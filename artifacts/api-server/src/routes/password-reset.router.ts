@@ -16,11 +16,14 @@ const TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 // ── Nodemailer transporter ────────────────────────────────────────────────────
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
   auth: {
     user: GMAIL_USER,
     pass: GMAIL_APP_PASSWORD,
   },
+  family: 4, // force IPv4 — Render's network can't reach Gmail's IPv6 SMTP address
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
