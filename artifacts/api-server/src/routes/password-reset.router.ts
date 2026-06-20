@@ -17,8 +17,8 @@ const TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
+  port: 587,
+  secure: false,
   auth: {
     user: GMAIL_USER,
     pass: GMAIL_APP_PASSWORD,
