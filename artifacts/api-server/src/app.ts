@@ -1,4 +1,4 @@
-import express, { type Express, type Request, type Response } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import { pinoHttp } from "pino-http"; // Isang import lang dapat
 import router from "./routes";
@@ -27,5 +27,22 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
+
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const error = err as { status?: number; type?: string; message?: string };
+  if (error?.type === "entity.parse.failed") {
+    res.status(400).json({
+      success: false,
+      message: "Invalid JSON body. Please check request payload.",
+    });
+    return;
+  }
+
+  const status = typeof error?.status === "number" ? error.status : 500;
+  res.status(status).json({
+    success: false,
+    message: error?.message || "Internal server error",
+  });
+});
 
 export default app;

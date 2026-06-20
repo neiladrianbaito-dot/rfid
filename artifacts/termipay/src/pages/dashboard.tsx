@@ -2,171 +2,323 @@ import {
   useGetDashboardStats,
   useGetRevenueTrend,
 } from "@workspace/api-client-react";
+import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DollarSign, Fingerprint, CreditCard, Route } from "lucide-react";
+import { DollarSign, Fingerprint, CreditCard, Route, Activity, Zap, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { motion } from "framer-motion";
 import {
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Area,
+  AreaChart,
 } from "recharts";
+
+const POLL_INTERVAL_MS = 500;
+
+const formatPeso = (value: number) =>
+  `P${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const [latency, setLatency] = useState<number>(-1);
+
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const prevRevenueRef = useRef<number | null>(null);
+  const [revenueFlash, setRevenueFlash] = useState(false);
+
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats({
     query: {
       staleTime: 0,
       refetchOnWindowFocus: true,
-      refetchInterval: 15000,
+      refetchInterval: POLL_INTERVAL_MS,
+      refetchIntervalInBackground: true,
     },
   });
+
   const { data: trend, isLoading: trendLoading } = useGetRevenueTrend({
     query: {
       staleTime: 0,
       refetchOnWindowFocus: true,
-      refetchInterval: 15000,
+      refetchInterval: POLL_INTERVAL_MS,
+      refetchIntervalInBackground: true,
     },
   });
 
-  // FIX 1: Nilagyan ng ?. sa toFixed para hindi mag-error kung undefined ang stats
+  useEffect(() => {
+    if (!stats) return;
+    const current = Math.abs(Number(stats.totalRevenueToday) || 0);
+
+    if (prevRevenueRef.current !== null && current !== prevRevenueRef.current) {
+      setRevenueFlash(true);
+      setTimeout(() => setRevenueFlash(false), 800);
+    }
+
+    prevRevenueRef.current = current;
+    setLastUpdated(new Date());
+  }, [stats]);
+
+  useEffect(() => {
+    const edgeFunctionUrl = "https://bpznyktrerwtnpqjrvgz.supabase.co/functions/v1/create-checkout";
+
+    const pingEdgeFunction = async () => {
+      const startTime = Date.now();
+      try {
+        await fetch(edgeFunctionUrl, { method: "OPTIONS" });
+        setLatency(Date.now() - startTime);
+      } catch {
+        setLatency(999);
+      }
+    };
+
+    pingEdgeFunction();
+    const intervalId = window.setInterval(pingEdgeFunction, 3000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  const getLatencyMeta = (value: number) => {
+    if (value < 0) return { label: "Checking", colorClass: "text-slate-400" };
+    if (value < 100) return { label: "Stable", colorClass: "text-emerald-400" };
+    if (value <= 300) return { label: "Average", colorClass: "text-amber-400" };
+    return { label: "Lagging", colorClass: "text-red-400" };
+  };
+
+  const latencyMeta = getLatencyMeta(latency);
+
+  const sanitizedTrend = (Array.isArray(trend) ? trend : []).map((d: any) => ({
+    ...d,
+    revenue: Math.abs(Number(d.revenue) || 0),
+  }));
+
   const statCards = [
     {
       title: "Total Revenue Today",
-      value: stats?.totalRevenueToday != null ? `P${stats.totalRevenueToday.toFixed(2)}` : "P0.00",
+      value: stats?.totalRevenueToday != null
+        ? formatPeso(Math.abs(Number(stats.totalRevenueToday)))
+        : "P0.00",
       icon: DollarSign,
-      color: "text-emerald-600 bg-emerald-50",
+      glow: "shadow-[0_0_20px_rgba(16,185,129,0.3)]",
+      border: "border-emerald-500/50",
+      text: "text-emerald-400",
+      bg: "bg-emerald-500/10",
+      bar: "bg-emerald-400",
+      flash: revenueFlash,
     },
     {
       title: "Total Taps Today",
       value: stats?.totalTapsToday ?? "0",
       icon: Fingerprint,
-      color: "text-blue-600 bg-blue-50",
+      glow: "shadow-[0_0_20px_rgba(59,130,246,0.3)]",
+      border: "border-blue-500/50",
+      text: "text-blue-400",
+      bg: "bg-blue-500/10",
+      bar: "bg-blue-400",
+      flash: false,
     },
     {
       title: "Registered Cards",
       value: stats?.registeredCards ?? "0",
       icon: CreditCard,
-      color: "text-violet-600 bg-violet-50",
+      glow: "shadow-[0_0_20px_rgba(168,85,247,0.3)]",
+      border: "border-purple-500/50",
+      text: "text-purple-400",
+      bg: "bg-purple-500/10",
+      bar: "bg-purple-400",
+      flash: false,
     },
     {
       title: "Active Routes",
       value: stats?.activeRoutes ?? "0",
       icon: Route,
-      color: "text-amber-600 bg-amber-50",
+      glow: "shadow-[0_0_20px_rgba(245,158,11,0.3)]",
+      border: "border-amber-500/50",
+      text: "text-amber-400",
+      bg: "bg-amber-500/10",
+      bar: "bg-amber-400",
+      flash: false,
     },
   ];
 
   return (
-    <div className="space-y-6" data-testid="dashboard-page">
-      <div>
-        <h2 className="text-2xl font-bold text-foreground tracking-tight">
-          Dashboard
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Welcome back, {user?.name || "Admin"}
-        </p>
+    <div className="space-y-8 min-h-screen bg-[#020617] text-slate-200 p-2 lg:p-6" data-testid="dashboard-page">
+      <style>{`
+        @keyframes card-pulse {
+          0% { box-shadow: 0 0 20px rgba(16,185,129,0.3); }
+          50% { box-shadow: 0 0 40px rgba(16,185,129,0.7); }
+          100% { box-shadow: 0 0 20px rgba(16,185,129,0.3); }
+        }
+        .card-pulse { animation: card-pulse 0.8s ease-in-out; }
+
+        @keyframes realtime-dot {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
+        }
+        .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+      `}</style>
+
+      {/* Top HUD Section */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-slate-800 pb-8">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="px-2 py-1 bg-blue-500/20 border border-blue-500/50 rounded text-[10px] font-bold text-blue-400 uppercase tracking-widest">
+              System Live
+            </div>
+            <div className="flex items-center gap-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+              <ShieldCheck size={12} /> Secure Connection
+            </div>
+            <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5">
+              <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-400 inline-block" />
+              LIVE
+            </span>
+          </div>
+          <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic flex items-center gap-3">
+            <Activity className="text-blue-500 animate-pulse" size={32} />
+            Centralized <span className="text-blue-500">Dashboard</span>
+          </h2>
+          <p className="text-slate-400 text-xs font-medium mt-1">
+            Authenticated as: <span className="text-blue-400 font-bold underline decoration-blue-500/30 underline-offset-4">{user?.name || "Root_Admin"}</span>
+          </p>
+        </div>
+
+        <div className="flex gap-4">
+          <div className="text-right hidden sm:block">
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Network Latency</p>
+            <p className={`text-xs font-mono ${latencyMeta.colorClass}`}>
+              {latency >= 0 ? `${latency}ms (${latencyMeta.label})` : latencyMeta.label}
+            </p>
+          </div>
+          <div className="h-10 w-[1px] bg-slate-800 hidden sm:block" />
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+              <Zap className="text-blue-400 animate-pulse" size={16} />
+              <span className="text-[10px] font-black text-blue-400 uppercase tracking-tighter">Live Telemetry Active</span>
+            </div>
+            {lastUpdated && (
+              <span className="text-[10px] text-slate-600 font-mono pr-1">
+                Last sync: {lastUpdated.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((card, i) => (
-          <Card key={i} className="shadow-sm">
-            <CardContent className="p-5">
-              {statsLoading ? (
-                <Skeleton className="h-16 w-full" />
-              ) : (
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      {card.title}
-                    </p>
-                    <p
-                      className="text-2xl font-bold text-foreground mt-1"
-                      data-testid={`text-stat-${i}`}
-                    >
-                      {card.value}
-                    </p>
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: i * 0.1 }}
+          >
+            <Card className={`relative overflow-hidden bg-slate-900/30 border-slate-800 backdrop-blur-xl transition-all duration-300 hover:border-slate-600 ${card.glow} ${card.flash ? "card-pulse" : ""}`}>
+              <CardContent className="p-6">
+                {statsLoading ? (
+                  <Skeleton className="h-16 w-full bg-slate-800/50" />
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1">
+                        {card.title}
+                      </p>
+                      <p className="text-3xl font-black text-white tracking-tight" data-testid={`text-stat-${i}`}>
+                        {card.value}
+                      </p>
+                    </div>
+                    <div className={`w-12 h-12 rounded-xl border flex items-center justify-center ${card.bg} ${card.border} ${card.text}`}>
+                      <card.icon size={24} strokeWidth={2.5} />
+                    </div>
                   </div>
-                  <div
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center ${card.color}`}
-                  >
-                    <card.icon className="w-5 h-5" />
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+              {/* Bottom decorative bar — explicit bg class per card so Tailwind includes it */}
+              <div className={`absolute bottom-0 left-0 h-[2px] w-full ${card.bar}`} />
+            </Card>
+          </motion.div>
         ))}
       </div>
 
-      <Card className="shadow-sm">
-        <CardHeader>
-          <CardTitle className="text-lg">Revenue Trend (Last 7 Days)</CardTitle>
+      {/* Revenue Area Chart */}
+      <Card className="bg-slate-900/20 border-slate-800 backdrop-blur-2xl shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-4">
+          <Zap size={16} className="text-blue-500/30" />
+        </div>
+
+        <CardHeader className="border-b border-slate-800/50">
+          <CardTitle className="text-sm font-black text-slate-400 uppercase tracking-[0.3em] italic flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_#3b82f6]" />
+            Revenue Stream Projection
+          </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-10">
           {trendLoading ? (
-            <Skeleton className="h-72 w-full" />
+            <Skeleton className="h-[350px] w-full bg-slate-800/30" />
           ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              {/* FIX 2: Sinigurado na Array ang data gamit ang fallback na [] */}
-              <LineChart data={Array.isArray(trend) ? trend : []}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="hsl(var(--border))"
-                />
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={(d: string) => {
-                    if (!d) return "";
-                    const date = new Date(d + "T00:00:00");
-                    return date.toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                    });
-                  }}
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                />
-                <YAxis
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                  tickFormatter={(v: number) => `P${v}`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                    fontSize: "13px",
-                  }}
-                  formatter={(value: number) => [
-                    `P${Number(value || 0).toFixed(2)}`,
-                    "Revenue",
-                  ]}
-                  labelFormatter={(label: string) => {
-                    if (!label) return "";
-                    const date = new Date(label + "T00:00:00");
-                    return date.toLocaleDateString("en-US", {
-                      weekday: "long",
-                      month: "long",
-                      day: "numeric",
-                    });
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="revenue"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth={2.5}
-                  dot={{ r: 4, fill: "hsl(var(--primary))" }}
-                  activeDot={{ r: 6 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <div className="h-[350px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={sanitizedTrend}>
+                  <defs>
+                    <linearGradient id="neonGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4}/>
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    strokeDasharray="4 4"
+                    stroke="#1e293b"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={(d: string) => {
+                      if (!d) return "";
+                      const date = new Date(d + "T00:00:00");
+                      return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                    }}
+                    stroke="#475569"
+                    fontSize={10}
+                    fontWeight={800}
+                    dy={10}
+                  />
+                  <YAxis
+                    stroke="#475569"
+                    fontSize={10}
+                    fontWeight={800}
+                    tickFormatter={(v: number) => `P${v.toLocaleString("en-US")}`}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "rgba(2, 6, 23, 0.95)",
+                      border: "1px solid #334155",
+                      borderRadius: "8px",
+                      backdropFilter: "blur(8px)",
+                      color: "#fff",
+                    }}
+                    itemStyle={{ color: "#3b82f6", textTransform: "uppercase", fontSize: "10px", fontWeight: "900" }}
+                    formatter={(value: number) => [formatPeso(Math.abs(Number(value) || 0)), "Revenue"]}
+                    labelFormatter={(label: string) => {
+                      if (!label) return "";
+                      const date = new Date(label + "T00:00:00");
+                      return date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase();
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="revenue"
+                    stroke="#3b82f6"
+                    strokeWidth={3}
+                    fillOpacity={1}
+                    fill="url(#neonGradient)"
+                    animationDuration={2500}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </CardContent>
       </Card>

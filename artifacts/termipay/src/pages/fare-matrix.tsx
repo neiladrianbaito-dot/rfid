@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   useListRoutes,
   useCreateRoute,
@@ -29,13 +29,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -46,10 +39,23 @@ import {
   Power,
   PowerOff,
   ArrowLeftRight,
-  Wifi,
   CheckCircle2,
   AlertCircle,
+  Search,
+  Zap,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+const POLL_INTERVAL_MS = 500; // ✅ 500ms real-time polling
 
 const CALBAYOG_BARANGAYS = [
   "Bugtong",
@@ -79,6 +85,7 @@ const DEFAULT_DESTINATION = "Calbayog";
 
 export default function FareMatrixPage() {
   const [showAdd, setShowAdd] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const [addForm, setAddForm] = useState({
     origin: "",
     destination: DEFAULT_DESTINATION,
@@ -86,20 +93,69 @@ export default function FareMatrixPage() {
     viceVersa: true,
   });
   const [editRoute, setEditRoute] = useState<any>(null);
+  const [deleteRoute, setDeleteRoute] = useState<any>(null);
   const [editForm, setEditForm] = useState({
     origin: "",
     destination: "",
     fareAmount: "",
   });
+
+  // ✅ Realtime state
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: routes, isLoading } = useListRoutes();
+  // ✅ 500ms polling — same pattern as TransactionsPage
+  const { data: routes, isLoading } = useListRoutes(undefined, {
+    query: {
+      refetchInterval: POLL_INTERVAL_MS,
+      refetchIntervalInBackground: true,
+    },
+  });
 
-  // FIXED: Safety check for array to prevent ".find is not a function" error
-  const activeRoute = Array.isArray(routes) 
-    ? routes.find((r) => r.isActive) ?? null 
+  // ✅ Track last updated time on every poll
+  useEffect(() => {
+    if (Array.isArray(routes) && routes.length >= 0) {
+      setLastUpdated(new Date());
+    }
+  }, [routes]);
+
+  const activeRoute = Array.isArray(routes)
+    ? routes.find((r) => r.isActive) ?? null
     : null;
+
+  // Stable sort: keep a ref of the last known order so rows don't
+  // jump/blink during optimistic update. Active row floats to top,
+  // inactive rows preserve their previous relative order.
+  const sortOrderRef = useRef<(string | number)[]>([]);
+
+  const filteredRoutes = useMemo(() => {
+    if (!Array.isArray(routes)) return [];
+
+    const filtered = routes.filter(
+      (r) =>
+        r.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        r.destination.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const activeItems = filtered.filter((r) => r.isActive);
+    const inactiveItems = filtered.filter((r) => !r.isActive);
+
+    // Preserve previous order for inactive rows to avoid DOM reorder flash
+    inactiveItems.sort((a, b) => {
+      const ai = sortOrderRef.current.indexOf(a.id);
+      const bi = sortOrderRef.current.indexOf(b.id);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+
+    const sorted = [...activeItems, ...inactiveItems];
+    sortOrderRef.current = sorted.map((r) => r.id);
+    return sorted;
+  }, [routes, searchTerm]);
 
   const createMutation = useCreateRoute({
     mutation: {
@@ -130,9 +186,39 @@ export default function FareMatrixPage() {
 
   const toggleMutation = useToggleRoute({
     mutation: {
+      onMutate: async ({ id }: { id: string | number }) => {
+        // Cancel any in-flight refetches so they don't overwrite our optimistic update
+        await queryClient.cancelQueries({ queryKey: getListRoutesQueryKey() });
+
+        // Snapshot current cache so we can roll back on error
+        const previous = queryClient.getQueryData(getListRoutesQueryKey());
+
+        // Optimistically flip isActive: the clicked route becomes active,
+        // all others become inactive (only one active at a time)
+        queryClient.setQueryData(getListRoutesQueryKey(), (old: any) => {
+          if (!Array.isArray(old)) return old;
+          const clickedIsCurrentlyActive = old.find((r: any) => r.id === id)?.isActive;
+          return old.map((r: any) => ({
+            ...r,
+            isActive: clickedIsCurrentlyActive ? (r.id === id ? false : r.isActive) : r.id === id,
+          }));
+        });
+
+        return { previous };
+      },
+      onError: (_err: any, _vars: any, context: any) => {
+        // Roll back to snapshot on failure
+        if (context?.previous !== undefined) {
+          queryClient.setQueryData(getListRoutesQueryKey(), context.previous);
+        }
+        toast({ title: "Failed to update route status", variant: "destructive" });
+      },
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
         toast({ title: "Route status updated" });
+      },
+      onSettled: () => {
+        // Sync with server truth in the background (no visual flash)
+        queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
       },
     },
   });
@@ -147,26 +233,30 @@ export default function FareMatrixPage() {
   };
 
   const handleAdd = async () => {
+    const origin = addForm.origin.trim();
+    const destination = addForm.destination.trim();
     const fare = parseFloat(addForm.fareAmount) || 0;
-    if (!addForm.origin || !addForm.destination || fare <= 0) {
+    if (!origin || !destination || fare <= 0) {
       toast({ title: "Please fill in all fields", variant: "destructive" });
       return;
     }
 
     try {
+      // First direction
       await createMutation.mutateAsync({
         data: {
-          origin: addForm.origin,
-          destination: addForm.destination,
+          origin,
+          destination,
           fareAmount: fare,
         },
       });
 
-      if (addForm.viceVersa) {
+      // Second direction (Vice Versa)
+      if (addForm.viceVersa && origin !== destination) {
         await createMutation.mutateAsync({
           data: {
-            origin: addForm.destination,
-            destination: addForm.origin,
+            origin: destination,
+            destination: origin,
             fareAmount: fare,
           },
         });
@@ -179,6 +269,7 @@ export default function FareMatrixPage() {
         fareAmount: "",
         viceVersa: true,
       });
+
       toast({
         title: addForm.viceVersa
           ? "Routes added (both directions)"
@@ -189,195 +280,242 @@ export default function FareMatrixPage() {
     }
   };
 
+  const confirmDelete = () => {
+    if (!deleteRoute) return;
+    deleteMutation.mutate(
+      { id: deleteRoute.id },
+      {
+        onSettled: () => setDeleteRoute(null),
+      },
+    );
+  };
+
+  const handleUpdate = () => {
+    if (!editRoute) return;
+
+    const origin = editForm.origin.trim();
+    const destination = editForm.destination.trim();
+    const fare = parseFloat(editForm.fareAmount) || 0;
+    if (!origin || !destination || fare <= 0) {
+      toast({ title: "Please fill in all fields", variant: "destructive" });
+      return;
+    }
+
+    updateMutation.mutate({
+      id: editRoute.id,
+      data: {
+        origin,
+        destination,
+        fareAmount: fare,
+      },
+    });
+  };
+
   return (
-    <div className="space-y-6" data-testid="fare-matrix-page">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8" data-testid="fare-matrix-page">
+      <style>{`
+        @keyframes realtime-dot {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
+        }
+        .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+      `}</style>
+
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
-          <h2 className="text-2xl font-bold text-foreground tracking-tight">
-            Fare Matrix
+          <h2 className="text-3xl font-black text-white tracking-tighter uppercase italic">
+            <span className="inline-flex items-center gap-2">
+              <MapPin className="w-7 h-7 text-blue-500" />
+              <span className="text-white">Fare </span>
+              <span className="text-blue-500">Matrix</span>
+            </span>
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-xs text-slate-400 mt-1 font-bold uppercase tracking-widest">
             Manage transit routes and fares for RFID tap deduction
           </p>
         </div>
-        <Button onClick={() => setShowAdd(true)} data-testid="button-add-route">
+
+        {/* ✅ Right side: Live indicator + Add Route button */}
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+            <Zap className="text-blue-400 animate-pulse" size={16} />
+            <span className="text-[10px] font-black text-blue-400 uppercase tracking-tighter">Live Telemetry Active</span>
+          </div>
+          {lastUpdated && (
+            <span className="text-[10px] text-slate-600 font-mono pr-1">
+              Last sync: {lastUpdated.toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ✅ Add Route button row */}
+      <div className="flex justify-end">
+        <Button
+          onClick={() => setShowAdd(true)}
+          data-testid="button-add-route"
+          className="bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-[0.2em] shadow-[0_0_20px_rgba(37,99,235,0.3)]"
+        >
           <Plus className="w-4 h-4 mr-2" />
           Add Route
         </Button>
       </div>
 
       <div
-        className={`rounded-xl border-2 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+        className={`rounded-xl border p-4 sm:p-5 flex items-center gap-4 backdrop-blur-xl ${
           activeRoute
-            ? "border-green-500 bg-green-50 dark:bg-green-950/20"
-            : "border-yellow-400 bg-yellow-50 dark:bg-yellow-950/20"
+            ? "border-emerald-500/40 bg-emerald-500/10"
+            : "border-amber-500/40 bg-amber-500/10"
         }`}
       >
         <div className="flex items-center gap-3">
           <div
             className={`p-2 rounded-full ${
               activeRoute
-                ? "bg-green-100 dark:bg-green-900/40"
-                : "bg-yellow-100 dark:bg-yellow-900/40"
+                ? "bg-emerald-500/20"
+                : "bg-amber-500/20"
             }`}
           >
             {activeRoute ? (
-              <CheckCircle2 className="w-6 h-6 text-green-600" />
+              <CheckCircle2 className="w-6 h-6 text-emerald-400" />
             ) : (
-              <AlertCircle className="w-6 h-6 text-yellow-600" />
+              <AlertCircle className="w-6 h-6 text-amber-400" />
             )}
           </div>
           <div>
             <p
               className={`font-semibold text-sm ${
                 activeRoute
-                  ? "text-green-800 dark:text-green-300"
-                  : "text-yellow-800 dark:text-yellow-300"
+                  ? "text-emerald-300"
+                  : "text-amber-300"
               }`}
             >
               {activeRoute ? "Active Route — RFID Ready" : "No Active Route"}
             </p>
             {activeRoute ? (
-              <p className="text-green-700 dark:text-green-400 font-bold text-lg">
+              <p className="text-white font-black text-lg tracking-tight">
                 {activeRoute.origin} → {activeRoute.destination} &nbsp;·&nbsp; ₱
                 {activeRoute.fareAmount.toFixed(2)} per tap
               </p>
             ) : (
-              <p className="text-yellow-700 dark:text-yellow-400 text-sm">
+              <p className="text-amber-300 text-sm">
                 Activate a route below so the ESP32 RFID reader can process fare
                 deductions.
               </p>
             )}
           </div>
         </div>
-
-        {activeRoute && (
-          <div className="flex flex-col gap-1 text-xs text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 rounded-lg px-3 py-2 font-mono">
-            <div className="flex items-center gap-1 font-semibold text-green-800 dark:text-green-300 mb-1">
-              <Wifi className="w-3.5 h-3.5" />
-              ESP32 Endpoint
-            </div>
-            <span>POST /api/scan-rfid</span>
-            <span className="text-green-600">{'{ "cardUid": "<uid>" }'}</span>
-          </div>
-        )}
       </div>
 
-      <Card className="border-dashed shadow-none bg-muted/30">
-        <CardContent className="pt-4 pb-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-            <div className="flex gap-2 items-start">
-              <span className="text-primary font-bold text-lg leading-none">
-                1
+      <Card className="bg-slate-900/40 border-slate-800 backdrop-blur-xl h-full shadow-2xl overflow-hidden relative">
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
+        <CardHeader className="pb-4 bg-slate-900/20 border-b border-slate-800/50">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1 flex items-center gap-3">
+              {/* ✅ LIVE badge — same as TransactionsPage */}
+              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5 shrink-0">
+                <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-400 inline-block" />
+                LIVE
               </span>
               <div>
-                <p className="font-semibold">Card Tap</p>
-                <p className="text-muted-foreground text-xs">
-                  ESP32 sends Card UID to{" "}
-                  <code className="bg-muted px-1 rounded">/api/scan-rfid</code>
+                <CardTitle className="text-sm font-black text-slate-300 uppercase tracking-[0.3em] flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-blue-400" />
+                  Configured Routes
+                </CardTitle>
+                <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">
+                  Only <strong>one route</strong> can be active at a time. Active route is pinned to the top.
                 </p>
               </div>
             </div>
-            <div className="flex gap-2 items-start">
-              <span className="text-primary font-bold text-lg leading-none">
-                2
-              </span>
-              <div>
-                <p className="font-semibold">Balance Check</p>
-                <p className="text-muted-foreground text-xs">
-                  Total Wallet = Card Balance + GCash Balance ≥ current fare
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2 items-start">
-              <span className="text-primary font-bold text-lg leading-none">
-                3
-              </span>
-              <div>
-                <p className="font-semibold">Deduction</p>
-                <p className="text-muted-foreground text-xs">
-                  Deducts from Card Balance first, then GCash. Saves history.
-                </p>
-              </div>
+            <div className="relative w-full md:w-72">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-600" />
+              <Input
+                placeholder="SEARCH ORIGIN OR DESTINATION..."
+                className="pl-9 bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600 focus:border-blue-500"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card className="shadow-sm">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <MapPin className="w-4 h-4 text-primary" />
-            Configured Routes
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Only <strong>one route</strong> can be active at a time. Activating
-            a route deactivates all others.
-          </p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-y-auto p-0 px-6 pb-6">
           {isLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-12 w-full" />
+            <div className="space-y-4 pt-6">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <Skeleton key={i} className="h-14 w-full bg-slate-800/30 rounded-lg" />
               ))}
             </div>
           ) : (
-            <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border">
+            <div className="relative mt-6 overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border border-slate-800">
               <Table>
-                <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
-                  <TableRow>
-                    <TableHead>Origin</TableHead>
-                    <TableHead></TableHead>
-                    <TableHead>Destination</TableHead>
-                    <TableHead>Fare Amount</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Activate</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                <TableHeader className="sticky top-0 bg-[#0a0f1c] z-10 border-b border-slate-800">
+                  <TableRow className="border-none hover:bg-transparent">
+                    <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      Origin
+                    </TableHead>
+                    <TableHead />
+                    <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      Destination
+                    </TableHead>
+                    <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      Fare Amount
+                    </TableHead>
+                    <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      Status
+                    </TableHead>
+                    <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      Activate
+                    </TableHead>
+                    <TableHead className="text-right text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      Actions
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(!Array.isArray(routes) || routes.length === 0) ? (
+                  {filteredRoutes.length === 0 ? (
                     <TableRow>
                       <TableCell
                         colSpan={7}
-                        className="text-center text-muted-foreground py-8"
+                        className="text-center py-20"
                       >
-                        No routes configured
+                        <div className="flex flex-col items-center opacity-20">
+                          <MapPin size={48} className="mb-2" />
+                          <p className="text-[10px] font-black uppercase tracking-[0.4em]">
+                            {searchTerm ? "No Routes Matched Query" : "No Routes Configured"}
+                          </p>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    routes.map((route) => (
+                    filteredRoutes.map((route) => (
                       <TableRow
                         key={route.id}
                         data-testid={`row-route-${route.id}`}
-                        className={
+                        className={`border-slate-800/50 group transition-all duration-300 ease-in-out ${
                           route.isActive
-                            ? "bg-green-50/50 dark:bg-green-950/10"
-                            : "opacity-60"
-                        }
+                            ? "bg-emerald-500/5 shadow-[inset_2px_0_0_0_rgb(16,185,129)]"
+                            : "hover:bg-slate-800/30"
+                        }`}
                       >
-                        <TableCell className="font-medium">
+                        <TableCell className="font-medium text-slate-200">
                           <div className="flex items-center gap-2">
-                            <MapPin className="w-3.5 h-3.5 text-primary" />
+                            <MapPin className="w-3.5 h-3.5 text-blue-400" />
                             {route.origin}
                           </div>
                         </TableCell>
-                        <TableCell className="text-muted-foreground text-xs px-1">
+                        <TableCell className="text-slate-600 text-xs px-1">
                           →
                         </TableCell>
-                        <TableCell className="font-medium">
+                        <TableCell className="font-medium text-slate-300">
                           <div className="flex items-center gap-2">
-                            <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+                            <MapPin className="w-3.5 h-3.5 text-slate-500" />
                             {route.destination}
                           </div>
                         </TableCell>
                         <TableCell>
                           <span
-                            className={`font-bold ${
-                              route.isActive
-                                ? "text-green-700 dark:text-green-400 text-base"
-                                : ""
+                            className={`font-black text-white ${
+                              route.isActive ? "text-base" : ""
                             }`}
                           >
                             ₱{route.fareAmount.toFixed(2)}
@@ -386,7 +524,11 @@ export default function FareMatrixPage() {
                         <TableCell>
                           <Badge
                             variant={route.isActive ? "default" : "secondary"}
-                            className={route.isActive ? "bg-green-600" : ""}
+                            className={
+                              route.isActive
+                                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                                : "bg-slate-800 text-slate-400 border border-slate-700"
+                            }
                           >
                             {route.isActive ? "Active" : "Inactive"}
                           </Badge>
@@ -397,8 +539,8 @@ export default function FareMatrixPage() {
                             variant={route.isActive ? "destructive" : "default"}
                             className={
                               route.isActive
-                                ? "bg-red-500 hover:bg-red-600"
-                                : "bg-green-600 hover:bg-green-700 text-white"
+                                ? "bg-red-500 hover:bg-red-600 text-white"
+                                : "bg-emerald-600 hover:bg-emerald-500 text-white"
                             }
                             onClick={() =>
                               toggleMutation.mutate({ id: route.id })
@@ -419,10 +561,11 @@ export default function FareMatrixPage() {
                           </Button>
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
+                          <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <Button
                               variant="ghost"
                               size="icon"
+                              className="text-slate-400 hover:text-blue-400 hover:bg-blue-500/10"
                               onClick={() => openEdit(route)}
                               data-testid={`button-edit-route-${route.id}`}
                             >
@@ -431,10 +574,8 @@ export default function FareMatrixPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="text-destructive"
-                              onClick={() =>
-                                deleteMutation.mutate({ id: route.id })
-                              }
+                              className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                              onClick={() => setDeleteRoute(route)}
                               data-testid={`button-delete-route-${route.id}`}
                             >
                               <Trash2 className="w-4 h-4" />
@@ -464,64 +605,62 @@ export default function FareMatrixPage() {
             });
         }}
       >
-        <DialogContent>
+        <DialogContent className="bg-slate-950 border-slate-800 text-slate-200">
+          <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/60" />
           <DialogHeader>
-            <DialogTitle>Add New Route</DialogTitle>
+            <DialogTitle className="text-white font-black uppercase tracking-tighter italic">
+              Add New Route
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Origin (Barangay)</Label>
-              <Select
+              <Label className="text-[10px] uppercase font-black tracking-widest text-slate-400">
+                Origin (Barangay)
+              </Label>
+              <Input
+                data-testid="input-add-origin"
+                list="barangay-suggestions"
+                placeholder="Type or select barangay..."
                 value={addForm.origin}
-                onValueChange={(v) => setAddForm({ ...addForm, origin: v })}
-              >
-                <SelectTrigger data-testid="input-add-origin">
-                  <SelectValue placeholder="Select barangay..." />
-                </SelectTrigger>
-                <SelectContent className="max-h-[280px] overflow-y-auto">
-                  <SelectItem value={DEFAULT_DESTINATION}>
-                    {DEFAULT_DESTINATION} (City Center)
-                  </SelectItem>
-                  {CALBAYOG_BARANGAYS.map((b) => (
-                    <SelectItem key={b} value={b}>
-                      {b}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Destination</Label>
-              <Select
-                value={addForm.destination}
-                onValueChange={(v) =>
-                  setAddForm({ ...addForm, destination: v })
+                onChange={(e) =>
+                  setAddForm({ ...addForm, origin: e.target.value })
                 }
-              >
-                <SelectTrigger data-testid="input-add-destination">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="max-h-[280px] overflow-y-auto">
-                  <SelectItem value={DEFAULT_DESTINATION}>
-                    {DEFAULT_DESTINATION} (City Center)
-                  </SelectItem>
-                  {CALBAYOG_BARANGAYS.map((b) => (
-                    <SelectItem key={b} value={b}>
-                      {b}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                className="bg-slate-900 border-slate-800 text-slate-300"
+              />
             </div>
 
             <div className="space-y-2">
-              <Label>Fare Amount (PHP)</Label>
+              <Label className="text-[10px] uppercase font-black tracking-widest text-slate-400">
+                Destination
+              </Label>
+              <Input
+                data-testid="input-add-destination"
+                list="barangay-suggestions"
+                placeholder="Type or select destination..."
+                value={addForm.destination}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, destination: e.target.value })
+                }
+                className="bg-slate-900 border-slate-800 text-slate-300"
+              />
+            </div>
+            <datalist id="barangay-suggestions">
+              <option value={DEFAULT_DESTINATION} />
+              {CALBAYOG_BARANGAYS.map((b) => (
+                <option key={b} value={b} />
+              ))}
+            </datalist>
+
+            <div className="space-y-2">
+              <Label className="text-[10px] uppercase font-black tracking-widest text-slate-400">
+                Fare Amount (PHP)
+              </Label>
               <Input
                 type="number"
                 step="0.01"
                 min="0"
                 placeholder="0.00"
+                className="bg-slate-900 border-slate-800 text-emerald-400 font-black focus:border-emerald-500"
                 value={addForm.fareAmount}
                 onChange={(e) =>
                   setAddForm({ ...addForm, fareAmount: e.target.value })
@@ -530,7 +669,7 @@ export default function FareMatrixPage() {
               />
             </div>
 
-            <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
+            <div className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg">
               <Checkbox
                 id="vice-versa"
                 checked={addForm.viceVersa}
@@ -541,27 +680,27 @@ export default function FareMatrixPage() {
               <div>
                 <Label
                   htmlFor="vice-versa"
-                  className="font-medium cursor-pointer flex items-center gap-1"
+                  className="font-medium cursor-pointer flex items-center gap-1 text-slate-200"
                 >
                   <ArrowLeftRight className="w-3.5 h-3.5" />
                   Add vice versa route
                 </Label>
-                <p className="text-xs text-muted-foreground mt-0.5">
+                <p className="text-xs text-slate-500 mt-0.5">
                   Also creates the reverse direction at the same fare
                 </p>
               </div>
             </div>
 
             {addForm.origin && addForm.destination && (
-              <div className="text-sm text-muted-foreground bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-1">
-                <p className="font-medium text-blue-700 dark:text-blue-400">
+              <div className="text-sm text-slate-300 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 space-y-1">
+                <p className="font-medium text-blue-300">
                   Routes to be created:
                 </p>
                 <p>
                   • {addForm.origin} → {addForm.destination} @ ₱
                   {addForm.fareAmount || "0.00"}
                 </p>
-                {addForm.viceVersa && (
+                {addForm.viceVersa && addForm.origin !== addForm.destination && (
                   <p>
                     • {addForm.destination} → {addForm.origin} @ ₱
                     {addForm.fareAmount || "0.00"}
@@ -571,13 +710,18 @@ export default function FareMatrixPage() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setShowAdd(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => setShowAdd(false)}
+              className="bg-slate-800 text-slate-200 hover:bg-slate-700"
+            >
               Cancel
             </Button>
             <Button
               onClick={handleAdd}
               disabled={createMutation.isPending}
               data-testid="button-save-route"
+              className="bg-blue-600 hover:bg-blue-500 text-white"
             >
               {createMutation.isPending ? "Adding..." : "Add Route"}
             </Button>
@@ -589,60 +733,58 @@ export default function FareMatrixPage() {
         open={!!editRoute}
         onOpenChange={(open) => !open && setEditRoute(null)}
       >
-        <DialogContent>
+        <DialogContent className="bg-slate-950 border-slate-800 text-slate-200">
+          <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/60" />
           <DialogHeader>
-            <DialogTitle>Edit Route</DialogTitle>
+            <DialogTitle className="text-white font-black uppercase tracking-tighter italic">
+              Edit Route
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Origin</Label>
-              <Select
+              <Label className="text-[10px] uppercase font-black tracking-widest text-slate-400">
+                Origin
+              </Label>
+              <Input
+                data-testid="input-edit-origin"
+                list="barangay-suggestions-edit"
+                placeholder="Type or select barangay..."
                 value={editForm.origin}
-                onValueChange={(v) => setEditForm({ ...editForm, origin: v })}
-              >
-                <SelectTrigger data-testid="input-edit-origin">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="max-h-[280px] overflow-y-auto">
-                  <SelectItem value={DEFAULT_DESTINATION}>
-                    {DEFAULT_DESTINATION} (City Center)
-                  </SelectItem>
-                  {CALBAYOG_BARANGAYS.map((b) => (
-                    <SelectItem key={b} value={b}>
-                      {b}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Destination</Label>
-              <Select
-                value={editForm.destination}
-                onValueChange={(v) =>
-                  setEditForm({ ...editForm, destination: v })
+                onChange={(e) =>
+                  setEditForm({ ...editForm, origin: e.target.value })
                 }
-              >
-                <SelectTrigger data-testid="input-edit-destination">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="max-h-[280px] overflow-y-auto">
-                  <SelectItem value={DEFAULT_DESTINATION}>
-                    {DEFAULT_DESTINATION} (City Center)
-                  </SelectItem>
-                  {CALBAYOG_BARANGAYS.map((b) => (
-                    <SelectItem key={b} value={b}>
-                      {b}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                className="bg-slate-900 border-slate-800 text-slate-300"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Fare Amount (PHP)</Label>
+              <Label className="text-[10px] uppercase font-black tracking-widest text-slate-400">
+                Destination
+              </Label>
+              <Input
+                data-testid="input-edit-destination"
+                list="barangay-suggestions-edit"
+                placeholder="Type or select destination..."
+                value={editForm.destination}
+                onChange={(e) =>
+                  setEditForm({ ...editForm, destination: e.target.value })
+                }
+                className="bg-slate-900 border-slate-800 text-slate-300"
+              />
+            </div>
+            <datalist id="barangay-suggestions-edit">
+              <option value={DEFAULT_DESTINATION} />
+              {CALBAYOG_BARANGAYS.map((b) => (
+                <option key={b} value={b} />
+              ))}
+            </datalist>
+            <div className="space-y-2">
+              <Label className="text-[10px] uppercase font-black tracking-widest text-slate-400">
+                Fare Amount (PHP)
+              </Label>
               <Input
                 type="number"
                 step="0.01"
+                className="bg-slate-900 border-slate-800 text-emerald-400 font-black focus:border-emerald-500"
                 value={editForm.fareAmount}
                 onChange={(e) =>
                   setEditForm({ ...editForm, fareAmount: e.target.value })
@@ -652,28 +794,47 @@ export default function FareMatrixPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setEditRoute(null)}>
+            <Button
+              variant="secondary"
+              onClick={() => setEditRoute(null)}
+              className="bg-slate-800 text-slate-200 hover:bg-slate-700"
+            >
               Cancel
             </Button>
             <Button
-              onClick={() =>
-                updateMutation.mutate({
-                  id: editRoute.id,
-                  data: {
-                    origin: editForm.origin,
-                    destination: editForm.destination,
-                    fareAmount: parseFloat(editForm.fareAmount) || 0,
-                  },
-                })
-              }
+              onClick={handleUpdate}
               disabled={updateMutation.isPending}
               data-testid="button-update-route"
+              className="bg-blue-600 hover:bg-blue-500 text-white"
             >
               {updateMutation.isPending ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteRoute} onOpenChange={(open) => !open && setDeleteRoute(null)}>
+        <AlertDialogContent className="bg-slate-950 border-slate-800 text-slate-200">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white font-black uppercase tracking-tighter">
+              Delete route?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              This action cannot be undone. The selected route will be permanently removed from the fare matrix.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={deleteMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Confirm"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

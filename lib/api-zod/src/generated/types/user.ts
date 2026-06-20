@@ -5,14 +5,14 @@
  * TermiPay Admin Console API
  * OpenAPI spec version: 0.1.0
  */
-
 export interface User {
   id: number;
   cardUid: string;
   fullName: string;
   contactNumber: string;
+  type: string;
   balance: number;
-  gcashLoadedTotal: number;
   status: string;
   createdAt: Date;
+  email: string | null;
 }

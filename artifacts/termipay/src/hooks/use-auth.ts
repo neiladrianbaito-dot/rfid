@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useGetMe, getGetMeQueryKey, useLogout } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -10,28 +10,76 @@ export function useAuth() {
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  // Clear the force logged out flag on mount if token exists
+  // This prevents the flag from blocking re-login
+  useEffect(() => {
+    const hasToken = !!window.localStorage.getItem(AUTH_TOKEN_KEY);
+    if (hasToken) {
+      window.localStorage.removeItem(FORCE_LOGGED_OUT_KEY);
+    }
+  }, []);
+
   const forceLoggedOut =
     typeof window !== "undefined" &&
     window.localStorage.getItem(FORCE_LOGGED_OUT_KEY) === "1";
 
-  // 1. Fetch current session
+  const hasAuthToken =
+    typeof window !== "undefined" &&
+    !!window.localStorage.getItem(AUTH_TOKEN_KEY);
+
   const { data: user, isLoading, error, refetch } = useGetMe({
     queryKey: getGetMeQueryKey(),
-    query: { 
-      enabled: !forceLoggedOut,
-      retry: false, 
-      staleTime: 0,
-      gcTime: 0 // Siguraduhing hindi naka-cache ang sensitive data
+    query: {
+      enabled: !forceLoggedOut && hasAuthToken,
+      retry: false,
+      staleTime: 1000 * 60 * 5,
+      gcTime: 1000 * 60 * 5,
     },
   } as any);
+
+  // Once query settles, mark init done
+  useEffect(() => {
+    if (!isLoading) {
+      setIsInitializing(false);
+    }
+  }, [isLoading]);
 
   const isApiOfflineError =
     !!error &&
     typeof error === "object" &&
     "message" in (error as Record<string, unknown>) &&
-    String((error as Record<string, unknown>).message).toLowerCase().includes("failed to fetch");
+    String((error as Record<string, unknown>).message)
+      .toLowerCase()
+      .includes("failed to fetch");
 
-  // 2. Logout Mutation
+  const isUnauthorizedError =
+    !!error &&
+    ((typeof error === "object" &&
+      (("status" in (error as Record<string, unknown>) &&
+        Number((error as Record<string, unknown>).status) === 401) ||
+        ("response" in (error as Record<string, unknown>) &&
+          typeof (error as Record<string, unknown>).response === "object" &&
+          !!(error as any).response &&
+          Number((error as any).response?.status) === 401))) ||
+      (typeof error === "object" &&
+        "message" in (error as Record<string, unknown>) &&
+        String((error as Record<string, unknown>).message)
+          .toLowerCase()
+          .includes("unauthorized")));
+
+  const effectiveUser = hasAuthToken ? user : null;
+
+  // FIX: On 401, clear token but do NOT redirect here — let ProtectedRoute handle it
+  useEffect(() => {
+    if (!isUnauthorizedError) return;
+    console.warn("TermiPay: 401 received — clearing token");
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.localStorage.setItem(FORCE_LOGGED_OUT_KEY, "1");
+    queryClient.removeQueries({ queryKey: getGetMeQueryKey() });
+  }, [isUnauthorizedError, queryClient]);
+
   const logoutMutation = useLogout();
 
   async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -56,17 +104,12 @@ export function useAuth() {
       }
     };
 
-    // Guaranteed fallback in case any awaited promise hangs.
     const redirectTimer = window.setTimeout(forceRedirect, 1500);
 
     try {
       window.localStorage.setItem(FORCE_LOGGED_OUT_KEY, "1");
       window.localStorage.removeItem(AUTH_TOKEN_KEY);
-
-      // Stop ongoing queries.
       await withTimeout(queryClient.cancelQueries(), 1000);
-
-      // Best-effort server logout; do not await this.
       logoutMutation.mutate(undefined as any);
     } catch (err) {
       console.warn("TermiPay: API logout error (ignoring for redirect)", err);
@@ -79,11 +122,21 @@ export function useAuth() {
     }
   }, [queryClient, logoutMutation, setLocation]);
 
+  const resolvedIsLoading =
+    forceLoggedOut || !hasAuthToken
+      ? false
+      : isInitializing || isLoading;
+
   return {
-    user: user ?? null,
-    isLoading: forceLoggedOut ? false : isLoading,
+    user: effectiveUser ?? null,
+    isLoading: resolvedIsLoading,
     error,
-    isAuthenticated: forceLoggedOut ? false : isApiOfflineError ? false : !!user,
+    isAuthenticated:
+      forceLoggedOut || !hasAuthToken
+        ? false
+        : isApiOfflineError || isUnauthorizedError
+        ? false
+        : !!effectiveUser,
     logout,
     isLoggingOut,
     refetchUser: refetch,

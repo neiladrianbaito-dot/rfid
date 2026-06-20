@@ -1,178 +1,461 @@
-import { useGetReportSummary } from "@workspace/api-client-react";
+import React from "react";
+import { useLocation } from "wouter";
+import { useGetReportSummary, useListTransactions, useListUsers } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Printer, TrendingUp, Calendar, Fingerprint, ShieldCheck } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  Eye,
+  TrendingUp,
+  Calendar,
+  Fingerprint,
+  BarChart3,
+  Activity,
+  PieChart,
+  FileText,
+  FileSpreadsheet,
+  LinkIcon,
+} from "lucide-react";
+
+const formatPeso = (value: number) =>
+  `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+function normalizeEmail(email: string | null | undefined): string | null {
+  if (!email) return null;
+  const trimmed = email.trim();
+  if (trimmed === "" || trimmed.toLowerCase() === "none") return null;
+  return trimmed;
+}
 
 export default function ReportsPage() {
+  const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const adminName = user?.name || "System Administrator";
+
   const { data: report, isLoading } = useGetReportSummary({
     query: {
       staleTime: 0,
       refetchOnWindowFocus: true,
-      refetchInterval: 15000,
+      refetchInterval: 500,
+      refetchIntervalInBackground: true,
     },
   });
+  const { data: transactions } = useListTransactions();
+  const { data: users } = useListUsers();
 
-  const handlePrint = () => {
-    window.print();
+  const totalUniqueTaps = React.useMemo(() => {
+    const txList = Array.isArray(transactions) ? transactions : [];
+    const uids = new Set(
+      txList.map((tx: any) => tx.card_uid || tx.cardUid).filter(Boolean)
+    );
+    return uids.size;
+  }, [transactions]);
+
+  const totalLinkedCards = React.useMemo(() => {
+    const userList = Array.isArray(users) ? users : [];
+    return userList.filter((u: any) => normalizeEmail(u.email) !== null).length;
+  }, [users]);
+
+  const todayRevenue = (() => {
+    const breakdown = report?.dailyBreakdown || [];
+    if (!breakdown.length) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const todayRow = breakdown.find((d: any) => d.date === today);
+    if (!todayRow) return 0;
+    return Math.abs(Number(todayRow.revenue) || 0);
+  })();
+
+  const totalRevenue7Days = Math.abs(Number(report?.totalRevenue7Days ?? 0));
+
+  const sanitizedBreakdown = (report?.dailyBreakdown || []).map((d: any) => ({
+    ...d,
+    revenue: Math.abs(Number(d.revenue) || 0),
+  }));
+
+  const handleOpenPreview = () => {
+    navigate("/reports/preview");
   };
 
-  const timestamp = new Date().toLocaleString("en-PH");
+  const handleExportExcelLogs = async () => {
+    const XLSXStyle = await import("xlsx-js-style" as any);
+    const { utils, writeFile } = XLSXStyle;
+
+    const txList = Array.isArray(transactions) ? transactions : [];
+    const stamp = new Date().toISOString().slice(0, 10);
+    const generatedAt = new Date().toLocaleString("en-PH", {
+      year: "numeric", month: "long", day: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+
+    const aoa: any[][] = [
+      ["Fare Collection System", "", "", "", "", "", ""],
+      ["Transaction Logs Export", "", "", "", "", "", ""],
+      [`Generated: ${generatedAt}`, "", "", `Prepared by: ${adminName}`, "", "", ""],
+      [],
+      ["Total Transactions", txList.length, "", "Total Unique Cards", totalUniqueTaps, "", ""],
+      ["7-Day Revenue", formatPeso(totalRevenue7Days), "", "Today's Revenue", formatPeso(todayRevenue), "", ""],
+      [],
+      ["Timestamp", "Card UID", "Full Name", "Type", "Amount (PHP)", "Signed Amount", "Status"],
+    ];
+
+    txList.forEach((tx: any) => {
+      const ts = tx.timestamp || tx.created_at;
+      const amount = Math.abs(Number(tx.amount) || 0);
+      aoa.push([
+        ts ? new Date(ts).toLocaleString("en-PH") : "",
+        tx.card_uid || tx.cardUid || "",
+        tx.full_name || tx.fullName || "",
+        tx.type || "",
+        amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        `+${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        tx.status || "",
+      ]);
+    });
+
+    const worksheet = utils.aoa_to_sheet(aoa);
+
+    worksheet["!cols"] = [
+      { wch: 26 },
+      { wch: 18 },
+      { wch: 24 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 14 },
+    ];
+
+    worksheet["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 2 } },
+      { s: { r: 2, c: 3 }, e: { r: 2, c: 6 } },
+      { s: { r: 4, c: 0 }, e: { r: 4, c: 0 } },
+      { s: { r: 5, c: 0 }, e: { r: 5, c: 0 } },
+      { s: { r: 4, c: 3 }, e: { r: 4, c: 4 } },
+      { s: { r: 5, c: 3 }, e: { r: 5, c: 4 } },
+    ];
+
+    const setStyle = (cellRef: string, style: any) => {
+      if (!worksheet[cellRef]) worksheet[cellRef] = { t: "z", v: "" };
+      worksheet[cellRef].s = style;
+    };
+
+    const thinBorder = {
+      top: { style: "thin", color: { rgb: "CBD5E1" } },
+      bottom: { style: "thin", color: { rgb: "CBD5E1" } },
+      left: { style: "thin", color: { rgb: "CBD5E1" } },
+      right: { style: "thin", color: { rgb: "CBD5E1" } },
+    };
+    const mediumBorder = {
+      top: { style: "medium", color: { rgb: "0F172A" } },
+      bottom: { style: "medium", color: { rgb: "0F172A" } },
+      left: { style: "thin", color: { rgb: "334155" } },
+      right: { style: "thin", color: { rgb: "334155" } },
+    };
+    const hairBorder = {
+      top: { style: "hair", color: { rgb: "E2E8F0" } },
+      bottom: { style: "hair", color: { rgb: "E2E8F0" } },
+      left: { style: "hair", color: { rgb: "E2E8F0" } },
+      right: { style: "hair", color: { rgb: "E2E8F0" } },
+    };
+
+    setStyle("A1", {
+      font: { bold: true, sz: 16, color: { rgb: "FFFFFF" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "0F172A" }, patternType: "solid" },
+      alignment: { horizontal: "center", vertical: "center" },
+    });
+
+    setStyle("A2", {
+      font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "1E40AF" }, patternType: "solid" },
+      alignment: { horizontal: "center", vertical: "center" },
+    });
+
+    const metaBase = {
+      font: { italic: true, sz: 10, color: { rgb: "475569" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "F1F5F9" }, patternType: "solid" },
+      alignment: { horizontal: "left", vertical: "center" },
+    };
+    setStyle("A3", metaBase);
+    setStyle("D3", { ...metaBase, font: { ...metaBase.font, italic: false, bold: true } });
+
+    const summaryLabel = {
+      font: { bold: true, sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "E2E8F0" }, patternType: "solid" },
+      alignment: { horizontal: "left", vertical: "center" },
+      border: thinBorder,
+    };
+    const summaryGreen = {
+      font: { bold: true, sz: 11, color: { rgb: "15803D" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "F0FDF4" }, patternType: "solid" },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: thinBorder,
+    };
+    const summaryBlue = {
+      font: { bold: true, sz: 11, color: { rgb: "1D4ED8" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "EFF6FF" }, patternType: "solid" },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: thinBorder,
+    };
+    setStyle("A5", summaryLabel);
+    setStyle("B5", summaryGreen);
+    setStyle("D5", summaryLabel);
+    setStyle("E5", summaryGreen);
+    setStyle("A6", summaryLabel);
+    setStyle("B6", summaryBlue);
+    setStyle("D6", summaryLabel);
+    setStyle("E6", summaryBlue);
+
+    const headerStyle = {
+      font: { bold: true, sz: 10, color: { rgb: "FFFFFF" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "1E3A5F" }, patternType: "solid" },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: mediumBorder,
+    };
+    ["A", "B", "C", "D", "E", "F", "G"].forEach((col) => setStyle(`${col}8`, headerStyle));
+
+    txList.forEach((tx: any, i: number) => {
+      const rowNum = 9 + i;
+      const isEven = i % 2 === 0;
+      const amount = Math.abs(Number(tx.amount) || 0);
+      const status = (tx.status || "").toLowerCase();
+      const baseFill = isEven ? "FFFFFF" : "F8FAFC";
+
+      const base = {
+        font: { sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
+        fill: { fgColor: { rgb: baseFill }, patternType: "solid" },
+        alignment: { horizontal: "left", vertical: "center" },
+        border: hairBorder,
+      };
+
+      setStyle(`A${rowNum}`, { ...base, font: { ...base.font, color: { rgb: "64748B" } } });
+      setStyle(`B${rowNum}`, { ...base, font: { ...base.font, name: "Courier New", color: { rgb: "7C3AED" } } });
+      setStyle(`C${rowNum}`, { ...base, font: { ...base.font, bold: true } });
+      setStyle(`D${rowNum}`, {
+        ...base,
+        font: { ...base.font, color: { rgb: "4338CA" } },
+        fill: { fgColor: { rgb: isEven ? "F5F3FF" : "EDE9FE" }, patternType: "solid" },
+        alignment: { horizontal: "center", vertical: "center" },
+      });
+      setStyle(`E${rowNum}`, {
+        ...base,
+        font: { ...base.font, bold: true, color: { rgb: "15803D" } },
+        alignment: { horizontal: "right", vertical: "center" },
+      });
+      setStyle(`F${rowNum}`, {
+        ...base,
+        font: { ...base.font, color: { rgb: "22C55E" } },
+        alignment: { horizontal: "right", vertical: "center" },
+      });
+
+      type StatusMap = { [key: string]: { font: string; fill: string } };
+      const statusMap: StatusMap = {
+        success:   { font: "166534", fill: "DCFCE7" },
+        completed: { font: "166534", fill: "DCFCE7" },
+        failed:    { font: "991B1B", fill: "FEE2E2" },
+        error:     { font: "991B1B", fill: "FEE2E2" },
+        pending:   { font: "92400E", fill: "FEF3C7" },
+      };
+      const sc = statusMap[status] || { font: "1E293B", fill: baseFill };
+      setStyle(`G${rowNum}`, {
+        ...base,
+        font: { ...base.font, bold: true, color: { rgb: sc.font } },
+        fill: { fgColor: { rgb: sc.fill }, patternType: "solid" },
+        alignment: { horizontal: "center", vertical: "center" },
+      });
+    });
+
+    worksheet["!rows"] = [
+      { hpt: 34 },
+      { hpt: 22 },
+      { hpt: 16 },
+      { hpt: 8 },
+      { hpt: 20 },
+      { hpt: 20 },
+      { hpt: 8 },
+      { hpt: 22 },
+    ];
+
+    const workbook = utils.book_new();
+    utils.book_append_sheet(workbook, worksheet, "Transaction Logs");
+    workbook.Props = {
+      Title: "Transaction Logs",
+      Subject: "Fare Collection Transaction Export",
+      Author: adminName,
+      CreatedDate: new Date(),
+    };
+    writeFile(workbook, `transaction-logs-${stamp}.xlsx`);
+  };
 
   return (
-    <div className="space-y-6" data-testid="reports-page">
-      {/* --- SCREEN ONLY HEADER --- */}
-      <div className="flex items-center justify-between print:hidden">
+    <div
+      className="space-y-8 h-full flex flex-col"
+      style={{ overflowX: "hidden", maxWidth: "100%", boxSizing: "border-box" }}
+      data-testid="reports-page"
+    >
+      <style>{`
+        html, body { overflow-x: hidden !important; }
+      `}</style>
+
+      {/* ══ HEADER ══ */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
         <div>
-          <h2 className="text-2xl font-bold text-foreground tracking-tight">Reports</h2>
-          <p className="text-sm text-muted-foreground mt-1">7-day revenue analytics and performance</p>
+          <h2 className="text-3xl font-black text-white tracking-tighter uppercase italic flex items-center gap-3">
+            <BarChart3 className="text-blue-500" />
+            Revenue <span className="text-blue-500">Report</span>
+          </h2>
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">
+            Strategic financial intelligence and 7-day performance metrics
+          </p>
         </div>
-        <Button onClick={handlePrint} variant="secondary" data-testid="button-print-pdf">
-          <Printer className="w-4 h-4 mr-2" />
-          Print PDF
-        </Button>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="hidden lg:flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+            <Activity className="text-blue-400 animate-pulse" size={16} />
+            <span className="text-[10px] font-black text-blue-400 uppercase tracking-tighter">
+              Real-time Stream Active
+            </span>
+          </div>
+          <Button
+            onClick={handleExportExcelLogs}
+            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase text-[10px] tracking-widest px-6"
+            data-testid="button-export-excel-logs"
+          >
+            <FileSpreadsheet className="w-4 h-4 mr-2" />
+            Export Excel Logs
+          </Button>
+          <Button
+            onClick={handleOpenPreview}
+            className="bg-slate-100 hover:bg-white text-slate-950 font-black uppercase text-[10px] tracking-widest px-6"
+            data-testid="button-preview-report"
+          >
+            <Eye className="w-4 h-4 mr-2" />
+            Preview Report
+          </Button>
+        </div>
       </div>
 
-      {/* --- PRINT ONLY HEADER (Official Government/Audit Style) --- */}
-      <div className="hidden print:flex flex-col items-center text-center border-b-2 border-black pb-6 mb-8">
-        <div className="flex items-center gap-2 mb-2">
-          <ShieldCheck className="w-8 h-8 text-black" />
-          <span className="text-2xl font-black uppercase tracking-widest">Official Revenue Report</span>
-        </div>
-        <p className="text-xs font-mono uppercase">Republic of the Philippines • Audit Division</p>
-        <div className="w-full flex justify-between mt-6 text-[10px] font-bold uppercase">
-          <span>Report ID: {Math.random().toString(36).substr(2, 9).toUpperCase()}</span>
-          <span>Generated: {timestamp}</span>
-        </div>
+      {/* ══ SUMMARY CARDS ══ */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: "7-Day Revenue", value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-total-revenue" },
+          { label: "Today's Revenue", value: formatPeso(todayRevenue), icon: Calendar, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-today-revenue" },
+          { label: "Total Registered Users", value: totalUniqueTaps, icon: Fingerprint, color: "text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20", testId: "text-total-taps" },
+          { label: "Total Linked Cards", value: totalLinkedCards, icon: LinkIcon, color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/20", testId: "text-total-linked-cards" },
+        ].map((stat, idx) => (
+          <Card key={idx} className="bg-slate-900/40 border-slate-800 backdrop-blur-md">
+            <CardContent className="p-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-16 h-16 opacity-5">
+                <stat.icon className="w-full h-full" />
+              </div>
+              {isLoading ? (
+                <Skeleton className="h-12 w-full bg-slate-800/50" />
+              ) : (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
+                    <p className={`text-2xl font-black mt-1 tracking-tighter ${stat.color}`} data-testid={stat.testId}>
+                      {stat.value}
+                    </p>
+                  </div>
+                  <div className={`w-10 h-10 rounded border ${stat.bg} ${stat.border} flex items-center justify-center ${stat.color}`}>
+                    <stat.icon size={20} />
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* --- SUMMARY SECTION --- */}
-      {/* Note: print:grid-cols-3 forces the layout to stay horizontal on paper */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 print:grid-cols-3 print:gap-2">
-        <Card className="shadow-sm print:shadow-none print:border-black">
-          <CardContent className="p-5 print:p-3">
-            {isLoading ? (
-              <Skeleton className="h-16 w-full" />
-            ) : (
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground uppercase print:text-black">7-Day Revenue</p>
-                  <p className="text-2xl font-bold text-foreground mt-1 print:text-xl" data-testid="text-total-revenue">
-                    P{(report?.totalRevenue7Days ?? 0).toFixed(2)}
-                  </p>
-                </div>
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center text-emerald-600 bg-emerald-50 print:hidden">
-                  <TrendingUp className="w-5 h-5" />
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm print:shadow-none print:border-black">
-          <CardContent className="p-5 print:p-3">
-            {isLoading ? (
-              <Skeleton className="h-16 w-full" />
-            ) : (
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground uppercase print:text-black">Avg Daily Revenue</p>
-                  <p className="text-2xl font-bold text-foreground mt-1 print:text-xl" data-testid="text-avg-revenue">
-                    P{(report?.averageDailyRevenue ?? 0).toFixed(2)}
-                  </p>
-                </div>
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center text-blue-600 bg-blue-50 print:hidden">
-                  <Calendar className="w-5 h-5" />
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm print:shadow-none print:border-black">
-          <CardContent className="p-5 print:p-3">
-            {isLoading ? (
-              <Skeleton className="h-16 w-full" />
-            ) : (
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground uppercase print:text-black">Total Taps</p>
-                  <p className="text-2xl font-bold text-foreground mt-1 print:text-xl" data-testid="text-total-taps">
-                    {report?.totalTaps7Days ?? 0}
-                  </p>
-                </div>
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center text-violet-600 bg-violet-50 print:hidden">
-                  <Fingerprint className="w-5 h-5" />
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* --- CHART (HIDDEN ON PRINT) --- */}
-      {/* We hide the chart on print to keep the report "Raw Data & Numbers" style as requested */}
-      <Card className="shadow-sm print:hidden">
-        <CardHeader>
-          <CardTitle className="text-lg">Daily Revenue Breakdown</CardTitle>
+      {/* ══ BAR CHART ══ */}
+      <Card className="bg-slate-900/40 border-slate-800 backdrop-blur-md shadow-2xl overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
+        <CardHeader className="border-b border-slate-800/50 bg-slate-900/20">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+              <PieChart size={14} className="text-blue-500" />
+              Daily Revenue Breakdown
+            </CardTitle>
+            <div className="text-[10px] font-bold text-slate-600 uppercase tracking-tighter">Performance Matrix</div>
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-8">
           {isLoading ? (
-            <Skeleton className="h-72 w-full" />
+            <Skeleton className="h-72 w-full bg-slate-800/30" />
           ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={report?.dailyBreakdown || []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={(d: string) => {
-                    const date = new Date(d + "T00:00:00");
-                    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                  }}
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickFormatter={(v: number) => `P${v}`} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
-                  formatter={(value: number) => [`P${value.toFixed(2)}`, "Revenue"]}
-                />
-                <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={sanitizedBreakdown}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={(d: string) => {
+                      const date = new Date(d + "T00:00:00");
+                      return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                    }}
+                    stroke="#475569" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false}
+                  />
+                  <YAxis
+                    stroke="#475569" fontSize={10} fontWeight="bold"
+                    tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false}
+                  />
+                  <Tooltip
+                    cursor={{ fill: "rgba(255,255,255,0.05)" }}
+                    contentStyle={{ backgroundColor: "#020617", border: "1px solid #1e293b", borderRadius: "8px", fontSize: "10px", fontWeight: "bold", textTransform: "uppercase" }}
+                    itemStyle={{ color: "#3b82f6" }}
+                    formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
+                  />
+                  <Bar dataKey="revenue" radius={[4, 4, 0, 0]}>
+                    {sanitizedBreakdown.map((_entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={index === sanitizedBreakdown.length - 1 ? "#3b82f6" : "#1e293b"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </CardContent>
       </Card>
 
-      {/* --- DATA TABLE --- */}
-      <Card className="shadow-sm print:shadow-none print:border-none">
-        <CardHeader className="print:px-0">
-          <CardTitle className="text-lg print:text-sm print:uppercase print:font-black">Detailed Transaction Log</CardTitle>
+      {/* ══ DATA TABLE ══ */}
+      <Card className="bg-slate-900/40 border-slate-800 backdrop-blur-md shadow-2xl flex-1 flex flex-col overflow-hidden">
+        <CardHeader className="flex-none pb-4 bg-slate-900/20 border-b border-slate-800/50">
+          <CardTitle className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+            <FileText size={14} className="text-blue-500" />
+            Detailed Revenue Log
+          </CardTitle>
         </CardHeader>
-        <CardContent className="print:px-0">
+        <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
           {isLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full bg-slate-800/30" />)}
             </div>
           ) : (
-            <Table className="print:border print:border-black">
-              <TableHeader className="print:bg-gray-100">
-                <TableRow className="print:border-b-2 print:border-black">
-                  <TableHead className="print:text-black print:font-bold">Date</TableHead>
-                  <TableHead className="print:text-black print:font-bold">Day</TableHead>
-                  <TableHead className="text-right print:text-black print:font-bold">Revenue</TableHead>
+            <Table>
+              <TableHeader className="bg-slate-950/50">
+                <TableRow className="border-slate-800 hover:bg-transparent">
+                  <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">Log Date</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">Standard Day</TableHead>
+                  <TableHead className="text-right text-[10px] font-black uppercase tracking-widest text-blue-500">Revenue Credited</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(report?.dailyBreakdown || []).map((day, i) => {
+                {sanitizedBreakdown.map((day: any, i: number) => {
                   const date = new Date(day.date + "T00:00:00");
                   return (
-                    <TableRow key={i} className="print:border-b print:border-gray-400">
-                      <TableCell className="print:py-1">{date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</TableCell>
-                      <TableCell className="print:py-1">{date.toLocaleDateString("en-US", { weekday: "long" })}</TableCell>
-                      <TableCell className="text-right font-medium print:py-1">P{day.revenue.toFixed(2)}</TableCell>
+                    <TableRow key={i} className="border-slate-800/50 hover:bg-white/5 transition-colors">
+                      <TableCell className="text-xs font-bold text-white">
+                        {date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                      </TableCell>
+                      <TableCell className="text-[10px] font-black text-slate-500 uppercase">
+                        {date.toLocaleDateString("en-US", { weekday: "long" })}
+                      </TableCell>
+                      <TableCell className="text-right font-black text-emerald-400 font-mono text-xs">
+                        {formatPeso(day.revenue)}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -181,16 +464,6 @@ export default function ReportsPage() {
           )}
         </CardContent>
       </Card>
-
-      {/* --- PRINT ONLY SIGNATURE FOOTER --- */}
-      <div className="hidden print:grid grid-cols-2 gap-10 mt-16 text-center text-xs uppercase font-bold">
-        <div>
-          <div className="border-t border-black pt-2">Prepared By: System Administrator</div>
-        </div>
-        <div>
-          <div className="border-t border-black pt-2">Verified By: Financial Auditor</div>
-        </div>
-      </div>
     </div>
   );
 }

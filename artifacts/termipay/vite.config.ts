@@ -8,6 +8,10 @@ const rawPort = process.env.PORT;
 const parsedPort = rawPort ? Number(rawPort) : NaN;
 const port = !Number.isNaN(parsedPort) && parsedPort > 0 ? parsedPort : 5173;
 const basePath = process.env.BASE_PATH?.trim() || "/";
+const rawApiUrl = process.env.VITE_API_URL?.trim();
+const normalizedApiOrigin = rawApiUrl
+  ? rawApiUrl.replace(/\/+$/, "").replace(/\/api$/, "")
+  : "http://localhost:8080";
 
 export default defineConfig({
   base: basePath,
@@ -45,6 +49,12 @@ export default defineConfig({
     port,
     host: "0.0.0.0",
     allowedHosts: true,
+    proxy: {
+      "/api": {
+        target: normalizedApiOrigin,
+        changeOrigin: true,
+      },
+    },
     fs: {
       strict: true,
       deny: ["**/.*"],

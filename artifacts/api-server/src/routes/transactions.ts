@@ -15,6 +15,7 @@ const router: IRouter = Router();
 
 // --- GET TRANSACTIONS ---
 router.get("/transactions", async (req, res): Promise<void> => {
+  // FIX: Use ListTransactionsQueryParams (not UpdateTransactionParams)
   const params = ListTransactionsQueryParams.safeParse(req.query);
   const search = params.success ? params.data.search : undefined;
   const typeFilter = params.success ? params.data.type : undefined;
@@ -80,7 +81,6 @@ router.post("/transactions", async (req, res): Promise<void> => {
 
       if (status === "Success") {
         if (type === "Top-up") {
-          // Increase both balance and lifetime GCash total
           await tx
             .update(usersTable)
             .set({
@@ -89,7 +89,6 @@ router.post("/transactions", async (req, res): Promise<void> => {
             })
             .where(eq(usersTable.cardUid, cardUid));
         } else if (type === "Fare") {
-          // Deduct from balance only
           await tx
             .update(usersTable)
             .set({
@@ -123,7 +122,10 @@ router.post("/transactions", async (req, res): Promise<void> => {
 
 // --- PATCH TRANSACTION ---
 router.patch("/transactions/:id", async (req, res): Promise<void> => {
-  const params = UpdateTransactionParams.safeParse(req.params);
+  // FIX: Convert id to number before parsing since Express params are always strings
+  const params = UpdateTransactionParams.safeParse({
+    id: Number(req.params.id),
+  });
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
@@ -134,6 +136,18 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+  if (
+    parsed.data.type === undefined &&
+    parsed.data.amount === undefined &&
+    parsed.data.status === undefined
+  ) {
+    res.status(400).json({ error: "No updatable fields provided" });
+    return;
+  }
+  if (parsed.data.amount !== undefined && !Number.isFinite(parsed.data.amount)) {
+    res.status(400).json({ error: "Amount must be a valid number" });
+    return;
+  }
 
   try {
     const patchResult = await db.transaction(async (tx) => {
@@ -141,7 +155,7 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
         .select()
         .from(transactionsTable)
         .where(eq(transactionsTable.id, params.data.id));
-      if (!oldTx) throw new Error("Not Found");
+      if (!oldTx) throw new Error("TX_NOT_FOUND");
 
       const updateData: Record<string, any> = {};
       if (parsed.data.type !== undefined) updateData.type = parsed.data.type;
@@ -162,9 +176,9 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
             .where(eq(usersTable.cardUid, oldTx.cardUid));
         } else if (oldTx.type === "Top-up") {
           await tx.update(usersTable)
-            .set({ 
+            .set({
               balance: sql`CAST(${usersTable.balance} AS NUMERIC) - CAST(${oldTx.amount} AS NUMERIC)`,
-              gcashLoadedTotal: sql`CAST(${usersTable.gcashLoadedTotal} AS NUMERIC) - CAST(${oldTx.amount} AS NUMERIC)`
+              gcashLoadedTotal: sql`CAST(${usersTable.gcashLoadedTotal} AS NUMERIC) - CAST(${oldTx.amount} AS NUMERIC)`,
             })
             .where(eq(usersTable.cardUid, oldTx.cardUid));
         }
@@ -178,9 +192,9 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
             .where(eq(usersTable.cardUid, newTx.cardUid));
         } else if (newTx.type === "Top-up") {
           await tx.update(usersTable)
-            .set({ 
+            .set({
               balance: sql`CAST(${usersTable.balance} AS NUMERIC) + CAST(${newTx.amount} AS NUMERIC)`,
-              gcashLoadedTotal: sql`CAST(${usersTable.gcashLoadedTotal} AS NUMERIC) + CAST(${newTx.amount} AS NUMERIC)`
+              gcashLoadedTotal: sql`CAST(${usersTable.gcashLoadedTotal} AS NUMERIC) + CAST(${newTx.amount} AS NUMERIC)`,
             })
             .where(eq(usersTable.cardUid, newTx.cardUid));
         }
@@ -192,6 +206,7 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
       .select()
       .from(usersTable)
       .where(eq(usersTable.cardUid, patchResult.cardUid));
+
     res.json(
       UpdateTransactionResponse.parse({
         id: patchResult.id,
@@ -204,6 +219,10 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
       }),
     );
   } catch (error) {
+    if (error instanceof Error && error.message === "TX_NOT_FOUND") {
+      res.status(404).json({ error: "Transaction not found" });
+      return;
+    }
     console.error("PATCH Transaction Error:", error);
     res.status(500).json({ error: "Update failed" });
   }
@@ -211,40 +230,48 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
 
 // --- DELETE TRANSACTION ---
 router.delete("/transactions/:id", async (req, res): Promise<void> => {
-  const params = DeleteTransactionParams.safeParse(req.params);
+  // FIX: Same id coercion fix as PATCH
+  const params = DeleteTransactionParams.safeParse({
+    id: Number(req.params.id),
+  });
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
 
   try {
-    await db.transaction(async (tx) => {
+    const deleted = await db.transaction(async (tx) => {
       const [txToDelete] = await tx
         .select()
         .from(transactionsTable)
         .where(eq(transactionsTable.id, params.data.id));
-      if (!txToDelete) return;
+      if (!txToDelete) return false;
 
       if (txToDelete.status === "Success") {
         if (txToDelete.type === "Fare") {
-          // Add back the deducted fare
           await tx.update(usersTable)
             .set({ balance: sql`CAST(${usersTable.balance} AS NUMERIC) + CAST(${txToDelete.amount} AS NUMERIC)` })
             .where(eq(usersTable.cardUid, txToDelete.cardUid));
         } else if (txToDelete.type === "Top-up") {
-          // Remove from both current balance and lifetime GCash total
           await tx.update(usersTable)
-            .set({ 
+            .set({
               balance: sql`CAST(${usersTable.balance} AS NUMERIC) - CAST(${txToDelete.amount} AS NUMERIC)`,
-              gcashLoadedTotal: sql`CAST(${usersTable.gcashLoadedTotal} AS NUMERIC) - CAST(${txToDelete.amount} AS NUMERIC)`
+              gcashLoadedTotal: sql`CAST(${usersTable.gcashLoadedTotal} AS NUMERIC) - CAST(${txToDelete.amount} AS NUMERIC)`,
             })
             .where(eq(usersTable.cardUid, txToDelete.cardUid));
         }
       }
+
       await tx
         .delete(transactionsTable)
         .where(eq(transactionsTable.id, params.data.id));
+      return true;
     });
+
+    if (!deleted) {
+      res.status(404).json({ error: "Transaction not found" });
+      return;
+    }
     res.sendStatus(204);
   } catch (error) {
     console.error("DELETE Transaction Error:", error);

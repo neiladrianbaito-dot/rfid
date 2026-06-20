@@ -1,12 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   useListTransactions,
-  useUpdateTransaction,
   useDeleteTransaction,
   getListTransactionsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,27 +25,34 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Pencil, Trash2, AlertCircle } from "lucide-react";
+import { Search, Trash2, Zap, History, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+const POLL_INTERVAL_MS = 500;
+const PAGE_SIZE = 10;
 
 export default function TransactionsPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [editTx, setEditTx] = useState<any>(null);
-  const [editForm, setEditForm] = useState({
-    type: "",
-    amount: "",
-    status: "",
-  });
+  const [deleteTx, setDeleteTx] = useState<any>(null);
+  const [page, setPage] = useState(1);
+
+  // Realtime state
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [newRowId, setNewRowId] = useState<number | null>(null);
+  const prevTopIdRef = useRef<number | null>(null);
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -55,248 +61,312 @@ export default function TransactionsPage() {
   if (typeFilter && typeFilter !== "all") params.type = typeFilter;
   if (statusFilter && statusFilter !== "all") params.status = statusFilter;
 
-  const { data: transactions, isLoading } = useListTransactions(params);
-  const transactionList = Array.isArray(transactions) ? transactions : [];
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [search, typeFilter, statusFilter]);
 
-  const updateMutation = useUpdateTransaction({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: getListTransactionsQueryKey(),
-        });
-        setEditTx(null);
-        toast({ title: "Transaction updated successfully" });
-      },
+  const { data: transactions, isLoading } = useListTransactions(params, {
+    query: {
+      refetchInterval: POLL_INTERVAL_MS,
+      refetchIntervalInBackground: true,
     },
   });
+
+  const transactionList = Array.isArray(transactions) ? transactions : [];
+
+  // Pagination calculations
+  const totalPages = Math.max(1, Math.ceil(transactionList.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const startIndex = (safePage - 1) * PAGE_SIZE;
+  const paginatedList = transactionList.slice(startIndex, startIndex + PAGE_SIZE);
+
+  // Detect new transactions → pulse newest row
+  useEffect(() => {
+    if (transactionList.length === 0) return;
+    const topId = transactionList[0]?.id;
+
+    if (prevTopIdRef.current !== null && topId !== prevTopIdRef.current) {
+      setNewRowId(topId);
+      setTimeout(() => setNewRowId(null), 800);
+    }
+
+    prevTopIdRef.current = topId;
+    setLastUpdated(new Date());
+  }, [transactionList]);
 
   const deleteMutation = useDeleteTransaction({
     mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: getListTransactionsQueryKey(),
-        });
-        toast({ title: "Transaction deleted", variant: "destructive" });
+      onSettled: () => {
+        queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
+        setDeleteTx(null);
+        toast({ title: "Transaction deleted successfully" });
       },
     },
   });
 
-  const openEdit = (tx: any) => {
-    setEditTx(tx);
-    setEditForm({
-      type: tx.type,
-      // Ginagawang positive ang display sa edit form kahit ano pa ang nasa DB
-      amount: String(Math.abs(Number(tx.amount))), 
-      status: tx.status,
-    });
-  };
-
-  const handleUpdate = () => {
-    if (!editTx) return;
-
-    const amountVal = parseFloat(editForm.amount);
-
-    /**
-     * REAL-WORLD LOGIC FIX:
-     * Hindi na tayo gagamit ng negative sign (-).
-     * Gagamit tayo ng Math.abs() para laging positive ang amount na ise-save.
-     * Ang SQL Trigger na ang bahala mag-deduct kung ang type ay "Fare".
-     */
-    const cleanAmount = Math.abs(amountVal);
-
-    updateMutation.mutate({
-      id: editTx.id,
-      data: {
-        type: editForm.type,
-        amount: cleanAmount, // Laging positive
-        status: editForm.status,
-      },
-    });
+  const confirmDelete = () => {
+    if (!deleteTx) return;
+    deleteMutation.mutate({ id: deleteTx.id });
   };
 
   const statusColor = (status: string) => {
     switch (status) {
-      case "Success": return "default";
-      case "Failed": return "destructive";
-      case "Pending": return "secondary";
-      default: return "secondary";
+      case "Success": return "bg-emerald-500/20 text-emerald-400 border-emerald-500/50";
+      case "Failed": return "bg-red-500/20 text-red-400 border-red-500/50";
+      case "Pending": return "bg-amber-500/20 text-amber-400 border-amber-500/50";
+      default: return "bg-slate-800 text-slate-400 border-slate-700";
     }
   };
 
   return (
-    <div className="space-y-6 h-full flex flex-col">
-      <div className="flex justify-between items-end">
+    <div className="space-y-8 h-full min-h-0 flex flex-col">
+      <style>{`
+        @keyframes row-pulse {
+          0% { background-color: transparent; }
+          50% { background-color: rgba(59,130,246,0.15); }
+          100% { background-color: transparent; }
+        }
+        .row-pulse { animation: row-pulse 0.8s ease-in-out; }
+
+        @keyframes realtime-dot {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
+        }
+        .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+      `}</style>
+
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
         <div>
-          <h2 className="text-2xl font-bold text-foreground tracking-tight">Transaction Logs</h2>
-          <p className="text-sm text-muted-foreground mt-1">Monitor all Fare deductions and Top-ups</p>
+          <h2 className="text-3xl font-black text-white tracking-tighter uppercase italic flex items-center gap-3">
+            <History className="text-blue-500" />
+            Transaction <span className="text-blue-500">Logs</span>
+          </h2>
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">
+            Monitor all Fare deductions and Top-ups in real-time
+          </p>
+        </div>
+        {/* Live indicator */}
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+            <Zap className="text-blue-400 animate-pulse" size={16} />
+            <span className="text-[10px] font-black text-blue-400 uppercase tracking-tighter">Live Telemetry Active</span>
+          </div>
+          {lastUpdated && (
+            <span className="text-[10px] text-slate-600 font-mono pr-1">
+              Last sync: {lastUpdated.toLocaleTimeString()}
+            </span>
+          )}
         </div>
       </div>
 
-      <Card className="shadow-sm flex-1 flex flex-col overflow-hidden">
-        <CardHeader className="flex-none pb-4">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+      <Card className="bg-slate-900/40 border-slate-800 backdrop-blur-xl shadow-2xl flex flex-col overflow-hidden relative">
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
+
+        <CardHeader className="flex-none pb-4 bg-slate-900/20 border-b border-slate-800/50">
+          <div className="flex flex-col lg:flex-row gap-4 items-center">
+            {/* LIVE badge */}
+            <div className="flex items-center gap-2 mr-2 shrink-0">
+              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5">
+                <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-400 inline-block" />
+                LIVE
+              </span>
+            </div>
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
               <Input
-                placeholder="Search card UID or name..."
+                placeholder="SEARCH CARD UID OR NAME..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-10"
+                className="pl-10 bg-slate-950 border-slate-800 focus:border-blue-500 text-white font-bold placeholder:text-slate-700 text-xs"
               />
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-3 w-full lg:w-auto">
               <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="w-[130px]">
-                  <SelectValue placeholder="Type" />
+                <SelectTrigger className="w-full lg:w-[150px] bg-slate-950 border-slate-800 text-slate-300 font-bold uppercase text-[10px] tracking-widest">
+                  <SelectValue placeholder="TYPE" />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="Fare">Fare</SelectItem>
-                  <SelectItem value="Top-up">Top-up</SelectItem>
+                <SelectContent className="bg-slate-950 border-slate-800 text-slate-300">
+                  <SelectItem value="all">ALL TYPES</SelectItem>
+                  <SelectItem value="Fare">FARE</SelectItem>
+                  <SelectItem value="Top-up">TOP-UP</SelectItem>
                 </SelectContent>
               </Select>
+
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[130px]">
-                  <SelectValue placeholder="Status" />
+                <SelectTrigger className="w-full lg:w-[150px] bg-slate-950 border-slate-800 text-slate-300 font-bold uppercase text-[10px] tracking-widest">
+                  <SelectValue placeholder="STATUS" />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="Success">Success</SelectItem>
-                  <SelectItem value="Failed">Failed</SelectItem>
-                  <SelectItem value="Pending">Pending</SelectItem>
+                <SelectContent className="bg-slate-950 border-slate-800 text-slate-300">
+                  <SelectItem value="all">ALL STATUS</SelectItem>
+                  <SelectItem value="Success">SUCCESS</SelectItem>
+                  <SelectItem value="Failed">FAILED</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
         </CardHeader>
 
-        <CardContent className="flex-1 overflow-y-auto p-0 px-6 pb-6">
+        <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4 flex flex-col overflow-hidden">
           {isLoading ? (
-            <div className="space-y-3 pt-4">
-              {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+            <div className="space-y-4 pt-6">
+              {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                <Skeleton key={i} className="h-14 w-full bg-slate-800/30 rounded-lg" />
+              ))}
             </div>
           ) : (
-            <div className="rounded-md border relative">
-              <Table>
-                <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
-                  <TableRow>
-                    <TableHead className="w-[180px]">Timestamp</TableHead>
-                    <TableHead>Card UID</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactionList.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-20 text-muted-foreground">
-                        No transaction records found.
-                      </TableCell>
+            <>
+              <div className="relative mt-6 flex-1 min-h-0 overflow-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-[#0a0f1c] z-10 border-b border-slate-800">
+                    <TableRow className="border-none hover:bg-transparent">
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">Timestamp</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">Card UID</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">Full Name</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">Type</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">Amount</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">Status</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">Actions</TableHead>
                     </TableRow>
-                  ) : (
-                    transactionList.map((tx: any) => (
-                      <TableRow key={tx.id}>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {new Date(tx.timestamp || tx.created_at).toLocaleString()}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{tx.card_uid || tx.cardUid}</TableCell>
-                        <TableCell className="font-medium">{tx.full_name || tx.fullName}</TableCell>
-                        <TableCell>
-                          <Badge variant={tx.type === "Fare" ? "outline" : "default"} className={tx.type === "Fare" ? "border-red-200 text-red-700 bg-red-50" : ""}>
-                            {tx.type}
-                          </Badge>
-                        </TableCell>
-                        {/* Display Logic: Nilalagyan lang ng symbol sa UI pero positive ang number */}
-                        <TableCell className={`font-bold ${tx.type === "Fare" ? "text-red-600" : "text-green-600"}`}>
-                          {tx.type === "Fare" ? "-" : "+"}₱{Math.abs(Number(tx.amount)).toFixed(2)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={statusColor(tx.status) as any}>{tx.status}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" onClick={() => openEdit(tx)}>
-                              <Pencil className="w-4 h-4" />
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="text-destructive hover:bg-destructive/10"
-                              onClick={() => {
-                                if (confirm("Delete this log? (This won't refund the user automatically)")) 
-                                  deleteMutation.mutate({ id: tx.id });
-                              }}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedList.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center py-32">
+                          <div className="flex flex-col items-center opacity-20">
+                            <History size={48} className="mb-2" />
+                            <p className="text-[10px] font-black uppercase tracking-[0.4em]">Zero Encrypted Records Found</p>
                           </div>
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                    ) : (
+                      paginatedList.map((tx: any) => (
+                        <TableRow
+                          key={tx.id}
+                          className={`border-slate-800/50 transition-colors hover:bg-white/5 group ${
+                            newRowId === tx.id ? "row-pulse" : ""
+                          }`}
+                        >
+                          <TableCell className="text-[10px] font-mono text-slate-400">
+                            {new Date(tx.timestamp || tx.created_at).toLocaleString()}
+                          </TableCell>
+                          <TableCell className="font-mono text-[11px] text-blue-400 font-bold">
+                            {tx.card_uid || tx.cardUid}
+                          </TableCell>
+                          <TableCell className="text-xs font-black text-white uppercase tracking-tight">
+                            {tx.full_name || tx.fullName}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={`text-[9px] font-black uppercase ${
+                                tx.type === "Fare"
+                                  ? "border-red-500/30 text-red-400 bg-red-500/5"
+                                  : "border-emerald-500/30 text-emerald-400 bg-emerald-500/5"
+                              }`}
+                            >
+                              {tx.type}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className={`text-xs font-black ${tx.type === "Fare" ? "text-red-500" : "text-emerald-500"}`}>
+                            {tx.type === "Fare" ? "-" : "+"}₱{Math.abs(Number(tx.amount)).toFixed(2)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[9px] font-black uppercase ${statusColor(tx.status)}`}>
+                              {tx.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-red-500/50 hover:text-red-400 hover:bg-red-500/10"
+                                onClick={() => setDeleteTx(tx)}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Pagination Footer */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-800/50 mt-2">
+                <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">
+                  Showing{" "}
+                  <span className="text-slate-300 font-black">
+                    {transactionList.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, transactionList.length)}
+                  </span>{" "}
+                  of{" "}
+                  <span className="text-slate-300 font-black">{transactionList.length}</span>{" "}
+                  records
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={safePage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className="h-8 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 border border-slate-800"
+                  >
+                    <ChevronLeft className="w-3 h-3 mr-1" />
+                    Prev
+                  </Button>
+
+                  <span className="text-[10px] font-black text-slate-400 px-2 tabular-nums">
+                    <span className="text-blue-400">{safePage}</span>
+                    <span className="text-slate-600"> / {totalPages}</span>
+                  </span>
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    className="h-8 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 border border-slate-800"
+                  >
+                    Next
+                    <ChevronRight className="w-3 h-3 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
 
-      <Dialog open={!!editTx} onOpenChange={(open) => !open && setEditTx(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Update Transaction Details</DialogTitle>
-          </DialogHeader>
-
-          <div className="bg-amber-50 p-3 rounded-md flex gap-3 items-start mb-2 border border-amber-100">
-            <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
-            <p className="text-xs text-amber-700">
-              <strong>Data Note:</strong> Ang system ay gumagamit ng positive values. Ang <b>Fare</b> ay awtomatikong ibabawas sa wallet ng user sa database.
-            </p>
-          </div>
-
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>Transaction Type</Label>
-              <Select value={editForm.type} onValueChange={(v) => setEditForm({ ...editForm, type: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Fare">Fare (Deduction)</SelectItem>
-                  <SelectItem value="Top-up">Top-up (Addition)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Amount (₱)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={editForm.amount}
-                onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <Select value={editForm.status} onValueChange={(v) => setEditForm({ ...editForm, status: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Success">Success</SelectItem>
-                  <SelectItem value="Failed">Failed</SelectItem>
-                  <SelectItem value="Pending">Pending</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditTx(null)}>Cancel</Button>
-            <Button onClick={handleUpdate} disabled={updateMutation.isPending}>
-              {updateMutation.isPending ? "Updating..." : "Save Changes"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Delete Alert Dialog */}
+      <AlertDialog open={!!deleteTx} onOpenChange={(open) => !open && setDeleteTx(null)}>
+        <AlertDialogContent className="bg-slate-950 border-slate-800">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white uppercase font-black tracking-tighter">Delete Transaction Record?</AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400 text-xs uppercase font-bold">
+              Warning: This clears the log entry from history. This will not trigger a database refund to the user's current balance.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={deleteMutation.isPending}
+              className="bg-slate-900 border-slate-800 text-white hover:bg-slate-800"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={deleteMutation.isPending}
+              className="bg-red-600 text-white hover:bg-red-500 font-black uppercase text-[10px]"
+            >
+              {deleteMutation.isPending ? "Purging..." : "Confirm"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

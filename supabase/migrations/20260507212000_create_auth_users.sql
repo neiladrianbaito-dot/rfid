@@ -1,0 +1,26 @@
+create extension if not exists "pgcrypto";
+
+create table if not exists public.auth_users (
+  id uuid primary key default gen_random_uuid(),
+  supabase_auth_id uuid not null unique,
+  full_name text not null,
+  email text not null unique,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create or replace function public.set_auth_users_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_auth_users_updated_at on public.auth_users;
+create trigger trg_auth_users_updated_at
+before update on public.auth_users
+for each row
+execute function public.set_auth_users_updated_at();

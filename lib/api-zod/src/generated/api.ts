@@ -7,16 +7,10 @@
  */
 import * as zod from "zod";
 
-/**
- * @summary Health check
- */
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
 
-/**
- * @summary Admin login
- */
 export const LoginBody = zod.object({
   username: zod.string(),
   password: zod.string(),
@@ -27,17 +21,11 @@ export const LoginResponse = zod.object({
   message: zod.string(),
 });
 
-/**
- * @summary Get current admin user
- */
 export const GetMeResponse = zod.object({
   username: zod.string(),
   name: zod.string(),
 });
 
-/**
- * @summary List all registered cardholders
- */
 export const ListUsersQueryParams = zod.object({
   search: zod.coerce.string().optional(),
 });
@@ -47,28 +35,23 @@ export const ListUsersResponseItem = zod.object({
   cardUid: zod.string(),
   fullName: zod.string(),
   contactNumber: zod.string(),
-  type: zod.string(), // Added
+  type: zod.string(),
   balance: zod.number(),
-  gcashLoadedTotal: zod.number(),
+  // ✅ gcashLoadedTotal REMOVED
   status: zod.string(),
   createdAt: zod.coerce.date(),
+  email: zod.string().nullable().optional(),
 });
 export const ListUsersResponse = zod.array(ListUsersResponseItem);
 
-/**
- * @summary Register a new RFID card
- */
 export const CreateUserBody = zod.object({
   cardUid: zod.string(),
   fullName: zod.string(),
   contactNumber: zod.string(),
   initialBalance: zod.number(),
-  type: zod.string().optional(), // Added
+  type: zod.string().optional(),
 });
 
-/**
- * @summary Get a user by ID
- */
 export const GetUserParams = zod.object({
   id: zod.coerce.number(),
 });
@@ -78,16 +61,14 @@ export const GetUserResponse = zod.object({
   cardUid: zod.string(),
   fullName: zod.string(),
   contactNumber: zod.string(),
-  type: zod.string(), // Added
+  type: zod.string(),
   balance: zod.number(),
-  gcashLoadedTotal: zod.number(),
+  // ✅ gcashLoadedTotal REMOVED
   status: zod.string(),
   createdAt: zod.coerce.date(),
+  email: zod.string().nullable().optional(),
 });
 
-/**
- * @summary Update a user
- */
 export const UpdateUserParams = zod.object({
   id: zod.coerce.number(),
 });
@@ -97,7 +78,7 @@ export const UpdateUserBody = zod.object({
   contactNumber: zod.string().optional(),
   balance: zod.number().optional(),
   status: zod.string().optional(),
-  type: zod.string().optional(), // Added
+  type: zod.string().optional(),
 });
 
 export const UpdateUserResponse = zod.object({
@@ -105,39 +86,32 @@ export const UpdateUserResponse = zod.object({
   cardUid: zod.string(),
   fullName: zod.string(),
   contactNumber: zod.string(),
-  type: zod.string(), // Added
+  type: zod.string(),
   balance: zod.number(),
-  gcashLoadedTotal: zod.number(),
+  // ✅ gcashLoadedTotal REMOVED
   status: zod.string(),
   createdAt: zod.coerce.date(),
+  email: zod.string().nullable().optional(),
 });
 
-/**
- * @summary Delete a user
- */
 export const DeleteUserParams = zod.object({
   id: zod.coerce.number(),
 });
 
-/**
- * @summary Recently registered users
- */
 export const ListRecentUsersResponseItem = zod.object({
   id: zod.number(),
   cardUid: zod.string(),
   fullName: zod.string(),
   contactNumber: zod.string(),
-  type: zod.string(), // Added
+  type: zod.string(),
   balance: zod.number(),
-  gcashLoadedTotal: zod.number(),
+  // ✅ gcashLoadedTotal REMOVED
   status: zod.string(),
   createdAt: zod.coerce.date(),
+  email: zod.string().nullable().optional(),
 });
 export const ListRecentUsersResponse = zod.array(ListRecentUsersResponseItem);
 
-/**
- * @summary List transactions with filters
- */
 export const ListTransactionsQueryParams = zod.object({
   search: zod.coerce.string().optional(),
   type: zod.enum(["Fare", "Top-up"]).optional(),
@@ -155,9 +129,6 @@ export const ListTransactionsResponseItem = zod.object({
 });
 export const ListTransactionsResponse = zod.array(ListTransactionsResponseItem);
 
-/**
- * @summary Create a transaction
- */
 export const CreateTransactionBody = zod.object({
   cardUid: zod.string(),
   type: zod.enum(["Fare", "Top-up"]),
@@ -165,9 +136,6 @@ export const CreateTransactionBody = zod.object({
   status: zod.enum(["Success", "Failed", "Pending"]),
 });
 
-/**
- * @summary Update a transaction
- */
 export const UpdateTransactionParams = zod.object({
   id: zod.coerce.number(),
 });
@@ -188,16 +156,10 @@ export const UpdateTransactionResponse = zod.object({
   status: zod.string(),
 });
 
-/**
- * @summary Delete a transaction
- */
 export const DeleteTransactionParams = zod.object({
   id: zod.coerce.number(),
 });
 
-/**
- * @summary List all fare routes
- */
 export const ListRoutesResponseItem = zod.object({
   id: zod.number(),
   origin: zod.string(),
@@ -207,18 +169,12 @@ export const ListRoutesResponseItem = zod.object({
 });
 export const ListRoutesResponse = zod.array(ListRoutesResponseItem);
 
-/**
- * @summary Add a new fare route
- */
 export const CreateRouteBody = zod.object({
   origin: zod.string(),
   destination: zod.string(),
   fareAmount: zod.number(),
 });
 
-/**
- * @summary Update a fare route
- */
 export const UpdateRouteParams = zod.object({
   id: zod.coerce.number(),
 });
@@ -238,16 +194,10 @@ export const UpdateRouteResponse = zod.object({
   isActive: zod.boolean(),
 });
 
-/**
- * @summary Delete a fare route
- */
 export const DeleteRouteParams = zod.object({
   id: zod.coerce.number(),
 });
 
-/**
- * @summary Toggle active status of a route
- */
 export const ToggleRouteParams = zod.object({
   id: zod.coerce.number(),
 });
@@ -260,9 +210,6 @@ export const ToggleRouteResponse = zod.object({
   isActive: zod.boolean(),
 });
 
-/**
- * @summary Get dashboard summary stats
- */
 export const GetDashboardStatsResponse = zod.object({
   totalRevenueToday: zod.number(),
   totalTapsToday: zod.number(),
@@ -270,18 +217,12 @@ export const GetDashboardStatsResponse = zod.object({
   activeRoutes: zod.number(),
 });
 
-/**
- * @summary Get 7-day revenue trend
- */
 export const GetRevenueTrendResponseItem = zod.object({
   date: zod.string(),
   revenue: zod.number(),
 });
 export const GetRevenueTrendResponse = zod.array(GetRevenueTrendResponseItem);
 
-/**
- * @summary Get report summary with 7-day analytics
- */
 export const GetReportSummaryResponse = zod.object({
   totalRevenue7Days: zod.number(),
   averageDailyRevenue: zod.number(),
