@@ -2,29 +2,19 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 const router: IRouter = Router();
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const GMAIL_USER = process.env.GMAIL_USER ?? "";
-const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD ?? "";
+const RESEND_API_KEY = process.env.RESEND_API_KEY ?? "";
 const APP_URL = (process.env.APP_URL ?? "http://localhost:5173").replace(/\/$/, "");
 const TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-// ── Nodemailer transporter ────────────────────────────────────────────────────
+// ── Resend client ─────────────────────────────────────────────────────────────
 
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  auth: {
-    user: GMAIL_USER,
-    pass: GMAIL_APP_PASSWORD,
-  },
-  family: 4, // force IPv4 — Render's network can't reach Gmail's IPv6 SMTP address
-});
+const resend = new Resend(RESEND_API_KEY);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -117,9 +107,9 @@ router.post("/auth/user/forgot-password", async (req, res): Promise<void> => {
 
     const resetLink = `${APP_URL}/reset-password?token=${rawToken}`;
 
-    // Send email via Gmail
-    await transporter.sendMail({
-      from: `"Transit Wallet" <${GMAIL_USER}>`,
+    // Send email via Resend
+    const { error: sendError } = await resend.emails.send({
+      from: "Transit Wallet <onboarding@resend.dev>",
       to: user.email,
       subject: "Reset your password",
       html: `
@@ -146,6 +136,12 @@ router.post("/auth/user/forgot-password", async (req, res): Promise<void> => {
         </html>
       `,
     });
+
+    if (sendError) {
+      console.error("Resend send error:", sendError);
+      res.status(500).json({ success: false, message: "Failed to send reset email." });
+      return;
+    }
 
     res.json({
       success: true,
