@@ -15,8 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { CreditCard, Plus, Cpu, ShieldCheck, Zap } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion } from "framer-motion";
-
-const POLL_INTERVAL_MS = 500; // ✅ 500ms real-time polling
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 
 export default function CardRegistrationPage() {
   const [cardUid, setCardUid] = useState("");
@@ -38,12 +37,18 @@ export default function CardRegistrationPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // ✅ 500ms refetch interval
-  const { data: recentUsers, isLoading } = useListRecentUsers({
+  // Realtime: walang nakatakdang interval na, refetch na lang tuwing
+  // may pagbabago sa users table (galing sa useRealtimeRefetch sa baba)
+  const { data: recentUsers, isLoading, refetch: refetchRecentUsers } = useListRecentUsers({
     query: {
-      refetchInterval: POLL_INTERVAL_MS,
-      refetchIntervalInBackground: true,
+      refetchOnWindowFocus: true,
     },
+  });
+
+  // Mag-subscribe sa Postgres changes ng users table. Tuwing may bagong
+  // na-register na card (INSERT) o na-edit (UPDATE), mag-re-refetch.
+  useRealtimeRefetch(["users"], () => {
+    refetchRecentUsers();
   });
 
   // ✅ Detect new card registered → pulse animation

@@ -27,8 +27,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 
-const POLL_INTERVAL_MS = 500;
 const PAGE_SIZE = 10;
 
 const formatPeso = (value: number) =>
@@ -65,15 +65,20 @@ export default function UserManagementPage() {
     setPage(1);
   }, [search]);
 
-  const { data: users, isLoading } = useListUsers(
+  const { data: users, isLoading, refetch: refetchUsers } = useListUsers(
     search ? { search } : undefined,
     {
       query: {
-        refetchInterval: POLL_INTERVAL_MS,
-        refetchIntervalInBackground: true,
+        refetchOnWindowFocus: true,
       },
     }
   );
+
+  // Realtime: mag-refetch tuwing may pagbabago sa users table
+  // (bagong register, edit, o delete) — walang nakatakdang interval na
+  useRealtimeRefetch(["users"], () => {
+    refetchUsers();
+  });
 
   const userList = Array.isArray(users) ? users : [];
 

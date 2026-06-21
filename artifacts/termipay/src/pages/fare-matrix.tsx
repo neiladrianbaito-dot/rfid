@@ -54,8 +54,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-
-const POLL_INTERVAL_MS = 500; // ✅ 500ms real-time polling
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 
 const CALBAYOG_BARANGAYS = [
   "Bugtong",
@@ -106,15 +105,22 @@ export default function FareMatrixPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // ✅ 500ms polling — same pattern as TransactionsPage
-  const { data: routes, isLoading } = useListRoutes(undefined, {
+  const { data: routes, isLoading, refetch: refetchRoutes } = useListRoutes(undefined, {
     query: {
-      refetchInterval: POLL_INTERVAL_MS,
-      refetchIntervalInBackground: true,
+      refetchOnWindowFocus: true,
     },
   });
 
-  // ✅ Track last updated time on every poll
+  // Realtime: mag-refetch tuwing may pagbabago sa fare_routes table
+  // (bagong route, edit, delete, o toggle active) — walang
+  // nakatakdang interval na. Ligtas itong tumakbo kasabay ng
+  // optimistic update sa toggleMutation dahil ang onSettled doon
+  // ay magre-refetch din pagkatapos ng successful mutation.
+  useRealtimeRefetch(["fare_routes"], () => {
+    refetchRoutes();
+  });
+
+  // ✅ Track last updated time on every data change
   useEffect(() => {
     if (Array.isArray(routes) && routes.length >= 0) {
       setLastUpdated(new Date());

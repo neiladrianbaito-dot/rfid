@@ -17,8 +17,7 @@ import {
   Area,
   AreaChart,
 } from "recharts";
-
-const POLL_INTERVAL_MS = 500;
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch"; // ayusin ang path kung saan mo nilagay
 
 const formatPeso = (value: number) =>
   `P${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -31,22 +30,31 @@ export default function DashboardPage() {
   const prevRevenueRef = useRef<number | null>(null);
   const [revenueFlash, setRevenueFlash] = useState(false);
 
-  const { data: stats, isLoading: statsLoading } = useGetDashboardStats({
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    refetch: refetchStats,
+  } = useGetDashboardStats({
     query: {
-      staleTime: 0,
       refetchOnWindowFocus: true,
-      refetchInterval: POLL_INTERVAL_MS,
-      refetchIntervalInBackground: true,
     },
   });
 
-  const { data: trend, isLoading: trendLoading } = useGetRevenueTrend({
+  const {
+    data: trend,
+    isLoading: trendLoading,
+    refetch: refetchTrend,
+  } = useGetRevenueTrend({
     query: {
-      staleTime: 0,
       refetchOnWindowFocus: true,
-      refetchInterval: POLL_INTERVAL_MS,
-      refetchIntervalInBackground: true,
     },
+  });
+
+  // Realtime: tuwing may pagbabago sa transactions, fare_routes, o users,
+  // mag-re-refetch ang stats at trend queries. Walang nakatakdang interval na.
+  useRealtimeRefetch(["transactions", "fare_routes", "users"], () => {
+    refetchStats();
+    refetchTrend();
   });
 
   useEffect(() => {
@@ -76,7 +84,9 @@ export default function DashboardPage() {
     };
 
     pingEdgeFunction();
-    const intervalId = window.setInterval(pingEdgeFunction, 3000);
+    // 15s imbes na 3s — sapat na ito para sa latency indicator,
+    // hindi na rin ito tinatamaan ng polling problem dati
+    const intervalId = window.setInterval(pingEdgeFunction, 15000);
 
     return () => window.clearInterval(intervalId);
   }, []);

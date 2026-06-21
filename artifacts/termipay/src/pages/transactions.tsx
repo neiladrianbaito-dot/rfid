@@ -37,8 +37,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 
-const POLL_INTERVAL_MS = 500;
 const PAGE_SIZE = 10;
 
 export default function TransactionsPage() {
@@ -66,11 +66,16 @@ export default function TransactionsPage() {
     setPage(1);
   }, [search, typeFilter, statusFilter]);
 
-  const { data: transactions, isLoading } = useListTransactions(params, {
+  const { data: transactions, isLoading, refetch: refetchTransactions } = useListTransactions(params, {
     query: {
-      refetchInterval: POLL_INTERVAL_MS,
-      refetchIntervalInBackground: true,
+      refetchOnWindowFocus: true,
     },
+  });
+
+  // Realtime: mag-refetch tuwing may pagbabago sa transactions table
+  // (bagong fare/top-up, o pag-delete) — walang nakatakdang interval na
+  useRealtimeRefetch(["transactions"], () => {
+    refetchTransactions();
   });
 
   const transactionList = Array.isArray(transactions) ? transactions : [];

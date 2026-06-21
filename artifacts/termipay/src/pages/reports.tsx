@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useGetReportSummary, useListTransactions, useListUsers } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { useAuth } from "@/hooks/use-auth";
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import {
   Eye,
   TrendingUp,
@@ -35,16 +36,41 @@ export default function ReportsPage() {
   const { user } = useAuth();
   const adminName = user?.name || "System Administrator";
 
-  const { data: report, isLoading } = useGetReportSummary({
+  // ── Added: revenue flash state (from dashboard) ───────────────────────────
+  const prevRevenueRef = useRef<number | null>(null);
+  const [revenueFlash, setRevenueFlash] = useState(false);
+
+  // ── Polling removed; added refetch handles ────────────────────────────────
+  const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
       staleTime: 0,
       refetchOnWindowFocus: true,
-      refetchInterval: 500,
-      refetchIntervalInBackground: true,
+      // refetchInterval and refetchIntervalInBackground removed
     },
   });
-  const { data: transactions } = useListTransactions();
-  const { data: users } = useListUsers();
+  const { data: transactions, refetch: refetchTransactions } = useListTransactions();
+  const { data: users, refetch: refetchUsers } = useListUsers();
+
+  // ── Added: realtime refetch on DB changes (from dashboard) ────────────────
+  useRealtimeRefetch(["transactions", "fare_routes", "users"], () => {
+    refetchReport();
+    refetchTransactions();
+    refetchUsers();
+  });
+
+  // ── Added: revenue flash effect (from dashboard) ──────────────────────────
+  useEffect(() => {
+    if (!report) return;
+    const breakdown = report?.dailyBreakdown || [];
+    const today = new Date().toISOString().slice(0, 10);
+    const todayRow = breakdown.find((d: any) => d.date === today);
+    const current = Math.abs(Number(todayRow?.revenue) || 0);
+    if (prevRevenueRef.current !== null && current !== prevRevenueRef.current) {
+      setRevenueFlash(true);
+      setTimeout(() => setRevenueFlash(false), 800);
+    }
+    prevRevenueRef.current = current;
+  }, [report]);
 
   const totalUniqueTaps = React.useMemo(() => {
     const txList = Array.isArray(transactions) ? transactions : [];
@@ -298,6 +324,12 @@ export default function ReportsPage() {
     >
       <style>{`
         html, body { overflow-x: hidden !important; }
+        @keyframes card-pulse {
+          0%   { box-shadow: 0 0 20px rgba(16,185,129,0.3); }
+          50%  { box-shadow: 0 0 40px rgba(16,185,129,0.7); }
+          100% { box-shadow: 0 0 20px rgba(16,185,129,0.3); }
+        }
+        .card-pulse { animation: card-pulse 0.8s ease-in-out; }
       `}</style>
 
       {/* ══ HEADER ══ */}
@@ -340,12 +372,12 @@ export default function ReportsPage() {
       {/* ══ SUMMARY CARDS ══ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: "7-Day Revenue", value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-total-revenue" },
-          { label: "Today's Revenue", value: formatPeso(todayRevenue), icon: Calendar, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-today-revenue" },
-          { label: "Total Registered Users", value: totalUniqueTaps, icon: Fingerprint, color: "text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20", testId: "text-total-taps" },
-          { label: "Total Linked Cards", value: totalLinkedCards, icon: LinkIcon, color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/20", testId: "text-total-linked-cards" },
+          { label: "7-Day Revenue", value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-total-revenue", flash: false },
+          { label: "Today's Revenue", value: formatPeso(todayRevenue), icon: Calendar, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-today-revenue", flash: revenueFlash },
+          { label: "Total Registered Users", value: totalUniqueTaps, icon: Fingerprint, color: "text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20", testId: "text-total-taps", flash: false },
+          { label: "Total Linked Cards", value: totalLinkedCards, icon: LinkIcon, color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/20", testId: "text-total-linked-cards", flash: false },
         ].map((stat, idx) => (
-          <Card key={idx} className="bg-slate-900/40 border-slate-800 backdrop-blur-md">
+          <Card key={idx} className={`bg-slate-900/40 border-slate-800 backdrop-blur-md ${stat.flash ? "card-pulse" : ""}`}>
             <CardContent className="p-6 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-16 h-16 opacity-5">
                 <stat.icon className="w-full h-full" />
