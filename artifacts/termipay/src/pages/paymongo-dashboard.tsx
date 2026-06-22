@@ -18,6 +18,7 @@ import {
 import { supabase } from "@/lib/supabase";
 
 const RECAPTCHA_SITE_KEY = "6LfbiuQsAAAAAI9iR6ZsDDUGodOeSMUQSu6ALcfc";
+const MAX_BALANCE = 20000;
 
 type UserRecord = {
   cardUid?: string;
@@ -261,7 +262,6 @@ export default function PaymongoDashboardPage() {
         const newBalance = Number(rawUser.balance ?? 0);
         const newTxCount = (payload.transactions || []).length;
 
-        // Pulse animation when balance or transactions change
         if (
           prevBalanceRef.current !== null &&
           (prevBalanceRef.current !== newBalance || prevTxCountRef.current !== newTxCount)
@@ -297,22 +297,14 @@ export default function PaymongoDashboardPage() {
     }
   };
 
-  // ── Realtime subscription: mag-refetch tuwing may pagbabago
-  // sa transactions o users table na may kaugnayan sa cardUid nito.
-  // Walang setInterval na — event-driven na ang updates.
   useEffect(() => {
     if (!cardUid) return;
 
-    // Initial load na may loading indicator
     void fetchCardData(cardUid, true);
 
     const channelName = `user-dashboard-${cardUid}-${Math.random().toString(36).slice(2, 8)}`;
     const channel = supabase.channel(channelName);
 
-    // Mag-subscribe sa transactions at users table.
-    // Hindi natin ni-filter by cardUid sa subscription level dahil
-    // ang filter ay kailangang column-level at depende sa schema —
-    // ang refetch mismo ang bahala sa pag-check ng tamang data.
     channel
       .on("postgres_changes", { event: "*", schema: "public", table: "transactions" }, () => {
         void fetchCardData(cardUid, false);
@@ -401,17 +393,38 @@ export default function PaymongoDashboardPage() {
     setLocation("/signin");
   };
 
+  // ── Top-up handler with ₱20,000 balance limit ──
   const handleTopup = async () => {
     if (!cardUid || !amount) {
       setAlertContent({ title: "Missing Information", msg: "Please enter an amount." });
       setAlertOpen(true);
       return;
     }
-    if (parseFloat(amount) <= 0) {
+
+    const parsedAmount = parseFloat(amount);
+
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
       setAlertContent({ title: "Invalid Amount", msg: "Please enter a valid amount." });
       setAlertOpen(true);
       return;
     }
+
+    const currentBalance = Number(user?.balance || 0);
+    const projectedBalance = currentBalance + parsedAmount;
+
+    if (projectedBalance > MAX_BALANCE) {
+      const remaining = MAX_BALANCE - currentBalance;
+      setAlertContent({
+        title: "Balance Limit Reached",
+        msg:
+          remaining <= 0
+            ? "Your wallet is already at the maximum balance of ₱20,000.00. You cannot top up further."
+            : `You can only top up ₱${remaining.toLocaleString(undefined, { minimumFractionDigits: 2 })} more. Your wallet has a ₱20,000.00 maximum balance limit.`,
+      });
+      setAlertOpen(true);
+      return;
+    }
+
     try {
       setTopupLoading(true);
       const res = await fetch(
@@ -443,6 +456,11 @@ export default function PaymongoDashboardPage() {
     const value = Number(user?.balance || 0);
     return `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   }, [user?.balance]);
+
+  // ── Derived values for top-up limit display ──
+  const currentBalance = Number(user?.balance || 0);
+  const remainingTopup = Math.max(0, MAX_BALANCE - currentBalance);
+  const isAtMaxBalance = remainingTopup <= 0;
 
   const isChecking = cardValidation.status === "checking";
   const isBlocked = cardValidation.status === "blocked";
@@ -680,7 +698,7 @@ export default function PaymongoDashboardPage() {
       </Dialog>
 
       {/* ── Topup Modal ── */}
-      <Dialog open={isTopupOpen} onOpenChange={setIsTopupOpen}>
+      <Dialog open={isTopupOpen} onOpenChange={(open) => { setIsTopupOpen(open); if (!open) setAmount(""); }}>
         <DialogContent className="p-0 border-none bg-transparent max-w-[380px]">
           <div className="rgb-container">
             <div className="p-6 text-white">
@@ -688,6 +706,32 @@ export default function PaymongoDashboardPage() {
                 <CreditCard className="text-emerald-400" /> Top-up Wallet
               </h2>
               <p className="text-[11px] text-slate-400 mb-6 uppercase tracking-wider">Secure Payment via PayMongo</p>
+
+              {/* Balance limit progress bar */}
+              <div className="mb-5 bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 space-y-2">
+                <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider">
+                  <span className="text-slate-500">Wallet Limit</span>
+                  <span className={isAtMaxBalance ? "text-red-400" : "text-emerald-400"}>
+                    ₱{currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ₱{MAX_BALANCE.toLocaleString()}
+                  </span>
+                </div>
+                <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className={`h-1.5 rounded-full transition-all ${
+                      isAtMaxBalance ? "bg-red-500" : currentBalance / MAX_BALANCE >= 0.8 ? "bg-amber-400" : "bg-emerald-500"
+                    }`}
+                    style={{ width: `${Math.min((currentBalance / MAX_BALANCE) * 100, 100)}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  {isAtMaxBalance ? (
+                    <span className="text-red-400 font-semibold">Wallet is full. You cannot top up further.</span>
+                  ) : (
+                    <>You can still top up <span className="text-emerald-400 font-bold">₱{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></>
+                  )}
+                </p>
+              </div>
+
               <div className="space-y-4">
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Card UID</label>
@@ -697,18 +741,27 @@ export default function PaymongoDashboardPage() {
                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Amount (PHP)</label>
                   <Input
                     type="number"
-                    placeholder="Enter amount"
+                    placeholder={isAtMaxBalance ? "Wallet is full" : `Max ₱${remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    className="bg-white/5 border-white/10 text-white focus:border-emerald-500/50"
+                    disabled={isAtMaxBalance}
+                    className={`bg-white/5 border-white/10 text-white focus:border-emerald-500/50 ${
+                      amount && parseFloat(amount) > remainingTopup ? "border-red-500/50" : ""
+                    }`}
                   />
+                  {amount && parseFloat(amount) > remainingTopup && !isAtMaxBalance && (
+                    <p className="text-[10px] text-red-400 mt-1 flex items-center gap-1">
+                      <XCircle className="h-3 w-3" />
+                      Amount exceeds your remaining limit of ₱{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </p>
+                  )}
                 </div>
                 <Button
                   onClick={handleTopup}
-                  disabled={topupLoading}
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12"
+                  disabled={topupLoading || isAtMaxBalance || !amount || parseFloat(amount) <= 0}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 disabled:opacity-50"
                 >
-                  {topupLoading ? "Verifying..." : "Pay via GCash / Maya"}
+                  {topupLoading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via GCash / Maya"}
                 </Button>
               </div>
             </div>
@@ -895,7 +948,6 @@ export default function PaymongoDashboardPage() {
             <div className="bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 font-mono text-sm text-slate-300 tracking-widest select-all">
               {cardUid || "Not linked"}
             </div>
-            {/* ✅ Real-time indicator */}
             <div className="flex items-center gap-1.5">
               <div className={`h-2 w-2 rounded-full ${loading ? "bg-yellow-400" : "bg-emerald-400 realtime-dot"}`} />
               <span className="text-[10px] text-slate-500 hidden sm:inline">
@@ -912,7 +964,7 @@ export default function PaymongoDashboardPage() {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Balance card with pulse on update */}
+          {/* Balance card */}
           <Card className="md:col-span-1 border-slate-800 bg-slate-900/40 backdrop-blur-md overflow-hidden border-t-emerald-500/50 border-t-2">
             <CardContent className="pt-6">
               <div className="flex justify-between items-start mb-2">
@@ -927,7 +979,24 @@ export default function PaymongoDashboardPage() {
               <h2 className={`text-5xl font-black text-white tracking-tighter ${isPulsing ? "balance-pulse" : ""}`}>
                 {balanceText}
               </h2>
-              <div className="mt-6 flex flex-wrap gap-2">
+              {/* Balance limit mini bar on dashboard card */}
+              <div className="mt-3 space-y-1">
+                <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
+                  <div
+                    className={`h-1 rounded-full transition-all ${
+                      isAtMaxBalance ? "bg-red-500" : currentBalance / MAX_BALANCE >= 0.8 ? "bg-amber-400" : "bg-emerald-500"
+                    }`}
+                    style={{ width: `${Math.min((currentBalance / MAX_BALANCE) * 100, 100)}%` }}
+                  />
+                </div>
+                <p className="text-[9px] text-slate-600 font-mono">
+                  {isAtMaxBalance
+                    ? <span className="text-red-400/70">Max balance reached · ₱20,000</span>
+                    : <>₱{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })} remaining of ₱20,000 limit</>
+                  }
+                </p>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
                 <Badge className={user?.status === "Active" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-3 py-1" : "bg-red-500/10 text-red-400 border-red-500/20 px-3 py-1"}>
                   <ShieldCheck className="h-3 w-3 mr-1.5" />
                   {user?.status || "Inactive"}
