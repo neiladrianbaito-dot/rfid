@@ -15,9 +15,9 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { supabase } from "@/lib/supabase";
 
 const RECAPTCHA_SITE_KEY = "6LfbiuQsAAAAAI9iR6ZsDDUGodOeSMUQSu6ALcfc";
-const POLL_INTERVAL_MS = 500; // ✅ 500ms real-time polling
 
 type UserRecord = {
   cardUid?: string;
@@ -248,7 +248,7 @@ export default function PaymongoDashboardPage() {
     })();
   }, []);
 
-  // ── ✅ Real-time fetch: 500ms polling, no loading flicker ──
+  // ── Fetch card data ──
   const fetchCardData = async (uid: string, showLoading = false) => {
     if (!uid) return;
     if (showLoading) setLoading(true);
@@ -261,7 +261,7 @@ export default function PaymongoDashboardPage() {
         const newBalance = Number(rawUser.balance ?? 0);
         const newTxCount = (payload.transactions || []).length;
 
-        // ✅ Pulse animation when balance or transactions change
+        // Pulse animation when balance or transactions change
         if (
           prevBalanceRef.current !== null &&
           (prevBalanceRef.current !== newBalance || prevTxCountRef.current !== newTxCount)
@@ -297,19 +297,41 @@ export default function PaymongoDashboardPage() {
     }
   };
 
-  // ✅ 500ms real-time polling
+  // ── Realtime subscription: mag-refetch tuwing may pagbabago
+  // sa transactions o users table na may kaugnayan sa cardUid nito.
+  // Walang setInterval na — event-driven na ang updates.
   useEffect(() => {
     if (!cardUid) return;
 
-    // Initial load with loading indicator
+    // Initial load na may loading indicator
     void fetchCardData(cardUid, true);
 
-    // Then poll every 500ms silently
-    const interval = setInterval(() => {
-      void fetchCardData(cardUid, false);
-    }, POLL_INTERVAL_MS);
+    const channelName = `user-dashboard-${cardUid}-${Math.random().toString(36).slice(2, 8)}`;
+    const channel = supabase.channel(channelName);
 
-    return () => clearInterval(interval);
+    // Mag-subscribe sa transactions at users table.
+    // Hindi natin ni-filter by cardUid sa subscription level dahil
+    // ang filter ay kailangang column-level at depende sa schema —
+    // ang refetch mismo ang bahala sa pag-check ng tamang data.
+    channel
+      .on("postgres_changes", { event: "*", schema: "public", table: "transactions" }, () => {
+        void fetchCardData(cardUid, false);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "users" }, () => {
+        void fetchCardData(cardUid, false);
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          console.log("[Realtime] User dashboard subscribed for card:", cardUid);
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("[Realtime] User dashboard connection issue:", status);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [cardUid]);
 
   // ── Link Card handlers ──
@@ -890,7 +912,7 @@ export default function PaymongoDashboardPage() {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* ✅ Balance card with pulse on update */}
+          {/* Balance card with pulse on update */}
           <Card className="md:col-span-1 border-slate-800 bg-slate-900/40 backdrop-blur-md overflow-hidden border-t-emerald-500/50 border-t-2">
             <CardContent className="pt-6">
               <div className="flex justify-between items-start mb-2">
@@ -902,7 +924,6 @@ export default function PaymongoDashboardPage() {
                   <PlusCircle className="h-3 w-3 mr-1" /> TOP UP
                 </Button>
               </div>
-              {/* ✅ Pulse animation when balance updates */}
               <h2 className={`text-5xl font-black text-white tracking-tighter ${isPulsing ? "balance-pulse" : ""}`}>
                 {balanceText}
               </h2>
@@ -976,7 +997,6 @@ export default function PaymongoDashboardPage() {
             <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-400 uppercase tracking-widest">
               <Activity className="h-4 w-4 text-blue-400" />
               Activity Log
-              {/* ✅ Live badge */}
               <span className="ml-auto flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5">
                 <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-400 inline-block" />
                 LIVE
