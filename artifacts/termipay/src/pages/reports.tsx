@@ -31,38 +31,39 @@ function normalizeEmail(email: string | null | undefined): string | null {
   return trimmed;
 }
 
+// ✅ FIX: Returns local date in YYYY-MM-DD format (timezone-safe for PH)
+function getLocalDateString(): string {
+  return new Date().toLocaleDateString("en-CA");
+}
+
 export default function ReportsPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const adminName = user?.name || "System Administrator";
 
-  // ── Added: revenue flash state (from dashboard) ───────────────────────────
   const prevRevenueRef = useRef<number | null>(null);
   const [revenueFlash, setRevenueFlash] = useState(false);
 
-  // ── Polling removed; added refetch handles ────────────────────────────────
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
       staleTime: 0,
       refetchOnWindowFocus: true,
-      // refetchInterval and refetchIntervalInBackground removed
     },
   });
   const { data: transactions, refetch: refetchTransactions } = useListTransactions();
   const { data: users, refetch: refetchUsers } = useListUsers();
 
-  // ── Added: realtime refetch on DB changes (from dashboard) ────────────────
   useRealtimeRefetch(["transactions", "fare_routes", "users"], () => {
     refetchReport();
     refetchTransactions();
     refetchUsers();
   });
 
-  // ── Added: revenue flash effect (from dashboard) ──────────────────────────
+  // ✅ FIX: Use getLocalDateString() instead of toISOString().slice(0, 10)
   useEffect(() => {
     if (!report) return;
     const breakdown = report?.dailyBreakdown || [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalDateString(); // ← FIXED
     const todayRow = breakdown.find((d: any) => d.date === today);
     const current = Math.abs(Number(todayRow?.revenue) || 0);
     if (prevRevenueRef.current !== null && current !== prevRevenueRef.current) {
@@ -85,10 +86,11 @@ export default function ReportsPage() {
     return userList.filter((u: any) => normalizeEmail(u.email) !== null).length;
   }, [users]);
 
+  // ✅ FIX: Use getLocalDateString() instead of toISOString().slice(0, 10)
   const todayRevenue = (() => {
     const breakdown = report?.dailyBreakdown || [];
     if (!breakdown.length) return 0;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalDateString(); // ← FIXED
     const todayRow = breakdown.find((d: any) => d.date === today);
     if (!todayRow) return 0;
     return Math.abs(Number(todayRow.revenue) || 0);
@@ -110,7 +112,7 @@ export default function ReportsPage() {
     const { utils, writeFile } = XLSXStyle;
 
     const txList = Array.isArray(transactions) ? transactions : [];
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = getLocalDateString(); // ← also use local date here for filename
     const generatedAt = new Date().toLocaleString("en-PH", {
       year: "numeric", month: "long", day: "numeric",
       hour: "2-digit", minute: "2-digit", second: "2-digit",

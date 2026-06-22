@@ -2,11 +2,23 @@ import React from "react";
 import { useLocation } from "wouter";
 import { useGetReportSummary, useListTransactions } from "@workspace/api-client-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch"; // ⚠️ adjust path to match where you saved that hook
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Printer, Loader2, Wallet } from "lucide-react";
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// FIX: get the date string in LOCAL time (YYYY-MM-DD), not UTC.
+// new Date().toISOString() always converts to UTC, which is 8 hours
+// behind Philippine time — so between 12am–8am local time it returns
+// "yesterday's" date and todayRevenue silently breaks.
+const getLocalDateString = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 export default function ReportPreviewPage() {
   const [, navigate] = useLocation();
@@ -22,8 +34,19 @@ export default function ReportPreviewPage() {
   ).current;
   const datePrinted = timestamp;
 
-  const { data: report, isLoading } = useGetReportSummary();
-  const { data: transactions } = useListTransactions();
+  // NOTE: assumes useGetReportSummary/useListTransactions are built on
+  // react-query (or similar) and expose `refetch`. If yours doesn't,
+  // tell me what the hook returns and I'll adjust.
+  const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary();
+  const { data: transactions, refetch: refetchTransactions } = useListTransactions();
+
+  // ══ REALTIME: auto-refetch the moment Supabase reports a change ══
+  // Adjust the table list if dailyBreakdown/totalRevenue7Days are
+  // derived from more than just "transactions" on the backend.
+  useRealtimeRefetch(["transactions"], () => {
+    refetchReport();
+    refetchTransactions();
+  });
 
   const totalUniqueTaps = React.useMemo(() => {
     const txList = Array.isArray(transactions) ? transactions : [];
@@ -36,7 +59,9 @@ export default function ReportPreviewPage() {
   const todayRevenue = (() => {
     const breakdown = report?.dailyBreakdown || [];
     if (!breakdown.length) return 0;
-    const today = new Date().toISOString().slice(0, 10);
+    // FIX: use local date, not UTC, so "today" matches the actual
+    // calendar date the report's dailyBreakdown rows are keyed on.
+    const today = getLocalDateString(new Date());
     const todayRow = breakdown.find((d: any) => d.date === today);
     if (!todayRow) return 0;
     return Math.abs(Number(todayRow.revenue) || 0);
