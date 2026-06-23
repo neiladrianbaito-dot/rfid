@@ -111,12 +111,6 @@ router.post("/auth/user/forgot-password", async (req, res): Promise<void> => {
   <html lang="en">
     <body style="font-family:sans-serif;background:#0f172a;color:#e2e8f0;padding:40px 0;margin:0">
       <div style="max-width:480px;margin:0 auto;background:#1e293b;border-radius:12px;padding:40px;border:1px solid #334155">
-        
-        <!-- Logo -->
-        <img src="https://rfid-termipay-sigma.vercel.app/favicon.jpg" 
-             alt="TermiPay"
-             style="width:60px;height:60px;border-radius:12px;margin-bottom:20px;display:block"/>
-
         <h2 style="color:#60a5fa;margin:0 0 8px">Password Reset</h2>
         <p style="color:#94a3b8;margin:0 0 8px;font-size:14px">Hi ${user.full_name},</p>
         <p style="color:#94a3b8;margin:0 0 24px;font-size:14px">
