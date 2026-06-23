@@ -22,10 +22,12 @@ import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
@@ -94,7 +96,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     const wantsPasswordChange = formData.newPassword.trim().length > 0;
     const wantsNameChange = formData.name.trim() !== (user?.name || "").trim();
 
-    // Nothing to update
     if (!wantsNameChange && !wantsPasswordChange) {
       toast({
         title: "No Changes Detected",
@@ -104,7 +105,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Password change requires current password
     if (wantsPasswordChange && !formData.currentPassword.trim()) {
       toast({
         title: "Security Check",
@@ -114,7 +114,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Prevent setting the same password
     if (wantsPasswordChange && formData.newPassword.trim() === formData.currentPassword.trim()) {
       toast({
         title: "Invalid Password",
@@ -130,7 +129,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       const supabaseSession = sessionData.session;
 
       if (supabaseSession?.user) {
-        // Verify current password before allowing password change
         if (wantsPasswordChange) {
           if (!supabaseSession.user.email) {
             throw new Error("Cannot update password for this account");
@@ -314,11 +312,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   </span>
                 </motion.div>
               </DialogTrigger>
+
+              {/* ✅ FIX: Added DialogDescription wrapped in VisuallyHidden to silence the Radix warning */}
               <DialogContent className="sm:max-w-[425px] bg-slate-950 border-slate-800 text-slate-200">
                 <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/50" />
                 <DialogHeader>
-                  <DialogTitle className="text-white font-black uppercase tracking-tighter italic">Security & Profile</DialogTitle>
+                  <DialogTitle className="text-white font-black uppercase tracking-tighter italic">
+                    Security & Profile
+                  </DialogTitle>
+                  <VisuallyHidden>
+                    <DialogDescription>
+                      Update your display name or change your account password.
+                    </DialogDescription>
+                  </VisuallyHidden>
                 </DialogHeader>
+
                 <div className="grid gap-6 py-4">
                   <div className="space-y-4">
                     <Label className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Full Name</Label>
@@ -358,6 +366,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     </div>
                   </div>
                 </div>
+
                 <div className="flex justify-end gap-3 pt-4">
                   <Button
                     variant="ghost"
