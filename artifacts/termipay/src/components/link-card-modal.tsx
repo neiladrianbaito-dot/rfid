@@ -1,5 +1,5 @@
 import ReCAPTCHA from "react-google-recaptcha";
-import { LinkIcon, Lock, CheckCircle2, XCircle, Loader2, Ban } from "lucide-react";
+import { LinkIcon, Lock, CheckCircle2, XCircle, Loader2, Ban, ShieldAlert, Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { RECAPTCHA_SITE_KEY } from "@/lib/api";
@@ -7,7 +7,6 @@ import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 import type { useLinkCard } from "@/hooks/use-link-card";
 
 type Props = ReturnType<typeof useLinkCard> & {
-  /** Called when the user cancels and should be returned to the sign-in / home screen */
   onCancel?: () => void;
 };
 
@@ -16,15 +15,16 @@ export function LinkCardModal(props: Props) {
     input, setInput, loading, error, validation, isConfirmStep,
     recaptchaRef, captchaToken, setCaptchaToken, captchaError, setCaptchaError,
     checkCard, confirmLink, backToInput, setValidation,
+    lockoutSecs,  // ← countdown seconds from hook
   } = props;
   const { onCancel } = props;
 
   const isChecking = validation.status === "checking";
   const isBlocked  = validation.status === "blocked";
+  const isLocked   = validation.status === "locked";  // ← new
 
   return (
     <>
-      {/* Inject shared styles — safe to render multiple times, browser dedupes */}
       <style>{DASHBOARD_STYLES}</style>
 
       {/* Backdrop */}
@@ -61,8 +61,46 @@ export function LinkCardModal(props: Props) {
               </p>
             </div>
 
+            {/* ── LOCKOUT BANNER ── shown instead of the form when locked */}
+            {isLocked && (
+              <div className="space-y-4">
+                <div className="flex flex-col items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-xl p-5 text-center">
+                  <ShieldAlert className="h-8 w-8 text-red-400" />
+                  <div>
+                    <p className="font-bold text-red-400 text-sm mb-1">Too Many Failed Attempts</p>
+                    <p className="text-xs text-red-300/80 leading-relaxed">
+                      You have been temporarily locked out for security reasons.
+                    </p>
+                  </div>
+
+                  {/* ✅ Realtime countdown */}
+                  <div className="flex items-center gap-2 px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-lg">
+                    <Clock className="h-4 w-4 text-red-400 animate-pulse" />
+                    <span className="text-sm text-red-300">
+                      Try again in{" "}
+                      <span className="font-black text-white tabular-nums">
+                        {lockoutSecs}s
+                      </span>
+                    </span>
+                  </div>
+
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    The timer will unlock automatically. Do not close this window.
+                  </p>
+                </div>
+
+                <Button
+                  onClick={onCancel}
+                  variant="outline"
+                  className="w-full border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white h-12"
+                >
+                  Cancel and return to sign-in
+                </Button>
+              </div>
+            )}
+
             {/* ── Step 1: Input ── */}
-            {!isConfirmStep && (
+            {!isConfirmStep && !isLocked && (
               <div className="space-y-4">
 
                 <div>
@@ -92,8 +130,6 @@ export function LinkCardModal(props: Props) {
                     style={{
                       transform: "scale(0.85)",
                       transformOrigin: "0 0",
-                      // recaptcha widget is ~304px wide & ~78px tall at scale 1,
-                      // reserve the *scaled* footprint so no leftover blank space
                       width: 304 * 0.85,
                       height: 78 * 0.85,
                     }}
@@ -164,7 +200,7 @@ export function LinkCardModal(props: Props) {
             )}
 
             {/* ── Step 2: Confirm ── */}
-            {isConfirmStep && validation.status === "found" && (
+            {isConfirmStep && !isLocked && validation.status === "found" && (
               <div className="space-y-4">
                 <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 space-y-3">
                   <div className="flex items-center gap-2 mb-1">
