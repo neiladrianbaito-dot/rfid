@@ -20,19 +20,23 @@ export function ActivityLog({ transactions }: Props) {
       </CardHeader>
       <CardContent className="p-0">
         <div className="max-h-[400px] overflow-y-auto">
-          <table className="w-full text-left" style={{ tableLayout: "fixed" }}>
+          <table className="w-full text-left table-fixed">
             <colgroup>
-              <col style={{ width: "26%" }} />
-              <col style={{ width: "18%" }} />
-              <col style={{ width: "34%" }} />
+              {/* Timestamp: needs room for date + time */}
+              <col style={{ width: "30%" }} />
+              {/* Service: short label, no wrap */}
+              <col style={{ width: "20%" }} />
+              {/* Amount: numbers + peso sign */}
+              <col style={{ width: "28%" }} />
+              {/* Result: badge */}
               <col style={{ width: "22%" }} />
             </colgroup>
             <thead className="bg-slate-950/50">
               <tr>
-                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500">Timestamp</th>
-                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500">Service</th>
-                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500 text-right">Amount</th>
-                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500 text-center">Result</th>
+                <th className="px-3 py-3 text-[9px] font-black uppercase text-slate-500 whitespace-nowrap">Timestamp</th>
+                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500 whitespace-nowrap">Service</th>
+                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500 text-right whitespace-nowrap">Amount</th>
+                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500 text-center whitespace-nowrap">Result</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
@@ -53,37 +57,40 @@ export function ActivityLog({ transactions }: Props) {
 
                   return (
                     <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
-                      <td className="px-2 py-3">
-                        <p className="text-[10px] text-slate-300 font-medium leading-tight">
+                      {/* Timestamp */}
+                      <td className="px-3 py-3">
+                        <p className="text-[10px] text-slate-300 font-medium leading-tight whitespace-nowrap">
                           {new Date(tx.timestamp).toLocaleDateString()}
                         </p>
-                        <p className="text-[9px] text-slate-500 font-mono leading-tight">
+                        <p className="text-[9px] text-slate-500 font-mono leading-tight whitespace-nowrap">
                           {new Date(tx.timestamp).toLocaleTimeString()}
                         </p>
                       </td>
+
+                      {/* Service — nowrap so "TOP-UP" stays on one line */}
                       <td className="px-2 py-3">
-                        <span className="text-[10px] font-semibold text-slate-200 uppercase">{tx.type}</span>
+                        <span className="text-[10px] font-semibold text-slate-200 uppercase whitespace-nowrap">
+                          {tx.type}
+                        </span>
                       </td>
-                      <td className="px-2 py-3" style={{ textAlign: "right" }}>
+
+                      {/* Amount — right-aligned, never wraps */}
+                      <td className="px-2 py-3 text-right">
                         <span
+                          className="whitespace-nowrap text-[11px] font-bold tabular-nums"
                           style={{
-                            whiteSpace: "nowrap",
-                            display: "block",
-                            textAlign: "right",
-                            fontSize: "11px",
-                            fontWeight: "700",
                             color: isFare ? "rgb(248 113 113)" : "rgb(52 211 153)",
-                            overflow: "hidden",
-                            unicodeBidi: "plaintext",
                           }}
                         >
                           {sign}&#8369;{amount}
                         </span>
                       </td>
+
+                      {/* Result badge */}
                       <td className="px-2 py-3 text-center">
                         <Badge
                           variant="outline"
-                          className={`text-[9px] font-black tracking-widest uppercase py-0 ${
+                          className={`text-[9px] font-black tracking-widest uppercase py-0 whitespace-nowrap ${
                             tx.status === "Success"
                               ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5"
                               : "text-red-400 border-red-500/30 bg-red-500/5"
