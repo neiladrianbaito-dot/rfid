@@ -23,10 +23,10 @@ export function ActivityLog({ transactions }: Props) {
           <table className="w-full text-left table-fixed">
             <thead className="bg-slate-950/50">
               <tr>
-                <th className="p-4 text-[10px] font-black uppercase text-slate-500 w-[30%]">Timestamp</th>
-                <th className="p-4 text-[10px] font-black uppercase text-slate-500 w-[25%]">Service</th>
-                <th className="p-4 text-[10px] font-black uppercase text-slate-500 text-right w-[25%]">Amount</th>
-                <th className="p-4 text-[10px] font-black uppercase text-slate-500 text-center w-[20%]">Result</th>
+                <th className="px-2 py-4 text-[10px] font-black uppercase text-slate-500 w-[28%]">Timestamp</th>
+                <th className="px-2 py-4 text-[10px] font-black uppercase text-slate-500 w-[22%]">Service</th>
+                <th className="px-2 py-4 text-[10px] font-black uppercase text-slate-500 text-right w-[30%]">Amount</th>
+                <th className="px-2 py-4 text-[10px] font-black uppercase text-slate-500 text-center w-[20%]">Result</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
@@ -47,29 +47,26 @@ export function ActivityLog({ transactions }: Props) {
 
                   return (
                     <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
-                      <td className="p-4">
-                        <p className="text-xs text-slate-300 font-medium">
+                      <td className="px-2 py-4">
+                        <p className="text-[10px] text-slate-300 font-medium">
                           {new Date(tx.timestamp).toLocaleDateString()}
                         </p>
-                        <p className="text-[10px] text-slate-500 font-mono">
+                        <p className="text-[9px] text-slate-500 font-mono">
                           {new Date(tx.timestamp).toLocaleTimeString()}
                         </p>
                       </td>
-                      <td className="p-4">
-                        <span className="text-xs font-semibold text-slate-200 uppercase">{tx.type}</span>
+                      <td className="px-2 py-4">
+                        <span className="text-[10px] font-semibold text-slate-200 uppercase">{tx.type}</span>
                       </td>
-                      <td className="p-4">
-                        {/* flex + justify-end overrides unicode-bidi:isolate from browser UA stylesheet */}
-                        <div
-                          className={`flex justify-end items-center text-xs font-bold ${
-                            isFare ? "text-red-400" : "text-emerald-400"
-                          }`}
-                          style={{ whiteSpace: "nowrap", unicodeBidi: "normal" }}
+                      <td className="px-2 py-4 text-right">
+                        <span
+                          className={`text-[10px] font-bold ${isFare ? "text-red-400" : "text-emerald-400"}`}
+                          style={{ whiteSpace: "nowrap", display: "inline-block", unicodeBidi: "normal" }}
                         >
                           {sign}&#8369;{amount}
-                        </div>
+                        </span>
                       </td>
-                      <td className="p-4 text-center">
+                      <td className="px-2 py-4 text-center">
                         <Badge
                           variant="outline"
                           className={`text-[9px] font-black tracking-widest uppercase py-0 ${
