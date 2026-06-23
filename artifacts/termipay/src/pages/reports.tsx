@@ -31,7 +31,6 @@ function normalizeEmail(email: string | null | undefined): string | null {
   return trimmed;
 }
 
-// ✅ FIX: Returns local date in YYYY-MM-DD format (timezone-safe for PH)
 function getLocalDateString(): string {
   return new Date().toLocaleDateString("en-CA");
 }
@@ -59,11 +58,10 @@ export default function ReportsPage() {
     refetchUsers();
   });
 
-  // ✅ FIX: Use getLocalDateString() instead of toISOString().slice(0, 10)
   useEffect(() => {
     if (!report) return;
     const breakdown = report?.dailyBreakdown || [];
-    const today = getLocalDateString(); // ← FIXED
+    const today = getLocalDateString();
     const todayRow = breakdown.find((d: any) => d.date === today);
     const current = Math.abs(Number(todayRow?.revenue) || 0);
     if (prevRevenueRef.current !== null && current !== prevRevenueRef.current) {
@@ -86,11 +84,10 @@ export default function ReportsPage() {
     return userList.filter((u: any) => normalizeEmail(u.email) !== null).length;
   }, [users]);
 
-  // ✅ FIX: Use getLocalDateString() instead of toISOString().slice(0, 10)
   const todayRevenue = (() => {
     const breakdown = report?.dailyBreakdown || [];
     if (!breakdown.length) return 0;
-    const today = getLocalDateString(); // ← FIXED
+    const today = getLocalDateString();
     const todayRow = breakdown.find((d: any) => d.date === today);
     if (!todayRow) return 0;
     return Math.abs(Number(todayRow.revenue) || 0);
@@ -112,19 +109,23 @@ export default function ReportsPage() {
     const { utils, writeFile } = XLSXStyle;
 
     const txList = Array.isArray(transactions) ? transactions : [];
-    const stamp = getLocalDateString(); // ← also use local date here for filename
+    const userList = Array.isArray(users) ? users : [];
+    const stamp = getLocalDateString();
     const generatedAt = new Date().toLocaleString("en-PH", {
       year: "numeric", month: "long", day: "numeric",
       hour: "2-digit", minute: "2-digit", second: "2-digit",
     });
 
+    // ✅ FIX: Summary rows now match the 4 stat cards on the UI exactly:
+    //    Row 5 → Today's Revenue  |  Total Registered Users
+    //    Row 6 → 7-Day Revenue    |  Total Linked Cards
     const aoa: any[][] = [
       ["Fare Collection System", "", "", "", "", "", ""],
       ["Transaction Logs Export", "", "", "", "", "", ""],
       [`Generated: ${generatedAt}`, "", "", `Prepared by: ${adminName}`, "", "", ""],
       [],
-      ["Total Transactions", txList.length, "", "Total Unique Cards", totalUniqueTaps, "", ""],
-      ["7-Day Revenue", formatPeso(totalRevenue7Days), "", "Today's Revenue", formatPeso(todayRevenue), "", ""],
+      ["Today's Revenue", formatPeso(todayRevenue), "", "Total Registered Users", totalUniqueTaps, "", ""],
+      ["7-Day Revenue", formatPeso(totalRevenue7Days), "", "Total Linked Cards", totalLinkedCards, "", ""],
       [],
       ["Timestamp", "Card UID", "Full Name", "Type", "Amount (PHP)", "Signed Amount", "Status"],
     ];
@@ -149,8 +150,8 @@ export default function ReportsPage() {
       { wch: 26 },
       { wch: 18 },
       { wch: 24 },
-      { wch: 14 },
-      { wch: 16 },
+      { wch: 24 },
+      { wch: 20 },
       { wch: 16 },
       { wch: 14 },
     ];
@@ -162,8 +163,8 @@ export default function ReportsPage() {
       { s: { r: 2, c: 3 }, e: { r: 2, c: 6 } },
       { s: { r: 4, c: 0 }, e: { r: 4, c: 0 } },
       { s: { r: 5, c: 0 }, e: { r: 5, c: 0 } },
-      { s: { r: 4, c: 3 }, e: { r: 4, c: 4 } },
-      { s: { r: 5, c: 3 }, e: { r: 5, c: 4 } },
+      { s: { r: 4, c: 3 }, e: { r: 4, c: 3 } },
+      { s: { r: 5, c: 3 }, e: { r: 5, c: 3 } },
     ];
 
     const setStyle = (cellRef: string, style: any) => {
@@ -172,22 +173,22 @@ export default function ReportsPage() {
     };
 
     const thinBorder = {
-      top: { style: "thin", color: { rgb: "CBD5E1" } },
-      bottom: { style: "thin", color: { rgb: "CBD5E1" } },
-      left: { style: "thin", color: { rgb: "CBD5E1" } },
-      right: { style: "thin", color: { rgb: "CBD5E1" } },
+      top:    { style: "thin",   color: { rgb: "CBD5E1" } },
+      bottom: { style: "thin",   color: { rgb: "CBD5E1" } },
+      left:   { style: "thin",   color: { rgb: "CBD5E1" } },
+      right:  { style: "thin",   color: { rgb: "CBD5E1" } },
     };
     const mediumBorder = {
-      top: { style: "medium", color: { rgb: "0F172A" } },
+      top:    { style: "medium", color: { rgb: "0F172A" } },
       bottom: { style: "medium", color: { rgb: "0F172A" } },
-      left: { style: "thin", color: { rgb: "334155" } },
-      right: { style: "thin", color: { rgb: "334155" } },
+      left:   { style: "thin",   color: { rgb: "334155" } },
+      right:  { style: "thin",   color: { rgb: "334155" } },
     };
     const hairBorder = {
-      top: { style: "hair", color: { rgb: "E2E8F0" } },
-      bottom: { style: "hair", color: { rgb: "E2E8F0" } },
-      left: { style: "hair", color: { rgb: "E2E8F0" } },
-      right: { style: "hair", color: { rgb: "E2E8F0" } },
+      top:    { style: "hair",   color: { rgb: "E2E8F0" } },
+      bottom: { style: "hair",   color: { rgb: "E2E8F0" } },
+      left:   { style: "hair",   color: { rgb: "E2E8F0" } },
+      right:  { style: "hair",   color: { rgb: "E2E8F0" } },
     };
 
     setStyle("A1", {
@@ -195,7 +196,6 @@ export default function ReportsPage() {
       fill: { fgColor: { rgb: "0F172A" }, patternType: "solid" },
       alignment: { horizontal: "center", vertical: "center" },
     });
-
     setStyle("A2", {
       font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
       fill: { fgColor: { rgb: "1E40AF" }, patternType: "solid" },
@@ -210,13 +210,14 @@ export default function ReportsPage() {
     setStyle("A3", metaBase);
     setStyle("D3", { ...metaBase, font: { ...metaBase.font, italic: false, bold: true } });
 
+    // ✅ Summary row styles — Row 5: Today's Revenue (emerald) | Total Registered Users (indigo)
     const summaryLabel = {
       font: { bold: true, sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
       fill: { fgColor: { rgb: "E2E8F0" }, patternType: "solid" },
       alignment: { horizontal: "left", vertical: "center" },
       border: thinBorder,
     };
-    const summaryGreen = {
+    const summaryEmerald = {
       font: { bold: true, sz: 11, color: { rgb: "15803D" }, name: "Calibri" },
       fill: { fgColor: { rgb: "F0FDF4" }, patternType: "solid" },
       alignment: { horizontal: "center", vertical: "center" },
@@ -228,14 +229,30 @@ export default function ReportsPage() {
       alignment: { horizontal: "center", vertical: "center" },
       border: thinBorder,
     };
+    const summaryIndigo = {
+      font: { bold: true, sz: 11, color: { rgb: "3730A3" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "EEF2FF" }, patternType: "solid" },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: thinBorder,
+    };
+    const summarySky = {
+      font: { bold: true, sz: 11, color: { rgb: "0369A1" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "F0F9FF" }, patternType: "solid" },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: thinBorder,
+    };
+
+    // Row 5: Today's Revenue | Total Registered Users
     setStyle("A5", summaryLabel);
-    setStyle("B5", summaryGreen);
+    setStyle("B5", summaryEmerald);
     setStyle("D5", summaryLabel);
-    setStyle("E5", summaryGreen);
+    setStyle("E5", summaryIndigo);
+
+    // Row 6: 7-Day Revenue | Total Linked Cards
     setStyle("A6", summaryLabel);
     setStyle("B6", summaryBlue);
     setStyle("D6", summaryLabel);
-    setStyle("E6", summaryBlue);
+    setStyle("E6", summarySky);
 
     const headerStyle = {
       font: { bold: true, sz: 10, color: { rgb: "FFFFFF" }, name: "Calibri" },
@@ -374,10 +391,10 @@ export default function ReportsPage() {
       {/* ══ SUMMARY CARDS ══ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: "7-Day Revenue", value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-total-revenue", flash: false },
-          { label: "Today's Revenue", value: formatPeso(todayRevenue), icon: Calendar, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-today-revenue", flash: revenueFlash },
-          { label: "Total Registered Users", value: totalUniqueTaps, icon: Fingerprint, color: "text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20", testId: "text-total-taps", flash: false },
-          { label: "Total Linked Cards", value: totalLinkedCards, icon: LinkIcon, color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/20", testId: "text-total-linked-cards", flash: false },
+          { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-total-revenue",      flash: false },
+          { label: "Today's Revenue",         value: formatPeso(todayRevenue),      icon: Calendar,   color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-today-revenue",      flash: revenueFlash },
+          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: Fingerprint,color: "text-indigo-400",  bg: "bg-indigo-500/10",  border: "border-indigo-500/20",  testId: "text-total-taps",         flash: false },
+          { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: "text-sky-400",     bg: "bg-sky-500/10",     border: "border-sky-500/20",     testId: "text-total-linked-cards", flash: false },
         ].map((stat, idx) => (
           <Card key={idx} className={`bg-slate-900/40 border-slate-800 backdrop-blur-md ${stat.flash ? "card-pulse" : ""}`}>
             <CardContent className="p-6 relative overflow-hidden">
