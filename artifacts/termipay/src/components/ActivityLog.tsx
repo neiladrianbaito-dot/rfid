@@ -37,39 +37,53 @@ export function ActivityLog({ transactions }: Props) {
                   </td>
                 </tr>
               ) : (
-                transactions.map((tx) => (
-                  <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
-                    <td className="p-4">
-                      <p className="text-xs text-slate-300 font-medium">
-                        {new Date(tx.timestamp).toLocaleDateString()}
-                      </p>
-                      <p className="text-[10px] text-slate-500 font-mono">
-                        {new Date(tx.timestamp).toLocaleTimeString()}
-                      </p>
-                    </td>
-                    <td className="p-4">
-                      <span className="text-xs font-semibold text-slate-200 uppercase">{tx.type}</span>
-                    </td>
-                    <td className="p-4 text-right">
-                      {/* FIX: whitespace-nowrap + no space so +₱100.00 stays one line on mobile */}
-                      <span className={`text-xs font-bold whitespace-nowrap ${tx.type === "Fare" ? "text-red-400" : "text-emerald-400"}`}>
-                        {tx.type === "Fare" ? "-" : "+"}&#8369;{Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    </td>
-                    <td className="p-4 text-center">
-                      <Badge
-                        variant="outline"
-                        className={`text-[9px] font-black tracking-widest uppercase py-0 ${
-                          tx.status === "Success"
-                            ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5"
-                            : "text-red-400 border-red-500/30 bg-red-500/5"
-                        }`}
-                      >
-                        {tx.status}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))
+                transactions.map((tx) => {
+                  const isFare = tx.type === "Fare";
+                  const sign = isFare ? "-" : "+";
+                  const amount = Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  });
+
+                  return (
+                    <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
+                      <td className="p-4">
+                        <p className="text-xs text-slate-300 font-medium">
+                          {new Date(tx.timestamp).toLocaleDateString()}
+                        </p>
+                        <p className="text-[10px] text-slate-500 font-mono">
+                          {new Date(tx.timestamp).toLocaleTimeString()}
+                        </p>
+                      </td>
+                      <td className="p-4">
+                        <span className="text-xs font-semibold text-slate-200 uppercase">{tx.type}</span>
+                      </td>
+                      <td className="p-4">
+                        {/* flex + justify-end overrides unicode-bidi:isolate from browser UA stylesheet */}
+                        <div
+                          className={`flex justify-end items-center text-xs font-bold ${
+                            isFare ? "text-red-400" : "text-emerald-400"
+                          }`}
+                          style={{ whiteSpace: "nowrap", unicodeBidi: "normal" }}
+                        >
+                          {sign}&#8369;{amount}
+                        </div>
+                      </td>
+                      <td className="p-4 text-center">
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] font-black tracking-widest uppercase py-0 ${
+                            tx.status === "Success"
+                              ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5"
+                              : "text-red-400 border-red-500/30 bg-red-500/5"
+                          }`}
+                        >
+                          {tx.status}
+                        </Badge>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
