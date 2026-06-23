@@ -55,8 +55,6 @@ async function ensureResetTokensTable(): Promise<void> {
 }
 
 // ── POST /auth/user/forgot-password ──────────────────────────────────────────
-// Accepts an email, creates a reset token, and emails the link.
-// Always responds with 200 to prevent email enumeration.
 
 router.post("/auth/user/forgot-password", async (req, res): Promise<void> => {
   try {
@@ -71,7 +69,6 @@ router.post("/auth/user/forgot-password", async (req, res): Promise<void> => {
       return;
     }
 
-    // Look up the user
     const rawUser = await db.execute(sql`
       select id as uid, full_name, email
       from auth_users
@@ -80,7 +77,6 @@ router.post("/auth/user/forgot-password", async (req, res): Promise<void> => {
     `);
     const user = extractRows<{ uid: string; full_name: string; email: string }>(rawUser)[0];
 
-    // Always return success to prevent enumeration
     if (!user) {
       res.json({
         success: true,
@@ -89,14 +85,12 @@ router.post("/auth/user/forgot-password", async (req, res): Promise<void> => {
       return;
     }
 
-    // Invalidate any existing unused tokens for this user
     await db.execute(sql`
       update password_reset_tokens
       set used = true
       where user_id = ${user.uid} and used = false
     `);
 
-    // Create a new token
     const rawToken = randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + TOKEN_TTL_MS);
 
@@ -107,9 +101,9 @@ router.post("/auth/user/forgot-password", async (req, res): Promise<void> => {
 
     const resetLink = `${APP_URL}/reset-password?token=${rawToken}`;
 
-    // Send email via Resend
+    // ✅ UPDATED: Using verified domain instead of onboarding@resend.dev
     const { error: sendError } = await resend.emails.send({
-      from: "Transit Wallet <onboarding@resend.dev>",
+      from: "Transit Wallet <noreply@farecollection.work.gd>",
       to: user.email,
       subject: "Reset your password",
       html: `
@@ -154,7 +148,6 @@ router.post("/auth/user/forgot-password", async (req, res): Promise<void> => {
 });
 
 // ── GET /auth/user/verify-reset-token ────────────────────────────────────────
-// The frontend calls this on page load to validate the token before showing the form.
 
 router.get("/auth/user/verify-reset-token", async (req, res): Promise<void> => {
   try {
@@ -202,7 +195,6 @@ router.get("/auth/user/verify-reset-token", async (req, res): Promise<void> => {
 });
 
 // ── POST /auth/user/reset-password ───────────────────────────────────────────
-// Validates token, updates password, and marks token as used.
 
 router.post("/auth/user/reset-password", async (req, res): Promise<void> => {
   try {
@@ -247,7 +239,6 @@ router.post("/auth/user/reset-password", async (req, res): Promise<void> => {
       return;
     }
 
-    // Check new password isn't the same as current
     const rawUser = await db.execute(sql`
       select password_hash from auth_users where id = ${row.user_id} limit 1
     `);
@@ -262,7 +253,6 @@ router.post("/auth/user/reset-password", async (req, res): Promise<void> => {
 
     const newHash = hashPassword(newPassword);
 
-    // Update password and reset the 24h cooldown timestamp
     await db.execute(sql`
       update auth_users
       set
@@ -272,7 +262,6 @@ router.post("/auth/user/reset-password", async (req, res): Promise<void> => {
       where id = ${row.user_id}
     `);
 
-    // Mark token as used
     await db.execute(sql`
       update password_reset_tokens
       set used = true
