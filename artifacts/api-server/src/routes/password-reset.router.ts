@@ -107,28 +107,33 @@ router.post("/auth/user/forgot-password", async (req, res): Promise<void> => {
       to: user.email,
       subject: "Reset your password",
       html: `
-        <!DOCTYPE html>
-        <html>
-          <body style="font-family:sans-serif;background:#0f172a;color:#e2e8f0;padding:40px 0;margin:0">
-            <div style="max-width:480px;margin:0 auto;background:#1e293b;border-radius:12px;padding:40px;border:1px solid #334155">
-              <h2 style="color:#60a5fa;margin:0 0 8px">Password Reset</h2>
-              <p style="color:#94a3b8;margin:0 0 24px;font-size:14px">
-                Hi ${user.full_name}, you requested to reset your password.
-                Click the button below — this link expires in <strong>1 hour</strong>.
-              </p>
-              <a href="${resetLink}"
-                 style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;
-                        padding:12px 28px;border-radius:8px;font-weight:700;font-size:14px">
-                Reset Password
-              </a>
-              <p style="color:#475569;font-size:12px;margin:24px 0 0">
-                If you didn't request this, you can safely ignore this email.<br/>
-                Link: <a href="${resetLink}" style="color:#60a5fa">${resetLink}</a>
-              </p>
-            </div>
-          </body>
-        </html>
-      `,
+  <!DOCTYPE html>
+  <html lang="en">
+    <body style="font-family:sans-serif;background:#0f172a;color:#e2e8f0;padding:40px 0;margin:0">
+      <div style="max-width:480px;margin:0 auto;background:#1e293b;border-radius:12px;padding:40px;border:1px solid #334155">
+        <h2 style="color:#60a5fa;margin:0 0 8px">Password Reset</h2>
+        <p style="color:#94a3b8;margin:0 0 8px;font-size:14px">Hi ${user.full_name},</p>
+        <p style="color:#94a3b8;margin:0 0 24px;font-size:14px">
+          You requested to reset your password for your Transit Wallet account.
+          Click the button below — this link expires in <strong>1 hour</strong>.
+        </p>
+        <a href="${resetLink}"
+           style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;
+                  padding:12px 28px;border-radius:8px;font-weight:700;font-size:14px">
+          Reset Password
+        </a>
+        <p style="color:#475569;font-size:12px;margin:24px 0 0">
+          If you didn't request this, you can safely ignore this email.
+          This link will expire in 1 hour for your security.
+        </p>
+        <hr style="border:none;border-top:1px solid #334155;margin:24px 0"/>
+        <p style="color:#475569;font-size:11px;margin:0">
+          Transit Wallet · You are receiving this because a password reset was requested.
+        </p>
+      </div>
+    </body>
+  </html>
+`,
     });
 
     if (sendError) {
