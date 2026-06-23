@@ -319,6 +319,16 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
 
 // ── CHECK CARD UID ────────────────────────────────────────────────────────────
 
+// ─── In-memory attempt tracker (per authenticated user) ──────────────────────
+// Key: user ID (from auth token)
+// Value: { count, lockedUntil }
+const cardUidAttemptMap = new Map<string, { count: number; lockedUntil: number }>();
+
+const CARD_UID_MAX_ATTEMPTS = 3;
+const CARD_UID_LOCKOUT_MS   = 60_000; // 60 seconds
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
   try {
     const currentUser = getUserFromAuthHeader(req.headers.authorization);
@@ -327,6 +337,24 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
       return;
     }
 
+    const userId = String(currentUser.id ?? currentUser.userId ?? currentUser.sub ?? "");
+
+    // ── 1. Check lockout ────────────────────────────────────────────────────
+    const tracker = cardUidAttemptMap.get(userId) ?? { count: 0, lockedUntil: 0 };
+    const now = Date.now();
+
+    if (tracker.lockedUntil > now) {
+      const secsLeft = Math.ceil((tracker.lockedUntil - now) / 1000);
+      res.status(429).json({
+        success: false,
+        message: `Too many failed attempts. Please wait ${secsLeft} second${secsLeft !== 1 ? "s" : ""} before trying again.`,
+        lockedOutSeconds: secsLeft,
+        forceExit: true,
+      });
+      return;
+    }
+
+    // ── 2. Validate query param ─────────────────────────────────────────────
     const cardUid =
       typeof req.query.cardUid === "string" ? req.query.cardUid.trim().toUpperCase() : "";
     if (!cardUid) {
@@ -336,22 +364,49 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
 
     await ensureLinkedCardUidColumn();
 
+    // ── 3. Look up the card ─────────────────────────────────────────────────
     const cardRaw = await db.execute(sql`
       select card_uid, full_name, type, status
       from users
       where card_uid = ${cardUid}
       limit 1
     `);
-    const cardRows = extractRows<{ card_uid: string; full_name: string; type: string; status: string }>(cardRaw);
+    const cardRows = extractRows<{
+      card_uid: string;
+      full_name: string;
+      type: string;
+      status: string;
+    }>(cardRaw);
 
+    // ── 4. Card not found → increment attempt counter ───────────────────────
     if (cardRows.length === 0) {
+      tracker.count += 1;
+      const attemptsLeft = CARD_UID_MAX_ATTEMPTS - tracker.count;
+
+      if (tracker.count >= CARD_UID_MAX_ATTEMPTS) {
+        tracker.lockedUntil = now + CARD_UID_LOCKOUT_MS;
+        cardUidAttemptMap.set(userId, tracker);
+
+        res.status(429).json({
+          success: false,
+          message: "Card UID not found. Maximum attempts reached. You are locked out for 60 seconds.",
+          lockedOutSeconds: 60,
+          forceExit: true,
+        });
+        return;
+      }
+
+      cardUidAttemptMap.set(userId, tracker);
       res.status(404).json({
         success: false,
-        message: "Card UID not found in the system. Please check and try again.",
+        message: `Card UID not found in the system. ${attemptsLeft} attempt${attemptsLeft !== 1 ? "s" : ""} remaining.`,
+        attemptsLeft,
       });
       return;
     }
 
+    // ── 5. Check if already linked to another account (409) ─────────────────
+    // 409 does NOT count as a failed attempt
     const linkedRaw = await db.execute(sql`
       select id as uid from auth_users
       where linked_card_uid = ${cardUid}
@@ -362,23 +417,28 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
     if (linkedRows.length > 0) {
       res.status(409).json({
         success: false,
-        message: "This Card UID is already linked to another account and cannot be linked again. Please use a different card.",
+        message:
+          "This Card UID is already linked to another account and cannot be linked again. Please use a different card.",
       });
       return;
     }
+
+    // ── 6. Success — reset the attempt counter for this user ─────────────────
+    cardUidAttemptMap.delete(userId);
 
     const card = cardRows[0];
     res.json({
       success: true,
       card: {
-        cardUid: card.card_uid,
+        cardUid:  card.card_uid,
         fullName: card.full_name,
-        type: card.type,
-        status: card.status,
+        type:     card.type,
+        status:   card.status,
       },
     });
   } catch (error) {
     console.error("Check card UID error:", error);
+    // Don't count server errors against the attempt limiter
     res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
   }
 });
