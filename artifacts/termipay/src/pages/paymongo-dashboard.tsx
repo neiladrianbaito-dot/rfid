@@ -173,6 +173,7 @@ export default function PaymongoDashboardPage() {
           </Card>
         </div>
 
+        {/* ── Activity Log ── */}
         <Card className="border-slate-800 bg-slate-900/40 backdrop-blur-md overflow-hidden">
           <CardHeader className="bg-slate-900/20 border-b border-slate-800">
             <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-400 uppercase tracking-widest">
@@ -184,48 +185,85 @@ export default function PaymongoDashboardPage() {
           </CardHeader>
           <CardContent className="p-0">
             <div className="max-h-[400px] overflow-y-auto">
-              <table className="w-full text-left" style={{ tableLayout: "fixed" }}>
+              <table className="w-full text-left table-fixed">
                 <colgroup>
-                  <col style={{ width: "28%" }} />
+                  {/* Timestamp */}
+                  <col style={{ width: "30%" }} />
+                  {/* Service — kept narrow; nowrap prevents wrap */}
                   <col style={{ width: "18%" }} />
-                  <col style={{ width: "32%" }} />
+                  {/* Amount — widened so ₱5,000.00 never wraps */}
+                  <col style={{ width: "30%" }} />
+                  {/* Result */}
                   <col style={{ width: "22%" }} />
                 </colgroup>
                 <thead className="bg-slate-950/50">
                   <tr>
-                    {["Timestamp", "Service", "Amount", "Result"].map((h, i) => (
-                      <th key={h} className={`px-2 py-3 text-[9px] font-black uppercase text-slate-500 ${i === 2 ? "text-right" : i === 3 ? "text-center" : ""}`}>{h}</th>
+                    {(["Timestamp", "Service", "Amount", "Result"] as const).map((h, i) => (
+                      <th
+                        key={h}
+                        className={`px-3 py-3 text-[9px] font-black uppercase text-slate-500 whitespace-nowrap ${
+                          i === 2 ? "text-right" : i === 3 ? "text-center" : ""
+                        }`}
+                      >
+                        {h}
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
                   {transactions.length === 0 ? (
-                    <tr><td className="p-12 text-center text-slate-600 text-sm italic" colSpan={4}>No activity recorded.</td></tr>
-                  ) : transactions.map((tx) => (
-                    <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
-                      <td className="px-2 py-3">
-                        <p className="text-[10px] text-slate-300 font-medium leading-tight">{new Date(tx.timestamp).toLocaleDateString()}</p>
-                        <p className="text-[9px] text-slate-500 font-mono leading-tight">{new Date(tx.timestamp).toLocaleTimeString()}</p>
-                      </td>
-                      <td className="px-2 py-3">
-                        <span className="text-[10px] font-semibold text-slate-200 uppercase">{tx.type}</span>
-                      </td>
-                      <td className="px-2 py-3 text-right">
-                        {/* formatAmount returns a SINGLE string — no split text nodes, no wrapping */}
-                        <span
-                          className={tx.type === "Fare" ? "text-red-400" : "text-emerald-400"}
-                          style={{ fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}
-                        >
-                          {formatAmount(tx.type, tx.amount)}
-                        </span>
-                      </td>
-                      <td className="px-2 py-3 text-center">
-                        <Badge variant="outline" className={`text-[9px] font-black tracking-widest uppercase py-0 ${tx.status === "Success" ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5" : "text-red-400 border-red-500/30 bg-red-500/5"}`}>
-                          {tx.status}
-                        </Badge>
+                    <tr>
+                      <td className="p-12 text-center text-slate-600 text-sm italic" colSpan={4}>
+                        No activity recorded.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    transactions.map((tx) => (
+                      <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
+                        {/* Timestamp */}
+                        <td className="px-3 py-3">
+                          <p className="text-[10px] text-slate-300 font-medium leading-tight whitespace-nowrap">
+                            {new Date(tx.timestamp).toLocaleDateString()}
+                          </p>
+                          <p className="text-[9px] text-slate-500 font-mono leading-tight whitespace-nowrap">
+                            {new Date(tx.timestamp).toLocaleTimeString()}
+                          </p>
+                        </td>
+
+                        {/* Service — whitespace-nowrap stops "TOP-UP" from breaking */}
+                        <td className="px-3 py-3">
+                          <span className="text-[10px] font-semibold text-slate-200 uppercase whitespace-nowrap">
+                            {tx.type}
+                          </span>
+                        </td>
+
+                        {/* Amount — single string, tabular nums, never wraps */}
+                        <td className="px-3 py-3 text-right">
+                          <span
+                            className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${
+                              tx.type === "Fare" ? "text-red-400" : "text-emerald-400"
+                            }`}
+                          >
+                            {formatAmount(tx.type, tx.amount)}
+                          </span>
+                        </td>
+
+                        {/* Result */}
+                        <td className="px-3 py-3 text-center">
+                          <Badge
+                            variant="outline"
+                            className={`text-[9px] font-black tracking-widest uppercase py-0 whitespace-nowrap ${
+                              tx.status === "Success"
+                                ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5"
+                                : "text-red-400 border-red-500/30 bg-red-500/5"
+                            }`}
+                          >
+                            {tx.status}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
