@@ -14,6 +14,16 @@ import { ChangePasswordModal } from "@/components/change-password-modal";
 import { getSignedInUser, cleanCardUid, USER_AUTH_TOKEN_KEY } from "@/lib/api";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 
+// Builds the full amount string like "+₱5,000.00" as ONE string — no separate text nodes
+function formatAmount(type: string, amount: number | string): string {
+  const sign = type === "Fare" ? "-" : "+";
+  const num = Math.abs(Number(amount || 0)).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${sign}\u20B1${num}`;
+}
+
 export default function PaymongoDashboardPage() {
   const [, setLocation] = useLocation();
   const [cardUid, setCardUid] = useState("");
@@ -174,11 +184,17 @@ export default function PaymongoDashboardPage() {
           </CardHeader>
           <CardContent className="p-0">
             <div className="max-h-[400px] overflow-y-auto">
-              <table className="w-full text-left">
+              <table className="w-full text-left" style={{ tableLayout: "fixed" }}>
+                <colgroup>
+                  <col style={{ width: "28%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "32%" }} />
+                  <col style={{ width: "22%" }} />
+                </colgroup>
                 <thead className="bg-slate-950/50">
                   <tr>
                     {["Timestamp", "Service", "Amount", "Result"].map((h, i) => (
-                      <th key={h} className={`p-4 text-[10px] font-black uppercase text-slate-500 ${i === 2 ? "text-right" : i === 3 ? "text-center" : ""}`}>{h}</th>
+                      <th key={h} className={`px-2 py-3 text-[9px] font-black uppercase text-slate-500 ${i === 2 ? "text-right" : i === 3 ? "text-center" : ""}`}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -187,18 +203,23 @@ export default function PaymongoDashboardPage() {
                     <tr><td className="p-12 text-center text-slate-600 text-sm italic" colSpan={4}>No activity recorded.</td></tr>
                   ) : transactions.map((tx) => (
                     <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
-                      <td className="p-4">
-                        <p className="text-xs text-slate-300 font-medium">{new Date(tx.timestamp).toLocaleDateString()}</p>
-                        <p className="text-[10px] text-slate-500 font-mono">{new Date(tx.timestamp).toLocaleTimeString()}</p>
+                      <td className="px-2 py-3">
+                        <p className="text-[10px] text-slate-300 font-medium leading-tight">{new Date(tx.timestamp).toLocaleDateString()}</p>
+                        <p className="text-[9px] text-slate-500 font-mono leading-tight">{new Date(tx.timestamp).toLocaleTimeString()}</p>
                       </td>
-                      <td className="p-4"><span className="text-xs font-semibold text-slate-200 uppercase">{tx.type}</span></td>
-                      <td className="p-4 text-right">
-                        {/* FIX: whitespace-nowrap keeps +₱amount on one line on mobile */}
-                        <span className={`text-xs font-bold whitespace-nowrap ${tx.type === "Fare" ? "text-red-400" : "text-emerald-400"}`}>
-                          {tx.type === "Fare" ? "-" : "+"}{"\u20B1"}{Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <td className="px-2 py-3">
+                        <span className="text-[10px] font-semibold text-slate-200 uppercase">{tx.type}</span>
+                      </td>
+                      <td className="px-2 py-3 text-right">
+                        {/* formatAmount returns a SINGLE string — no split text nodes, no wrapping */}
+                        <span
+                          className={tx.type === "Fare" ? "text-red-400" : "text-emerald-400"}
+                          style={{ fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}
+                        >
+                          {formatAmount(tx.type, tx.amount)}
                         </span>
                       </td>
-                      <td className="p-4 text-center">
+                      <td className="px-2 py-3 text-center">
                         <Badge variant="outline" className={`text-[9px] font-black tracking-widest uppercase py-0 ${tx.status === "Success" ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5" : "text-red-400 border-red-500/30 bg-red-500/5"}`}>
                           {tx.status}
                         </Badge>
