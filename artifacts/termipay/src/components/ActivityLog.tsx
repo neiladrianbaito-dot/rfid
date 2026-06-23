@@ -52,7 +52,7 @@ export function ActivityLog({ transactions }: Props) {
                     </td>
                     <td className="p-4 text-right">
                       <span className={`text-xs font-bold ${tx.type === "Fare" ? "text-red-400" : "text-emerald-400"}`}>
-                        {tx.type === "Fare" ? "-" : "+"} ₱{Math.abs(Number(tx.amount || 0)).toFixed(2)}
+                        {tx.type === "Fare" ? "-" : "+"} ₱{Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </td>
                     <td className="p-4 text-center">
