@@ -17,16 +17,6 @@ import {
 
 const USER_AUTH_TOKEN_KEY = "termipay_user_auth_token";
 
-/**
- * Particle Network Background
- * Dots drift in from the edges, fade in/out, and link to nearby
- * neighbors with thin lines. Mouse/touch position joins the network.
- *
- * Mouse/touch listeners are attached at the WINDOW level (not just the
- * canvas) so the particle network keeps tracking the cursor even when
- * it's hovering over foreground UI like the Sign In card, since the
- * canvas sits behind everything (-z-10).
- */
 const ParticleNetworkBackground = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -41,7 +31,6 @@ const ParticleNetworkBackground = () => {
     const ALPHA_F = 0.03;
     const DIS_LIMIT = 140;
     const LINE_WIDTH = 0.8;
-    // Matches the page's blue accent (blue-500: #3b82f6)
     const BALL_COLOR = { r: 96, g: 165, b: 250 };
 
     type Particle = {
@@ -68,14 +57,10 @@ const ParticleNetworkBackground = () => {
       const min = -0.6;
       const max = 0.6;
       switch (pos) {
-        case "top":
-          return [randomNumFrom(min, max), randomNumFrom(0.05, max)];
-        case "right":
-          return [randomNumFrom(min, -0.05), randomNumFrom(min, max)];
-        case "bottom":
-          return [randomNumFrom(min, max), randomNumFrom(min, -0.05)];
-        case "left":
-          return [randomNumFrom(0.05, max), randomNumFrom(min, max)];
+        case "top":    return [randomNumFrom(min, max), randomNumFrom(0.05, max)];
+        case "right":  return [randomNumFrom(min, -0.05), randomNumFrom(min, max)];
+        case "bottom": return [randomNumFrom(min, max), randomNumFrom(min, -0.05)];
+        case "left":   return [randomNumFrom(0.05, max), randomNumFrom(min, max)];
       }
     };
 
@@ -84,14 +69,10 @@ const ParticleNetworkBackground = () => {
       const [vx, vy] = getRandomSpeed(pos);
       const base = { vx, vy, alpha: 1, phase: randomNumFrom(0, 10) };
       switch (pos) {
-        case "top":
-          return { ...base, x: randomSidePos(canW), y: -R };
-        case "right":
-          return { ...base, x: canW + R, y: randomSidePos(canH) };
-        case "bottom":
-          return { ...base, x: randomSidePos(canW), y: canH + R };
-        case "left":
-          return { ...base, x: -R, y: randomSidePos(canH) };
+        case "top":    return { ...base, x: randomSidePos(canW), y: -R };
+        case "right":  return { ...base, x: canW + R, y: randomSidePos(canH) };
+        case "bottom": return { ...base, x: randomSidePos(canW), y: canH + R };
+        case "left":   return { ...base, x: -R, y: randomSidePos(canH) };
       }
     };
 
@@ -155,10 +136,7 @@ const ParticleNetworkBackground = () => {
     const updateParticles = () => {
       const next: Particle[] = [];
       particles.forEach((p) => {
-        if (p.isMouse) {
-          next.push(p);
-          return;
-        }
+        if (p.isMouse) { next.push(p); return; }
         p.x += p.vx;
         p.y += p.vy;
         p.phase += ALPHA_F;
@@ -171,9 +149,7 @@ const ParticleNetworkBackground = () => {
     };
 
     const addParticleIfNeeded = () => {
-      if (particles.length < BALL_NUM) {
-        particles.push(getRandomParticle());
-      }
+      if (particles.length < BALL_NUM) particles.push(getRandomParticle());
     };
 
     const render = () => {
@@ -185,10 +161,6 @@ const ParticleNetworkBackground = () => {
       rafId = window.requestAnimationFrame(render);
     };
 
-    const handleResize = () => resize();
-
-    // Shared helper: convert viewport coords -> canvas-relative coords,
-    // and create/update the mouse particle.
     const setMouseParticlePos = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect();
       if (!mouseParticle) {
@@ -204,61 +176,39 @@ const ParticleNetworkBackground = () => {
       mouseParticle = null;
     };
 
-    // Mouse — attached on window so it keeps working even over
-    // foreground UI (Card, inputs, buttons) since the canvas sits at -z-10.
-    const handleWindowMouseMove = (e: MouseEvent) => {
-      setMouseParticlePos(e.clientX, e.clientY);
-    };
-    const handleWindowMouseOut = (e: MouseEvent) => {
-      // relatedTarget is null when the cursor actually leaves the browser window
-      if (!e.relatedTarget) {
-        clearMouseParticle();
-      }
-    };
-
-    // Touch — tap/drag joins the network the same way a mouse hover does
-    const handleTouchStart = (e: TouchEvent) => {
-      const touch = e.touches[0];
-      if (touch) setMouseParticlePos(touch.clientX, touch.clientY);
-    };
-    const handleTouchMove = (e: TouchEvent) => {
-      // Prevent the page from scrolling while dragging a finger across the background
-      e.preventDefault();
-      const touch = e.touches[0];
-      if (touch) setMouseParticlePos(touch.clientX, touch.clientY);
-    };
-    const handleTouchEnd = () => {
-      clearMouseParticle();
-    };
+    const handleWindowMouseMove = (e: MouseEvent) => setMouseParticlePos(e.clientX, e.clientY);
+    const handleWindowMouseOut  = (e: MouseEvent) => { if (!e.relatedTarget) clearMouseParticle(); };
+    const handleTouchStart = (e: TouchEvent) => { const t = e.touches[0]; if (t) setMouseParticlePos(t.clientX, t.clientY); };
+    const handleTouchMove  = (e: TouchEvent) => { e.preventDefault(); const t = e.touches[0]; if (t) setMouseParticlePos(t.clientX, t.clientY); };
+    const handleTouchEnd   = () => clearMouseParticle();
 
     resize();
     initParticles(BALL_NUM);
     rafId = window.requestAnimationFrame(render);
 
-    window.addEventListener("resize", handleResize);
+    window.addEventListener("resize", resize);
     window.addEventListener("mousemove", handleWindowMouseMove);
     window.addEventListener("mouseout", handleWindowMouseOut);
     canvas.addEventListener("touchstart", handleTouchStart, { passive: true });
-    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
-    canvas.addEventListener("touchend", handleTouchEnd);
-    canvas.addEventListener("touchcancel", handleTouchEnd);
+    canvas.addEventListener("touchmove",  handleTouchMove,  { passive: false });
+    canvas.addEventListener("touchend",   handleTouchEnd);
+    canvas.addEventListener("touchcancel",handleTouchEnd);
 
     return () => {
       window.cancelAnimationFrame(rafId);
-      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("resize", resize);
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseout", handleWindowMouseOut);
       canvas.removeEventListener("touchstart", handleTouchStart);
-      canvas.removeEventListener("touchmove", handleTouchMove);
-      canvas.removeEventListener("touchend", handleTouchEnd);
-      canvas.removeEventListener("touchcancel", handleTouchEnd);
+      canvas.removeEventListener("touchmove",  handleTouchMove);
+      canvas.removeEventListener("touchend",   handleTouchEnd);
+      canvas.removeEventListener("touchcancel",handleTouchEnd);
     };
   }, []);
 
   return (
     <div className="fixed inset-0 -z-10 bg-[#020617] overflow-hidden">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(30,41,59,0.5)_0%,_rgba(2,6,23,1)_100%)]" />
-      {/* Keep the original blue/emerald accent glows behind the particles */}
       <div className="absolute top-[-5%] right-[-5%] w-[30%] h-[30%] bg-blue-500/10 rounded-full blur-[100px]" />
       <div className="absolute bottom-[-5%] left-[-5%] w-[30%] h-[30%] bg-emerald-500/10 rounded-full blur-[100px]" />
       <canvas ref={canvasRef} className="absolute inset-0" />
@@ -306,23 +256,11 @@ export default function SigninPage() {
       const response = await fetch(buildApiUrl("/auth/user-signin"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: email.trim(),
-          password,
-        }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
-
       const data = (await response.json()) as { message?: string; token?: string };
-      if (!response.ok) {
-        setError(data?.message || "Invalid email or password");
-        return;
-      }
-
-      if (!data.token) {
-        setError("Signin response is missing token. Please try again.");
-        return;
-      }
-
+      if (!response.ok) { setError(data?.message || "Invalid email or password"); return; }
+      if (!data.token)  { setError("Signin response is missing token. Please try again."); return; }
       window.localStorage.setItem(USER_AUTH_TOKEN_KEY, data.token);
       redirectToPaymongoDashboard();
     } catch {
@@ -406,7 +344,6 @@ export default function SigninPage() {
               </div>
 
               <div className="space-y-1.5">
-                {/* Password label only — no forgot link here */}
                 <Label htmlFor="password" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">
                   Security Password
                 </Label>
@@ -432,7 +369,6 @@ export default function SigninPage() {
                 </div>
               </div>
 
-              {/* ✅ Forgot password now BELOW the password field */}
               <div className="flex justify-end -mt-2">
                 <button
                   type="button"
@@ -473,42 +409,71 @@ export default function SigninPage() {
               </p>
             </div>
 
+            {/* ✅ FIXED: Mobile-responsive forgot password modal */}
             <Dialog open={forgotOpen} onOpenChange={setForgotOpen}>
-              <DialogContent className="bg-slate-900 border-slate-800 text-white sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Reset your password</DialogTitle>
-                  <DialogDescription className="text-slate-400 text-xs">
+              <DialogContent
+                className="
+                  bg-slate-900 border-slate-800 text-white
+                  w-[calc(100vw-2rem)] max-w-md
+                  mx-auto
+                  rounded-2xl
+                  max-h-[90dvh] overflow-y-auto
+                  p-5 sm:p-6
+                  gap-0
+                "
+              >
+                <DialogHeader className="mb-5">
+                  <DialogTitle className="text-base font-semibold text-white">
+                    Reset your password
+                  </DialogTitle>
+                  <DialogDescription className="text-slate-400 text-xs mt-1 leading-relaxed">
                     Enter your registered email and we will send you a secure reset link valid for 1 hour.
                   </DialogDescription>
                 </DialogHeader>
-                <form onSubmit={handleForgotSubmit} className="space-y-3">
+
+                <form onSubmit={handleForgotSubmit} className="space-y-4">
                   {forgotError && (
-                    <div className="p-2 rounded-md bg-red-500/10 border border-red-500/20 text-red-400 text-xs">{forgotError}</div>
+                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs leading-relaxed">
+                      {forgotError}
+                    </div>
                   )}
                   {forgotMessage && (
-                    <div className="p-2 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
+                    <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs leading-relaxed">
                       {forgotMessage}
                     </div>
                   )}
-                  <div className="space-y-1">
-                    <Label htmlFor="forgot-email" className="text-[10px] uppercase text-slate-500">
-                      Email
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="forgot-email" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">
+                      Email Address
                     </Label>
                     <Input
                       id="forgot-email"
                       type="email"
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
-                      className="bg-slate-950/50 border-slate-700 text-white"
+                      placeholder="name@example.com"
+                      className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 h-11 text-white"
                       disabled={forgotBusy}
                       required
                     />
                   </div>
-                  <DialogFooter className="gap-2 sm:gap-0">
-                    <Button type="button" variant="outline" className="border-slate-600" onClick={() => setForgotOpen(false)}>
-                      Close
+
+                  {/* ✅ Stacked on mobile, side-by-side on sm+ */}
+                  <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-slate-700 text-slate-300 hover:bg-slate-800 h-11 w-full sm:w-auto"
+                      onClick={() => setForgotOpen(false)}
+                    >
+                      Cancel
                     </Button>
-                    <Button type="submit" className="bg-blue-600 hover:bg-blue-500" disabled={forgotBusy}>
+                    <Button
+                      type="submit"
+                      className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-11 w-full sm:w-auto"
+                      disabled={forgotBusy}
+                    >
                       {forgotBusy ? (
                         <span className="inline-flex items-center gap-2">
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -518,7 +483,7 @@ export default function SigninPage() {
                         "Send reset link"
                       )}
                     </Button>
-                  </DialogFooter>
+                  </div>
                 </form>
               </DialogContent>
             </Dialog>
