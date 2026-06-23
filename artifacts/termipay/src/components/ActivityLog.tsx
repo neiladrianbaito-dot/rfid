@@ -20,13 +20,19 @@ export function ActivityLog({ transactions }: Props) {
       </CardHeader>
       <CardContent className="p-0">
         <div className="max-h-[400px] overflow-y-auto">
-          <table className="w-full text-left table-fixed">
+          <table className="w-full text-left" style={{ tableLayout: "fixed" }}>
+            <colgroup>
+              <col style={{ width: "26%" }} />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "34%" }} />
+              <col style={{ width: "22%" }} />
+            </colgroup>
             <thead className="bg-slate-950/50">
               <tr>
-                <th className="px-2 py-4 text-[10px] font-black uppercase text-slate-500 w-[28%]">Timestamp</th>
-                <th className="px-2 py-4 text-[10px] font-black uppercase text-slate-500 w-[22%]">Service</th>
-                <th className="px-2 py-4 text-[10px] font-black uppercase text-slate-500 text-right w-[30%]">Amount</th>
-                <th className="px-2 py-4 text-[10px] font-black uppercase text-slate-500 text-center w-[20%]">Result</th>
+                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500">Timestamp</th>
+                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500">Service</th>
+                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500 text-right">Amount</th>
+                <th className="px-2 py-3 text-[9px] font-black uppercase text-slate-500 text-center">Result</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
@@ -47,26 +53,34 @@ export function ActivityLog({ transactions }: Props) {
 
                   return (
                     <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
-                      <td className="px-2 py-4">
-                        <p className="text-[10px] text-slate-300 font-medium">
+                      <td className="px-2 py-3">
+                        <p className="text-[10px] text-slate-300 font-medium leading-tight">
                           {new Date(tx.timestamp).toLocaleDateString()}
                         </p>
-                        <p className="text-[9px] text-slate-500 font-mono">
+                        <p className="text-[9px] text-slate-500 font-mono leading-tight">
                           {new Date(tx.timestamp).toLocaleTimeString()}
                         </p>
                       </td>
-                      <td className="px-2 py-4">
+                      <td className="px-2 py-3">
                         <span className="text-[10px] font-semibold text-slate-200 uppercase">{tx.type}</span>
                       </td>
-                      <td className="px-2 py-4 text-right">
+                      <td className="px-2 py-3" style={{ textAlign: "right" }}>
                         <span
-                          className={`text-[10px] font-bold ${isFare ? "text-red-400" : "text-emerald-400"}`}
-                          style={{ whiteSpace: "nowrap", display: "inline-block", unicodeBidi: "normal" }}
+                          style={{
+                            whiteSpace: "nowrap",
+                            display: "block",
+                            textAlign: "right",
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            color: isFare ? "rgb(248 113 113)" : "rgb(52 211 153)",
+                            overflow: "hidden",
+                            unicodeBidi: "plaintext",
+                          }}
                         >
                           {sign}&#8369;{amount}
                         </span>
                       </td>
-                      <td className="px-2 py-4 text-center">
+                      <td className="px-2 py-3 text-center">
                         <Badge
                           variant="outline"
                           className={`text-[9px] font-black tracking-widest uppercase py-0 ${
