@@ -193,8 +193,9 @@ export default function PaymongoDashboardPage() {
                       </td>
                       <td className="p-4"><span className="text-xs font-semibold text-slate-200 uppercase">{tx.type}</span></td>
                       <td className="p-4 text-right">
-                        <span className={`text-xs font-bold ${tx.type === "Fare" ? "text-red-400" : "text-emerald-400"}`}>
-                          {tx.type === "Fare" ? "-" : "+"} {"\u20B1"}{Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {/* FIX: whitespace-nowrap keeps +₱amount on one line on mobile */}
+                        <span className={`text-xs font-bold whitespace-nowrap ${tx.type === "Fare" ? "text-red-400" : "text-emerald-400"}`}>
+                          {tx.type === "Fare" ? "-" : "+"}{"\u20B1"}{Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </td>
                       <td className="p-4 text-center">
