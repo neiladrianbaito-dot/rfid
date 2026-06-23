@@ -20,13 +20,13 @@ export function ActivityLog({ transactions }: Props) {
       </CardHeader>
       <CardContent className="p-0">
         <div className="max-h-[400px] overflow-y-auto">
-          <table className="w-full text-left">
+          <table className="w-full text-left table-fixed">
             <thead className="bg-slate-950/50">
               <tr>
-                <th className="p-4 text-[10px] font-black uppercase text-slate-500">Timestamp</th>
-                <th className="p-4 text-[10px] font-black uppercase text-slate-500">Service</th>
-                <th className="p-4 text-[10px] font-black uppercase text-slate-500 text-right">Amount</th>
-                <th className="p-4 text-[10px] font-black uppercase text-slate-500 text-center">Result</th>
+                <th className="p-4 text-[10px] font-black uppercase text-slate-500 w-[30%]">Timestamp</th>
+                <th className="p-4 text-[10px] font-black uppercase text-slate-500 w-[25%]">Service</th>
+                <th className="p-4 text-[10px] font-black uppercase text-slate-500 text-right w-[25%]">Amount</th>
+                <th className="p-4 text-[10px] font-black uppercase text-slate-500 text-center w-[20%]">Result</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
@@ -51,8 +51,9 @@ export function ActivityLog({ transactions }: Props) {
                       <span className="text-xs font-semibold text-slate-200 uppercase">{tx.type}</span>
                     </td>
                     <td className="p-4 text-right">
-                      <span className={`text-xs font-bold ${tx.type === "Fare" ? "text-red-400" : "text-emerald-400"}`}>
-                        {tx.type === "Fare" ? "-" : "+"} ₱{Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {/* FIX: whitespace-nowrap + no space so +₱100.00 stays one line on mobile */}
+                      <span className={`text-xs font-bold whitespace-nowrap ${tx.type === "Fare" ? "text-red-400" : "text-emerald-400"}`}>
+                        {tx.type === "Fare" ? "-" : "+"}&#8369;{Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </td>
                     <td className="p-4 text-center">
