@@ -6,7 +6,10 @@ import { RECAPTCHA_SITE_KEY } from "@/lib/api";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 import type { useLinkCard } from "@/hooks/use-link-card";
 
-type Props = ReturnType<typeof useLinkCard>;
+type Props = ReturnType<typeof useLinkCard> & {
+  /** Called when the user cancels and should be returned to the sign-in / home screen */
+  onCancel?: () => void;
+};
 
 export function LinkCardModal(props: Props) {
   const {
@@ -14,6 +17,7 @@ export function LinkCardModal(props: Props) {
     recaptchaRef, captchaToken, setCaptchaToken, captchaError, setCaptchaError,
     checkCard, confirmLink, backToInput, setValidation,
   } = props;
+  const { onCancel } = props;
 
   const isChecking = validation.status === "checking";
   const isBlocked  = validation.status === "blocked";
@@ -133,15 +137,25 @@ export function LinkCardModal(props: Props) {
                   </div>
                 )}
 
-                <Button
-                  onClick={checkCard}
-                  disabled={isChecking || !input.trim() || !captchaToken}
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 transition-all disabled:opacity-50"
-                >
-                  {isChecking
-                    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Verifying Card...</>
-                    : <><CheckCircle2 className="h-4 w-4 mr-2" />Verify Card UID</>}
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={onCancel}
+                    disabled={isChecking}
+                    variant="outline"
+                    className="flex-1 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white h-12"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={checkCard}
+                    disabled={isChecking || !input.trim() || !captchaToken}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 transition-all disabled:opacity-50"
+                  >
+                    {isChecking
+                      ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Verifying Card...</>
+                      : <><CheckCircle2 className="h-4 w-4 mr-2" />Verify Card UID</>}
+                  </Button>
+                </div>
 
                 <p className="text-center text-[10px] text-slate-600 leading-relaxed">
                   Complete the reCAPTCHA and verify your card before linking.
@@ -201,6 +215,14 @@ export function LinkCardModal(props: Props) {
                       : <><LinkIcon className="h-4 w-4 mr-2" />Confirm & Link</>}
                   </Button>
                 </div>
+
+                <button
+                  onClick={onCancel}
+                  disabled={loading}
+                  className="w-full text-center text-[11px] text-slate-500 hover:text-slate-300 transition-colors underline underline-offset-2 disabled:opacity-50"
+                >
+                  Cancel and return to sign-in
+                </button>
 
                 <p className="text-center text-[10px] text-slate-600 leading-relaxed">
                   By clicking above, you agree that this card UID will be permanently tied to your account and cannot be modified.
