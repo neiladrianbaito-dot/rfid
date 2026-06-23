@@ -124,6 +124,14 @@ export default function TransactionsPage() {
     }
   };
 
+  // ✅ UPDATED: Format number with commas (1000 → 1,000)
+  const formatAmount = (amount: number) => {
+    return Math.abs(amount).toLocaleString("en-PH", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
   return (
     <div className="space-y-8 h-full min-h-0 flex flex-col">
       <style>{`
@@ -274,8 +282,9 @@ export default function TransactionsPage() {
                               {tx.type}
                             </Badge>
                           </TableCell>
+                          {/* ✅ UPDATED: With comma formatting */}
                           <TableCell className={`text-xs font-black ${tx.type === "Fare" ? "text-red-500" : "text-emerald-500"}`}>
-                            {tx.type === "Fare" ? "-" : "+"}₱{Math.abs(Number(tx.amount)).toFixed(2)}
+                            {tx.type === "Fare" ? "-" : "+"}₱{formatAmount(Number(tx.amount))}
                           </TableCell>
                           <TableCell>
                             <Badge variant="outline" className={`text-[9px] font-black uppercase ${statusColor(tx.status)}`}>
