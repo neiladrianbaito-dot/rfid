@@ -14,7 +14,6 @@ import { ChangePasswordModal } from "@/components/change-password-modal";
 import { getSignedInUser, cleanCardUid, USER_AUTH_TOKEN_KEY } from "@/lib/api";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 
-// Builds the full amount string like "+₱5,000.00" as ONE string — no separate text nodes
 function formatAmount(type: string, amount: number | string): string {
   const sign = type === "Fare" ? "-" : "+";
   const num = Math.abs(Number(amount || 0)).toLocaleString(undefined, {
@@ -72,6 +71,7 @@ export default function PaymongoDashboardPage() {
       <style>{DASHBOARD_STYLES}</style>
 
       <div className={`mx-auto w-full max-w-6xl space-y-6 dashboard-content ${linkCard.isOpen ? "is-obscured" : ""}`}>
+        {/* ── Header ── */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-6">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-emerald-500/10 rounded-xl">
@@ -92,23 +92,27 @@ export default function PaymongoDashboardPage() {
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/20 p-4 rounded-2xl border border-slate-800/50">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
-              <Lock className="h-4 w-4 text-emerald-400" />
+        {/* ── Linked Card — single row on all screen sizes ── */}
+        <div className="flex items-center justify-between gap-2 bg-slate-900/20 px-3 py-3 rounded-2xl border border-slate-800/50">
+          {/* Left: icon + label */}
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="h-8 w-8 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+              <Lock className="h-3.5 w-3.5 text-emerald-400" />
             </div>
             <div>
-              <p className="text-xs font-bold text-slate-300">Linked Card</p>
+              <p className="text-xs font-bold text-slate-300 leading-none">Linked Card</p>
               <p className="text-[10px] text-slate-500">Permanently linked</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 font-mono text-sm text-slate-300 tracking-widest select-all">
+
+          {/* Right: UID + dot + time — all one line */}
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 font-mono text-xs text-slate-300 tracking-widest select-all truncate max-w-[140px]">
               {cardUid || "Not linked"}
             </div>
-            <div className="flex items-center gap-1.5">
-              <div className={`h-2 w-2 rounded-full ${loading ? "bg-yellow-400" : "bg-emerald-400 realtime-dot"}`} />
-              <span className="text-[10px] text-slate-500 hidden sm:inline">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <div className={`h-2 w-2 rounded-full shrink-0 ${loading ? "bg-yellow-400" : "bg-emerald-400 realtime-dot"}`} />
+              <span className="text-[10px] text-slate-500 hidden sm:inline whitespace-nowrap">
                 {loading ? "Loading..." : lastUpdated ? lastUpdated.toLocaleTimeString() : "Connecting..."}
               </span>
             </div>
@@ -117,6 +121,7 @@ export default function PaymongoDashboardPage() {
 
         {error && <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">Warning: {error}</div>}
 
+        {/* ── Balance + Profile Cards ── */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card className="md:col-span-1 border-slate-800 bg-slate-900/40 backdrop-blur-md border-t-emerald-500/50 border-t-2">
             <CardContent className="pt-6">
@@ -187,13 +192,9 @@ export default function PaymongoDashboardPage() {
             <div className="max-h-[400px] overflow-y-auto">
               <table className="w-full text-left table-fixed">
                 <colgroup>
-                  {/* Timestamp */}
                   <col style={{ width: "30%" }} />
-                  {/* Service — kept narrow; nowrap prevents wrap */}
                   <col style={{ width: "18%" }} />
-                  {/* Amount — widened so ₱5,000.00 never wraps */}
                   <col style={{ width: "30%" }} />
-                  {/* Result */}
                   <col style={{ width: "22%" }} />
                 </colgroup>
                 <thead className="bg-slate-950/50">
@@ -220,7 +221,6 @@ export default function PaymongoDashboardPage() {
                   ) : (
                     transactions.map((tx) => (
                       <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
-                        {/* Timestamp */}
                         <td className="px-3 py-3">
                           <p className="text-[10px] text-slate-300 font-medium leading-tight whitespace-nowrap">
                             {new Date(tx.timestamp).toLocaleDateString()}
@@ -229,15 +229,11 @@ export default function PaymongoDashboardPage() {
                             {new Date(tx.timestamp).toLocaleTimeString()}
                           </p>
                         </td>
-
-                        {/* Service — whitespace-nowrap stops "TOP-UP" from breaking */}
                         <td className="px-3 py-3">
                           <span className="text-[10px] font-semibold text-slate-200 uppercase whitespace-nowrap">
                             {tx.type}
                           </span>
                         </td>
-
-                        {/* Amount — single string, tabular nums, never wraps */}
                         <td className="px-3 py-3 text-right">
                           <span
                             className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${
@@ -247,8 +243,6 @@ export default function PaymongoDashboardPage() {
                             {formatAmount(tx.type, tx.amount)}
                           </span>
                         </td>
-
-                        {/* Result */}
                         <td className="px-3 py-3 text-center">
                           <Badge
                             variant="outline"
