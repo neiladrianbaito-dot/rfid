@@ -9,7 +9,7 @@ import { MAX_BALANCE } from "@/lib/api";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 import type { useTopup } from "@/hooks/use-topup";
 
-type Props = ReturnType<typeof useTopup> & { cardUid: string; currentBalance: number };
+type Props = ReturnType<typeof useTopup> & { currentBalance: number };
 
 /** Format a plain number string with thousand separators + 2 decimal places. */
 function formatDisplay(raw: string): string {
@@ -23,7 +23,7 @@ export function TopupModal({
   isOpen, close, amount, setAmount, loading,
   alertOpen, setAlertOpen, alertContent,
   remainingTopup, isAtMaxBalance, handleTopup,
-  cardUid, currentBalance,
+  currentBalance,
 }: Props) {
   const [displayValue, setDisplayValue] = useState("");
   const [isFocused, setIsFocused] = useState(false);
