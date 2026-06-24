@@ -231,11 +231,11 @@ export default function SigninPage() {
 
   function redirectToPaymongoDashboard() {
     const basePath = (import.meta.env.BASE_URL || "").replace(/\/$/, "");
-    const target = `${basePath}/paymongo-dashboard`;
+    const target = `${basePath}/user-dashboard`;
     try {
-      setLocation("/paymongo-dashboard");
+      setLocation("/user-dashboard");
       window.setTimeout(() => {
-        if (!window.location.pathname.endsWith("/paymongo-dashboard")) {
+        if (!window.location.pathname.endsWith("/user-dashboard")) {
           window.location.assign(target);
         }
       }, 50);
