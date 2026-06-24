@@ -95,7 +95,7 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
                   disabled={loading || isAtMaxBalance || !amount || parseFloat(amount) <= 0}
                   className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 disabled:opacity-50"
                 >
-                  {loading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via GCash / Maya"}
+                  {loading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via PayMongo"}
                 </Button>
               </div>
             </div>
