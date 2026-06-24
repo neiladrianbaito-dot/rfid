@@ -85,17 +85,16 @@ export default function PaymongoDashboardPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-100 p-4 sm:p-8 pb-24 md:pb-8">
+    // 1️⃣ Outer wrapper: NO padding, just background + text color
+    <div className="min-h-screen bg-[#020617] text-slate-100">
       {linkCard.isOpen && <LinkCardModal {...linkCard} />}
       <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
-
       <style>{DASHBOARD_STYLES}</style>
 
-      <div className={`mx-auto w-full max-w-6xl space-y-6 dashboard-content ${linkCard.isOpen ? "is-obscured" : ""}`}>
-
-        {/* ── Header ── */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-6">
+      {/* 2️⃣ STICKY HEADER — lives outside the scrollable content */}
+      <div className="sticky top-0 z-40 w-full bg-[#020617]/95 backdrop-blur-md border-b border-slate-800">
+        <div className="mx-auto w-full max-w-6xl px-4 sm:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-emerald-500/10 rounded-xl">
               <Wallet className="h-7 w-7 text-emerald-400" />
@@ -105,7 +104,6 @@ export default function PaymongoDashboardPage() {
               <p className="text-[10px] uppercase tracking-widest text-slate-500 mt-1 font-semibold">User Dashboard</p>
             </div>
           </div>
-          {/* Desktop-only header actions */}
           <div className="hidden md:flex items-center gap-2">
             <Button variant="ghost" onClick={changePassword.open} className="text-slate-400 hover:text-violet-400 hover:bg-violet-400/10 gap-2">
               <KeyRound className="h-4 w-4" /><span>Change Password</span>
@@ -114,8 +112,11 @@ export default function PaymongoDashboardPage() {
               <LogOut className="h-4 w-4" /><span>Logout</span>
             </Button>
           </div>
-          {/* Mobile: no buttons — handled in Settings tab */}
         </div>
+      </div>
+
+      {/* 3️⃣ SCROLLABLE CONTENT — has its own padding */}
+      <div className={`mx-auto w-full max-w-6xl px-4 sm:px-8 pb-24 md:pb-8 pt-6 space-y-6 dashboard-content ${linkCard.isOpen ? "is-obscured" : ""}`}>
 
         {/* ── Linked Card ── */}
         <div className="flex items-center justify-between gap-2 bg-slate-900/20 px-3 py-3 rounded-2xl border border-slate-800/50">
@@ -146,11 +147,6 @@ export default function PaymongoDashboardPage() {
             Warning: {error}
           </div>
         )}
-
-        {/* ══════════════════════════════════════════════════════════════════
-            DESKTOP: always show all sections
-            MOBILE:  show section based on activeTab
-        ══════════════════════════════════════════════════════════════════ */}
 
         {/* ── HOME tab: Balance + Profile ── */}
         <div className={activeTab === "home" ? "block" : "hidden md:block"}>
@@ -201,7 +197,7 @@ export default function PaymongoDashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Profile Card — desktop only (mobile profile lives in Settings) */}
+            {/* Profile Card */}
             <Card className="md:col-span-2 border-slate-800 bg-slate-900/40 backdrop-blur-md">
               <CardContent className="pt-8 grid grid-cols-1 sm:grid-cols-2 gap-y-8 gap-x-4">
                 {[
@@ -320,10 +316,7 @@ export default function PaymongoDashboardPage() {
         {/* ── SETTINGS tab (mobile only) ── */}
         <div className={activeTab === "settings" ? "block md:hidden" : "hidden"}>
           <div className="space-y-4">
-
-            {/* Profile card with avatar */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
-              {/* Avatar header */}
               <div className="flex items-center gap-4 px-5 py-5 border-b border-slate-800/60">
                 <div className="h-14 w-14 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0">
                   <span className="text-emerald-400 font-black text-lg tracking-tight">
@@ -346,13 +339,11 @@ export default function PaymongoDashboardPage() {
                   </div>
                 </div>
               </div>
-
-              {/* Profile info rows */}
               {[
-                { icon: <CreditCard className="h-4 w-4 text-purple-400" />, label: "UID",     value: user?.cardUid || "----",            mono: true  },
-                { icon: <Phone className="h-4 w-4 text-orange-400" />,      label: "Contact", value: user?.contactNumber || "None",       mono: false },
-                { icon: <Tag className="h-4 w-4 text-emerald-400" />,       label: "Class",   value: user?.type || "General",             mono: false },
-                { icon: <Mail className="h-4 w-4 text-sky-400" />,          label: "Email",   value: user?.email || "Not linked",         mono: false },
+                { icon: <CreditCard className="h-4 w-4 text-purple-400" />, label: "UID",     value: user?.cardUid || "----",         mono: true  },
+                { icon: <Phone className="h-4 w-4 text-orange-400" />,      label: "Contact", value: user?.contactNumber || "None",    mono: false },
+                { icon: <Tag className="h-4 w-4 text-emerald-400" />,       label: "Class",   value: user?.type || "General",          mono: false },
+                { icon: <Mail className="h-4 w-4 text-sky-400" />,          label: "Email",   value: user?.email || "Not linked",      mono: false },
               ].map(({ icon, label, value, mono }, i, arr) => (
                 <div
                   key={label}
@@ -367,11 +358,8 @@ export default function PaymongoDashboardPage() {
               ))}
             </div>
 
-            {/* Account actions */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
               <p className="px-5 pt-4 pb-2 text-[9px] font-black uppercase tracking-widest text-slate-600">Account</p>
-
-              {/* Change Password */}
               <button
                 onClick={changePassword.open}
                 className="w-full flex items-center gap-4 px-5 py-4 border-b border-slate-800/50 hover:bg-slate-800/30 active:bg-slate-800/50 transition-colors"
@@ -385,8 +373,6 @@ export default function PaymongoDashboardPage() {
                 </div>
                 <ChevronRight className="h-4 w-4 text-slate-600 shrink-0" />
               </button>
-
-              {/* Logout */}
               <button
                 onClick={handleLogout}
                 className="w-full flex items-center gap-4 px-5 py-4 hover:bg-red-500/5 active:bg-red-500/10 transition-colors"
@@ -402,7 +388,6 @@ export default function PaymongoDashboardPage() {
               </button>
             </div>
 
-            {/* Version footer */}
             <p className="text-center text-[9px] font-mono uppercase tracking-widest text-slate-700 pb-2">
               Fare Collection System &mdash; v1.0.0
             </p>
@@ -418,9 +403,7 @@ export default function PaymongoDashboardPage() {
         </footer>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          MOBILE BOTTOM NAV — visible only on < md screens
-      ══════════════════════════════════════════════════════════════════ */}
+      {/* ── Mobile Bottom Nav ── */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden h-16 bg-[#0a0f1e]/95 backdrop-blur-md border-t border-slate-800/60">
         {navItems.map(({ tab, icon, label }) => {
           const isActive = activeTab === tab;
