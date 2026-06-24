@@ -39,10 +39,24 @@ export function TopupModal({
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const raw = e.target.value;
-    // Only allow digits and one decimal point while typing
-    if (raw !== "" && !/^\d*\.?\d{0,2}$/.test(raw)) return;
-    setDisplayValue(raw);
-    setAmount(raw); // keep hook in sync with raw value
+
+    // Strip out anything that isn't a digit or decimal point immediately
+    const cleaned = raw.replace(/[^\d.]/g, "");
+
+    // Prevent multiple decimal points
+    const parts = cleaned.split(".");
+    const normalized = parts.length > 2
+      ? parts[0] + "." + parts.slice(1).join("")
+      : cleaned;
+
+    // Limit to 2 decimal places
+    const decimalIndex = normalized.indexOf(".");
+    const final = decimalIndex !== -1
+      ? normalized.slice(0, decimalIndex + 3)
+      : normalized;
+
+    setDisplayValue(final);
+    setAmount(final);
   }
 
   function handleFocus() {
