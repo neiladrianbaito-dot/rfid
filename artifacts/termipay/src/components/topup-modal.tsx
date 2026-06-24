@@ -65,14 +65,7 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
 
               {/* Form */}
               <div className="space-y-4">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Card FASDASD UID</label>
-                  <Input
-                    disabled
-                    value={cardUid}
-                    className="bg-white/5 border-white/10 text-slate-300 font-mono text-xs truncate"
-                  />
-                </div>
+                
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Amount (PHP)</label>
                   <Input
