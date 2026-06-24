@@ -10,7 +10,49 @@ import type { useTopup } from "@/hooks/use-topup";
 
 type Props = ReturnType<typeof useTopup> & { cardUid: string; currentBalance: number };
 
-export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpen, setAlertOpen, alertContent, remainingTopup, isAtMaxBalance, handleTopup, cardUid, currentBalance }: Props) {
+/** Strip commas so we get a plain numeric string, e.g. "1,500.00" → "1500.00" */
+function stripCommas(value: string): string {
+  return value.replace(/,/g, "");
+}
+
+/**
+ * Format a raw numeric string with thousands separators while the user types.
+ * Preserves the decimal portion exactly as typed so the cursor stays predictable.
+ * e.g. "1500"   → "1,500"
+ *      "1500.5" → "1,500.5"
+ */
+function formatWithCommas(raw: string): string {
+  if (!raw) return "";
+  const [intPart, decPart] = raw.split(".");
+  const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return decPart !== undefined ? `${formattedInt}.${decPart}` : formattedInt;
+}
+
+export function TopupModal({
+  isOpen, close, amount, setAmount, loading,
+  alertOpen, setAlertOpen, alertContent,
+  remainingTopup, isAtMaxBalance, handleTopup,
+  cardUid, currentBalance,
+}: Props) {
+
+  /** The raw numeric string (no commas) derived from whatever `amount` holds. */
+  const rawAmount = stripCommas(amount);
+  const parsedAmount = parseFloat(rawAmount);
+  const exceedsLimit = !!rawAmount && parsedAmount > remainingTopup;
+
+  /** Keep `amount` in the hook as the raw value; display the formatted version. */
+  function handleAmountChange(e: React.ChangeEvent<HTMLInputElement>) {
+    // Allow digits, one decimal point, and optionally already-typed commas (strip them first)
+    const input = e.target.value;
+    const stripped = stripCommas(input);
+
+    // Reject anything that isn't a valid partial number
+    if (stripped !== "" && !/^\d*\.?\d*$/.test(stripped)) return;
+
+    // Store the raw value in the hook so validation still works
+    setAmount(stripped);
+  }
+
   return (
     <>
       <style>{DASHBOARD_STYLES}</style>
@@ -75,15 +117,29 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Amount (PHP)</label>
-                  <Input
-                    type="number"
-                    placeholder={isAtMaxBalance ? "Wallet is full" : `Max ₱${remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    disabled={isAtMaxBalance}
-                    className={`bg-white/5 border-white/10 text-white focus:border-emerald-500/50 ${amount && parseFloat(amount) > remainingTopup ? "border-red-500/50" : ""}`}
-                  />
-                  {amount && parseFloat(amount) > remainingTopup && !isAtMaxBalance && (
+                  <div className="relative">
+                    {/* Peso sign prefix */}
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none select-none">
+                      ₱
+                    </span>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder={
+                        isAtMaxBalance
+                          ? "Wallet is full"
+                          : `Max ${remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                      }
+                      // Display the formatted (comma-separated) version of the raw amount
+                      value={formatWithCommas(rawAmount)}
+                      onChange={handleAmountChange}
+                      disabled={isAtMaxBalance}
+                      className={`pl-7 bg-white/5 border-white/10 text-white focus:border-emerald-500/50 ${
+                        exceedsLimit ? "border-red-500/50" : ""
+                      }`}
+                    />
+                  </div>
+                  {exceedsLimit && !isAtMaxBalance && (
                     <p className="text-[10px] text-red-400 mt-1 flex items-start gap-1">
                       <XCircle className="h-3 w-3 shrink-0 mt-0.5" />
                       <span>Amount exceeds your remaining limit of ₱{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -92,7 +148,7 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
                 </div>
                 <Button
                   onClick={handleTopup}
-                  disabled={loading || isAtMaxBalance || !amount || parseFloat(amount) <= 0}
+                  disabled={loading || isAtMaxBalance || !rawAmount || parsedAmount <= 0}
                   className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 disabled:opacity-50"
                 >
                   {loading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via GCash / Maya"}
