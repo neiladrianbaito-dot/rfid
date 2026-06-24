@@ -25,12 +25,6 @@ export function TopupModal({
   remainingTopup, isAtMaxBalance, handleTopup,
   cardUid, currentBalance,
 }: Props) {
-  /**
-   * `displayValue` is what the input shows.
-   * While the user is typing → raw digits (e.g. "1500")
-   * On blur → formatted (e.g. "1,500.00")
-   * On focus → back to raw so typing continues cleanly
-   */
   const [displayValue, setDisplayValue] = useState("");
   const [isFocused, setIsFocused] = useState(false);
 
@@ -38,22 +32,16 @@ export function TopupModal({
   const exceedsLimit = !!amount && parsedAmount > remainingTopup;
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    // Allow control keys
     const controlKeys = ["Backspace", "Delete", "Tab", "Escape", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
     if (controlKeys.includes(e.key)) return;
-    // Allow Ctrl/Cmd shortcuts (copy, paste, select all, etc.)
     if (e.ctrlKey || e.metaKey) return;
-    // Allow digits
     if (/^\d$/.test(e.key)) return;
-    // Allow one decimal point
     if (e.key === "." && !displayValue.includes(".")) return;
-    // Block everything else (letters, e, +, -, symbols)
     e.preventDefault();
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const raw = e.target.value;
-    // Limit to 2 decimal places
     const decimalIndex = raw.indexOf(".");
     const final = decimalIndex !== -1 ? raw.slice(0, decimalIndex + 3) : raw;
     setDisplayValue(final);
@@ -62,16 +50,12 @@ export function TopupModal({
 
   function handleFocus() {
     setIsFocused(true);
-    // Show raw value while editing so cursor doesn't jump
     setDisplayValue(amount);
   }
 
   function handleBlur() {
     setIsFocused(false);
-    // Format with commas once user leaves the field
-    if (amount) {
-      setDisplayValue(formatDisplay(amount));
-    }
+    if (amount) setDisplayValue(formatDisplay(amount));
   }
 
   return (
@@ -126,16 +110,8 @@ export function TopupModal({
                 </p>
               </div>
 
-              {/* Form */}
+              {/* Form — Card UID hidden, only Amount shown */}
               <div className="space-y-4">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Card UID</label>
-                  <Input
-                    disabled
-                    value={cardUid}
-                    className="bg-white/5 border-white/10 text-slate-300 font-mono text-xs truncate"
-                  />
-                </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Amount (PHP)</label>
                   <div className="relative">
@@ -174,6 +150,7 @@ export function TopupModal({
                   {loading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via GCash / Maya"}
                 </Button>
               </div>
+
             </div>
           </div>
         </DialogContent>
