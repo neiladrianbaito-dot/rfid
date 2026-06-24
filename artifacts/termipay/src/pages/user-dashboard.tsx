@@ -85,14 +85,13 @@ export default function PaymongoDashboardPage() {
   ];
 
   return (
-    // 1️⃣ Outer wrapper: NO padding, just background + text color
     <div className="min-h-screen bg-[#020617] text-slate-100">
       {linkCard.isOpen && <LinkCardModal {...linkCard} />}
       <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
       <style>{DASHBOARD_STYLES}</style>
 
-      {/* 2️⃣ STICKY HEADER — lives outside the scrollable content */}
+      {/* STICKY HEADER */}
       <div className="sticky top-0 z-40 w-full bg-[#020617]/95 backdrop-blur-md border-b border-slate-800">
         <div className="mx-auto w-full max-w-6xl px-4 sm:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -115,7 +114,7 @@ export default function PaymongoDashboardPage() {
         </div>
       </div>
 
-      {/* 3️⃣ SCROLLABLE CONTENT — has its own padding */}
+      {/* SCROLLABLE CONTENT */}
       <div className={`mx-auto w-full max-w-6xl px-4 sm:px-8 pb-24 md:pb-8 pt-6 space-y-6 dashboard-content ${linkCard.isOpen ? "is-obscured" : ""}`}>
 
         {/* ── Linked Card ── */}
@@ -148,9 +147,17 @@ export default function PaymongoDashboardPage() {
           </div>
         )}
 
-        {/* ── HOME tab: Balance + Profile ── */}
+        {/* ── HOME tab ── */}
         <div className={activeTab === "home" ? "block" : "hidden md:block"}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+            {/* ── Welcome Message — full width, no card ── */}
+            <div className="col-span-1 md:col-span-3">
+              <p className="text-2xl font-bold text-white">
+                Welcome back, <span className="text-emerald-400">{user?.fullName?.split(" ")[0] || "User"}</span> 👋
+              </p>
+              <p className="text-xs text-slate-500 mt-1">Here's your account overview.</p>
+            </div>
 
             {/* Balance Card */}
             <Card className="md:col-span-1 border-slate-800 bg-slate-900/40 backdrop-blur-md border-t-emerald-500/50 border-t-2">
@@ -197,14 +204,14 @@ export default function PaymongoDashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Profile Card */}
-            <Card className="md:col-span-2 border-slate-800 bg-slate-900/40 backdrop-blur-md">
+            {/* Profile Card — desktop only */}
+            <Card className="hidden md:block md:col-span-2 border-slate-800 bg-slate-900/40 backdrop-blur-md">
               <CardContent className="pt-8 grid grid-cols-1 sm:grid-cols-2 gap-y-8 gap-x-4">
                 {[
-                  { icon: <User className="h-5 w-5 text-blue-400" />,        bg: "bg-blue-500/10 border-blue-500/20",     label: "Name",    value: user?.fullName || "Not Linked" },
-                  { icon: <CreditCard className="h-5 w-5 text-purple-400" />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID",     value: user?.cardUid || "----", mono: true },
-                  { icon: <Phone className="h-5 w-5 text-orange-400" />,      bg: "bg-orange-500/10 border-orange-500/20", label: "Contact", value: user?.contactNumber || "None" },
-                  { icon: <Tag className="h-5 w-5 text-emerald-400" />,       bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: user?.type || "General" },
+                  { icon: <User className="h-5 w-5 text-blue-400" />,        bg: "bg-blue-500/10 border-blue-500/20",       label: "Name",    value: user?.fullName || "Not Linked" },
+                  { icon: <CreditCard className="h-5 w-5 text-purple-400" />, bg: "bg-purple-500/10 border-purple-500/20",   label: "UID",     value: user?.cardUid || "----", mono: true },
+                  { icon: <Phone className="h-5 w-5 text-orange-400" />,      bg: "bg-orange-500/10 border-orange-500/20",   label: "Contact", value: user?.contactNumber || "None" },
+                  { icon: <Tag className="h-5 w-5 text-emerald-400" />,       bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class",   value: user?.type || "General" },
                 ].map(({ icon, bg, label, value, mono }) => (
                   <div key={label} className="flex items-center gap-4">
                     <div className={`h-10 w-10 rounded-full flex items-center justify-center border ${bg}`}>{icon}</div>
@@ -225,6 +232,7 @@ export default function PaymongoDashboardPage() {
                 </div>
               </CardContent>
             </Card>
+
           </div>
         </div>
 
@@ -340,10 +348,10 @@ export default function PaymongoDashboardPage() {
                 </div>
               </div>
               {[
-                { icon: <CreditCard className="h-4 w-4 text-purple-400" />, label: "UID",     value: user?.cardUid || "----",         mono: true  },
-                { icon: <Phone className="h-4 w-4 text-orange-400" />,      label: "Contact", value: user?.contactNumber || "None",    mono: false },
-                { icon: <Tag className="h-4 w-4 text-emerald-400" />,       label: "Class",   value: user?.type || "General",          mono: false },
-                { icon: <Mail className="h-4 w-4 text-sky-400" />,          label: "Email",   value: user?.email || "Not linked",      mono: false },
+                { icon: <CreditCard className="h-4 w-4 text-purple-400" />, label: "UID",     value: user?.cardUid || "----",      mono: true  },
+                { icon: <Phone className="h-4 w-4 text-orange-400" />,      label: "Contact", value: user?.contactNumber || "None", mono: false },
+                { icon: <Tag className="h-4 w-4 text-emerald-400" />,       label: "Class",   value: user?.type || "General",       mono: false },
+                { icon: <Mail className="h-4 w-4 text-sky-400" />,          label: "Email",   value: user?.email || "Not linked",   mono: false },
               ].map(({ icon, label, value, mono }, i, arr) => (
                 <div
                   key={label}
