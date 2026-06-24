@@ -11,7 +11,6 @@ import type { useTopup } from "@/hooks/use-topup";
 
 type Props = ReturnType<typeof useTopup> & { currentBalance: number };
 
-/** Format a plain number string with thousand separators + 2 decimal places. */
 function formatDisplay(raw: string): string {
   if (!raw) return "";
   const num = parseFloat(raw);
@@ -26,13 +25,19 @@ export function TopupModal({
   currentBalance,
 }: Props) {
   const [displayValue, setDisplayValue] = useState("");
-  const [isFocused, setIsFocused] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   const parsedAmount = parseFloat(amount);
   const exceedsLimit = !!amount && parsedAmount > remainingTopup;
 
+  // What the input actually shows:
+  // - while editing → raw digits the user is typing
+  // - while idle → formatted version (e.g. "1,500.00"), or empty
+  const shownValue = isEditing ? displayValue : (amount ? formatDisplay(amount) : "");
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    const controlKeys = ["Backspace", "Delete", "Tab", "Escape", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
+    const controlKeys = ["Backspace", "Delete", "Tab", "Escape", "Enter",
+      "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
     if (controlKeys.includes(e.key)) return;
     if (e.ctrlKey || e.metaKey) return;
     if (/^\d$/.test(e.key)) return;
@@ -49,13 +54,13 @@ export function TopupModal({
   }
 
   function handleFocus() {
-    setIsFocused(true);
-    setDisplayValue(amount);
+    setIsEditing(true);
+    setDisplayValue(amount); // show raw while typing
   }
 
   function handleBlur() {
-    setIsFocused(false);
-    if (amount) setDisplayValue(formatDisplay(amount));
+    setIsEditing(false);
+    // shownValue will auto-switch to formatted via the ternary above
   }
 
   return (
@@ -110,7 +115,7 @@ export function TopupModal({
                 </p>
               </div>
 
-              {/* Form — Card UID hidden, only Amount shown */}
+              {/* Form */}
               <div className="space-y-4">
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Amount (PHP)</label>
@@ -124,7 +129,7 @@ export function TopupModal({
                           ? "Wallet is full"
                           : `Max ${remainingTopup.toLocaleString("en-PH", { minimumFractionDigits: 2 })}`
                       }
-                      value={displayValue}
+                      value={shownValue}
                       onChange={handleChange}
                       onKeyDown={handleKeyDown}
                       onFocus={handleFocus}
