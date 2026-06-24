@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import PaymongoTopup from "@/pages/Paymongo-Topup";
-import PaymongoDashboardPage from "@/pages/paymongo-dashboard";
+import PaymongoDashboardPage from "@/pages/user-dashboard";
 import LoginPage from "@/pages/login";
 import SigninPage from "@/pages/signin";
 import SignupPage from "@/pages/signup";
@@ -103,7 +103,7 @@ function AppRouter() {
       <Route path="/signup" component={SignupPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/paymongo-topup" component={PaymongoTopup} />
-      <Route path="/paymongo-dashboard" component={PaymongoRoute} />
+      <Route path="/user-dashboard" component={PaymongoRoute} />
       <Route path="/reports/preview" component={ReportPreviewPage} />
 
       {/* PROTECTED ROUTES */}
