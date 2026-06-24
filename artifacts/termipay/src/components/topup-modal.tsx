@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { CreditCard, XCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,22 +11,12 @@ import type { useTopup } from "@/hooks/use-topup";
 
 type Props = ReturnType<typeof useTopup> & { cardUid: string; currentBalance: number };
 
-/** Strip commas so we get a plain numeric string, e.g. "1,500.00" → "1500.00" */
-function stripCommas(value: string): string {
-  return value.replace(/,/g, "");
-}
-
-/**
- * Format a raw numeric string with thousands separators while the user types.
- * Preserves the decimal portion exactly as typed so the cursor stays predictable.
- * e.g. "1500"   → "1,500"
- *      "1500.5" → "1,500.5"
- */
-function formatWithCommas(raw: string): string {
+/** Format a plain number string with thousand separators + 2 decimal places. */
+function formatDisplay(raw: string): string {
   if (!raw) return "";
-  const [intPart, decPart] = raw.split(".");
-  const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return decPart !== undefined ? `${formattedInt}.${decPart}` : formattedInt;
+  const num = parseFloat(raw);
+  if (isNaN(num)) return raw;
+  return num.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export function TopupModal({
@@ -34,23 +25,38 @@ export function TopupModal({
   remainingTopup, isAtMaxBalance, handleTopup,
   cardUid, currentBalance,
 }: Props) {
+  /**
+   * `displayValue` is what the input shows.
+   * While the user is typing → raw digits (e.g. "1500")
+   * On blur → formatted (e.g. "1,500.00")
+   * On focus → back to raw so typing continues cleanly
+   */
+  const [displayValue, setDisplayValue] = useState("");
+  const [isFocused, setIsFocused] = useState(false);
 
-  /** The raw numeric string (no commas) derived from whatever `amount` holds. */
-  const rawAmount = stripCommas(amount);
-  const parsedAmount = parseFloat(rawAmount);
-  const exceedsLimit = !!rawAmount && parsedAmount > remainingTopup;
+  const parsedAmount = parseFloat(amount);
+  const exceedsLimit = !!amount && parsedAmount > remainingTopup;
 
-  /** Keep `amount` in the hook as the raw value; display the formatted version. */
-  function handleAmountChange(e: React.ChangeEvent<HTMLInputElement>) {
-    // Allow digits, one decimal point, and optionally already-typed commas (strip them first)
-    const input = e.target.value;
-    const stripped = stripCommas(input);
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.value;
+    // Only allow digits and one decimal point while typing
+    if (raw !== "" && !/^\d*\.?\d{0,2}$/.test(raw)) return;
+    setDisplayValue(raw);
+    setAmount(raw); // keep hook in sync with raw value
+  }
 
-    // Reject anything that isn't a valid partial number
-    if (stripped !== "" && !/^\d*\.?\d*$/.test(stripped)) return;
+  function handleFocus() {
+    setIsFocused(true);
+    // Show raw value while editing so cursor doesn't jump
+    setDisplayValue(amount);
+  }
 
-    // Store the raw value in the hook so validation still works
-    setAmount(stripped);
+  function handleBlur() {
+    setIsFocused(false);
+    // Format with commas once user leaves the field
+    if (amount) {
+      setDisplayValue(formatDisplay(amount));
+    }
   }
 
   return (
@@ -118,21 +124,19 @@ export function TopupModal({
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Amount (PHP)</label>
                   <div className="relative">
-                    {/* Peso sign prefix */}
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none select-none">
-                      ₱
-                    </span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none select-none">₱</span>
                     <Input
                       type="text"
                       inputMode="decimal"
                       placeholder={
                         isAtMaxBalance
                           ? "Wallet is full"
-                          : `Max ${remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                          : `Max ${remainingTopup.toLocaleString("en-PH", { minimumFractionDigits: 2 })}`
                       }
-                      // Display the formatted (comma-separated) version of the raw amount
-                      value={formatWithCommas(rawAmount)}
-                      onChange={handleAmountChange}
+                      value={displayValue}
+                      onChange={handleChange}
+                      onFocus={handleFocus}
+                      onBlur={handleBlur}
                       disabled={isAtMaxBalance}
                       className={`pl-7 bg-white/5 border-white/10 text-white focus:border-emerald-500/50 ${
                         exceedsLimit ? "border-red-500/50" : ""
@@ -148,7 +152,7 @@ export function TopupModal({
                 </div>
                 <Button
                   onClick={handleTopup}
-                  disabled={loading || isAtMaxBalance || !rawAmount || parsedAmount <= 0}
+                  disabled={loading || isAtMaxBalance || !amount || parsedAmount <= 0}
                   className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 disabled:opacity-50"
                 >
                   {loading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via GCash / Maya"}
