@@ -37,24 +37,25 @@ export function TopupModal({
   const parsedAmount = parseFloat(amount);
   const exceedsLimit = !!amount && parsedAmount > remainingTopup;
 
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    // Allow control keys
+    const controlKeys = ["Backspace", "Delete", "Tab", "Escape", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
+    if (controlKeys.includes(e.key)) return;
+    // Allow Ctrl/Cmd shortcuts (copy, paste, select all, etc.)
+    if (e.ctrlKey || e.metaKey) return;
+    // Allow digits
+    if (/^\d$/.test(e.key)) return;
+    // Allow one decimal point
+    if (e.key === "." && !displayValue.includes(".")) return;
+    // Block everything else (letters, e, +, -, symbols)
+    e.preventDefault();
+  }
+
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const raw = e.target.value;
-
-    // Strip out anything that isn't a digit or decimal point immediately
-    const cleaned = raw.replace(/[^\d.]/g, "");
-
-    // Prevent multiple decimal points
-    const parts = cleaned.split(".");
-    const normalized = parts.length > 2
-      ? parts[0] + "." + parts.slice(1).join("")
-      : cleaned;
-
     // Limit to 2 decimal places
-    const decimalIndex = normalized.indexOf(".");
-    const final = decimalIndex !== -1
-      ? normalized.slice(0, decimalIndex + 3)
-      : normalized;
-
+    const decimalIndex = raw.indexOf(".");
+    const final = decimalIndex !== -1 ? raw.slice(0, decimalIndex + 3) : raw;
     setDisplayValue(final);
     setAmount(final);
   }
@@ -149,6 +150,7 @@ export function TopupModal({
                       }
                       value={displayValue}
                       onChange={handleChange}
+                      onKeyDown={handleKeyDown}
                       onFocus={handleFocus}
                       onBlur={handleBlur}
                       disabled={isAtMaxBalance}
