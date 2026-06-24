@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { CreditCard, XCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,60 +8,9 @@ import { MAX_BALANCE } from "@/lib/api";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 import type { useTopup } from "@/hooks/use-topup";
 
-type Props = ReturnType<typeof useTopup> & { currentBalance: number };
+type Props = ReturnType<typeof useTopup> & { cardUid: string; currentBalance: number };
 
-function formatDisplay(raw: string): string {
-  if (!raw) return "";
-  const num = parseFloat(raw);
-  if (isNaN(num)) return raw;
-  return num.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-export function TopupModal({
-  isOpen, close, amount, setAmount, loading,
-  alertOpen, setAlertOpen, alertContent,
-  remainingTopup, isAtMaxBalance, handleTopup,
-  currentBalance,
-}: Props) {
-  const [displayValue, setDisplayValue] = useState("");
-  const [isEditing, setIsEditing] = useState(false);
-
-  const parsedAmount = parseFloat(amount);
-  const exceedsLimit = !!amount && parsedAmount > remainingTopup;
-
-  // What the input actually shows:
-  // - while editing → raw digits the user is typing
-  // - while idle → formatted version (e.g. "1,500.00"), or empty
-  const shownValue = isEditing ? displayValue : (amount ? formatDisplay(amount) : "");
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    const controlKeys = ["Backspace", "Delete", "Tab", "Escape", "Enter",
-      "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
-    if (controlKeys.includes(e.key)) return;
-    if (e.ctrlKey || e.metaKey) return;
-    if (/^\d$/.test(e.key)) return;
-    if (e.key === "." && !displayValue.includes(".")) return;
-    e.preventDefault();
-  }
-
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const raw = e.target.value;
-    const decimalIndex = raw.indexOf(".");
-    const final = decimalIndex !== -1 ? raw.slice(0, decimalIndex + 3) : raw;
-    setDisplayValue(final);
-    setAmount(final);
-  }
-
-  function handleFocus() {
-    setIsEditing(true);
-    setDisplayValue(amount); // show raw while typing
-  }
-
-  function handleBlur() {
-    setIsEditing(false);
-    // shownValue will auto-switch to formatted via the ternary above
-  }
-
+export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpen, setAlertOpen, alertContent, remainingTopup, isAtMaxBalance, handleTopup, cardUid, currentBalance }: Props) {
   return (
     <>
       <style>{DASHBOARD_STYLES}</style>
@@ -118,29 +66,24 @@ export function TopupModal({
               {/* Form */}
               <div className="space-y-4">
                 <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Card UID</label>
+                  <Input
+                    disabled
+                    value={cardUid}
+                    className="bg-white/5 border-white/10 text-slate-300 font-mono text-xs truncate"
+                  />
+                </div>
+                <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Amount (PHP)</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none select-none">₱</span>
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder={
-                        isAtMaxBalance
-                          ? "Wallet is full"
-                          : `Max ${remainingTopup.toLocaleString("en-PH", { minimumFractionDigits: 2 })}`
-                      }
-                      value={shownValue}
-                      onChange={handleChange}
-                      onKeyDown={handleKeyDown}
-                      onFocus={handleFocus}
-                      onBlur={handleBlur}
-                      disabled={isAtMaxBalance}
-                      className={`pl-7 bg-white/5 border-white/10 text-white focus:border-emerald-500/50 ${
-                        exceedsLimit ? "border-red-500/50" : ""
-                      }`}
-                    />
-                  </div>
-                  {exceedsLimit && !isAtMaxBalance && (
+                  <Input
+                    type="number"
+                    placeholder={isAtMaxBalance ? "Wallet is full" : `Max ₱${remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    disabled={isAtMaxBalance}
+                    className={`bg-white/5 border-white/10 text-white focus:border-emerald-500/50 ${amount && parseFloat(amount) > remainingTopup ? "border-red-500/50" : ""}`}
+                  />
+                  {amount && parseFloat(amount) > remainingTopup && !isAtMaxBalance && (
                     <p className="text-[10px] text-red-400 mt-1 flex items-start gap-1">
                       <XCircle className="h-3 w-3 shrink-0 mt-0.5" />
                       <span>Amount exceeds your remaining limit of ₱{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -149,13 +92,12 @@ export function TopupModal({
                 </div>
                 <Button
                   onClick={handleTopup}
-                  disabled={loading || isAtMaxBalance || !amount || parsedAmount <= 0}
+                  disabled={loading || isAtMaxBalance || !amount || parseFloat(amount) <= 0}
                   className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 disabled:opacity-50"
                 >
-                  {loading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via PayMongo"}
+                  {loading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via GCash / Maya"}
                 </Button>
               </div>
-
             </div>
           </div>
         </DialogContent>
