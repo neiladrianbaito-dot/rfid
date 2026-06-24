@@ -66,7 +66,7 @@ export default function PaymongoDashboardPage() {
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 p-4 sm:p-8">
       {linkCard.isOpen && <LinkCardModal {...linkCard} />}
-      <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
+      <TopupModal {...topup} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
 
       <style>{DASHBOARD_STYLES}</style>
@@ -187,13 +187,9 @@ export default function PaymongoDashboardPage() {
             <div className="max-h-[400px] overflow-y-auto">
               <table className="w-full text-left table-fixed">
                 <colgroup>
-                  {/* Timestamp */}
                   <col style={{ width: "30%" }} />
-                  {/* Service — kept narrow; nowrap prevents wrap */}
                   <col style={{ width: "18%" }} />
-                  {/* Amount — widened so ₱5,000.00 never wraps */}
                   <col style={{ width: "30%" }} />
-                  {/* Result */}
                   <col style={{ width: "22%" }} />
                 </colgroup>
                 <thead className="bg-slate-950/50">
@@ -220,7 +216,6 @@ export default function PaymongoDashboardPage() {
                   ) : (
                     transactions.map((tx) => (
                       <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
-                        {/* Timestamp */}
                         <td className="px-3 py-3">
                           <p className="text-[10px] text-slate-300 font-medium leading-tight whitespace-nowrap">
                             {new Date(tx.timestamp).toLocaleDateString()}
@@ -229,15 +224,11 @@ export default function PaymongoDashboardPage() {
                             {new Date(tx.timestamp).toLocaleTimeString()}
                           </p>
                         </td>
-
-                        {/* Service — whitespace-nowrap stops "TOP-UP" from breaking */}
                         <td className="px-3 py-3">
                           <span className="text-[10px] font-semibold text-slate-200 uppercase whitespace-nowrap">
                             {tx.type}
                           </span>
                         </td>
-
-                        {/* Amount — single string, tabular nums, never wraps */}
                         <td className="px-3 py-3 text-right">
                           <span
                             className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${
@@ -247,8 +238,6 @@ export default function PaymongoDashboardPage() {
                             {formatAmount(tx.type, tx.amount)}
                           </span>
                         </td>
-
-                        {/* Result */}
                         <td className="px-3 py-3 text-center">
                           <Badge
                             variant="outline"
