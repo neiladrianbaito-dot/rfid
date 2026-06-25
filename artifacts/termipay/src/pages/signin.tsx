@@ -43,8 +43,8 @@ const ParticleNetworkBackground = () => {
       isMouse?: boolean;
     };
 
-    let canW = window.innerWidth;
-    let canH = window.innerHeight;
+    let canW = 0;
+    let canH = 0;
     let particles: Particle[] = [];
     let rafId = 0;
     let mouseParticle: Particle | null = null;
@@ -211,7 +211,7 @@ const ParticleNetworkBackground = () => {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(30,41,59,0.5)_0%,_rgba(2,6,23,1)_100%)]" />
       <div className="absolute top-[-5%] right-[-5%] w-[30%] h-[30%] bg-blue-500/10 rounded-full blur-[100px]" />
       <div className="absolute bottom-[-5%] left-[-5%] w-[30%] h-[30%] bg-emerald-500/10 rounded-full blur-[100px]" />
-      <canvas ref={canvasRef} className="absolute inset-0" />
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
     </div>
   );
 };
@@ -296,27 +296,35 @@ export default function SigninPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
+    <div className="min-h-screen min-h-[100dvh] flex items-center justify-center px-4 py-8 sm:p-6 relative overflow-hidden">
       <ParticleNetworkBackground />
 
       <div className="w-full max-w-[420px] z-10">
-        <div className="text-center mb-8">
+        {/* Header */}
+        <div className="text-center mb-6 sm:mb-8">
           <div className="inline-flex items-center justify-center p-3 bg-blue-500/10 rounded-2xl border border-blue-500/20 mb-4">
-            <CreditCard className="h-8 w-8 text-blue-400" />
+            <CreditCard className="h-7 w-7 sm:h-8 sm:w-8 text-blue-400" />
           </div>
-          <h1 className="text-3xl font-black text-white tracking-tight italic">ACCESS THE SYSTEM</h1>
-          <p className="text-slate-500 text-xs uppercase tracking-[0.3em] mt-2">Digital Transit Network</p>
+          {/* FIX: single line, no-wrap, scales with viewport */}
+          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight italic whitespace-nowrap">
+            ACCESS THE WALLET
+          </h1>
+          <p className="text-slate-500 text-[10px] uppercase tracking-[0.25em] mt-2">
+            Digital Transit Network
+          </p>
         </div>
 
+        {/* Card */}
         <Card className="bg-slate-900/40 backdrop-blur-xl border-slate-800 shadow-2xl overflow-hidden">
           <div className="h-1 w-full bg-gradient-to-r from-blue-500 via-emerald-500 to-blue-500" />
-          <CardHeader className="pb-4">
-            <CardTitle className="text-xl text-white">Sign In</CardTitle>
+          <CardHeader className="pb-4 px-5 sm:px-6 pt-5 sm:pt-6">
+            <CardTitle className="text-lg sm:text-xl text-white">Sign In</CardTitle>
             <CardDescription className="text-slate-500 text-xs">
               Welcome back. Please authenticate to access your wallet.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+
+          <CardContent className="px-5 sm:px-6 pb-5 sm:pb-6">
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
                 <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] animate-in fade-in slide-in-from-top-1">
@@ -324,12 +332,13 @@ export default function SigninPage() {
                 </div>
               )}
 
+              {/* Email */}
               <div className="space-y-1.5">
                 <Label htmlFor="email" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">
                   Email Address
                 </Label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
                   <Input
                     id="email"
                     type="email"
@@ -338,17 +347,19 @@ export default function SigninPage() {
                     placeholder="name@example.com"
                     disabled={isSubmitting}
                     required
-                    className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 pl-10 h-11 text-white transition-all"
+                    autoComplete="email"
+                    className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 pl-10 h-11 text-white text-sm transition-all"
                   />
                 </div>
               </div>
 
+              {/* Password */}
               <div className="space-y-1.5">
                 <Label htmlFor="password" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">
                   Security Password
                 </Label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
@@ -357,22 +368,25 @@ export default function SigninPage() {
                     placeholder="••••••••"
                     disabled={isSubmitting}
                     required
-                    className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 pl-10 pr-10 h-11 text-white transition-all"
+                    autoComplete="current-password"
+                    className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 pl-10 pr-10 h-11 text-white text-sm transition-all"
                   />
                   <button
                     type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors p-1 -mr-1"
                     onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
 
-              <div className="flex justify-end -mt-2">
+              {/* Forgot password link */}
+              <div className="flex justify-end -mt-1">
                 <button
                   type="button"
-                  className="text-[10px] font-semibold text-blue-400 hover:text-blue-300"
+                  className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 transition-colors py-1"
                   onClick={() => {
                     setForgotOpen(true);
                     setForgotEmail(email.trim());
@@ -384,9 +398,10 @@ export default function SigninPage() {
                 </button>
               </div>
 
+              {/* Submit */}
               <Button
                 type="submit"
-                className="w-full h-11 bg-blue-600 hover:bg-blue-500 text-white font-bold transition-all shadow-lg shadow-blue-900/20"
+                className="w-full h-11 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold transition-all shadow-lg shadow-blue-900/20 text-sm"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
@@ -400,7 +415,8 @@ export default function SigninPage() {
               </Button>
             </form>
 
-            <div className="mt-6 pt-6 border-t border-slate-800">
+            {/* Sign up link */}
+            <div className="mt-5 pt-5 border-t border-slate-800">
               <p className="text-sm text-slate-500 text-center">
                 No account yet?{" "}
                 <Link href="/signup" className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
@@ -408,92 +424,94 @@ export default function SigninPage() {
                 </Link>
               </p>
             </div>
-
-            {/* ✅ FIXED: Mobile-responsive forgot password modal */}
-            <Dialog open={forgotOpen} onOpenChange={setForgotOpen}>
-              <DialogContent
-                className="
-                  bg-slate-900 border-slate-800 text-white
-                  w-[calc(100vw-2rem)] max-w-md
-                  mx-auto
-                  rounded-2xl
-                  max-h-[90dvh] overflow-y-auto
-                  p-5 sm:p-6
-                  gap-0
-                "
-              >
-                <DialogHeader className="mb-5">
-                  <DialogTitle className="text-base font-semibold text-white">
-                    Reset your password
-                  </DialogTitle>
-                  <DialogDescription className="text-slate-400 text-xs mt-1 leading-relaxed">
-                    Enter your registered email and we will send you a secure reset link valid for 1 hour.
-                  </DialogDescription>
-                </DialogHeader>
-
-                <form onSubmit={handleForgotSubmit} className="space-y-4">
-                  {forgotError && (
-                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs leading-relaxed">
-                      {forgotError}
-                    </div>
-                  )}
-                  {forgotMessage && (
-                    <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs leading-relaxed">
-                      {forgotMessage}
-                    </div>
-                  )}
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="forgot-email" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">
-                      Email Address
-                    </Label>
-                    <Input
-                      id="forgot-email"
-                      type="email"
-                      value={forgotEmail}
-                      onChange={(e) => setForgotEmail(e.target.value)}
-                      placeholder="name@example.com"
-                      className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 h-11 text-white"
-                      disabled={forgotBusy}
-                      required
-                    />
-                  </div>
-
-                  {/* ✅ Stacked on mobile, side-by-side on sm+ */}
-                  <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="border-slate-700 text-slate-300 hover:bg-slate-800 h-11 w-full sm:w-auto"
-                      onClick={() => setForgotOpen(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-11 w-full sm:w-auto"
-                      disabled={forgotBusy}
-                    >
-                      {forgotBusy ? (
-                        <span className="inline-flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Sending…
-                        </span>
-                      ) : (
-                        "Send reset link"
-                      )}
-                    </Button>
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
           </CardContent>
         </Card>
 
-        <p className="mt-8 text-[10px] text-slate-600 text-center uppercase tracking-[0.2em]">
+        {/* Footer */}
+        <p className="mt-6 text-[10px] text-slate-600 text-center uppercase tracking-[0.2em]">
           Automated Transit Wallet System v2.0
         </p>
       </div>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={forgotOpen} onOpenChange={setForgotOpen}>
+        <DialogContent
+          className="
+            bg-slate-900 border-slate-800 text-white
+            w-[calc(100vw-2rem)] max-w-sm
+            mx-auto
+            rounded-2xl
+            max-h-[85dvh] overflow-y-auto
+            p-5 sm:p-6
+            gap-0
+          "
+        >
+          <DialogHeader className="mb-4">
+            <DialogTitle className="text-base font-semibold text-white">
+              Reset your password
+            </DialogTitle>
+            <DialogDescription className="text-slate-400 text-xs mt-1 leading-relaxed">
+              Enter your registered email and we'll send you a secure reset link valid for 1 hour.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleForgotSubmit} className="space-y-4">
+            {forgotError && (
+              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs leading-relaxed">
+                {forgotError}
+              </div>
+            )}
+            {forgotMessage && (
+              <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs leading-relaxed">
+                {forgotMessage}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="forgot-email" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">
+                Email Address
+              </Label>
+              <Input
+                id="forgot-email"
+                type="email"
+                value={forgotEmail}
+                onChange={(e) => setForgotEmail(e.target.value)}
+                placeholder="name@example.com"
+                autoComplete="email"
+                className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 h-11 text-white text-sm"
+                disabled={forgotBusy}
+                required
+              />
+            </div>
+
+            {/* Stacked on mobile, side-by-side on sm+ */}
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                className="border-slate-700 text-slate-300 hover:bg-slate-800 h-11 w-full sm:w-auto text-sm"
+                onClick={() => setForgotOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-11 w-full sm:w-auto text-sm"
+                disabled={forgotBusy}
+              >
+                {forgotBusy ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Sending…
+                  </span>
+                ) : (
+                  "Send reset link"
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

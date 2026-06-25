@@ -7,16 +7,6 @@ import { Label } from "@/components/ui/label";
 import { CreditCard, Eye, EyeOff, Loader2, User, Mail, Lock, CheckCircle2 } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-url";
 
-/**
- * Particle Network Background
- * Dots drift in from the edges, fade in/out, and link to nearby
- * neighbors with thin lines. Mouse/touch position joins the network.
- *
- * Mouse/touch listeners are attached at the WINDOW level (not just the
- * canvas) so the particle network keeps tracking the cursor even when
- * it's hovering over foreground UI like the Create Account card, since
- * the canvas sits behind everything (-z-10).
- */
 const ParticleNetworkBackground = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -31,7 +21,6 @@ const ParticleNetworkBackground = () => {
     const ALPHA_F = 0.03;
     const DIS_LIMIT = 140;
     const LINE_WIDTH = 0.8;
-    // Matches the page's blue accent (blue-500: #3b82f6)
     const BALL_COLOR = { r: 96, g: 165, b: 250 };
 
     type Particle = {
@@ -44,8 +33,8 @@ const ParticleNetworkBackground = () => {
       isMouse?: boolean;
     };
 
-    let canW = window.innerWidth;
-    let canH = window.innerHeight;
+    let canW = 0;
+    let canH = 0;
     let particles: Particle[] = [];
     let rafId = 0;
     let mouseParticle: Particle | null = null;
@@ -58,14 +47,10 @@ const ParticleNetworkBackground = () => {
       const min = -0.6;
       const max = 0.6;
       switch (pos) {
-        case "top":
-          return [randomNumFrom(min, max), randomNumFrom(0.05, max)];
-        case "right":
-          return [randomNumFrom(min, -0.05), randomNumFrom(min, max)];
-        case "bottom":
-          return [randomNumFrom(min, max), randomNumFrom(min, -0.05)];
-        case "left":
-          return [randomNumFrom(0.05, max), randomNumFrom(min, max)];
+        case "top":    return [randomNumFrom(min, max), randomNumFrom(0.05, max)];
+        case "right":  return [randomNumFrom(min, -0.05), randomNumFrom(min, max)];
+        case "bottom": return [randomNumFrom(min, max), randomNumFrom(min, -0.05)];
+        case "left":   return [randomNumFrom(0.05, max), randomNumFrom(min, max)];
       }
     };
 
@@ -74,14 +59,10 @@ const ParticleNetworkBackground = () => {
       const [vx, vy] = getRandomSpeed(pos);
       const base = { vx, vy, alpha: 1, phase: randomNumFrom(0, 10) };
       switch (pos) {
-        case "top":
-          return { ...base, x: randomSidePos(canW), y: -R };
-        case "right":
-          return { ...base, x: canW + R, y: randomSidePos(canH) };
-        case "bottom":
-          return { ...base, x: randomSidePos(canW), y: canH + R };
-        case "left":
-          return { ...base, x: -R, y: randomSidePos(canH) };
+        case "top":    return { ...base, x: randomSidePos(canW), y: -R };
+        case "right":  return { ...base, x: canW + R, y: randomSidePos(canH) };
+        case "bottom": return { ...base, x: randomSidePos(canW), y: canH + R };
+        case "left":   return { ...base, x: -R, y: randomSidePos(canH) };
       }
     };
 
@@ -145,10 +126,7 @@ const ParticleNetworkBackground = () => {
     const updateParticles = () => {
       const next: Particle[] = [];
       particles.forEach((p) => {
-        if (p.isMouse) {
-          next.push(p);
-          return;
-        }
+        if (p.isMouse) { next.push(p); return; }
         p.x += p.vx;
         p.y += p.vy;
         p.phase += ALPHA_F;
@@ -161,9 +139,7 @@ const ParticleNetworkBackground = () => {
     };
 
     const addParticleIfNeeded = () => {
-      if (particles.length < BALL_NUM) {
-        particles.push(getRandomParticle());
-      }
+      if (particles.length < BALL_NUM) particles.push(getRandomParticle());
     };
 
     const render = () => {
@@ -175,10 +151,6 @@ const ParticleNetworkBackground = () => {
       rafId = window.requestAnimationFrame(render);
     };
 
-    const handleResize = () => resize();
-
-    // Shared helper: convert viewport coords -> canvas-relative coords,
-    // and create/update the mouse particle.
     const setMouseParticlePos = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect();
       if (!mouseParticle) {
@@ -194,73 +166,46 @@ const ParticleNetworkBackground = () => {
       mouseParticle = null;
     };
 
-    // Mouse — attached on window so it keeps working even over
-    // foreground UI (Card, inputs, buttons) since the canvas sits at -z-10.
-    const handleWindowMouseMove = (e: MouseEvent) => {
-      setMouseParticlePos(e.clientX, e.clientY);
-    };
-    const handleWindowMouseOut = (e: MouseEvent) => {
-      // relatedTarget is null when the cursor actually leaves the browser window
-      if (!e.relatedTarget) {
-        clearMouseParticle();
-      }
-    };
-
-    // Touch — tap/drag joins the network the same way a mouse hover does
-    const handleTouchStart = (e: TouchEvent) => {
-      const touch = e.touches[0];
-      if (touch) setMouseParticlePos(touch.clientX, touch.clientY);
-    };
-    const handleTouchMove = (e: TouchEvent) => {
-      // Prevent the page from scrolling while dragging a finger across the background
-      e.preventDefault();
-      const touch = e.touches[0];
-      if (touch) setMouseParticlePos(touch.clientX, touch.clientY);
-    };
-    const handleTouchEnd = () => {
-      clearMouseParticle();
-    };
+    const handleWindowMouseMove = (e: MouseEvent) => setMouseParticlePos(e.clientX, e.clientY);
+    const handleWindowMouseOut  = (e: MouseEvent) => { if (!e.relatedTarget) clearMouseParticle(); };
+    const handleTouchStart = (e: TouchEvent) => { const t = e.touches[0]; if (t) setMouseParticlePos(t.clientX, t.clientY); };
+    const handleTouchMove  = (e: TouchEvent) => { e.preventDefault(); const t = e.touches[0]; if (t) setMouseParticlePos(t.clientX, t.clientY); };
+    const handleTouchEnd   = () => clearMouseParticle();
 
     resize();
     initParticles(BALL_NUM);
     rafId = window.requestAnimationFrame(render);
 
-    window.addEventListener("resize", handleResize);
+    window.addEventListener("resize", resize);
     window.addEventListener("mousemove", handleWindowMouseMove);
     window.addEventListener("mouseout", handleWindowMouseOut);
     canvas.addEventListener("touchstart", handleTouchStart, { passive: true });
-    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
-    canvas.addEventListener("touchend", handleTouchEnd);
-    canvas.addEventListener("touchcancel", handleTouchEnd);
+    canvas.addEventListener("touchmove",  handleTouchMove,  { passive: false });
+    canvas.addEventListener("touchend",   handleTouchEnd);
+    canvas.addEventListener("touchcancel",handleTouchEnd);
 
     return () => {
       window.cancelAnimationFrame(rafId);
-      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("resize", resize);
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseout", handleWindowMouseOut);
       canvas.removeEventListener("touchstart", handleTouchStart);
-      canvas.removeEventListener("touchmove", handleTouchMove);
-      canvas.removeEventListener("touchend", handleTouchEnd);
-      canvas.removeEventListener("touchcancel", handleTouchEnd);
+      canvas.removeEventListener("touchmove",  handleTouchMove);
+      canvas.removeEventListener("touchend",   handleTouchEnd);
+      canvas.removeEventListener("touchcancel",handleTouchEnd);
     };
   }, []);
 
   return (
     <div className="fixed inset-0 -z-10 bg-[#020617] overflow-hidden">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(30,41,59,0.5)_0%,_rgba(2,6,23,1)_100%)]" />
-      {/* Keep the original blue/emerald accent glows behind the particles */}
       <div className="absolute top-[-5%] right-[-5%] w-[30%] h-[30%] bg-blue-500/10 rounded-full blur-[100px]" />
       <div className="absolute bottom-[-5%] left-[-5%] w-[30%] h-[30%] bg-emerald-500/10 rounded-full blur-[100px]" />
-      <canvas ref={canvasRef} className="absolute inset-0" />
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
     </div>
   );
 };
 
-// ── Calls YOUR backend directly — checks the typed full name against
-// records the admin already pre-registered in the system (the `users`
-// table). Used right before account creation inside handleSubmit, not
-// as a separate verify step — the result only shows up after the
-// person clicks "Create Account".
 async function checkFullNameMatch(fullName: string): Promise<{ fullName: string; status?: string }> {
   const response = await fetch(
     buildApiUrl(`/auth/check-full-name?fullName=${encodeURIComponent(fullName)}`)
@@ -310,10 +255,6 @@ export default function SignupPage() {
 
     setIsSubmitting(true);
     try {
-      // ── Step 1: full name must match a pre-registered record ──
-      // Blocks account creation if the typed name isn't found in the
-      // `users` table (the admin-created records). Result only shows
-      // up after the single "Create Account" click.
       try {
         await checkFullNameMatch(fullNameTrim);
       } catch (nameErr) {
@@ -325,10 +266,6 @@ export default function SignupPage() {
         return;
       }
 
-      // ── Step 2: name matched — proceed to create the account ──
-      // Calls YOUR backend directly — zero Supabase Auth involved.
-      // The backend should independently re-check the name match
-      // server-side too, since this client-side check can be bypassed.
       const res = await fetch(buildApiUrl("/auth/signup"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -357,27 +294,35 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
+    <div className="min-h-screen min-h-[100dvh] flex items-center justify-center px-4 py-8 sm:p-6 relative overflow-hidden">
       <ParticleNetworkBackground />
 
       <div className="w-full max-w-[420px] z-10">
-        <div className="text-center mb-8">
+        {/* Header */}
+        <div className="text-center mb-6 sm:mb-8">
           <div className="inline-flex items-center justify-center p-3 bg-blue-500/10 rounded-2xl border border-blue-500/20 mb-4">
-            <CreditCard className="h-8 w-8 text-blue-400" />
+            <CreditCard className="h-7 w-7 sm:h-8 sm:w-8 text-blue-400" />
           </div>
-          <h1 className="text-3xl font-black text-white tracking-tight italic">JOIN THE SYSTEM</h1>
-          <p className="text-slate-500 text-xs uppercase tracking-[0.3em] mt-2">Digital Transit Network</p>
+          {/* Single line, no wrap, scales with viewport */}
+          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight italic whitespace-nowrap">
+            JOIN THE NETWORK
+          </h1>
+          <p className="text-slate-500 text-[10px] uppercase tracking-[0.25em] mt-2">
+            Digital Transit Network
+          </p>
         </div>
 
+        {/* Card */}
         <Card className="bg-slate-900/40 backdrop-blur-xl border-slate-800 shadow-2xl overflow-hidden">
           <div className="h-1 w-full bg-gradient-to-r from-blue-500 via-emerald-500 to-blue-500" />
-          <CardHeader className="pb-4">
-            <CardTitle className="text-xl text-white">Create Account</CardTitle>
+          <CardHeader className="pb-4 px-5 sm:px-6 pt-5 sm:pt-6">
+            <CardTitle className="text-lg sm:text-xl text-white">Create Account</CardTitle>
             <CardDescription className="text-slate-500 text-xs">
               Enter your details to get started with your digital wallet.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+
+          <CardContent className="px-5 sm:px-6 pb-5 sm:pb-6">
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
                 <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] animate-in fade-in slide-in-from-top-1">
@@ -386,17 +331,18 @@ export default function SignupPage() {
               )}
               {success && (
                 <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] flex items-center gap-2 animate-in zoom-in-95">
-                  <CheckCircle2 className="h-4 w-4" />
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
                   {success}
                 </div>
               )}
 
+              {/* Full Name */}
               <div className="space-y-1.5">
                 <Label htmlFor="fullName" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">
                   Full Name
                 </Label>
                 <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
                   <Input
                     id="fullName"
                     type="text"
@@ -405,17 +351,19 @@ export default function SignupPage() {
                     placeholder="Juan Dela Cruz"
                     disabled={isSubmitting}
                     required
-                    className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 pl-10 h-11 text-white transition-all"
+                    autoComplete="name"
+                    className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 pl-10 h-11 text-white text-sm transition-all"
                   />
                 </div>
               </div>
 
+              {/* Email */}
               <div className="space-y-1.5">
                 <Label htmlFor="email" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">
                   Email Address
                 </Label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
                   <Input
                     id="email"
                     type="email"
@@ -424,17 +372,19 @@ export default function SignupPage() {
                     placeholder="name@example.com"
                     disabled={isSubmitting}
                     required
-                    className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 pl-10 h-11 text-white transition-all"
+                    autoComplete="email"
+                    className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 pl-10 h-11 text-white text-sm transition-all"
                   />
                 </div>
               </div>
 
+              {/* Password */}
               <div className="space-y-1.5">
                 <Label htmlFor="password" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">
                   Security Password
                 </Label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
@@ -443,21 +393,24 @@ export default function SignupPage() {
                     placeholder="••••••••"
                     disabled={isSubmitting}
                     required
-                    className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 pl-10 pr-10 h-11 text-white transition-all"
+                    autoComplete="new-password"
+                    className="bg-slate-950/50 border-slate-700 focus:border-blue-500/50 pl-10 pr-10 h-11 text-white text-sm transition-all"
                   />
                   <button
                     type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors p-1 -mr-1"
                     onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
 
+              {/* Submit */}
               <Button
                 type="submit"
-                className="w-full h-11 bg-blue-600 hover:bg-blue-500 text-white font-bold transition-all shadow-lg shadow-blue-900/20 mt-2"
+                className="w-full h-11 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold transition-all shadow-lg shadow-blue-900/20 text-sm mt-2"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
@@ -471,7 +424,8 @@ export default function SignupPage() {
               </Button>
             </form>
 
-            <div className="mt-6 pt-6 border-t border-slate-800">
+            {/* Sign in link */}
+            <div className="mt-5 pt-5 border-t border-slate-800">
               <p className="text-sm text-slate-500 text-center">
                 Already have an account?{" "}
                 <Link href="/signin" className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
@@ -482,7 +436,8 @@ export default function SignupPage() {
           </CardContent>
         </Card>
 
-        <p className="mt-8 text-[10px] text-slate-600 text-center uppercase tracking-[0.2em]">
+        {/* Footer */}
+        <p className="mt-6 text-[10px] text-slate-600 text-center uppercase tracking-[0.2em]">
           Automated Transit Wallet System v2.0
         </p>
       </div>
