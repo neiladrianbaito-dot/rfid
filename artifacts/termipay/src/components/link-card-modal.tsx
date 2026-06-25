@@ -1,5 +1,5 @@
 import ReCAPTCHA from "react-google-recaptcha";
-import { LinkIcon, Lock, CheckCircle2, XCircle, Loader2, Ban, ShieldAlert, Clock } from "lucide-react";
+import { LinkIcon, Lock, CheckCircle2, XCircle, Loader2, Ban, ShieldAlert, Clock, ArrowLeft } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { RECAPTCHA_SITE_KEY } from "@/lib/api";
@@ -174,14 +174,13 @@ export function LinkCardModal(props: Props) {
                 )}
 
                 <div className="flex gap-2">
-                  <Button
-                    onClick={onCancel}
-                    disabled={isChecking}
-                    variant="outline"
-                    className="flex-1 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white h-12"
-                  >
-                    Cancel
-                  </Button>
+                     <button
+              onClick={() => window.history.back()}
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-[#1f2622] text-[#d7ded9] text-sm px-4 py-2.5 hover:border-[#4ea878] hover:text-[#7CFFB2] transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Go back
+            </button>
                   <Button
                     onClick={checkCard}
                     disabled={isChecking || !input.trim() || !captchaToken}
