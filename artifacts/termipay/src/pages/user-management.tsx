@@ -74,8 +74,6 @@ export default function UserManagementPage() {
     }
   );
 
-  // Realtime: mag-refetch tuwing may pagbabago sa users table
-  // (bagong register, edit, o delete) — walang nakatakdang interval na
   useRealtimeRefetch(["users"], () => {
     refetchUsers();
   });
@@ -257,7 +255,7 @@ export default function UserManagementPage() {
                         return (
                           <TableRow
                             key={user.id}
-                            className={`border-slate-800/50 transition-colors hover:bg-white/5 group ${
+                            className={`border-slate-800/50 transition-colors hover:bg-white/5 ${
                               newRowId === user.id ? "row-pulse" : ""
                             }`}
                           >
@@ -332,13 +330,15 @@ export default function UserManagementPage() {
                               </Badge>
                             </TableCell>
 
+                            {/* ✅ FIXED: Always visible actions — same as TransactionsPage */}
                             <TableCell className="text-right">
-                              <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="flex justify-end gap-1">
                                 <Button
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => openEdit(user)}
-                                  className="h-8 w-8 text-slate-400 hover:text-white hover:bg-white/10"
+                                  className="h-8 w-8 text-blue-400/70 hover:text-blue-300 hover:bg-blue-500/10"
+                                  title="Edit user"
                                 >
                                   <Pencil className="w-3.5 h-3.5" />
                                 </Button>
@@ -346,7 +346,8 @@ export default function UserManagementPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => setDeleteUser(user)}
-                                  className="h-8 w-8 text-red-500/50 hover:text-red-400 hover:bg-red-500/10"
+                                  className="h-8 w-8 text-red-400/70 hover:text-red-400 hover:bg-red-500/10"
+                                  title="Delete user"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </Button>

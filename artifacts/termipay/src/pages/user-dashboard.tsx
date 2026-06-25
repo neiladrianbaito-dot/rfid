@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import {
   Wallet, Lock, Activity, User, Phone, Tag, ShieldCheck,
   LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings,
-  ChevronRight,
+  ChevronRight, X, Hash, Calendar, Clock,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,12 +38,165 @@ function getInitials(name: string): string {
 
 type Tab = "home" | "activity" | "settings";
 
+type Transaction = {
+  id: string | number;
+  timestamp: string;
+  type: string;
+  amount: number | string;
+  status: string;
+};
+
+// ── Transaction Detail Modal ──────────────────────────────────────────────────
+function TransactionDetailModal({
+  tx,
+  onClose,
+}: {
+  tx: Transaction | null;
+  onClose: () => void;
+}) {
+  if (!tx) return null;
+
+  const isFare = tx.type === "Fare";
+  const isSuccess = tx.status === "Success";
+  const date = new Date(tx.timestamp);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <div className="flex items-center gap-2 text-slate-400 text-[11px] font-black uppercase tracking-widest">
+            <Activity className="h-4 w-4 text-blue-400" />
+            Transaction Details
+          </div>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onClose}
+            className="h-7 w-7 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-5 space-y-4">
+          {/* Badges */}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <Badge
+              className={
+                isFare
+                  ? "bg-red-500/10 text-red-400 border-red-500/20 px-3 py-1"
+                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-3 py-1"
+              }
+            >
+              {tx.type}
+            </Badge>
+            <Badge
+              className={
+                isSuccess
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-3 py-1"
+                  : "bg-red-500/10 text-red-400 border-red-500/20 px-3 py-1"
+              }
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full mr-1.5 inline-block ${
+                  isSuccess ? "bg-emerald-400" : "bg-red-400"
+                }`}
+              />
+              {tx.status}
+            </Badge>
+          </div>
+
+          {/* Amount */}
+          <p
+            className={`text-4xl font-black tracking-tighter ${
+              isFare ? "text-red-400" : "text-emerald-400"
+            }`}
+          >
+            {formatAmount(tx.type, tx.amount)}
+          </p>
+
+          {/* Detail rows */}
+          <div className="space-y-2">
+            {[
+              {
+                icon: <Hash className="h-3.5 w-3.5" />,
+                label: "Transaction ID",
+                value: String(tx.id),
+                mono: true,
+              },
+              {
+                icon: <Calendar className="h-3.5 w-3.5" />,
+                label: "Date",
+                value: date.toLocaleDateString(undefined, {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                }),
+                mono: false,
+              },
+              {
+                icon: <Clock className="h-3.5 w-3.5" />,
+                label: "Time",
+                value: date.toLocaleTimeString(),
+                mono: false,
+              },
+              {
+                icon: <CreditCard className="h-3.5 w-3.5" />,
+                label: "Service Type",
+                value: tx.type,
+                mono: false,
+              },
+            ].map(({ icon, label, value, mono }) => (
+              <div
+                key={label}
+                className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl px-4 py-3"
+              >
+                <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                  {icon}
+                  {label}
+                </span>
+                <span
+                  className={`text-xs font-semibold text-slate-300 ${
+                    mono ? "font-mono" : ""
+                  }`}
+                >
+                  {value}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Dismiss button */}
+          <Button
+            onClick={onClose}
+            variant="outline"
+            className="w-full border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white mt-1"
+          >
+            Close
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function PaymongoDashboardPage() {
   const [, setLocation] = useLocation();
   const [cardUid, setCardUid] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("home");
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
-  const { user, transactions, loading, error, lastUpdated, isPulsing } = useCardData(cardUid);
+  const { user, transactions, loading, error, lastUpdated, isPulsing } =
+    useCardData(cardUid);
   const currentBalance = Number(user?.balance || 0);
 
   const linkCard = useLinkCard((uid) => setCardUid(uid));
@@ -55,13 +208,19 @@ export default function PaymongoDashboardPage() {
 
   useEffect(() => {
     const token = window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
-    if (!token) { setLocation("/signin"); return; }
+    if (!token) {
+      setLocation("/signin");
+      return;
+    }
     void (async () => {
       try {
         const profile = await getSignedInUser();
         const linkedUid = cleanCardUid(profile?.user?.linkedCardUid || "");
-        if (linkedUid) { setCardUid(linkedUid); }
-        else { linkCard.setIsOpen(true); }
+        if (linkedUid) {
+          setCardUid(linkedUid);
+        } else {
+          linkCard.setIsOpen(true);
+        }
       } catch {
         window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
         setLocation("/signin");
@@ -75,13 +234,23 @@ export default function PaymongoDashboardPage() {
   };
 
   const balanceText = useMemo(() => {
-    return `\u20B1${Number(user?.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+    return `\u20B1${Number(user?.balance || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+    })}`;
   }, [user?.balance]);
 
   const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
-    { tab: "home",     icon: <Home className="h-5 w-5" />,     label: "Home"     },
-    { tab: "activity", icon: <Activity className="h-5 w-5" />, label: "Activity" },
-    { tab: "settings", icon: <Settings className="h-5 w-5" />, label: "Settings" },
+    { tab: "home", icon: <Home className="h-5 w-5" />, label: "Home" },
+    {
+      tab: "activity",
+      icon: <Activity className="h-5 w-5" />,
+      label: "Activity",
+    },
+    {
+      tab: "settings",
+      icon: <Settings className="h-5 w-5" />,
+      label: "Settings",
+    },
   ];
 
   return (
@@ -89,6 +258,13 @@ export default function PaymongoDashboardPage() {
       {linkCard.isOpen && <LinkCardModal {...linkCard} />}
       <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
+
+      {/* Transaction Detail Modal */}
+      <TransactionDetailModal
+        tx={selectedTx}
+        onClose={() => setSelectedTx(null)}
+      />
+
       <style>{DASHBOARD_STYLES}</style>
 
       {/* STICKY HEADER */}
@@ -99,24 +275,41 @@ export default function PaymongoDashboardPage() {
               <Wallet className="h-7 w-7 text-emerald-400" />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight text-white leading-none">Fare Collection System</h1>
-              <p className="text-[10px] uppercase tracking-widest text-slate-500 mt-1 font-semibold">User Dashboard</p>
+              <h1 className="text-xl font-bold tracking-tight text-white leading-none">
+                Fare Collection System
+              </h1>
+              <p className="text-[10px] uppercase tracking-widest text-slate-500 mt-1 font-semibold">
+                User Dashboard
+              </p>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-2">
-            <Button variant="ghost" onClick={changePassword.open} className="text-slate-400 hover:text-violet-400 hover:bg-violet-400/10 gap-2">
-              <KeyRound className="h-4 w-4" /><span>Change Password</span>
+            <Button
+              variant="ghost"
+              onClick={changePassword.open}
+              className="text-slate-400 hover:text-violet-400 hover:bg-violet-400/10 gap-2"
+            >
+              <KeyRound className="h-4 w-4" />
+              <span>Change Password</span>
             </Button>
-            <Button variant="ghost" onClick={handleLogout} className="text-slate-400 hover:text-red-400 hover:bg-red-400/10 gap-2">
-              <LogOut className="h-4 w-4" /><span>Logout</span>
+            <Button
+              variant="ghost"
+              onClick={handleLogout}
+              className="text-slate-400 hover:text-red-400 hover:bg-red-400/10 gap-2"
+            >
+              <LogOut className="h-4 w-4" />
+              <span>Logout</span>
             </Button>
           </div>
         </div>
       </div>
 
       {/* SCROLLABLE CONTENT */}
-      <div className={`mx-auto w-full max-w-6xl px-4 sm:px-8 pb-24 md:pb-8 pt-6 space-y-6 dashboard-content ${linkCard.isOpen ? "is-obscured" : ""}`}>
-
+      <div
+        className={`mx-auto w-full max-w-6xl px-4 sm:px-8 pb-24 md:pb-8 pt-6 space-y-6 dashboard-content ${
+          linkCard.isOpen ? "is-obscured" : ""
+        }`}
+      >
         {/* ── Linked Card ── */}
         <div className="flex items-center justify-between gap-2 bg-slate-900/20 px-3 py-3 rounded-2xl border border-slate-800/50">
           <div className="flex items-center gap-2 shrink-0">
@@ -124,7 +317,9 @@ export default function PaymongoDashboardPage() {
               <Lock className="h-3.5 w-3.5 text-emerald-400" />
             </div>
             <div>
-              <p className="text-xs font-bold text-slate-300 leading-none">Linked Card</p>
+              <p className="text-xs font-bold text-slate-300 leading-none">
+                Linked Card
+              </p>
               <p className="text-[10px] text-slate-500">Permanently linked</p>
             </div>
           </div>
@@ -133,9 +328,19 @@ export default function PaymongoDashboardPage() {
               {cardUid || "Not linked"}
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <div className={`h-2 w-2 rounded-full shrink-0 ${loading ? "bg-yellow-400" : "bg-emerald-400 realtime-dot"}`} />
+              <div
+                className={`h-2 w-2 rounded-full shrink-0 ${
+                  loading
+                    ? "bg-yellow-400"
+                    : "bg-emerald-400 realtime-dot"
+                }`}
+              />
               <span className="text-[10px] text-slate-500 hidden sm:inline whitespace-nowrap">
-                {loading ? "Loading..." : lastUpdated ? lastUpdated.toLocaleTimeString() : "Connecting..."}
+                {loading
+                  ? "Loading..."
+                  : lastUpdated
+                  ? lastUpdated.toLocaleTimeString()
+                  : "Connecting..."}
               </span>
             </div>
           </div>
@@ -150,20 +355,27 @@ export default function PaymongoDashboardPage() {
         {/* ── HOME tab ── */}
         <div className={activeTab === "home" ? "block" : "hidden md:block"}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-            {/* ── Welcome Message — full width, no card ── */}
+            {/* Welcome */}
             <div className="col-span-1 md:col-span-3">
               <p className="text-2xl font-bold text-white">
-                Welcome back, <span className="text-emerald-400">{user?.fullName?.split(" ")[0] || "User"}</span> 👋
+                Welcome back,{" "}
+                <span className="text-emerald-400">
+                  {user?.fullName?.split(" ")[0] || "User"}
+                </span>{" "}
+                👋
               </p>
-              <p className="text-xs text-slate-500 mt-1">Here's your account overview.</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Here's your account overview.
+              </p>
             </div>
 
             {/* Balance Card */}
             <Card className="md:col-span-1 border-slate-800 bg-slate-900/40 backdrop-blur-md border-t-emerald-500/50 border-t-2">
               <CardContent className="pt-6">
                 <div className="flex justify-between items-start mb-2">
-                  <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Available Balance</p>
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                    Available Balance
+                  </p>
                   <Button
                     size="sm"
                     variant="outline"
@@ -173,31 +385,62 @@ export default function PaymongoDashboardPage() {
                     <PlusCircle className="h-3 w-3 mr-1" /> TOP UP
                   </Button>
                 </div>
-                <h2 className={`text-5xl font-black text-white tracking-tighter ${isPulsing ? "balance-pulse" : ""}`}>
+                <h2
+                  className={`text-5xl font-black text-white tracking-tighter ${
+                    isPulsing ? "balance-pulse" : ""
+                  }`}
+                >
                   {balanceText}
                 </h2>
                 <div className="mt-3 space-y-1">
                   <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
                     <div
-                      className={`h-1 rounded-full transition-all ${isAtMaxBalance ? "bg-red-500" : currentBalance / 20000 >= 0.8 ? "bg-amber-400" : "bg-emerald-500"}`}
-                      style={{ width: `${Math.min((currentBalance / 20000) * 100, 100)}%` }}
+                      className={`h-1 rounded-full transition-all ${
+                        isAtMaxBalance
+                          ? "bg-red-500"
+                          : currentBalance / 20000 >= 0.8
+                          ? "bg-amber-400"
+                          : "bg-emerald-500"
+                      }`}
+                      style={{
+                        width: `${Math.min(
+                          (currentBalance / 20000) * 100,
+                          100
+                        )}%`,
+                      }}
                     />
                   </div>
                   <p className="text-[9px] text-slate-600 font-mono">
-                    {isAtMaxBalance
-                      ? <span className="text-red-400/70">Max balance reached</span>
-                      : <>{"\u20B1"}{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })} remaining</>
-                    }
+                    {isAtMaxBalance ? (
+                      <span className="text-red-400/70">
+                        Max balance reached
+                      </span>
+                    ) : (
+                      <>
+                        {"\u20B1"}
+                        {remainingTopup.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                        })}{" "}
+                        remaining
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Badge className={user?.status === "Active"
-                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-3 py-1"
-                    : "bg-red-500/10 text-red-400 border-red-500/20 px-3 py-1"
-                  }>
-                    <ShieldCheck className="h-3 w-3 mr-1.5" />{user?.status || "Inactive"}
+                  <Badge
+                    className={
+                      user?.status === "Active"
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-3 py-1"
+                        : "bg-red-500/10 text-red-400 border-red-500/20 px-3 py-1"
+                    }
+                  >
+                    <ShieldCheck className="h-3 w-3 mr-1.5" />
+                    {user?.status || "Inactive"}
                   </Badge>
-                  <Badge variant="outline" className="border-slate-700 text-slate-400 px-3 py-1">
+                  <Badge
+                    variant="outline"
+                    className="border-slate-700 text-slate-400 px-3 py-1"
+                  >
                     {user?.type || "Standard User"}
                   </Badge>
                 </div>
@@ -208,16 +451,49 @@ export default function PaymongoDashboardPage() {
             <Card className="hidden md:block md:col-span-2 border-slate-800 bg-slate-900/40 backdrop-blur-md">
               <CardContent className="pt-8 grid grid-cols-1 sm:grid-cols-2 gap-y-8 gap-x-4">
                 {[
-                  { icon: <User className="h-5 w-5 text-blue-400" />,        bg: "bg-blue-500/10 border-blue-500/20",       label: "Name",    value: user?.fullName || "Not Linked" },
-                  { icon: <CreditCard className="h-5 w-5 text-purple-400" />, bg: "bg-purple-500/10 border-purple-500/20",   label: "UID",     value: user?.cardUid || "----", mono: true },
-                  { icon: <Phone className="h-5 w-5 text-orange-400" />,      bg: "bg-orange-500/10 border-orange-500/20",   label: "Contact", value: user?.contactNumber || "None" },
-                  { icon: <Tag className="h-5 w-5 text-emerald-400" />,       bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class",   value: user?.type || "General" },
+                  {
+                    icon: <User className="h-5 w-5 text-blue-400" />,
+                    bg: "bg-blue-500/10 border-blue-500/20",
+                    label: "Name",
+                    value: user?.fullName || "Not Linked",
+                  },
+                  {
+                    icon: <CreditCard className="h-5 w-5 text-purple-400" />,
+                    bg: "bg-purple-500/10 border-purple-500/20",
+                    label: "UID",
+                    value: user?.cardUid || "----",
+                    mono: true,
+                  },
+                  {
+                    icon: <Phone className="h-5 w-5 text-orange-400" />,
+                    bg: "bg-orange-500/10 border-orange-500/20",
+                    label: "Contact",
+                    value: user?.contactNumber || "None",
+                  },
+                  {
+                    icon: <Tag className="h-5 w-5 text-emerald-400" />,
+                    bg: "bg-emerald-500/10 border-emerald-500/20",
+                    label: "Class",
+                    value: user?.type || "General",
+                  },
                 ].map(({ icon, bg, label, value, mono }) => (
                   <div key={label} className="flex items-center gap-4">
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center border ${bg}`}>{icon}</div>
+                    <div
+                      className={`h-10 w-10 rounded-full flex items-center justify-center border ${bg}`}
+                    >
+                      {icon}
+                    </div>
                     <div>
-                      <p className="text-[10px] font-bold uppercase text-slate-500 leading-none mb-1">{label}</p>
-                      <p className={`text-base font-semibold text-slate-200 ${mono ? "font-mono" : ""}`}>{value}</p>
+                      <p className="text-[10px] font-bold uppercase text-slate-500 leading-none mb-1">
+                        {label}
+                      </p>
+                      <p
+                        className={`text-base font-semibold text-slate-200 ${
+                          mono ? "font-mono" : ""
+                        }`}
+                      >
+                        {value}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -226,29 +502,41 @@ export default function PaymongoDashboardPage() {
                     <Mail className="h-5 w-5 text-sky-400" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold uppercase text-slate-500 leading-none mb-1">Email</p>
-                    <p className="text-base text-slate-200">{user?.email || "Not linked"}</p>
+                    <p className="text-[10px] font-bold uppercase text-slate-500 leading-none mb-1">
+                      Email
+                    </p>
+                    <p className="text-base text-slate-200">
+                      {user?.email || "Not linked"}
+                    </p>
                   </div>
                 </div>
               </CardContent>
             </Card>
-
           </div>
         </div>
 
         {/* ── ACTIVITY tab ── */}
-        <div className={activeTab === "activity" ? "block" : "hidden md:block"}>
+        <div
+          className={
+            activeTab === "activity" ? "block" : "hidden md:block"
+          }
+        >
           <Card className="border-slate-800 bg-slate-900/40 backdrop-blur-md overflow-hidden">
             <CardHeader className="bg-slate-900/20 border-b border-slate-800">
               <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-400 uppercase tracking-widest">
                 <Activity className="h-4 w-4 text-blue-400" />
                 Activity Log
                 <span className="ml-auto flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5">
-                  <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-400 inline-block" />LIVE
+                  <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-400 inline-block" />
+                  LIVE
                 </span>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
+              {/* Hint text */}
+              <p className="px-4 pt-3 pb-1 text-[10px] text-slate-600 italic">
+                Tap a row to view transaction details.
+              </p>
               <div className="max-h-[400px] overflow-y-auto">
                 <table className="w-full text-left table-fixed">
                   <colgroup>
@@ -259,11 +547,17 @@ export default function PaymongoDashboardPage() {
                   </colgroup>
                   <thead className="bg-slate-950/50">
                     <tr>
-                      {(["Timestamp", "Service", "Amount", "Result"] as const).map((h, i) => (
+                      {(
+                        ["Timestamp", "Service", "Amount", "Result"] as const
+                      ).map((h, i) => (
                         <th
                           key={h}
                           className={`px-3 py-3 text-[9px] font-black uppercase text-slate-500 whitespace-nowrap ${
-                            i === 2 ? "text-right" : i === 3 ? "text-center" : ""
+                            i === 2
+                              ? "text-right"
+                              : i === 3
+                              ? "text-center"
+                              : ""
                           }`}
                         >
                           {h}
@@ -274,13 +568,20 @@ export default function PaymongoDashboardPage() {
                   <tbody className="divide-y divide-slate-800/50">
                     {transactions.length === 0 ? (
                       <tr>
-                        <td className="p-12 text-center text-slate-600 text-sm italic" colSpan={4}>
+                        <td
+                          className="p-12 text-center text-slate-600 text-sm italic"
+                          colSpan={4}
+                        >
                           No activity recorded.
                         </td>
                       </tr>
                     ) : (
                       transactions.map((tx) => (
-                        <tr key={tx.id} className="hover:bg-slate-800/20 transition-colors">
+                        <tr
+                          key={tx.id}
+                          onClick={() => setSelectedTx(tx)}
+                          className="hover:bg-slate-800/30 active:bg-slate-800/50 transition-colors cursor-pointer"
+                        >
                           <td className="px-3 py-3">
                             <p className="text-[10px] text-slate-300 font-medium leading-tight whitespace-nowrap">
                               {new Date(tx.timestamp).toLocaleDateString()}
@@ -295,7 +596,13 @@ export default function PaymongoDashboardPage() {
                             </span>
                           </td>
                           <td className="px-3 py-3 text-right">
-                            <span className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${tx.type === "Fare" ? "text-red-400" : "text-emerald-400"}`}>
+                            <span
+                              className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${
+                                tx.type === "Fare"
+                                  ? "text-red-400"
+                                  : "text-emerald-400"
+                              }`}
+                            >
                               {formatAmount(tx.type, tx.amount)}
                             </span>
                           </td>
@@ -322,7 +629,11 @@ export default function PaymongoDashboardPage() {
         </div>
 
         {/* ── SETTINGS tab (mobile only) ── */}
-        <div className={activeTab === "settings" ? "block md:hidden" : "hidden"}>
+        <div
+          className={
+            activeTab === "settings" ? "block md:hidden" : "hidden"
+          }
+        >
           <div className="space-y-4">
             <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
               <div className="flex items-center gap-4 px-5 py-5 border-b border-slate-800/60">
@@ -332,42 +643,85 @@ export default function PaymongoDashboardPage() {
                   </span>
                 </div>
                 <div>
-                  <p className="text-base font-bold text-white leading-tight">{user?.fullName || "Not linked"}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">{user?.email || "—"}</p>
+                  <p className="text-base font-bold text-white leading-tight">
+                    {user?.fullName || "Not linked"}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {user?.email || "—"}
+                  </p>
                   <div className="flex gap-2 mt-2">
-                    <Badge className={user?.status === "Active"
-                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-2 py-0.5 text-[9px]"
-                      : "bg-red-500/10 text-red-400 border-red-500/20 px-2 py-0.5 text-[9px]"
-                    }>
-                      <ShieldCheck className="h-2.5 w-2.5 mr-1" />{user?.status || "Inactive"}
+                    <Badge
+                      className={
+                        user?.status === "Active"
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-2 py-0.5 text-[9px]"
+                          : "bg-red-500/10 text-red-400 border-red-500/20 px-2 py-0.5 text-[9px]"
+                      }
+                    >
+                      <ShieldCheck className="h-2.5 w-2.5 mr-1" />
+                      {user?.status || "Inactive"}
                     </Badge>
-                    <Badge variant="outline" className="border-slate-700 text-slate-400 px-2 py-0.5 text-[9px]">
+                    <Badge
+                      variant="outline"
+                      className="border-slate-700 text-slate-400 px-2 py-0.5 text-[9px]"
+                    >
                       {user?.type || "Standard"}
                     </Badge>
                   </div>
                 </div>
               </div>
               {[
-                { icon: <CreditCard className="h-4 w-4 text-purple-400" />, label: "UID",     value: user?.cardUid || "----",      mono: true  },
-                { icon: <Phone className="h-4 w-4 text-orange-400" />,      label: "Contact", value: user?.contactNumber || "None", mono: false },
-                { icon: <Tag className="h-4 w-4 text-emerald-400" />,       label: "Class",   value: user?.type || "General",       mono: false },
-                { icon: <Mail className="h-4 w-4 text-sky-400" />,          label: "Email",   value: user?.email || "Not linked",   mono: false },
+                {
+                  icon: <CreditCard className="h-4 w-4 text-purple-400" />,
+                  label: "UID",
+                  value: user?.cardUid || "----",
+                  mono: true,
+                },
+                {
+                  icon: <Phone className="h-4 w-4 text-orange-400" />,
+                  label: "Contact",
+                  value: user?.contactNumber || "None",
+                  mono: false,
+                },
+                {
+                  icon: <Tag className="h-4 w-4 text-emerald-400" />,
+                  label: "Class",
+                  value: user?.type || "General",
+                  mono: false,
+                },
+                {
+                  icon: <Mail className="h-4 w-4 text-sky-400" />,
+                  label: "Email",
+                  value: user?.email || "Not linked",
+                  mono: false,
+                },
               ].map(({ icon, label, value, mono }, i, arr) => (
                 <div
                   key={label}
-                  className={`flex items-center gap-3 px-5 py-3.5 ${i < arr.length - 1 ? "border-b border-slate-800/50" : ""}`}
+                  className={`flex items-center gap-3 px-5 py-3.5 ${
+                    i < arr.length - 1 ? "border-b border-slate-800/50" : ""
+                  }`}
                 >
                   <div className="shrink-0 opacity-80">{icon}</div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 leading-none mb-0.5">{label}</p>
-                    <p className={`text-sm text-slate-200 truncate ${mono ? "font-mono" : "font-medium"}`}>{value}</p>
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 leading-none mb-0.5">
+                      {label}
+                    </p>
+                    <p
+                      className={`text-sm text-slate-200 truncate ${
+                        mono ? "font-mono" : "font-medium"
+                      }`}
+                    >
+                      {value}
+                    </p>
                   </div>
                 </div>
               ))}
             </div>
 
             <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
-              <p className="px-5 pt-4 pb-2 text-[9px] font-black uppercase tracking-widest text-slate-600">Account</p>
+              <p className="px-5 pt-4 pb-2 text-[9px] font-black uppercase tracking-widest text-slate-600">
+                Account
+              </p>
               <button
                 onClick={changePassword.open}
                 className="w-full flex items-center gap-4 px-5 py-4 border-b border-slate-800/50 hover:bg-slate-800/30 active:bg-slate-800/50 transition-colors"
@@ -376,8 +730,12 @@ export default function PaymongoDashboardPage() {
                   <KeyRound className="h-4 w-4 text-violet-400" />
                 </div>
                 <div className="flex-1 text-left">
-                  <p className="text-sm font-semibold text-slate-200">Change Password</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">Update your account password</p>
+                  <p className="text-sm font-semibold text-slate-200">
+                    Change Password
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Update your account password
+                  </p>
                 </div>
                 <ChevronRight className="h-4 w-4 text-slate-600 shrink-0" />
               </button>
@@ -390,7 +748,9 @@ export default function PaymongoDashboardPage() {
                 </div>
                 <div className="flex-1 text-left">
                   <p className="text-sm font-semibold text-red-400">Logout</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">Sign out of your account</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Sign out of your account
+                  </p>
                 </div>
                 <ChevronRight className="h-4 w-4 text-slate-600 shrink-0" />
               </button>
@@ -406,7 +766,9 @@ export default function PaymongoDashboardPage() {
         <footer className="hidden md:block border-t border-slate-800/60 pt-4 pb-2">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-widest text-slate-700">
             <span>Fare Collection System &mdash; User Dashboard</span>
-            <span>&copy; {new Date().getFullYear()} All rights reserved. | v1.0.0</span>
+            <span>
+              &copy; {new Date().getFullYear()} All rights reserved. | v1.0.0
+            </span>
           </div>
         </footer>
       </div>
@@ -420,14 +782,18 @@ export default function PaymongoDashboardPage() {
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors duration-150 ${
-                isActive ? "text-emerald-400" : "text-slate-600 hover:text-slate-400"
+                isActive
+                  ? "text-emerald-400"
+                  : "text-slate-600 hover:text-slate-400"
               }`}
             >
               {isActive && (
                 <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-emerald-400" />
               )}
               {icon}
-              <span className="text-[9px] font-bold uppercase tracking-wider">{label}</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">
+                {label}
+              </span>
             </button>
           );
         })}

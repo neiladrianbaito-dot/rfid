@@ -26,7 +26,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Trash2, Zap, History, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Trash2, Zap, History, ChevronLeft, ChevronRight, Eye } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +37,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 
 const PAGE_SIZE = 10;
@@ -46,6 +52,7 @@ export default function TransactionsPage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [deleteTx, setDeleteTx] = useState<any>(null);
+  const [viewTx, setViewTx] = useState<any>(null);
   const [page, setPage] = useState(1);
 
   // Realtime state
@@ -73,7 +80,6 @@ export default function TransactionsPage() {
   });
 
   // Realtime: mag-refetch tuwing may pagbabago sa transactions table
-  // (bagong fare/top-up, o pag-delete) — walang nakatakdang interval na
   useRealtimeRefetch(["transactions"], () => {
     refetchTransactions();
   });
@@ -124,7 +130,6 @@ export default function TransactionsPage() {
     }
   };
 
-  // ✅ UPDATED: Format number with commas (1000 → 1,000)
   const formatAmount = (amount: number) => {
     return Math.abs(amount).toLocaleString("en-PH", {
       minimumFractionDigits: 2,
@@ -257,7 +262,7 @@ export default function TransactionsPage() {
                       paginatedList.map((tx: any) => (
                         <TableRow
                           key={tx.id}
-                          className={`border-slate-800/50 transition-colors hover:bg-white/5 group ${
+                          className={`border-slate-800/50 transition-colors hover:bg-white/5 ${
                             newRowId === tx.id ? "row-pulse" : ""
                           }`}
                         >
@@ -282,7 +287,6 @@ export default function TransactionsPage() {
                               {tx.type}
                             </Badge>
                           </TableCell>
-                          {/* ✅ UPDATED: With comma formatting */}
                           <TableCell className={`text-xs font-black ${tx.type === "Fare" ? "text-red-500" : "text-emerald-500"}`}>
                             {tx.type === "Fare" ? "-" : "+"}₱{formatAmount(Number(tx.amount))}
                           </TableCell>
@@ -292,14 +296,24 @@ export default function TransactionsPage() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex justify-end gap-1">
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8 text-red-500/50 hover:text-red-400 hover:bg-red-500/10"
-                                onClick={() => setDeleteTx(tx)}
+                                className="h-8 w-8 text-blue-400/70 hover:text-blue-300 hover:bg-blue-500/10"
+                                onClick={() => setViewTx(tx)}
+                                title="View details"
                               >
-                                <Trash2 className="w-3 h-3" />
+                                <Eye className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-red-400/70 hover:text-red-400 hover:bg-red-500/10"
+                                onClick={() => setDeleteTx(tx)}
+                                title="Delete record"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </Button>
                             </div>
                           </TableCell>
@@ -354,6 +368,42 @@ export default function TransactionsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* View Transaction Dialog */}
+      <Dialog open={!!viewTx} onOpenChange={(open) => !open && setViewTx(null)}>
+        <DialogContent className="bg-slate-950 border-slate-800 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white uppercase font-black tracking-tighter text-sm flex items-center gap-2">
+              <Eye className="w-4 h-4 text-blue-400" />
+              Transaction Details
+            </DialogTitle>
+          </DialogHeader>
+          {viewTx && (
+            <div className="space-y-3 mt-2">
+              {[
+                { label: "Transaction ID", value: `#${viewTx.id}` },
+                { label: "Timestamp", value: new Date(viewTx.timestamp || viewTx.created_at).toLocaleString() },
+                { label: "Card UID", value: viewTx.card_uid || viewTx.cardUid, mono: true, accent: "text-blue-400" },
+                { label: "Full Name", value: viewTx.full_name || viewTx.fullName },
+                { label: "Type", value: viewTx.type },
+                {
+                  label: "Amount",
+                  value: `${viewTx.type === "Fare" ? "-" : "+"}₱${formatAmount(Number(viewTx.amount))}`,
+                  accent: viewTx.type === "Fare" ? "text-red-400" : "text-emerald-400",
+                },
+                { label: "Status", value: viewTx.status },
+              ].map(({ label, value, mono, accent }) => (
+                <div key={label} className="flex justify-between items-center py-2 border-b border-slate-800/60 last:border-0">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</span>
+                  <span className={`text-xs font-bold ${mono ? "font-mono" : ""} ${accent ?? "text-white"}`}>
+                    {value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Alert Dialog */}
       <AlertDialog open={!!deleteTx} onOpenChange={(open) => !open && setDeleteTx(null)}>

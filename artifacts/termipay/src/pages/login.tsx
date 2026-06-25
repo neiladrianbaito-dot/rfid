@@ -3,26 +3,15 @@ import { useLocation } from "wouter";
 import { useLogin } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetMeQueryKey } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { CreditCard, Lock, User, Loader2, Shield, Eye, EyeOff } from "lucide-react";
+import { CreditCard, Lock, User, Loader2, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
 const FORCE_LOGGED_OUT_KEY = "termipay_force_logged_out";
 const AUTH_TOKEN_KEY = "termipay_auth_token";
 
-/**
- * Particle Network Background
- * Dots drift in from the edges, fade in/out, and link to nearby
- * neighbors with thin lines. Mouse/touch position joins the network.
- *
- * NOTE: mouse/touch listeners are attached at the WINDOW level (not just
- * the canvas) so the particle network keeps tracking the cursor even when
- * it's hovering over foreground elements like the login Card, which sit
- * above the canvas (the canvas is -z-10).
- */
 const ParticleNetworkBackground = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -32,22 +21,15 @@ const ParticleNetworkBackground = () => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const BALL_NUM = 60;
-    const R = 2;
-    const ALPHA_F = 0.03;
-    const DIS_LIMIT = 140;
-    const LINE_WIDTH = 0.8;
-    // Matches the page's blue accent (blue-500: #3b82f6)
+    const BALL_NUM = 45;
+    const R = 1.5;
+    const ALPHA_F = 0.025;
+    const DIS_LIMIT = 120;
     const BALL_COLOR = { r: 96, g: 165, b: 250 };
 
     type Particle = {
-      x: number;
-      y: number;
-      vx: number;
-      vy: number;
-      alpha: number;
-      phase: number;
-      isMouse?: boolean;
+      x: number; y: number; vx: number; vy: number;
+      alpha: number; phase: number; isMouse?: boolean;
     };
 
     let canW = window.innerWidth;
@@ -57,21 +39,16 @@ const ParticleNetworkBackground = () => {
     let mouseParticle: Particle | null = null;
 
     const randomNumFrom = (min: number, max: number) => Math.random() * (max - min) + min;
-    const randomSidePos = (length: number) => Math.ceil(Math.random() * length);
+    const randomSidePos = (len: number) => Math.ceil(Math.random() * len);
     const randomArrayItem = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
 
     const getRandomSpeed = (pos: "top" | "right" | "bottom" | "left"): [number, number] => {
-      const min = -0.6;
-      const max = 0.6;
+      const mn = -0.5, mx = 0.5;
       switch (pos) {
-        case "top":
-          return [randomNumFrom(min, max), randomNumFrom(0.05, max)];
-        case "right":
-          return [randomNumFrom(min, -0.05), randomNumFrom(min, max)];
-        case "bottom":
-          return [randomNumFrom(min, max), randomNumFrom(min, -0.05)];
-        case "left":
-          return [randomNumFrom(0.05, max), randomNumFrom(min, max)];
+        case "top":    return [randomNumFrom(mn, mx), randomNumFrom(0.05, mx)];
+        case "right":  return [randomNumFrom(mn, -0.05), randomNumFrom(mn, mx)];
+        case "bottom": return [randomNumFrom(mn, mx), randomNumFrom(mn, -0.05)];
+        case "left":   return [randomNumFrom(0.05, mx), randomNumFrom(mn, mx)];
       }
     };
 
@@ -80,182 +57,107 @@ const ParticleNetworkBackground = () => {
       const [vx, vy] = getRandomSpeed(pos);
       const base = { vx, vy, alpha: 1, phase: randomNumFrom(0, 10) };
       switch (pos) {
-        case "top":
-          return { ...base, x: randomSidePos(canW), y: -R };
-        case "right":
-          return { ...base, x: canW + R, y: randomSidePos(canH) };
-        case "bottom":
-          return { ...base, x: randomSidePos(canW), y: canH + R };
-        case "left":
-          return { ...base, x: -R, y: randomSidePos(canH) };
+        case "top":    return { ...base, x: randomSidePos(canW), y: -R };
+        case "right":  return { ...base, x: canW + R, y: randomSidePos(canH) };
+        case "bottom": return { ...base, x: randomSidePos(canW), y: canH + R };
+        case "left":   return { ...base, x: -R, y: randomSidePos(canH) };
       }
     };
 
-    const getDisOf = (a: Particle, b: Particle) => {
-      const dx = a.x - b.x;
-      const dy = a.y - b.y;
-      return Math.sqrt(dx * dx + dy * dy);
-    };
+    const dist = (a: Particle, b: Particle) => Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
 
-    const initParticles = (num: number) => {
-      particles = [];
-      for (let i = 0; i < num; i++) {
+    const initParticles = (n: number) => {
+      particles = Array.from({ length: n }, () => {
         const [vx, vy] = getRandomSpeed("top");
-        particles.push({
-          x: randomSidePos(canW),
-          y: randomSidePos(canH),
-          vx,
-          vy,
-          alpha: 1,
-          phase: randomNumFrom(0, 10),
-        });
-      }
+        return { x: randomSidePos(canW), y: randomSidePos(canH), vx, vy, alpha: 1, phase: randomNumFrom(0, 10) };
+      });
     };
 
     const resize = () => {
-      canW = window.innerWidth;
-      canH = window.innerHeight;
-      canvas.width = canW;
-      canvas.height = canH;
-    };
-
-    const renderParticles = () => {
-      particles.forEach((p) => {
-        if (p.isMouse) return;
-        ctx.fillStyle = `rgba(${BALL_COLOR.r},${BALL_COLOR.g},${BALL_COLOR.b},${p.alpha})`;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, R, 0, Math.PI * 2, true);
-        ctx.closePath();
-        ctx.fill();
-      });
-    };
-
-    const renderLines = () => {
-      for (let i = 0; i < particles.length; i++) {
-        for (let j = i + 1; j < particles.length; j++) {
-          const fraction = getDisOf(particles[i], particles[j]) / DIS_LIMIT;
-          if (fraction < 1) {
-            const alpha = (1 - fraction) * 0.5;
-            ctx.strokeStyle = `rgba(148,163,184,${alpha})`;
-            ctx.lineWidth = LINE_WIDTH;
-            ctx.beginPath();
-            ctx.moveTo(particles[i].x, particles[i].y);
-            ctx.lineTo(particles[j].x, particles[j].y);
-            ctx.stroke();
-            ctx.closePath();
-          }
-        }
-      }
-    };
-
-    const updateParticles = () => {
-      const next: Particle[] = [];
-      particles.forEach((p) => {
-        if (p.isMouse) {
-          next.push(p);
-          return;
-        }
-        p.x += p.vx;
-        p.y += p.vy;
-        p.phase += ALPHA_F;
-        p.alpha = Math.abs(Math.cos(p.phase));
-        if (p.x > -50 && p.x < canW + 50 && p.y > -50 && p.y < canH + 50) {
-          next.push(p);
-        }
-      });
-      particles = next;
-    };
-
-    const addParticleIfNeeded = () => {
-      if (particles.length < BALL_NUM) {
-        particles.push(getRandomParticle());
-      }
+      canW = window.innerWidth; canH = window.innerHeight;
+      canvas.width = canW; canvas.height = canH;
     };
 
     const render = () => {
       ctx.clearRect(0, 0, canW, canH);
-      renderParticles();
-      renderLines();
-      updateParticles();
-      addParticleIfNeeded();
-      rafId = window.requestAnimationFrame(render);
+
+      // Draw dots
+      particles.forEach((p) => {
+        if (p.isMouse) return;
+        ctx.fillStyle = `rgba(${BALL_COLOR.r},${BALL_COLOR.g},${BALL_COLOR.b},${p.alpha * 0.7})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, R, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Draw lines
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const d = dist(particles[i], particles[j]);
+          if (d < DIS_LIMIT) {
+            ctx.strokeStyle = `rgba(148,163,184,${(1 - d / DIS_LIMIT) * 0.35})`;
+            ctx.lineWidth = 0.7;
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      // Update
+      particles = particles.filter((p) => {
+        if (p.isMouse) return true;
+        p.x += p.vx; p.y += p.vy; p.phase += ALPHA_F;
+        p.alpha = Math.abs(Math.cos(p.phase));
+        return p.x > -50 && p.x < canW + 50 && p.y > -50 && p.y < canH + 50;
+      });
+      if (particles.length < BALL_NUM) particles.push(getRandomParticle());
+
+      rafId = requestAnimationFrame(render);
     };
 
-    const handleResize = () => resize();
-
-    // Shared helper: convert viewport coords -> canvas-relative coords,
-    // and create/update the mouse particle.
-    const setMouseParticlePos = (clientX: number, clientY: number) => {
+    const setMouse = (cx: number, cy: number) => {
       const rect = canvas.getBoundingClientRect();
       if (!mouseParticle) {
         mouseParticle = { x: 0, y: 0, vx: 0, vy: 0, alpha: 1, phase: 0, isMouse: true };
         particles.push(mouseParticle);
       }
-      mouseParticle.x = clientX - rect.left;
-      mouseParticle.y = clientY - rect.top;
+      mouseParticle.x = cx - rect.left;
+      mouseParticle.y = cy - rect.top;
     };
+    const clearMouse = () => { particles = particles.filter(p => !p.isMouse); mouseParticle = null; };
 
-    const clearMouseParticle = () => {
-      particles = particles.filter((p) => !p.isMouse);
-      mouseParticle = null;
-    };
+    const onMouseMove = (e: MouseEvent) => setMouse(e.clientX, e.clientY);
+    const onMouseOut  = (e: MouseEvent) => { if (!e.relatedTarget) clearMouse(); };
+    const onTouchStart = (e: TouchEvent) => { const t = e.touches[0]; if (t) setMouse(t.clientX, t.clientY); };
+    const onTouchMove  = (e: TouchEvent) => { e.preventDefault(); const t = e.touches[0]; if (t) setMouse(t.clientX, t.clientY); };
+    const onTouchEnd   = () => clearMouse();
 
-    // Mouse — attached on window so it keeps working even over
-    // foreground UI (Card, inputs, buttons) since the canvas sits at -z-10.
-    const handleWindowMouseMove = (e: MouseEvent) => {
-      setMouseParticlePos(e.clientX, e.clientY);
-    };
-    const handleWindowMouseOut = (e: MouseEvent) => {
-      // relatedTarget is null when the cursor actually leaves the browser window
-      if (!e.relatedTarget) {
-        clearMouseParticle();
-      }
-    };
-
-    // Touch — tap/drag joins the network the same way a mouse hover does
-    const handleTouchStart = (e: TouchEvent) => {
-      const touch = e.touches[0];
-      if (touch) setMouseParticlePos(touch.clientX, touch.clientY);
-    };
-    const handleTouchMove = (e: TouchEvent) => {
-      // Prevent the page from scrolling while dragging a finger across the background
-      e.preventDefault();
-      const touch = e.touches[0];
-      if (touch) setMouseParticlePos(touch.clientX, touch.clientY);
-    };
-    const handleTouchEnd = () => {
-      clearMouseParticle();
-    };
-
-    resize();
-    initParticles(BALL_NUM);
-    rafId = window.requestAnimationFrame(render);
-
-    window.addEventListener("resize", handleResize);
-    window.addEventListener("mousemove", handleWindowMouseMove);
-    window.addEventListener("mouseout", handleWindowMouseOut);
-    // Touch listeners stay on the canvas itself (touch doesn't bubble the
-    // same concern as hover, and we want preventDefault scoped to it)
-    canvas.addEventListener("touchstart", handleTouchStart, { passive: true });
-    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
-    canvas.addEventListener("touchend", handleTouchEnd);
-    canvas.addEventListener("touchcancel", handleTouchEnd);
+    resize(); initParticles(BALL_NUM); rafId = requestAnimationFrame(render);
+    window.addEventListener("resize", resize);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseout", onMouseOut);
+    canvas.addEventListener("touchstart", onTouchStart, { passive: true });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd);
+    canvas.addEventListener("touchcancel", onTouchEnd);
 
     return () => {
-      window.cancelAnimationFrame(rafId);
-      window.removeEventListener("resize", handleResize);
-      window.removeEventListener("mousemove", handleWindowMouseMove);
-      window.removeEventListener("mouseout", handleWindowMouseOut);
-      canvas.removeEventListener("touchstart", handleTouchStart);
-      canvas.removeEventListener("touchmove", handleTouchMove);
-      canvas.removeEventListener("touchend", handleTouchEnd);
-      canvas.removeEventListener("touchcancel", handleTouchEnd);
+      cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseout", onMouseOut);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+      canvas.removeEventListener("touchcancel", onTouchEnd);
     };
   }, []);
 
   return (
     <div className="fixed inset-0 -z-10 bg-[#020617] overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(30,41,59,0.5)_0%,_rgba(2,6,23,1)_100%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,rgba(30,41,59,0.6)_0%,rgba(2,6,23,1)_70%)]" />
       <canvas ref={canvasRef} className="absolute inset-0" />
     </div>
   );
@@ -274,9 +176,7 @@ export default function LoginPage() {
       onSuccess: async (data) => {
         window.localStorage.removeItem(FORCE_LOGGED_OUT_KEY);
         const token = (data as any)?.token;
-        if (token) {
-          window.localStorage.setItem(AUTH_TOKEN_KEY, token);
-        }
+        if (token) window.localStorage.setItem(AUTH_TOKEN_KEY, token);
         queryClient.clear();
         queryClient.setQueryData(getGetMeQueryKey(), data);
         await queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
@@ -290,127 +190,140 @@ export default function LoginPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username || !password) {
-      setError("Please enter both username and password");
-      return;
-    }
+    if (!username || !password) { setError("Please enter both username and password"); return; }
     setError("");
     loginMutation.mutate({ data: { username, password } });
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center p-6" data-testid="login-page">
+    <div
+      className="relative min-h-screen flex flex-col items-center justify-center px-4 py-8"
+      data-testid="login-page"
+    >
       <ParticleNetworkBackground />
 
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5 }}
-        className="w-full max-w-lg z-10"
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
+        className="w-full max-w-sm z-10"
       >
-        <div className="text-center mb-10">
-          <motion.div 
-            animate={{ boxShadow: ["0 0 20px #3b82f6", "0 0 40px #3b82f6", "0 0 20px #3b82f6"] }}
-            transition={{ duration: 2, repeat: Infinity }}
-            className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-blue-600 text-white mb-6 border border-blue-400"
+        {/* Logo + title */}
+        <div className="flex flex-col items-center mb-6">
+          <motion.div
+            animate={{ boxShadow: ["0 0 14px #3b82f6", "0 0 28px #3b82f6", "0 0 14px #3b82f6"] }}
+            transition={{ duration: 2.5, repeat: Infinity }}
+            className="flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600 text-white mb-4 border border-blue-400/50"
           >
-            <CreditCard className="w-10 h-10" />
+            <CreditCard className="w-7 h-7" />
           </motion.div>
-          <h1 className="text-4xl font-black text-white tracking-tighter uppercase italic" data-testid="text-app-title">
+
+          <h1
+            className="text-2xl font-black text-white tracking-tight uppercase italic leading-tight text-center"
+            data-testid="text-app-title"
+          >
             Fare <span className="text-blue-500">Collection</span> System
           </h1>
-          <p className="text-blue-200/60 mt-2 font-semibold tracking-widest text-xs uppercase">
-            Local Transport Cooperative (Calbayog City)
+          <p className="text-[10px] text-blue-200/50 mt-1 font-semibold tracking-widest uppercase text-center">
+            LTC Calbayog City
           </p>
         </div>
 
-        <Card className="bg-slate-950/80 border-slate-800 backdrop-blur-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)] overflow-hidden relative">
-          {/* Top accent glow */}
-          <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-blue-500 to-transparent" />
-          
-          <CardHeader className="text-center pt-8 pb-4">
-            <CardTitle className="text-2xl text-white font-bold tracking-tight">Admin Authentication</CardTitle>
-            <CardDescription className="text-slate-400">Secure access to transit management</CardDescription>
-          </CardHeader>
+        {/* Card */}
+        <div className="relative bg-slate-950/80 border border-slate-800 rounded-2xl backdrop-blur-2xl shadow-[0_8px_40px_rgba(0,0,0,0.6)] overflow-hidden">
+          {/* Top glow line */}
+          <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-blue-500/70 to-transparent" />
 
-          <CardContent className="px-10 pb-10">
-            <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="px-6 pt-6 pb-7">
+            <p className="text-slate-400 text-xs text-center mb-5 tracking-wide">
+              Admin authentication
+            </p>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Error */}
               {error && (
-                <div className="p-4 rounded-xl bg-red-500/10 text-red-400 text-sm font-bold border border-red-500/20 animate-pulse">
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   {error}
                 </div>
               )}
-              
-              <div className="space-y-3">
-                <Label htmlFor="username" className="text-slate-300 font-bold uppercase text-[11px] tracking-wider ml-1">Username</Label>
+
+              {/* Username */}
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="username"
+                  className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider"
+                >
+                  Username
+                </Label>
                 <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
                   <Input
                     id="username"
                     type="text"
                     placeholder="ADMIN_ID"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="pl-11 h-12 bg-slate-900/50 border-slate-700 text-white focus:border-blue-500 focus:ring-blue-500/20"
+                    className="pl-9 h-10 text-sm bg-slate-900/60 border-slate-700/70 text-white placeholder:text-slate-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 rounded-lg"
                     required
                     disabled={loginMutation.isPending}
                   />
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <Label htmlFor="password" className="text-slate-300 font-bold uppercase text-[11px] tracking-wider ml-1">Secure Password</Label>
+              {/* Password */}
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="password"
+                  className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider"
+                >
+                  Password
+                </Label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-11 pr-11 h-12 bg-slate-900/50 border-slate-700 text-white focus:border-blue-500 focus:ring-blue-500/20"
+                    className="pl-9 pr-9 h-10 text-sm bg-slate-900/60 border-slate-700/70 text-white placeholder:text-slate-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 rounded-lg"
                     required
                     disabled={loginMutation.isPending}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300 transition-colors"
+                    tabIndex={-1}
                   >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
 
+              {/* Submit */}
               <Button
                 type="submit"
-                className="w-full h-14 text-lg font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-500 text-white transition-all shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:shadow-[0_0_30px_rgba(37,99,235,0.6)]"
+                className="w-full h-11 text-sm font-bold uppercase tracking-widest bg-blue-600 hover:bg-blue-500 text-white transition-all rounded-lg shadow-[0_0_16px_rgba(37,99,235,0.35)] hover:shadow-[0_0_24px_rgba(37,99,235,0.55)] mt-1"
                 disabled={loginMutation.isPending}
-              >   
+              >
                 {loginMutation.isPending ? (
-                  <div className="flex items-center gap-3">
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Connecting...
-                  </div>
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Connecting…
+                  </span>
                 ) : (
                   "Log In"
                 )}
               </Button>
             </form>
-            
-            <div className="mt-8 pt-6 border-t border-slate-800/50">
-              <div className="flex items-center justify-center gap-2 text-slate-500">
-                <Shield className="w-3 h-3" />
-                <p className="text-[10px] text-center uppercase tracking-widest font-black">
-                  Encrypted
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <p className="text-center text-xs text-slate-600 mt-10 font-bold uppercase tracking-widest">
-          © 2026 LTC Calbayog City • System V1.0
+          </div>
+        </div>
+
+        {/* Footer */}
+        <p className="text-center text-[10px] text-slate-700 mt-5 font-semibold uppercase tracking-widest">
+          © 2026 LTC Calbayog City · V1.0
         </p>
       </motion.div>
     </div>
