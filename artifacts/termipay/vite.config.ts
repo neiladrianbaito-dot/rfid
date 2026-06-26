@@ -44,6 +44,8 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // IDAGDAG ITONG LINYA NA ITO DITO:
+    target: ["es2015", "chrome61"],
   },
   server: {
     port,
