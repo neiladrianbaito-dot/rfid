@@ -54,9 +54,11 @@ export function LinkCardModal(props: Props) {
     <>
       <style>{DASHBOARD_STYLES}</style>
 
-      {/* Backdrop — full-screen overlay with blur, scrollable on small screens */}
+      {/* Backdrop — full-screen overlay with blur, scrollable on small screens.
+          z-50 here is intentionally above the dashboard's sticky header (z-10)
+          and mobile bottom nav (z-20), so this modal always sits on top. */}
       <div
-        className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto"
+        className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto"
         style={{
           padding: "1rem",
           background: "rgba(2,6,23,0.75)",
@@ -66,7 +68,7 @@ export function LinkCardModal(props: Props) {
       >
         <div
           className="rgb-container w-full max-w-[420px] relative my-auto"
-          style={{ zIndex: 50 }}
+          style={{ zIndex: 51 }}
         >
           <div className="p-4 sm:p-7 text-white max-h-[90vh] overflow-y-auto">
 
