@@ -263,6 +263,13 @@ export default function PaymongoDashboardPage() {
   const remainingTopup = Math.max(0, 20000 - currentBalance);
   const isAtMaxBalance = remainingTopup <= 0;
 
+  // ── AUTO-CLOSE modal when navigating away from activity tab ──────────────────
+  useEffect(() => {
+    if (activeTab !== "activity") {
+      setSelectedTx(null);
+    }
+  }, [activeTab]);
+
   useEffect(() => {
     const token = window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
     if (!token) {
@@ -295,6 +302,12 @@ export default function PaymongoDashboardPage() {
       minimumFractionDigits: 2,
     })}`;
   }, [user?.balance]);
+
+  // ── Tab nav handler — also closes modal ──────────────────────────────────────
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab);
+    setSelectedTx(null);
+  };
 
   const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
     { tab: "home", icon: <Home className="h-5 w-5" />, label: "Home" },
@@ -832,7 +845,7 @@ export default function PaymongoDashboardPage() {
           return (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => handleTabChange(tab)}
               className={`relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors duration-150 ${
                 isActive
                   ? "text-emerald-400"
