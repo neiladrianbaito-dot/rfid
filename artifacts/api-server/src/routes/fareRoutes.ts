@@ -46,6 +46,13 @@ router.post("/routes", async (req, res): Promise<void> => {
   res.status(201).json(formatRoute(route));
 });
 
+// Public endpoint — no auth required
+router.get("/routes/active", async (_req, res): Promise<void> => {
+  const routes = await db.select().from(fareRoutesTable)
+    .where(eq(fareRoutesTable.isActive, true));
+  res.json(routes.map(formatRoute));
+});
+
 router.patch("/routes/:id", async (req, res): Promise<void> => {
   const params = UpdateRouteParams.safeParse(req.params);
   if (!params.success) {

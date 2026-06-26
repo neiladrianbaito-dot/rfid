@@ -15,6 +15,7 @@ export type TransactionRecord = {
   type: string;
   amount: string | number;
   status: string;
+   route_id?: number | null; // ✅ idagdag ito
 };
 
 export type CardValidationState =

@@ -3,11 +3,12 @@ import {
   Calendar,
   Clock,
   CreditCard,
-  Activity,
+  Receipt,
   ShieldCheck,
+  MapPin,
+  Navigation,
   X,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -18,11 +19,20 @@ export type Transaction = {
   type: string;
   amount: number | string;
   status: string;
+  route_id?: number | null; // ✅ added
+};
+
+export type FareRoute = {
+  id: number;
+  origin: string;
+  destination: string;
+  fareAmount: number;
+  isActive: boolean;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatAmount(type: string, amount: number | string): string {
+function formatAmount(amount: number | string): string {
   const num = Math.abs(Number(amount || 0)).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -35,17 +45,25 @@ function formatAmount(type: string, amount: number | string): string {
 interface TransactionDetailModalProps {
   tx: Transaction | null;
   onClose: () => void;
+  routes: FareRoute[];
 }
 
 export function TransactionDetailModal({
   tx,
   onClose,
+  routes,
 }: TransactionDetailModalProps) {
   if (!tx) return null;
 
   const isFare = tx.type === "Fare";
   const isSuccess = tx.status === "Success";
   const date = new Date(tx.timestamp);
+
+  // ✅ FIXED: match by route_id directly instead of fareAmount
+  const safeRoutes = Array.isArray(routes) ? routes : [];
+  const matchedRoute = isFare && tx.route_id
+    ? safeRoutes.find((r) => r.id === tx.route_id) ?? null
+    : null;
 
   const rows = [
     {
@@ -84,19 +102,11 @@ export function TransactionDetailModal({
       onClick={onClose}
     >
       <div
-        className="
-          w-full max-w-sm
-          bg-slate-900 border border-slate-700
-          rounded-2xl overflow-hidden shadow-2xl
-          /* slide up from bottom on mobile */
-          translate-y-0
-        "
+        className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top accent stripe */}
-        <div
-          className={`h-1 w-full ${isFare ? "bg-red-500" : "bg-emerald-500"}`}
-        />
+        <div className={`h-1 w-full ${isFare ? "bg-red-500" : "bg-emerald-500"}`} />
 
         {/* Header */}
         <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-800">
@@ -106,7 +116,7 @@ export function TransactionDetailModal({
                 isFare ? "bg-red-500/10" : "bg-emerald-500/10"
               }`}
             >
-              <Activity
+              <Receipt
                 className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${
                   isFare ? "text-red-400" : "text-emerald-400"
                 }`}
@@ -137,15 +147,12 @@ export function TransactionDetailModal({
 
         {/* Amount hero */}
         <div className="px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4 border-b border-dashed border-slate-700 text-center">
-
-
-          {/* Responsive amount — shrinks on very small screens */}
           <p
             className={`text-3xl sm:text-4xl font-black tracking-tighter ${
               isFare ? "text-red-400" : "text-emerald-400"
             }`}
           >
-            {formatAmount(tx.type, tx.amount)}
+            {formatAmount(tx.amount)}
           </p>
           <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
             {date.toLocaleDateString(undefined, {
@@ -181,18 +188,41 @@ export function TransactionDetailModal({
                 </span>
               </div>
             ))}
+
+            {/* Status row */}
             <div className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40">
               <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
                 <ShieldCheck className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
                 Status
               </span>
-              <span
-                style={{ color: "#ffffff" }}
-                className="text-[10px] sm:text-xs font-medium"
-              >
+              <span style={{ color: "#ffffff" }} className="text-[10px] sm:text-xs font-medium">
                 {tx.status}
               </span>
             </div>
+
+            {/* Origin & Destination — only for Fare type */}
+            {isFare && (
+              <>
+                <div className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40">
+                  <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
+                    <MapPin className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
+                    Origin
+                  </span>
+                  <span className="text-[10px] sm:text-xs font-medium text-slate-200 text-right truncate max-w-[55%]">
+                    {matchedRoute ? matchedRoute.origin : <span className="text-slate-600">—</span>}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40">
+                  <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
+                    <Navigation className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
+                    Destination
+                  </span>
+                  <span className="text-[10px] sm:text-xs font-medium text-slate-200 text-right truncate max-w-[55%]">
+                    {matchedRoute ? matchedRoute.destination : <span className="text-slate-600">—</span>}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -201,23 +231,17 @@ export function TransactionDetailModal({
           <span className="text-[10px] sm:text-xs font-semibold text-slate-400">
             {isFare ? "Amount deducted" : "Amount credited"}
           </span>
-          <span
-            className={`text-xs sm:text-sm font-black ${
-              isFare ? "text-red-400" : "text-emerald-400"
-            }`}
-          >
-            {formatAmount(tx.type, tx.amount)}
+          <span className={`text-xs sm:text-sm font-black ${isFare ? "text-red-400" : "text-emerald-400"}`}>
+            {formatAmount(tx.amount)}
           </span>
         </div>
 
         {/* Footer */}
-        <div className="px-4 sm:px-5 pt-2.5 sm:pt-3 pb-4 sm:pb-5 space-y-2">
+        <div className="px-4 sm:px-5 pt-2.5 sm:pt-3 pb-4 sm:pb-5">
           <Button
             onClick={onClose}
             className="w-full text-white border-0 font-semibold transition-colors text-sm sm:text-base"
-            style={{
-              backgroundColor: isFare ? "#dc2626" : "#059669",
-            }}
+            style={{ backgroundColor: isFare ? "#dc2626" : "#059669" }}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLButtonElement).style.backgroundColor =
                 isFare ? "#ef4444" : "#10b981";

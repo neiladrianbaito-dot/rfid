@@ -16,8 +16,9 @@ import { LinkCardModal } from "@/components/link-card-modal";
 import { TopupModal } from "@/components/topup-modal";
 import { ChangePasswordModal } from "@/components/change-password-modal";
 import { getSignedInUser, cleanCardUid, USER_AUTH_TOKEN_KEY } from "@/lib/api";
-import { TransactionDetailModal, type Transaction } from "@/components/transaction-detail-modal";
+import { TransactionDetailModal, type Transaction, type FareRoute } from "@/components/transaction-detail-modal";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
+import { supabase } from "@/lib/supabase"; // ✅ import supabase client
 
 function formatAmount(type: string, amount: number | string): string {
   const sign = type === "Fare" ? "-" : "+";
@@ -45,6 +46,7 @@ export default function PaymongoDashboardPage() {
   const [cardUid, setCardUid] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [routes, setRoutes] = useState<FareRoute[]>([]);
 
   const { user, transactions, loading, error, lastUpdated, isPulsing } =
     useCardData(cardUid);
@@ -56,6 +58,47 @@ export default function PaymongoDashboardPage() {
 
   const remainingTopup = Math.max(0, 20000 - currentBalance);
   const isAtMaxBalance = remainingTopup <= 0;
+
+  // ✅ FIXED: Single Supabase realtime subscription for routes (replaces two fetch calls)
+  useEffect(() => {
+    // Initial load
+    const loadRoutes = async () => {
+      const { data, error } = await supabase
+        .from("fare_routes")
+        .select("id, origin, destination, fare_amount, is_active")
+        .order("id");
+
+      if (!error && data) {
+        const mapped: FareRoute[] = data.map((r: any) => ({
+          id: r.id,
+          origin: r.origin,
+          destination: r.destination,
+          fareAmount: r.fare_amount,
+          isActive: r.is_active,
+        }));
+        setRoutes(mapped);
+      }
+    };
+
+    loadRoutes();
+
+    // Realtime subscription — auto-updates when routes change in DB
+    const channel = supabase
+      .channel("fare_routes_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "fare_routes" },
+        () => {
+          // Re-fetch on any change (INSERT, UPDATE, DELETE)
+          loadRoutes();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     if (activeTab !== "activity") {
@@ -112,7 +155,7 @@ export default function PaymongoDashboardPage() {
       {linkCard.isOpen && <LinkCardModal {...linkCard} />}
       <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
-      <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} />
+      <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} routes={routes} />
 
       <style>{DASHBOARD_STYLES}</style>
 
