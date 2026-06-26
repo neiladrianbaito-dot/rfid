@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
@@ -30,19 +30,42 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string | null {
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
 }
 
-// FIX: Call these IMMEDIATELY at module load time, before any component renders
-// Previously inside useEffect — too late, first API call fires before effect runs
 const baseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
 setBaseUrl(baseUrl);
 setAuthTokenGetter(() => window.localStorage.getItem("termipay_auth_token"));
 
-function FullPageLoading() {
+function FullPageLoading({ isDone }: { isDone: boolean }) {
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setProgress(prev => {
+        if (isDone) return 100;
+        if (prev >= 90) return prev;
+        return Math.min(90, prev + 3);
+      });
+    }, 50);
+    return () => clearInterval(interval);
+  }, [isDone]);
+
   return (
     <div className="flex h-screen w-full flex-col items-center justify-center bg-background">
-      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
-      <p className="mt-4 text-sm font-medium text-muted-foreground animate-pulse">
-        TermiPay: Validating Session...
-      </p>
+      <div className="w-64 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-muted-foreground">
+            TermiPay: Validating Session...
+          </p>
+          <span className="text-sm font-semibold tabular-nums text-primary">
+            {progress}%
+          </span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-primary transition-all duration-75 ease-linear"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -50,13 +73,8 @@ function FullPageLoading() {
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
 
-  if (isLoading) {
-    return <FullPageLoading />;
-  }
-
-  if (!isAuthenticated) {
-    return <Redirect to="/login" />;
-  }
+  if (isLoading) return <FullPageLoading isDone={false} />;
+  if (!isAuthenticated) return <Redirect to="/login" />;
 
   return (
     <Layout>
@@ -68,13 +86,8 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 function LoginRoute() {
   const { isAuthenticated, isLoading } = useAuth();
 
-  if (isLoading) {
-    return <FullPageLoading />;
-  }
-
-  if (isAuthenticated) {
-    return <Redirect to="/" />;
-  }
+  if (isLoading) return <FullPageLoading isDone={false} />;
+  if (isAuthenticated) return <Redirect to="/" />;
 
   return <LoginPage />;
 }
@@ -87,9 +100,7 @@ function PaymongoRoute() {
   const hasUserToken =
     typeof window !== "undefined" && !!window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
 
-  if (!hasUserToken) {
-    return <Redirect to="/signin" />;
-  }
+  if (!hasUserToken) return <Redirect to="/signin" />;
 
   return <PaymongoDashboardPage />;
 }
@@ -143,7 +154,6 @@ const queryClient = new QueryClient({
 });
 
 function App() {
-  // Removed useEffect — setup already done at module level abovey
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
