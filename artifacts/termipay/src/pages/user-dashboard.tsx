@@ -46,7 +46,7 @@ type Transaction = {
   status: string;
 };
 
-// ── Transaction Detail Modal ──────────────────────────────────────────────────
+// ── Transaction Receipt Modal ─────────────────────────────────────────────────
 function TransactionDetailModal({
   tx,
   onClose,
@@ -60,6 +60,37 @@ function TransactionDetailModal({
   const isSuccess = tx.status === "Success";
   const date = new Date(tx.timestamp);
 
+  const rows = [
+    {
+      icon: <Hash className="h-3.5 w-3.5" />,
+      label: "Transaction ID",
+      value: String(tx.id),
+      mono: true,
+    },
+    {
+      icon: <Calendar className="h-3.5 w-3.5" />,
+      label: "Date",
+      value: date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      }),
+      mono: false,
+    },
+    {
+      icon: <Clock className="h-3.5 w-3.5" />,
+      label: "Time",
+      value: date.toLocaleTimeString(),
+      mono: false,
+    },
+    {
+      icon: <CreditCard className="h-3.5 w-3.5" />,
+      label: "Service type",
+      value: tx.type,
+      mono: false,
+    },
+  ];
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
@@ -69,11 +100,33 @@ function TransactionDetailModal({
         className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Top accent stripe */}
+        <div
+          className={`h-1 w-full ${isFare ? "bg-red-500" : "bg-emerald-500"}`}
+        />
+
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-          <div className="flex items-center gap-2 text-slate-400 text-[11px] font-black uppercase tracking-widest">
-            <Activity className="h-4 w-4 text-blue-400" />
-            Transaction Details
+          <div className="flex items-center gap-2.5">
+            <div
+              className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                isFare ? "bg-red-500/10" : "bg-emerald-500/10"
+              }`}
+            >
+              <Activity
+                className={`h-4 w-4 ${
+                  isFare ? "text-red-400" : "text-emerald-400"
+                }`}
+              />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white leading-none">
+                Receipt
+              </p>
+              <p className="text-[10px] font-mono text-slate-500 mt-0.5">
+                #TXN-{tx.id}
+              </p>
+            </div>
           </div>
           <Button
             size="icon"
@@ -85,36 +138,22 @@ function TransactionDetailModal({
           </Button>
         </div>
 
-        {/* Body */}
-        <div className="px-5 py-5 space-y-4">
-          {/* Badges */}
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <Badge
-              className={
-                isFare
-                  ? "bg-red-500/10 text-red-400 border-red-500/20 px-3 py-1"
-                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-3 py-1"
-              }
-            >
-              {tx.type}
-            </Badge>
-            <Badge
-              className={
-                isSuccess
-                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-3 py-1"
-                  : "bg-red-500/10 text-red-400 border-red-500/20 px-3 py-1"
-              }
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full mr-1.5 inline-block ${
-                  isSuccess ? "bg-emerald-400" : "bg-red-400"
-                }`}
-              />
-              {tx.status}
-            </Badge>
+        {/* Amount hero */}
+        <div className="px-5 pt-5 pb-4 border-b border-dashed border-slate-700 text-center">
+          <div
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 mb-3 border text-[10px] font-semibold uppercase tracking-widest ${
+              isFare
+                ? "bg-red-500/10 border-red-500/20 text-red-400"
+                : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full inline-block ${
+                isFare ? "bg-red-400" : "bg-emerald-400"
+              }`}
+            />
+            {tx.type} · {tx.status}
           </div>
-
-          {/* Amount */}
           <p
             className={`text-4xl font-black tracking-tighter ${
               isFare ? "text-red-400" : "text-emerald-400"
@@ -122,66 +161,84 @@ function TransactionDetailModal({
           >
             {formatAmount(tx.type, tx.amount)}
           </p>
+          <p className="text-[11px] text-slate-500 mt-1">
+            {date.toLocaleDateString(undefined, {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            })}{" "}
+            · {date.toLocaleTimeString()}
+          </p>
+        </div>
 
-          {/* Detail rows */}
-          <div className="space-y-2">
-            {[
-              {
-                icon: <Hash className="h-3.5 w-3.5" />,
-                label: "Transaction ID",
-                value: String(tx.id),
-                mono: true,
-              },
-              {
-                icon: <Calendar className="h-3.5 w-3.5" />,
-                label: "Date",
-                value: date.toLocaleDateString(undefined, {
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                }),
-                mono: false,
-              },
-              {
-                icon: <Clock className="h-3.5 w-3.5" />,
-                label: "Time",
-                value: date.toLocaleTimeString(),
-                mono: false,
-              },
-              {
-                icon: <CreditCard className="h-3.5 w-3.5" />,
-                label: "Service Type",
-                value: tx.type,
-                mono: false,
-              },
-            ].map(({ icon, label, value, mono }) => (
+        {/* Detail rows */}
+        <div className="px-5 pt-4 pb-2">
+          <p className="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-2">
+            Transaction details
+          </p>
+          <div className="rounded-xl overflow-hidden border border-slate-800 divide-y divide-slate-800">
+            {rows.map(({ icon, label, value, mono }) => (
               <div
                 key={label}
-                className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl px-4 py-3"
+                className="flex items-center justify-between px-3 py-2.5 bg-slate-950/40"
               >
-                <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                <span className="flex items-center gap-2 text-[10px] text-slate-500">
                   {icon}
                   {label}
                 </span>
                 <span
-                  className={`text-xs font-semibold text-slate-300 ${
-                    mono ? "font-mono" : ""
+                  className={`text-xs text-slate-200 ${
+                    mono ? "font-mono" : "font-medium"
                   }`}
                 >
                   {value}
                 </span>
               </div>
             ))}
+            <div className="flex items-center justify-between px-3 py-2.5 bg-slate-950/40">
+              <span className="flex items-center gap-2 text-[10px] text-slate-500">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Status
+              </span>
+              <Badge
+                className={
+                  isSuccess
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[9px] px-2 py-0.5"
+                    : "bg-red-500/10 text-red-400 border-red-500/20 text-[9px] px-2 py-0.5"
+                }
+              >
+                {tx.status}
+              </Badge>
+            </div>
           </div>
+        </div>
 
-          {/* Dismiss button */}
+        {/* Total line */}
+        <div className="mx-5 mt-3 mb-1 border-t border-dashed border-slate-700 pt-3 flex items-center justify-between">
+          <span className="text-xs font-semibold text-slate-400">
+            {isFare ? "Amount deducted" : "Amount credited"}
+          </span>
+          <span
+            className={`text-sm font-black ${
+              isFare ? "text-red-400" : "text-emerald-400"
+            }`}
+          >
+            {formatAmount(tx.type, tx.amount)}
+          </span>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 pt-3 pb-5 space-y-2">
           <Button
             onClick={onClose}
             variant="outline"
-            className="w-full border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white mt-1"
+            className="w-full border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white"
           >
             Close
           </Button>
+          <p className="text-center text-[9px] font-mono text-slate-700">
+            Fare Collection System · v1.0.0
+          </p>
         </div>
       </div>
     </div>
@@ -259,7 +316,7 @@ export default function PaymongoDashboardPage() {
       <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
 
-      {/* Transaction Detail Modal */}
+      {/* Transaction Receipt Modal */}
       <TransactionDetailModal
         tx={selectedTx}
         onClose={() => setSelectedTx(null)}
@@ -330,9 +387,7 @@ export default function PaymongoDashboardPage() {
             <div className="flex items-center gap-1.5 shrink-0">
               <div
                 className={`h-2 w-2 rounded-full shrink-0 ${
-                  loading
-                    ? "bg-yellow-400"
-                    : "bg-emerald-400 realtime-dot"
+                  loading ? "bg-yellow-400" : "bg-emerald-400 realtime-dot"
                 }`}
               />
               <span className="text-[10px] text-slate-500 hidden sm:inline whitespace-nowrap">
@@ -517,9 +572,7 @@ export default function PaymongoDashboardPage() {
 
         {/* ── ACTIVITY tab ── */}
         <div
-          className={
-            activeTab === "activity" ? "block" : "hidden md:block"
-          }
+          className={activeTab === "activity" ? "block" : "hidden md:block"}
         >
           <Card className="border-slate-800 bg-slate-900/40 backdrop-blur-md overflow-hidden">
             <CardHeader className="bg-slate-900/20 border-b border-slate-800">
@@ -533,7 +586,6 @@ export default function PaymongoDashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              {/* Hint text */}
               <p className="px-4 pt-3 pb-1 text-[10px] text-slate-600 italic">
                 Tap a row to view transaction details.
               </p>
