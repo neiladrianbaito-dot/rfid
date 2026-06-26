@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import ReCAPTCHA from "react-google-recaptcha";
 import { LinkIcon, Lock, CheckCircle2, XCircle, Loader2, Ban, ShieldAlert, Clock, ArrowLeft } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,32 @@ export function LinkCardModal(props: Props) {
   const isChecking = validation.status === "checking";
   const isBlocked  = validation.status === "blocked";
   const isLocked   = validation.status === "locked";  // ← new
+
+  // ── Responsive reCAPTCHA scaling ──────────────────────────────────────────
+  // The widget's real rendered size is fixed at 304×78px. Instead of a hardcoded
+  // transform scale, measure the placeholder container and scale to fit it.
+  const RECAPTCHA_WIDTH = 304;
+  const RECAPTCHA_HEIGHT = 78;
+  const recaptchaBoxRef = useRef<HTMLDivElement>(null);
+  const [recaptchaScale, setRecaptchaScale] = useState(1);
+
+  useEffect(() => {
+    const el = recaptchaBoxRef.current;
+    if (!el) return;
+
+    const updateScale = () => {
+      const availableWidth = el.offsetWidth;
+      if (!availableWidth) return;
+      const nextScale = Math.min(availableWidth / RECAPTCHA_WIDTH, 1);
+      setRecaptchaScale(nextScale > 0 ? nextScale : 1);
+    };
+
+    updateScale();
+
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <>
@@ -128,25 +155,28 @@ export function LinkCardModal(props: Props) {
                   <label className="text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase mb-1 self-start">
                     Verification
                   </label>
-                  <div className="w-full flex justify-center sm:justify-start">
+                  {/* Placeholder box — full width of its parent. The recaptcha
+                      scales itself to exactly match this box's width. */}
+                  <div
+                    ref={recaptchaBoxRef}
+                    className="w-full max-w-[304px]"
+                    style={{ height: RECAPTCHA_HEIGHT * recaptchaScale }}
+                  >
                     <div
-                      className="origin-top-left"
                       style={{
-                        transform: "scale(var(--recaptcha-scale, 0.85))",
+                        transform: `scale(${recaptchaScale})`,
                         transformOrigin: "0 0",
-                        width: 304,
-                        height: 78,
+                        width: RECAPTCHA_WIDTH,
+                        height: RECAPTCHA_HEIGHT,
                       }}
                     >
-                      <div className="recaptcha-scale-wrapper">
-                        <ReCAPTCHA
-                          ref={recaptchaRef}
-                          sitekey={RECAPTCHA_SITE_KEY}
-                          theme="dark"
-                          onChange={(token) => { setCaptchaToken(token); setCaptchaError(""); }}
-                          onExpired={() => { setCaptchaToken(null); setCaptchaError("reCAPTCHA expired. Please verify again."); }}
-                        />
-                      </div>
+                      <ReCAPTCHA
+                        ref={recaptchaRef}
+                        sitekey={RECAPTCHA_SITE_KEY}
+                        theme="dark"
+                        onChange={(token) => { setCaptchaToken(token); setCaptchaError(""); }}
+                        onExpired={() => { setCaptchaToken(null); setCaptchaError("reCAPTCHA expired. Please verify again."); }}
+                      />
                     </div>
                   </div>
                   {captchaError && (
