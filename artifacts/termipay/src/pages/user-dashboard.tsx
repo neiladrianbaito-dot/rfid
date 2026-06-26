@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import {
-  Wallet, Lock, Activity, User, Phone, Tag, ShieldCheck,
+  Wallet, Activity, User, Phone, Tag, ShieldCheck,
   LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings,
   ChevronRight,
 } from "lucide-react";
@@ -57,7 +57,6 @@ export default function PaymongoDashboardPage() {
   const remainingTopup = Math.max(0, 20000 - currentBalance);
   const isAtMaxBalance = remainingTopup <= 0;
 
-  // ── AUTO-CLOSE modal when navigating away from activity tab ──────────────────
   useEffect(() => {
     if (activeTab !== "activity") {
       setSelectedTx(null);
@@ -97,7 +96,6 @@ export default function PaymongoDashboardPage() {
     })}`;
   }, [user?.balance]);
 
-  // ── Tab nav handler — also closes modal ──────────────────────────────────────
   const handleTabChange = (tab: Tab) => {
     setActiveTab(tab);
     setSelectedTx(null);
@@ -105,16 +103,8 @@ export default function PaymongoDashboardPage() {
 
   const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
     { tab: "home", icon: <Home className="h-5 w-5" />, label: "Home" },
-    {
-      tab: "activity",
-      icon: <Activity className="h-5 w-5" />,
-      label: "Activity",
-    },
-    {
-      tab: "settings",
-      icon: <Settings className="h-5 w-5" />,
-      label: "Settings",
-    },
+    { tab: "activity", icon: <Activity className="h-5 w-5" />, label: "Activity" },
+    { tab: "settings", icon: <Settings className="h-5 w-5" />, label: "Settings" },
   ];
 
   return (
@@ -122,12 +112,7 @@ export default function PaymongoDashboardPage() {
       {linkCard.isOpen && <LinkCardModal {...linkCard} />}
       <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
-
-      {/* Transaction Receipt Modal */}
-      <TransactionDetailModal
-        tx={selectedTx}
-        onClose={() => setSelectedTx(null)}
-      />
+      <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} />
 
       <style>{DASHBOARD_STYLES}</style>
 
@@ -174,40 +159,6 @@ export default function PaymongoDashboardPage() {
           linkCard.isOpen ? "is-obscured" : ""
         }`}
       >
-        {/* ── Linked Card ── */}
-        <div className="flex items-center justify-between gap-2 bg-slate-900/20 px-3 py-3 rounded-2xl border border-slate-800/50">
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="h-8 w-8 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
-              <Lock className="h-3.5 w-3.5 text-emerald-400" />
-            </div>
-            <div>
-              <p className="text-xs font-bold text-slate-300 leading-none">
-                Linked Card
-              </p>
-              <p className="text-[10px] text-slate-500">Permanently linked</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 font-mono text-xs text-slate-300 tracking-widest select-all truncate max-w-[140px]">
-              {cardUid || "Not linked"}
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <div
-                className={`h-2 w-2 rounded-full shrink-0 ${
-                  loading ? "bg-yellow-400" : "bg-emerald-400 realtime-dot"
-                }`}
-              />
-              <span className="text-[10px] text-slate-500 hidden sm:inline whitespace-nowrap">
-                {loading
-                  ? "Loading..."
-                  : lastUpdated
-                  ? lastUpdated.toLocaleTimeString()
-                  : "Connecting..."}
-              </span>
-            </div>
-          </div>
-        </div>
-
         {error && (
           <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
             Warning: {error}
@@ -217,7 +168,6 @@ export default function PaymongoDashboardPage() {
         {/* ── HOME tab ── */}
         <div className={activeTab === "home" ? "block" : "hidden md:block"}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Welcome */}
             <div className="col-span-1 md:col-span-3">
               <p className="text-2xl font-bold text-white">
                 Welcome back,{" "}
@@ -265,18 +215,13 @@ export default function PaymongoDashboardPage() {
                           : "bg-emerald-500"
                       }`}
                       style={{
-                        width: `${Math.min(
-                          (currentBalance / 20000) * 100,
-                          100
-                        )}%`,
+                        width: `${Math.min((currentBalance / 20000) * 100, 100)}%`,
                       }}
                     />
                   </div>
                   <p className="text-[9px] text-slate-600 font-mono">
                     {isAtMaxBalance ? (
-                      <span className="text-red-400/70">
-                        Max balance reached
-                      </span>
+                      <span className="text-red-400/70">Max balance reached</span>
                     ) : (
                       <>
                         {"\u20B1"}
@@ -299,10 +244,7 @@ export default function PaymongoDashboardPage() {
                     <ShieldCheck className="h-3 w-3 mr-1.5" />
                     {user?.status || "Inactive"}
                   </Badge>
-                  <Badge
-                    variant="outline"
-                    className="border-slate-700 text-slate-400 px-3 py-1"
-                  >
+                  <Badge variant="outline" className="border-slate-700 text-slate-400 px-3 py-1">
                     {user?.type || "Standard User"}
                   </Badge>
                 </div>
@@ -340,20 +282,14 @@ export default function PaymongoDashboardPage() {
                   },
                 ].map(({ icon, bg, label, value, mono }) => (
                   <div key={label} className="flex items-center gap-4">
-                    <div
-                      className={`h-10 w-10 rounded-full flex items-center justify-center border ${bg}`}
-                    >
+                    <div className={`h-10 w-10 rounded-full flex items-center justify-center border ${bg}`}>
                       {icon}
                     </div>
                     <div>
                       <p className="text-[10px] font-bold uppercase text-slate-500 leading-none mb-1">
                         {label}
                       </p>
-                      <p
-                        className={`text-base font-semibold text-slate-200 ${
-                          mono ? "font-mono" : ""
-                        }`}
-                      >
+                      <p className={`text-base font-semibold text-slate-200 ${mono ? "font-mono" : ""}`}>
                         {value}
                       </p>
                     </div>
@@ -367,9 +303,7 @@ export default function PaymongoDashboardPage() {
                     <p className="text-[10px] font-bold uppercase text-slate-500 leading-none mb-1">
                       Email
                     </p>
-                    <p className="text-base text-slate-200">
-                      {user?.email || "Not linked"}
-                    </p>
+                    <p className="text-base text-slate-200">{user?.email || "Not linked"}</p>
                   </div>
                 </div>
               </CardContent>
@@ -378,9 +312,7 @@ export default function PaymongoDashboardPage() {
         </div>
 
         {/* ── ACTIVITY tab ── */}
-        <div
-          className={activeTab === "activity" ? "block" : "hidden md:block"}
-        >
+        <div className={activeTab === "activity" ? "block" : "hidden md:block"}>
           <Card className="border-slate-800 bg-slate-900/40 backdrop-blur-md overflow-hidden">
             <CardHeader className="bg-slate-900/20 border-b border-slate-800">
               <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-400 uppercase tracking-widest">
@@ -406,17 +338,11 @@ export default function PaymongoDashboardPage() {
                   </colgroup>
                   <thead className="bg-slate-950/50">
                     <tr>
-                      {(
-                        ["Timestamp", "Service", "Amount", "Result"] as const
-                      ).map((h, i) => (
+                      {(["Timestamp", "Service", "Amount", "Result"] as const).map((h, i) => (
                         <th
                           key={h}
                           className={`px-3 py-3 text-[9px] font-black uppercase text-slate-500 whitespace-nowrap ${
-                            i === 2
-                              ? "text-right"
-                              : i === 3
-                              ? "text-center"
-                              : ""
+                            i === 2 ? "text-right" : i === 3 ? "text-center" : ""
                           }`}
                         >
                           {h}
@@ -427,10 +353,7 @@ export default function PaymongoDashboardPage() {
                   <tbody className="divide-y divide-slate-800/50">
                     {transactions.length === 0 ? (
                       <tr>
-                        <td
-                          className="p-12 text-center text-slate-600 text-sm italic"
-                          colSpan={4}
-                        >
+                        <td className="p-12 text-center text-slate-600 text-sm italic" colSpan={4}>
                           No activity recorded.
                         </td>
                       </tr>
@@ -457,9 +380,7 @@ export default function PaymongoDashboardPage() {
                           <td className="px-3 py-3 text-right">
                             <span
                               className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${
-                                tx.type === "Fare"
-                                  ? "text-red-400"
-                                  : "text-emerald-400"
+                                tx.type === "Fare" ? "text-red-400" : "text-emerald-400"
                               }`}
                             >
                               {formatAmount(tx.type, tx.amount)}
@@ -488,11 +409,7 @@ export default function PaymongoDashboardPage() {
         </div>
 
         {/* ── SETTINGS tab (mobile only) ── */}
-        <div
-          className={
-            activeTab === "settings" ? "block md:hidden" : "hidden"
-          }
-        >
+        <div className={activeTab === "settings" ? "block md:hidden" : "hidden"}>
           <div className="space-y-4">
             <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
               <div className="flex items-center gap-4 px-5 py-5 border-b border-slate-800/60">
@@ -505,9 +422,7 @@ export default function PaymongoDashboardPage() {
                   <p className="text-base font-bold text-white leading-tight">
                     {user?.fullName || "Not linked"}
                   </p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {user?.email || "—"}
-                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">{user?.email || "—"}</p>
                   <div className="flex gap-2 mt-2">
                     <Badge
                       className={
@@ -519,10 +434,7 @@ export default function PaymongoDashboardPage() {
                       <ShieldCheck className="h-2.5 w-2.5 mr-1" />
                       {user?.status || "Inactive"}
                     </Badge>
-                    <Badge
-                      variant="outline"
-                      className="border-slate-700 text-slate-400 px-2 py-0.5 text-[9px]"
-                    >
+                    <Badge variant="outline" className="border-slate-700 text-slate-400 px-2 py-0.5 text-[9px]">
                       {user?.type || "Standard"}
                     </Badge>
                   </div>
@@ -565,11 +477,7 @@ export default function PaymongoDashboardPage() {
                     <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 leading-none mb-0.5">
                       {label}
                     </p>
-                    <p
-                      className={`text-sm text-slate-200 truncate ${
-                        mono ? "font-mono" : "font-medium"
-                      }`}
-                    >
+                    <p className={`text-sm text-slate-200 truncate ${mono ? "font-mono" : "font-medium"}`}>
                       {value}
                     </p>
                   </div>
@@ -589,12 +497,8 @@ export default function PaymongoDashboardPage() {
                   <KeyRound className="h-4 w-4 text-violet-400" />
                 </div>
                 <div className="flex-1 text-left">
-                  <p className="text-sm font-semibold text-slate-200">
-                    Change Password
-                  </p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">
-                    Update your account password
-                  </p>
+                  <p className="text-sm font-semibold text-slate-200">Change Password</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Update your account password</p>
                 </div>
                 <ChevronRight className="h-4 w-4 text-slate-600 shrink-0" />
               </button>
@@ -607,9 +511,7 @@ export default function PaymongoDashboardPage() {
                 </div>
                 <div className="flex-1 text-left">
                   <p className="text-sm font-semibold text-red-400">Logout</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">
-                    Sign out of your account
-                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Sign out of your account</p>
                 </div>
                 <ChevronRight className="h-4 w-4 text-slate-600 shrink-0" />
               </button>
@@ -625,9 +527,7 @@ export default function PaymongoDashboardPage() {
         <footer className="hidden md:block border-t border-slate-800/60 pt-4 pb-2">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-widest text-slate-700">
             <span>Fare Collection System &mdash; User Dashboard</span>
-            <span>
-              &copy; {new Date().getFullYear()} All rights reserved. | v1.0.0
-            </span>
+            <span>&copy; {new Date().getFullYear()} All rights reserved. | v1.0.0</span>
           </div>
         </footer>
       </div>
@@ -641,18 +541,14 @@ export default function PaymongoDashboardPage() {
               key={tab}
               onClick={() => handleTabChange(tab)}
               className={`relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors duration-150 ${
-                isActive
-                  ? "text-emerald-400"
-                  : "text-slate-600 hover:text-slate-400"
+                isActive ? "text-emerald-400" : "text-slate-600 hover:text-slate-400"
               }`}
             >
               {isActive && (
                 <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-emerald-400" />
               )}
               {icon}
-              <span className="text-[9px] font-bold uppercase tracking-wider">
-                {label}
-              </span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">{label}</span>
             </button>
           );
         })}
