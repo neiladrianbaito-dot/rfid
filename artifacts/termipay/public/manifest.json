@@ -4,6 +4,7 @@
   "short_name": "Termipay",
   "start_url": "/signin",
   "display": "standalone",
+  "orientation": "any", 
   "background_color": "#ffffff",
   "theme_color": "#000000",
   "icons": [
