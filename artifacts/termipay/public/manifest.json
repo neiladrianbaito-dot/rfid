@@ -1,8 +1,8 @@
 {
-  "id": "/login",
+  "id": "/signin",
   "name": "Fare Collection System",
   "short_name": "Termipay",
-  "start_url": "/login",
+  "start_url": "/signin",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#000000",
