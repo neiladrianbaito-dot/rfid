@@ -43,14 +43,14 @@ export const DASHBOARD_STYLES = `
 
   .recaptcha-wrapper iframe { border-radius: 8px; }
 
-  .dashboard-content {
-    transition: filter 0.35s ease, opacity 0.35s ease;
-  }
-  .dashboard-content.is-obscured {
+  /* Blur everything behind the modal */
+  .modal-open .dashboard-header,
+  .modal-open .dashboard-content {
     filter: blur(8px) brightness(0.4);
     opacity: 0.6;
     pointer-events: none;
     user-select: none;
+    transition: filter 0.35s ease, opacity 0.35s ease;
   }
 
   .balance-pulse { animation: balance-pulse 0.8s ease-in-out; }
