@@ -576,7 +576,14 @@ export default function PaymongoDashboardPage() {
       </div>
 
       {/* ── Mobile Bottom Nav ── */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden h-16 bg-[#0a0f1e]/95 backdrop-blur-md border-t border-slate-800/60">
+      {/* Hides and blurs when the link-card modal is open */}
+      <nav
+        className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 bg-[#0a0f1e]/95 backdrop-blur-md border-t border-slate-800/60 transition-all duration-300 ${
+          linkCard.isOpen
+            ? "opacity-0 pointer-events-none blur-sm"
+            : "opacity-100"
+        }`}
+      >
         {navItems.map(({ tab, icon, label }) => {
           const isActive = activeTab === tab;
           return (
