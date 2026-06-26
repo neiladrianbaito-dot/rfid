@@ -1,252 +1,312 @@
-import {
-  Hash,
-  Calendar,
-  Clock,
-  CreditCard,
-  Receipt,
-  ShieldCheck,
-  Route,
-  X,
-} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import ReCAPTCHA from "react-google-recaptcha";
+import { LinkIcon, Lock, CheckCircle2, XCircle, Loader2, Ban, ShieldAlert, Clock, ArrowLeft } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { RECAPTCHA_SITE_KEY } from "@/lib/api";
+import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
+import type { useLinkCard } from "@/hooks/use-link-card";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-export type Transaction = {
-  id: string | number;
-  timestamp: string;
-  type: string;
-  amount: number | string;
-  status: string;
-  route_id?: number | null; // ✅ added
+type Props = ReturnType<typeof useLinkCard> & {
+  onCancel?: () => void;
 };
 
-export type FareRoute = {
-  id: number;
-  origin: string;
-  destination: string;
-  fareAmount: number;
-  isActive: boolean;
-};
+export function LinkCardModal(props: Props) {
+  const {
+    input, setInput, loading, error, validation, isConfirmStep,
+    recaptchaRef, captchaToken, setCaptchaToken, captchaError, setCaptchaError,
+    checkCard, confirmLink, backToInput, setValidation,
+    lockoutSecs,  // ← countdown seconds from hook
+  } = props;
+  const { onCancel } = props;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+  const isChecking = validation.status === "checking";
+  const isBlocked  = validation.status === "blocked";
+  const isLocked   = validation.status === "locked";  // ← new
 
-function formatAmount(amount: number | string): string {
-  const num = Math.abs(Number(amount || 0)).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return `\u20B1${num}`;
-}
+  // ── Responsive reCAPTCHA scaling ──────────────────────────────────────────
+  // The widget's real rendered size is fixed at 304×78px. Instead of a hardcoded
+  // transform scale, measure the placeholder container and scale to fit it.
+  const RECAPTCHA_WIDTH = 304;
+  const RECAPTCHA_HEIGHT = 78;
+  const recaptchaBoxRef = useRef<HTMLDivElement>(null);
+  const [recaptchaScale, setRecaptchaScale] = useState(1);
 
-// ── Component ─────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const el = recaptchaBoxRef.current;
+    if (!el) return;
 
-interface TransactionDetailModalProps {
-  tx: Transaction | null;
-  onClose: () => void;
-  routes: FareRoute[];
-}
+    const updateScale = () => {
+      const availableWidth = el.offsetWidth;
+      if (!availableWidth) return;
+      const nextScale = Math.min(availableWidth / RECAPTCHA_WIDTH, 1);
+      setRecaptchaScale(nextScale > 0 ? nextScale : 1);
+    };
 
-export function TransactionDetailModal({
-  tx,
-  onClose,
-  routes,
-}: TransactionDetailModalProps) {
-  if (!tx) return null;
+    updateScale();
 
-  const isFare = tx.type === "Fare";
-  const isSuccess = tx.status === "Success";
-  const date = new Date(tx.timestamp);
-
-  // ✅ FIXED: match by route_id directly instead of fareAmount
-  const safeRoutes = Array.isArray(routes) ? routes : [];
-  const matchedRoute = isFare && tx.route_id
-    ? safeRoutes.find((r) => r.id === tx.route_id) ?? null
-    : null;
-
-  const rows = [
-    {
-      icon: <Hash className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />,
-      label: "Transaction ID",
-      value: String(tx.id),
-      mono: true,
-    },
-    {
-      icon: <Calendar className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />,
-      label: "Date",
-      value: date.toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      }),
-      mono: false,
-    },
-    {
-      icon: <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />,
-      label: "Time",
-      value: date.toLocaleTimeString(),
-      mono: false,
-    },
-    {
-      icon: <CreditCard className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />,
-      label: "Service type",
-      value: tx.type,
-      mono: false,
-    },
-  ];
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-3 sm:px-4"
-      onClick={onClose}
-    >
+    <>
+      <style>{DASHBOARD_STYLES}</style>
+
+      {/* Backdrop — full-screen overlay with blur, scrollable on small screens.
+          z-50 here is intentionally above the dashboard's sticky header (z-10)
+          and mobile bottom nav (z-20), so this modal always sits on top. */}
       <div
-        className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto"
+        style={{
+          padding: "1rem",
+          background: "rgba(2,6,23,0.75)",
+          backdropFilter: "blur(4px)",
+          WebkitBackdropFilter: "blur(4px)",
+        }}
       >
-        {/* Top accent stripe */}
-        <div className={`h-1 w-full ${isFare ? "bg-red-500" : "bg-emerald-500"}`} />
+        <div
+          className="rgb-container w-full max-w-[420px] relative my-auto"
+          style={{ zIndex: 51 }}
+        >
+          <div className="p-4 sm:p-7 text-white max-h-[90vh] overflow-y-auto">
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-800">
-          <div className="flex items-center gap-2 sm:gap-2.5">
-            <div
-              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                isFare ? "bg-red-500/10" : "bg-emerald-500/10"
-              }`}
-            >
-              <Receipt
-                className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${
-                  isFare ? "text-red-400" : "text-emerald-400"
-                }`}
-              />
-            </div>
-            <div>
-              <p className="text-xs sm:text-sm font-semibold text-white leading-none">
-                Receipt
-              </p>
-              <p className="text-[9px] sm:text-[10px] font-mono text-slate-500 mt-0.5">
-                #TXN-{tx.id}
-              </p>
-            </div>
-          </div>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={onClose}
-            className={`h-7 w-7 rounded-lg shrink-0 ${
-              isFare
-                ? "text-red-500 hover:text-red-300 hover:bg-red-500/10"
-                : "text-emerald-500 hover:text-emerald-300 hover:bg-emerald-500/10"
-            }`}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {/* Amount hero */}
-        <div className="px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4 border-b border-dashed border-slate-700 text-center">
-          <p
-            className={`text-3xl sm:text-4xl font-black tracking-tighter ${
-              isFare ? "text-red-400" : "text-emerald-400"
-            }`}
-          >
-            {formatAmount(tx.amount)}
-          </p>
-          <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
-            {date.toLocaleDateString(undefined, {
-              month: "long",
-              day: "numeric",
-              year: "numeric",
-            })}{" "}
-            · {date.toLocaleTimeString()}
-          </p>
-        </div>
-
-        {/* Detail rows */}
-        <div className="px-4 sm:px-5 pt-3 sm:pt-4 pb-2">
-          <p className="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-2">
-            Transaction details
-          </p>
-          <div className="rounded-xl overflow-hidden border border-slate-800 divide-y divide-slate-800">
-            {rows.map(({ icon, label, value, mono }) => (
-              <div
-                key={label}
-                className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40"
-              >
-                <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
-                  {icon}
-                  {label}
-                </span>
-                <span
-                  className={`text-[10px] sm:text-xs text-slate-200 text-right truncate max-w-[55%] ${
-                    mono ? "font-mono" : "font-medium"
-                  }`}
-                >
-                  {value}
-                </span>
+            {/* Header */}
+            <div className="flex items-center gap-2.5 sm:gap-3 mb-2">
+              <div className="p-2 sm:p-2.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 shrink-0">
+                <LinkIcon className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-400" />
               </div>
-            ))}
-
-            {/* Status row */}
-            <div className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40">
-              <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
-                <ShieldCheck className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
-                Status
-              </span>
-              <span style={{ color: "#ffffff" }} className="text-[10px] sm:text-xs font-medium">
-                {tx.status}
-              </span>
+              <div className="min-w-0">
+                <h2 className="text-base sm:text-lg font-bold leading-tight truncate">Link Your Card</h2>
+                <p className="text-[9px] sm:text-[10px] text-slate-400 uppercase tracking-widest">One-time setup</p>
+              </div>
             </div>
 
-            {/* Route — only for Fare type (single combined line) */}
-            {isFare && (
-              <div className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40">
-                <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
-                  <Route className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
-                  Route
-                </span>
-                <span className="text-[10px] sm:text-xs font-medium text-slate-200 text-right truncate max-w-[55%]">
-                  {matchedRoute ? (
-                    `${matchedRoute.origin} → ${matchedRoute.destination}`
-                  ) : (
-                    <span className="text-slate-600">—</span>
-                  )}
-                </span>
+            {/* Security notice */}
+            <div className="mt-3 sm:mt-4 mb-4 sm:mb-5 flex gap-2.5 sm:gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 sm:p-3">
+              <Lock className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+              <p className="text-[11px] sm:text-xs text-amber-300 leading-relaxed">
+                <span className="font-bold">Security Notice:</span> For your account's security, a card can
+                only be linked <span className="font-bold underline underline-offset-2">once</span>. This
+                action is permanent and cannot be changed after confirmation.
+              </p>
+            </div>
+
+            {/* ── LOCKOUT BANNER ── shown instead of the form when locked */}
+            {isLocked && (
+              <div className="space-y-3 sm:space-y-4">
+                <div className="flex flex-col items-center gap-2.5 sm:gap-3 bg-red-500/10 border border-red-500/30 rounded-xl p-4 sm:p-5 text-center">
+                  <ShieldAlert className="h-7 w-7 sm:h-8 sm:w-8 text-red-400" />
+                  <div>
+                    <p className="font-bold text-red-400 text-sm mb-1">Too Many Failed Attempts</p>
+                    <p className="text-[11px] sm:text-xs text-red-300/80 leading-relaxed">
+                      You have been temporarily locked out for security reasons.
+                    </p>
+                  </div>
+
+                  {/* ✅ Realtime countdown */}
+                  <div className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-lg">
+                    <Clock className="h-4 w-4 text-red-400 animate-pulse shrink-0" />
+                    <span className="text-[13px] sm:text-sm text-red-300">
+                      Try again in{" "}
+                      <span className="font-black text-white tabular-nums">
+                        {lockoutSecs}s
+                      </span>
+                    </span>
+                  </div>
+
+                  <p className="text-[9px] sm:text-[10px] text-slate-500 leading-relaxed">
+                    The timer will unlock automatically. Do not close this window.
+                  </p>
+                </div>
+
+                <Button
+                  onClick={onCancel}
+                  variant="outline"
+                  className="w-full border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white h-11 sm:h-12 text-sm"
+                >
+                  Cancel and return to sign-in
+                </Button>
               </div>
             )}
+
+            {/* ── Step 1: Input ── */}
+            {!isConfirmStep && !isLocked && (
+              <div className="space-y-3 sm:space-y-4">
+
+                <div>
+                  <label className="text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase block mb-1.5">
+                    Card UID
+                  </label>
+                  <Input
+                    value={input}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/[^a-zA-Z0-9-_]/g, "");
+                      setInput(raw);
+                      if (validation.status !== "idle") setValidation({ status: "idle" });
+                    }}
+                    placeholder="Enter your Card UID..."
+                    className="bg-white/5 border-white/10 text-white placeholder:text-slate-600 focus:border-emerald-500/50 font-mono text-sm h-11"
+                    onKeyDown={(e) => e.key === "Enter" && !isChecking && checkCard()}
+                    disabled={isChecking}
+                  />
+                </div>
+
+                <div className="recaptcha-wrapper flex flex-col items-center gap-1 w-full overflow-hidden">
+                  <label className="text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase mb-1 self-start">
+                    Verification
+                  </label>
+                  {/* Placeholder box — full width of its parent. The recaptcha
+                      scales itself to exactly match this box's width. */}
+                  <div
+                    ref={recaptchaBoxRef}
+                    className="w-full max-w-[304px]"
+                    style={{ height: RECAPTCHA_HEIGHT * recaptchaScale }}
+                  >
+                    <div
+                      style={{
+                        transform: `scale(${recaptchaScale})`,
+                        transformOrigin: "0 0",
+                        width: RECAPTCHA_WIDTH,
+                        height: RECAPTCHA_HEIGHT,
+                      }}
+                    >
+                      <ReCAPTCHA
+                        ref={recaptchaRef}
+                        sitekey={RECAPTCHA_SITE_KEY}
+                        theme="dark"
+                        onChange={(token) => { setCaptchaToken(token); setCaptchaError(""); }}
+                        onExpired={() => { setCaptchaToken(null); setCaptchaError("reCAPTCHA expired. Please verify again."); }}
+                      />
+                    </div>
+                  </div>
+                  {captchaError && (
+                    <p className="text-[11px] sm:text-xs text-red-400 mt-1 flex items-center gap-1 self-start">
+                      <XCircle className="h-3 w-3 shrink-0" /> {captchaError}
+                    </p>
+                  )}
+                </div>
+
+                {isBlocked && (
+                  <div className="flex items-start gap-2 text-[11px] sm:text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-3">
+                    <Ban className="h-4 w-4 flex-shrink-0 mt-0.5 text-red-400" />
+                    <div>
+                      <p className="font-bold text-red-400 mb-0.5">Card Blocked</p>
+                      <p className="text-red-300/80">This card has been blocked. Please contact support.</p>
+                    </div>
+                  </div>
+                )}
+
+                {error && !isBlocked && (
+                  <div className="flex items-start gap-2 text-[11px] sm:text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2.5">
+                    <XCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                {isChecking && (
+                  <div className="flex items-center gap-2 text-[11px] sm:text-xs text-slate-400 bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2.5">
+                    <Loader2 className="h-4 w-4 animate-spin text-emerald-400 shrink-0" />
+                    <span>Checking card in system...</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    onClick={() => window.history.back()}
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-[#1f2622] text-[#d7ded9] text-sm px-4 py-2.5 h-11 sm:h-12 hover:border-[#4ea878] hover:text-[#7CFFB2] transition-colors"
+                  >
+                    <ArrowLeft className="h-4 w-4 shrink-0" />
+                    Go back
+                  </button>
+                  <Button
+                    onClick={checkCard}
+                    disabled={isChecking || !input.trim() || !captchaToken}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-11 sm:h-12 text-sm transition-all disabled:opacity-50"
+                  >
+                    {isChecking
+                      ? <><Loader2 className="h-4 w-4 mr-2 animate-spin shrink-0" />Verifying Card...</>
+                      : <><CheckCircle2 className="h-4 w-4 mr-2 shrink-0" />Verify Card UID</>}
+                  </Button>
+                </div>
+
+                <p className="text-center text-[9px] sm:text-[10px] text-slate-600 leading-relaxed">
+                  Complete the reCAPTCHA and verify your card before linking.
+                </p>
+              </div>
+            )}
+
+            {/* ── Step 2: Confirm ── */}
+            {isConfirmStep && !isLocked && validation.status === "found" && (
+              <div className="space-y-3 sm:space-y-4">
+                <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 sm:p-4 space-y-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <span className="text-[11px] sm:text-xs font-bold text-emerald-400 uppercase tracking-wider">Card Found</span>
+                  </div>
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-[9px] sm:text-[10px] text-slate-500 uppercase font-bold mb-0.5">Card UID</p>
+                      <p className="text-sm font-mono text-white tracking-widest break-all">{validation.cardData.cardUid}</p>
+                    </div>
+                    {validation.cardData.fullName && (
+                      <div>
+                        <p className="text-[9px] sm:text-[10px] text-slate-500 uppercase font-bold mb-0.5">Registered Name</p>
+                        <p className="text-sm font-semibold text-white break-words">{validation.cardData.fullName}</p>
+                      </div>
+                    )}
+                    {validation.cardData.type && (
+                      <div>
+                        <p className="text-[9px] sm:text-[10px] text-slate-500 uppercase font-bold mb-0.5">Card Type</p>
+                        <p className="text-sm text-slate-300">{validation.cardData.type}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-[11px] sm:text-xs text-slate-400 text-center leading-relaxed">
+                  Is this your card? Confirm to permanently link it to your account.{" "}
+                  <span className="text-amber-400 font-semibold">This cannot be undone.</span>
+                </p>
+
+                {error && (
+                  <div className="flex items-start gap-2 text-[11px] sm:text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2.5">
+                    <XCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button onClick={backToInput} disabled={loading} variant="outline"
+                    className="flex-1 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white h-11 sm:h-12 text-sm">
+                    Back
+                  </Button>
+                  <Button onClick={confirmLink} disabled={loading}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-11 sm:h-12 text-sm transition-all">
+                    {loading
+                      ? <><Loader2 className="h-4 w-4 mr-2 animate-spin shrink-0" />Linking...</>
+                      : <><LinkIcon className="h-4 w-4 mr-2 shrink-0" />Confirm & Link</>}
+                  </Button>
+                </div>
+
+                <button
+                  onClick={onCancel}
+                  disabled={loading}
+                  className="w-full text-center text-[11px] text-slate-500 hover:text-slate-300 transition-colors underline underline-offset-2 disabled:opacity-50"
+                >
+                  Cancel and return to sign-in
+                </button>
+
+                <p className="text-center text-[9px] sm:text-[10px] text-slate-600 leading-relaxed">
+                  By clicking above, you agree that this card UID will be permanently tied to your account and cannot be modified.
+                </p>
+              </div>
+            )}
+
           </div>
         </div>
-
-        {/* Total line */}
-        <div className="mx-4 sm:mx-5 mt-2.5 sm:mt-3 mb-1 border-t border-dashed border-slate-700 pt-2.5 sm:pt-3 flex items-center justify-between gap-2">
-          <span className="text-[10px] sm:text-xs font-semibold text-slate-400">
-            {isFare ? "Amount deducted" : "Amount credited"}
-          </span>
-          <span className={`text-xs sm:text-sm font-black ${isFare ? "text-red-400" : "text-emerald-400"}`}>
-            {formatAmount(tx.amount)}
-          </span>
-        </div>
-
-        {/* Footer */}
-        <div className="px-4 sm:px-5 pt-2.5 sm:pt-3 pb-4 sm:pb-5">
-          <Button
-            onClick={onClose}
-            className="w-full text-white border-0 font-semibold transition-colors text-sm sm:text-base"
-            style={{ backgroundColor: isFare ? "#dc2626" : "#059669" }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                isFare ? "#ef4444" : "#10b981";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                isFare ? "#dc2626" : "#059669";
-            }}
-          >
-            Close
-          </Button>
-        </div>
       </div>
-    </div>
+    </>
   );
 }
