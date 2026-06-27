@@ -354,7 +354,6 @@ export default function ResetPasswordPage() {
       }
 
       setSuccess(true);
-      setTimeout(() => setLocation("/signin"), 3000);
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
@@ -432,10 +431,9 @@ export default function ResetPasswordPage() {
             <div>
               <p className="text-white font-bold text-base mb-1">Password Reset!</p>
               <p className="text-slate-400 text-sm">
-                Your password has been updated. Redirecting you to sign in…
+                Your password has been updated successfully.
               </p>
             </div>
-            <Loader2 className="h-4 w-4 text-slate-500 animate-spin" />
             {/* ── Back to Sign In button ── */}
             <Button
               className="mt-2 w-full h-11 bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition-all shadow-lg shadow-emerald-900/20 inline-flex items-center justify-center gap-2"
