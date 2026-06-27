@@ -34,6 +34,7 @@ router.get("/transactions", async (req, res): Promise<void> => {
       type: transactionsTable.type,
       amount: transactionsTable.amount,
       status: transactionsTable.status,
+      payment_method: transactionsTable.payment_method, // ✅ dagdag
     })
     .from(transactionsTable)
     .leftJoin(usersTable, eq(transactionsTable.cardUid, usersTable.cardUid))
@@ -85,6 +86,7 @@ router.post("/transactions", async (req, res): Promise<void> => {
           type: transactionsTable.type,
           amount: transactionsTable.amount,
           status: transactionsTable.status,
+          payment_method: transactionsTable.payment_method, // ✅ dagdag
         });
 
       if (status === "Success") {

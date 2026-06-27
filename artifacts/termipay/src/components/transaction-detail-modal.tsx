@@ -6,6 +6,7 @@ import {
   Receipt,
   ShieldCheck,
   Route,
+  Wallet,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,8 @@ export type Transaction = {
   type: string;
   amount: number | string;
   status: string;
-  route_id?: number | null; // ✅ added
+  route_id?: number | null;
+  payment_method?: string | null; // ✅ added
 };
 
 export type FareRoute = {
@@ -37,6 +39,23 @@ function formatAmount(amount: number | string): string {
     maximumFractionDigits: 2,
   });
   return `\u20B1${num}`;
+}
+
+// ✅ Maps raw PayMongo payment method codes to display-friendly labels
+function formatPaymentMethod(method?: string | null): string | null {
+  if (!method) return null;
+  const map: Record<string, string> = {
+    gcash: "GCash",
+    paymaya: "Maya",
+    card: "Card",
+    grab_pay: "GrabPay",
+    billease: "BillEase",
+    dob: "Online Banking",
+    dob_ubp: "UnionBank",
+    qrph: "QR Ph",
+  };
+  const key = method.toLowerCase().trim();
+  return map[key] ?? method.charAt(0).toUpperCase() + method.slice(1);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -63,6 +82,8 @@ export function TransactionDetailModal({
   const matchedRoute = isFare && tx.route_id
     ? safeRoutes.find((r) => r.id === tx.route_id) ?? null
     : null;
+
+  const paymentMethodLabel = formatPaymentMethod(tx.payment_method);
 
   const rows = [
     {
@@ -187,6 +208,21 @@ export function TransactionDetailModal({
                 </span>
               </div>
             ))}
+
+            {/* Payment method — only for Top-up (non-Fare) transactions */}
+            {!isFare && (
+              <div className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40">
+                <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
+                  <Wallet className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
+                  Payment method
+                </span>
+                <span className="text-[10px] sm:text-xs font-medium text-slate-200 text-right truncate max-w-[55%]">
+                  {paymentMethodLabel ?? (
+                    <span className="text-slate-600">—</span>
+                  )}
+                </span>
+              </div>
+            )}
 
             {/* Status row */}
             <div className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40">

@@ -95,6 +95,7 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
         amount:    Number(tx.amount ?? 0),
         status:    tx.status,
         route_id:  tx.routeId ?? tx.route_id ?? null, // ✅ idagdag ito
+        payment_method: tx.paymentMethod ?? tx.payment_method ?? null, // ✅ dagdag ito
       })),
     });
 

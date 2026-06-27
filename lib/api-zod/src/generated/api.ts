@@ -123,6 +123,7 @@ export const ListTransactionsResponseItem = zod.object({
   type: zod.string(),
   amount: zod.number(),
   status: zod.string(),
+  payment_method: zod.string().nullable().optional(),
 });
 export const ListTransactionsResponse = zod.array(ListTransactionsResponseItem);
 
@@ -153,6 +154,7 @@ export const UpdateTransactionResponse = zod.object({
   type: zod.string(),
   amount: zod.number(),
   status: zod.string(),
+  payment_method: zod.string().nullable().optional(),
 });
 
 // ✅ FIXED: id is now string to support 13-digit BIGINT
