@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { CreditCard, Eye, EyeOff, Loader2, Lock, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { CreditCard, Eye, EyeOff, Loader2, Lock, CheckCircle2, XCircle, AlertTriangle, ArrowLeft } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-url";
 
 type TokenState = "loading" | "valid" | "invalid" | "expired" | "used";
@@ -436,6 +436,14 @@ export default function ResetPasswordPage() {
               </p>
             </div>
             <Loader2 className="h-4 w-4 text-slate-500 animate-spin" />
+            {/* ── Back to Sign In button ── */}
+            <Button
+              className="mt-2 w-full h-11 bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition-all shadow-lg shadow-emerald-900/20 inline-flex items-center justify-center gap-2"
+              onClick={() => setLocation("/signin")}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to Sign In
+            </Button>
           </CardContent>
         </Card>
       </Shell>
