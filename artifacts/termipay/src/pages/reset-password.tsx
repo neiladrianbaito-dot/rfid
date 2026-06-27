@@ -273,7 +273,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         </div>
         {children}
         <p className="mt-8 text-[10px] text-slate-600 text-center uppercase tracking-[0.2em]">
-          Automated Transit Wallet System v2.0
+          Fare Collection System v1.0
         </p>
       </div>
     </div>

@@ -429,7 +429,7 @@ export default function SigninPage() {
 
         {/* Footer */}
         <p className="mt-6 text-[10px] text-slate-600 text-center uppercase tracking-[0.2em]">
-          Automated Transit Wallet System v2.0
+          Fare Collection System v1.0
         </p>
       </div>
 
