@@ -15,7 +15,6 @@ const router: IRouter = Router();
 
 // --- GET TRANSACTIONS ---
 router.get("/transactions", async (req, res): Promise<void> => {
-  // FIX: Use ListTransactionsQueryParams (not UpdateTransactionParams)
   const params = ListTransactionsQueryParams.safeParse(req.query);
   const search = params.success ? params.data.search : undefined;
   const typeFilter = params.success ? params.data.type : undefined;
@@ -27,7 +26,8 @@ router.get("/transactions", async (req, res): Promise<void> => {
 
   const rows = await db
     .select({
-      id: transactionsTable.id,
+      // ✅ FIXED: Cast BIGINT id to text para hindi mag-precision loss
+      id: sql<string>`${transactionsTable.id}::text`.as("id"),
       timestamp: transactionsTable.timestamp,
       cardUid: transactionsTable.cardUid,
       fullName: sql<string>`COALESCE(${usersTable.fullName}, 'Unknown')`.as("full_name"),
@@ -77,7 +77,15 @@ router.post("/transactions", async (req, res): Promise<void> => {
           amount: String(amount),
           status,
         })
-        .returning();
+        .returning({
+          // ✅ FIXED: Cast id to text on insert returning
+          id: sql<string>`${transactionsTable.id}::text`,
+          timestamp: transactionsTable.timestamp,
+          cardUid: transactionsTable.cardUid,
+          type: transactionsTable.type,
+          amount: transactionsTable.amount,
+          status: transactionsTable.status,
+        });
 
       if (status === "Success") {
         if (type === "Top-up") {
@@ -106,7 +114,7 @@ router.post("/transactions", async (req, res): Promise<void> => {
       .where(eq(usersTable.cardUid, cardUid));
 
     res.status(201).json({
-      id: txResult.id,
+      id: txResult.id, // ✅ already string
       timestamp: txResult.timestamp,
       cardUid: txResult.cardUid,
       fullName: user?.fullName || "Unknown",
@@ -122,9 +130,9 @@ router.post("/transactions", async (req, res): Promise<void> => {
 
 // --- PATCH TRANSACTION ---
 router.patch("/transactions/:id", async (req, res): Promise<void> => {
-  // FIX: Convert id to number before parsing since Express params are always strings
+  // ✅ FIXED: id is string now, no need to coerce to number
   const params = UpdateTransactionParams.safeParse({
-    id: Number(req.params.id),
+    id: req.params.id,
   });
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -154,7 +162,8 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
       const [oldTx] = await tx
         .select()
         .from(transactionsTable)
-        .where(eq(transactionsTable.id, params.data.id));
+        // ✅ FIXED: Cast string id back to bigint for DB query
+        .where(eq(transactionsTable.id, sql`${params.data.id}::bigint`));
       if (!oldTx) throw new Error("TX_NOT_FOUND");
 
       const updateData: Record<string, any> = {};
@@ -165,8 +174,16 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
       const [newTx] = await tx
         .update(transactionsTable)
         .set(updateData)
-        .where(eq(transactionsTable.id, params.data.id))
-        .returning();
+        .where(eq(transactionsTable.id, sql`${params.data.id}::bigint`))
+        .returning({
+          // ✅ FIXED: Cast id to text on returning
+          id: sql<string>`${transactionsTable.id}::text`,
+          timestamp: transactionsTable.timestamp,
+          cardUid: transactionsTable.cardUid,
+          type: transactionsTable.type,
+          amount: transactionsTable.amount,
+          status: transactionsTable.status,
+        });
 
       // 1. Reverse OLD effect
       if (oldTx.status === "Success") {
@@ -209,7 +226,7 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
 
     res.json(
       UpdateTransactionResponse.parse({
-        id: patchResult.id,
+        id: patchResult.id, // ✅ already string
         timestamp: patchResult.timestamp,
         cardUid: patchResult.cardUid,
         fullName: user?.fullName || "Unknown",
@@ -230,9 +247,9 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
 
 // --- DELETE TRANSACTION ---
 router.delete("/transactions/:id", async (req, res): Promise<void> => {
-  // FIX: Same id coercion fix as PATCH
+  // ✅ FIXED: id is string now
   const params = DeleteTransactionParams.safeParse({
-    id: Number(req.params.id),
+    id: req.params.id,
   });
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -244,7 +261,8 @@ router.delete("/transactions/:id", async (req, res): Promise<void> => {
       const [txToDelete] = await tx
         .select()
         .from(transactionsTable)
-        .where(eq(transactionsTable.id, params.data.id));
+        // ✅ FIXED: Cast string id back to bigint for DB query
+        .where(eq(transactionsTable.id, sql`${params.data.id}::bigint`));
       if (!txToDelete) return false;
 
       if (txToDelete.status === "Success") {
@@ -264,7 +282,8 @@ router.delete("/transactions/:id", async (req, res): Promise<void> => {
 
       await tx
         .delete(transactionsTable)
-        .where(eq(transactionsTable.id, params.data.id));
+        // ✅ FIXED: Cast string id back to bigint for DB query
+        .where(eq(transactionsTable.id, sql`${params.data.id}::bigint`));
       return true;
     });
 

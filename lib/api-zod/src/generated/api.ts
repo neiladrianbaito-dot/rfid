@@ -37,7 +37,6 @@ export const ListUsersResponseItem = zod.object({
   contactNumber: zod.string(),
   type: zod.string(),
   balance: zod.number(),
-  // ✅ gcashLoadedTotal REMOVED
   status: zod.string(),
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
@@ -63,7 +62,6 @@ export const GetUserResponse = zod.object({
   contactNumber: zod.string(),
   type: zod.string(),
   balance: zod.number(),
-  // ✅ gcashLoadedTotal REMOVED
   status: zod.string(),
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
@@ -88,7 +86,6 @@ export const UpdateUserResponse = zod.object({
   contactNumber: zod.string(),
   type: zod.string(),
   balance: zod.number(),
-  // ✅ gcashLoadedTotal REMOVED
   status: zod.string(),
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
@@ -105,7 +102,6 @@ export const ListRecentUsersResponseItem = zod.object({
   contactNumber: zod.string(),
   type: zod.string(),
   balance: zod.number(),
-  // ✅ gcashLoadedTotal REMOVED
   status: zod.string(),
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
@@ -118,8 +114,9 @@ export const ListTransactionsQueryParams = zod.object({
   status: zod.enum(["Success", "Failed", "Pending"]).optional(),
 });
 
+// ✅ FIXED: id is now string to support 13-digit BIGINT
 export const ListTransactionsResponseItem = zod.object({
-  id: zod.number(),
+  id: zod.coerce.string(),
   timestamp: zod.coerce.date(),
   cardUid: zod.string(),
   fullName: zod.string(),
@@ -136,8 +133,9 @@ export const CreateTransactionBody = zod.object({
   status: zod.enum(["Success", "Failed", "Pending"]),
 });
 
+// ✅ FIXED: id is now string to support 13-digit BIGINT
 export const UpdateTransactionParams = zod.object({
-  id: zod.coerce.number(),
+  id: zod.coerce.string(),
 });
 
 export const UpdateTransactionBody = zod.object({
@@ -146,8 +144,9 @@ export const UpdateTransactionBody = zod.object({
   status: zod.string().optional(),
 });
 
+// ✅ FIXED: id is now string to support 13-digit BIGINT
 export const UpdateTransactionResponse = zod.object({
-  id: zod.number(),
+  id: zod.coerce.string(),
   timestamp: zod.coerce.date(),
   cardUid: zod.string(),
   fullName: zod.string(),
@@ -156,8 +155,9 @@ export const UpdateTransactionResponse = zod.object({
   status: zod.string(),
 });
 
+// ✅ FIXED: id is now string to support 13-digit BIGINT
 export const DeleteTransactionParams = zod.object({
-  id: zod.coerce.number(),
+  id: zod.coerce.string(),
 });
 
 export const ListRoutesResponseItem = zod.object({
