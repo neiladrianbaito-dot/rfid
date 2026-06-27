@@ -14,4 +14,6 @@ export interface Transaction {
   type: string;
   amount: number;
   status: string;
+  route_id?: number | null;        // ✅ dagdag
+  payment_method?: string | null;  // ✅ dagdag
 }

@@ -50,20 +50,7 @@ export function useCardData(cardUid: string) {
         setUser(null);
       }
 
-      // ✅ FIX: Explicit mapping para hindi mawala ang payment_method
-      setTransactions(
-        (payload.transactions || []).map((t: any) => ({
-          id: t.id,
-          timestamp: t.timestamp,
-          cardUid: t.cardUid ?? t.card_uid,
-          fullName: t.fullName ?? t.full_name ?? "Unknown",
-          type: t.type,
-          amount: Number(t.amount ?? 0),
-          status: t.status,
-          payment_method: t.payment_method ?? null, // ✅ explicitly mapped
-        })) as TransactionRecord[]
-      );
-
+      setTransactions((payload.transactions || []) as TransactionRecord[]);
       setLastUpdated(new Date());
       setError("");
     } catch (err: unknown) {
