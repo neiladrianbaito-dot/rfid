@@ -348,20 +348,30 @@ export default function PaymongoDashboardPage() {
         </div>
 
         {/* ── TRANSACTIONS — Mobile ── */}
-        <div className={activeTab === "Transactions" ? "block md:hidden" : "hidden"}>
-          <p className="text-sm font-bold text-white mb-1 px-1">Transactions History</p>
-          {transactions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <List className="h-7 w-7 text-slate-700" />
-              <p className="text-slate-600 text-xs italic">No transactions yet.</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-800/50 -mx-3">
-              {transactions.map((tx) => (
-                <MobileTxRow key={tx.id} tx={tx} onClick={() => setSelectedTx(tx)} />
-              ))}
-            </div>
-          )}
+        <div className={activeTab === "Transactions" ? "flex flex-col md:hidden" : "hidden"}
+          style={{ height: "calc(100vh - 112px)" }}>
+          {/* Sticky sub-header */}
+          <div className="sticky top-[57px] z-30 bg-[#020617]/95 backdrop-blur-md px-1 py-2.5 shrink-0">
+            <p className="text-sm font-bold text-white flex items-center gap-2">
+              <List className="h-4 w-4 text-blue-400" />
+              Transactions History
+            </p>
+          </div>
+          {/* Scrollable list */}
+          <div className="flex-1 overflow-y-auto -mx-3">
+            {transactions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <List className="h-7 w-7 text-slate-700" />
+                <p className="text-slate-600 text-xs italic">No transactions yet.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-800/50">
+                {transactions.map((tx) => (
+                  <MobileTxRow key={tx.id} tx={tx} onClick={() => setSelectedTx(tx)} />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ── SETTINGS tab (mobile only) ── */}
