@@ -13,6 +13,24 @@ export const DASHBOARD_STYLES = `
     50%       { opacity: 0.2; }
   }
 
+  /* ── Hide scrollbar on all devices ── */
+  * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  *::-webkit-scrollbar {
+    display: none;
+  }
+  html, body {
+    overflow-x: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    display: none;
+  }
+
   .rgb-container {
     position: relative;
     padding: 3px;
