@@ -5,31 +5,33 @@ export const MAX_BALANCE = 20000;
 export const RECAPTCHA_SITE_KEY = "6LfbiuQsAAAAAI9iR6ZsDDUGodOeSMUQSu6ALcfc";
 
 // ─── Card UID Attempt Limiter ─────────────────────────────────────────────────
-// 3 failed lookups → 60-second lockout → force exit callback is called
-const CARD_UID_MAX_ATTEMPTS = 3;
-const CARD_UID_LOCKOUT_MS   = 60_000; // 60 seconds
+const CARD_UID_MAX_ATTEMPTS    = 3;
+const CARD_UID_LOCKOUT_MS      = 60_000;
+const STORAGE_KEY_COUNT        = "card_uid_attempt_count";
+const STORAGE_KEY_LOCKED_UNTIL = "card_uid_locked_until";
 
-const cardUidAttemptState = {
-  count: 0,
-  lockedUntil: 0, // epoch ms; 0 = not locked
-};
+function getAttemptCount(): number {
+  return parseInt(localStorage.getItem(STORAGE_KEY_COUNT) ?? "0", 10);
+}
+function setAttemptCount(n: number): void {
+  localStorage.setItem(STORAGE_KEY_COUNT, String(n));
+}
+function getLockedUntil(): number {
+  return parseInt(localStorage.getItem(STORAGE_KEY_LOCKED_UNTIL) ?? "0", 10);
+}
+function setLockedUntil(ms: number): void {
+  localStorage.setItem(STORAGE_KEY_LOCKED_UNTIL, String(ms));
+}
 
-/**
- * Returns how many milliseconds remain in the lockout (0 if not locked).
- */
 export function getCardUidLockoutRemaining(): number {
-  const remaining = cardUidAttemptState.lockedUntil - Date.now();
+  const remaining = getLockedUntil() - Date.now();
   return remaining > 0 ? remaining : 0;
 }
 
-/**
- * Resets the attempt counter and lockout (e.g. after a successful scan).
- */
 export function resetCardUidAttempts(): void {
-  cardUidAttemptState.count = 0;
-  cardUidAttemptState.lockedUntil = 0;
+  localStorage.removeItem(STORAGE_KEY_COUNT);
+  localStorage.removeItem(STORAGE_KEY_LOCKED_UNTIL);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function cleanCardUid(raw: string): string {
@@ -74,17 +76,6 @@ export async function saveLinkedCardUid(cardUid: string) {
   if (!response.ok) throw new Error(payload?.message || "Failed to save linked card.");
 }
 
-/**
- * Validates that a card UID exists in the system.
- *
- * Built-in attempt limiter:
- *  - 3 consecutive failures → 60-second lockout
- *  - On the 3rd failure an error with `forceExit: true` is thrown
- *  - A successful lookup resets the counter automatically
- *
- * The caller should check `(error as any).forceExit === true` and redirect
- * the user away (e.g. back to the sign-in page).
- */
 export async function validateCardUidExists(
   uid: string
 ): Promise<{ fullName?: string; cardUid: string; type?: string; status?: string }> {
@@ -113,18 +104,17 @@ export async function validateCardUidExists(
     payload = await response.json();
     ok = response.ok;
   } catch {
-    // Network error — don't count against the limiter
     throw new Error("Network error. Please check your connection and try again.");
   }
 
   // ── 3. Handle failure ─────────────────────────────────────────────────────
   if (!ok || !payload?.card?.cardUid) {
-    cardUidAttemptState.count += 1;
-    const attemptsLeft = CARD_UID_MAX_ATTEMPTS - cardUidAttemptState.count;
+    const newCount = getAttemptCount() + 1;
+    setAttemptCount(newCount);
+    const attemptsLeft = CARD_UID_MAX_ATTEMPTS - newCount;
 
-    if (cardUidAttemptState.count >= CARD_UID_MAX_ATTEMPTS) {
-      // Lock out and signal force-exit to the caller
-      cardUidAttemptState.lockedUntil = Date.now() + CARD_UID_LOCKOUT_MS;
+    if (newCount >= CARD_UID_MAX_ATTEMPTS) {
+      setLockedUntil(Date.now() + CARD_UID_LOCKOUT_MS);
 
       const err: any = new Error(
         "Card UID not found. Maximum attempts reached. You have been locked out for 60 seconds."
