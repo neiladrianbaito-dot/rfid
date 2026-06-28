@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { getUserByCardUid } from "@/lib/api";
 import type { UserRecord, TransactionRecord } from "@/lib/types";
@@ -14,7 +14,7 @@ export function useCardData(cardUid: string) {
   const prevBalanceRef = useRef<number | null>(null);
   const prevTxCountRef = useRef<number>(0);
 
-  const fetchCardData = async (uid: string, showLoading = false) => {
+  const fetchCardData = useCallback(async (uid: string, showLoading = false) => {
     if (!uid) return;
     if (showLoading) setLoading(true);
 
@@ -50,7 +50,16 @@ export function useCardData(cardUid: string) {
         setUser(null);
       }
 
-      setTransactions((payload.transactions || []) as TransactionRecord[]);
+      // ✅ Fix: only update transactions if something actually changed
+      const newTxs = (payload.transactions || []) as TransactionRecord[];
+      setTransactions(prev => {
+        if (
+          prev.length === newTxs.length &&
+          prev.every((t, i) => t.id === newTxs[i].id && t.amount === newTxs[i].amount)
+        ) return prev; // same reference = no re-render = no blink
+        return newTxs;
+      });
+
       setLastUpdated(new Date());
       setError("");
     } catch (err: unknown) {
@@ -59,7 +68,7 @@ export function useCardData(cardUid: string) {
     } finally {
       if (showLoading) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!cardUid) return;
@@ -86,7 +95,7 @@ export function useCardData(cardUid: string) {
       });
 
     return () => { supabase.removeChannel(channel); };
-  }, [cardUid]);
+  }, [cardUid, fetchCardData]);
 
   return { user, transactions, loading, error, lastUpdated, isPulsing };
 }

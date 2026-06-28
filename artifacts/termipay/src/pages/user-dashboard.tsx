@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { memo, useCallback, useMemo, useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import {
   Wallet, User, Phone, Tag, ShieldCheck,
@@ -38,7 +38,14 @@ function getInitials(name: string): string {
     .join("");
 }
 
-function MobileTxRow({ tx, onClick }: { tx: Transaction; onClick: () => void }) {
+// ✅ Fix: memo — hindi na mag-re-render ang row kapag hindi nagbago ang tx
+const MobileTxRow = memo(function MobileTxRow({
+  tx,
+  onClick,
+}: {
+  tx: Transaction;
+  onClick: () => void;
+}) {
   const isFare = tx.type === "Fare";
   const date = new Date(tx.timestamp);
   const dateStr = date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -72,7 +79,8 @@ function MobileTxRow({ tx, onClick }: { tx: Transaction; onClick: () => void }) 
       </div>
     </button>
   );
-}
+// ✅ Fix: custom comparator — re-render lang kapag talgang nagbago ang tx
+}, (prev, next) => prev.tx.id === next.tx.id && prev.tx.amount === next.tx.amount);
 
 type Tab = "home" | "Transactions" | "settings";
 
@@ -150,6 +158,11 @@ export default function PaymongoDashboardPage() {
     setSelectedTx(null);
   };
 
+  // ✅ Fix: useCallback — stable reference, hindi mag-re-render ang rows dahil dito
+  const handleTxClick = useCallback((tx: Transaction) => {
+    setSelectedTx(tx);
+  }, []);
+
   const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
     { tab: "home", icon: <Home className="h-5 w-5" />, label: "Home" },
     { tab: "Transactions", icon: <List className="h-5 w-5" />, label: "Transactions" },
@@ -188,7 +201,7 @@ export default function PaymongoDashboardPage() {
         </div>
       </div>
 
-      {/* SCROLLABLE CONTENT — pb-20 ensures content clears the 64px nav */}
+      {/* SCROLLABLE CONTENT */}
       <div className={`mx-auto w-full max-w-6xl px-3 sm:px-8 pb-20 md:pb-8 pt-4 space-y-4 dashboard-content ${
         linkCard.isOpen ? "is-obscured" : ""
       }`}>
@@ -198,7 +211,7 @@ export default function PaymongoDashboardPage() {
           </div>
         )}
 
-        {/* ── HOME tab ── */}
+        {/* HOME tab */}
         <div className={activeTab === "home" ? "block" : "hidden md:block"}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="col-span-1 md:col-span-3">
@@ -283,7 +296,7 @@ export default function PaymongoDashboardPage() {
           </div>
         </div>
 
-        {/* ── TRANSACTIONS — Desktop ── */}
+        {/* TRANSACTIONS — Desktop */}
         <div className="hidden md:block">
           <Card className="border-slate-800 bg-slate-900/40 backdrop-blur-md overflow-hidden">
             <CardHeader className="bg-slate-900/20 border-b border-slate-800 py-3">
@@ -311,7 +324,8 @@ export default function PaymongoDashboardPage() {
                     {transactions.length === 0 ? (
                       <tr><td className="p-12 text-center text-slate-600 text-sm italic" colSpan={4}>No activity recorded.</td></tr>
                     ) : transactions.map((tx) => (
-                      <tr key={tx.id} onClick={() => setSelectedTx(tx)}
+                      // ✅ Fix: useCallback na handleTxClick — stable reference, walang blink
+                      <tr key={tx.id} onClick={() => handleTxClick(tx)}
                         className="hover:bg-slate-800/30 active:bg-slate-800/50 transition-colors cursor-pointer">
                         <td className="px-3 py-2.5">
                           <p className="text-[10px] text-slate-300 font-medium leading-tight whitespace-nowrap">
@@ -347,42 +361,40 @@ export default function PaymongoDashboardPage() {
           </Card>
         </div>
 
-      {/* ── TRANSACTIONS — Mobile ── */}
-<div
-  className={activeTab === "Transactions" ? "fixed inset-0 flex flex-col md:hidden z-10" : "hidden"}
-  style={{ top: "57px", bottom: "64px" }}
->
-  {/* Locked sub-header */}
-  <div className="bg-[#020617]/95 backdrop-blur-md px-4 py-2.5 border-b border-slate-800/60 shrink-0">
-    <p className="text-sm font-bold text-white flex items-center gap-2">
-      <List className="h-4 w-4 text-blue-400" />
-      Transactions History
-    </p>
-  </div>
-  {/* Scrollable list only — header never moves */}
-  <div className="flex-1 overflow-y-auto">
-    {transactions.length === 0 ? (
-      <div className="flex flex-col items-center justify-center py-16 gap-3">
-        <List className="h-7 w-7 text-slate-700" />
-        <p className="text-slate-600 text-xs italic">No transactions yet.</p>
-      </div>
-    ) : (
-      <div className="divide-y divide-slate-800/50">
-        {transactions.map((tx) => (
-          <MobileTxRow key={tx.id} tx={tx} onClick={() => setSelectedTx(tx)} />
-        ))}
-      </div>
-    )}
-  </div>
-</div>
+        {/* TRANSACTIONS — Mobile */}
+        <div
+          className={activeTab === "Transactions" ? "fixed inset-0 flex flex-col md:hidden z-10" : "hidden"}
+          style={{ top: "57px", bottom: "64px" }}
+        >
+          <div className="bg-[#020617]/95 backdrop-blur-md px-4 py-2.5 border-b border-slate-800/60 shrink-0">
+            <p className="text-sm font-bold text-white flex items-center gap-2">
+              <List className="h-4 w-4 text-blue-400" />
+              Transactions History
+            </p>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {transactions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <List className="h-7 w-7 text-slate-700" />
+                <p className="text-slate-600 text-xs italic">No transactions yet.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-800/50">
+                {transactions.map((tx) => (
+                  // ✅ Fix: handleTxClick stable + MobileTxRow memo = walang blink
+                  <MobileTxRow key={tx.id} tx={tx} onClick={() => handleTxClick(tx)} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
-        {/* ── SETTINGS tab (mobile only) ── */}
+        {/* SETTINGS tab (mobile only) */}
         <div className={activeTab === "settings" ? "block md:hidden" : "hidden"}>
           <div className="space-y-3">
 
             {/* Profile Card */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
-              {/* Avatar row */}
               <div className="flex items-center gap-3 px-4 py-4 border-b border-slate-800/60">
                 <div className="h-11 w-11 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0">
                   <span className="text-emerald-400 font-black text-base tracking-tight">
@@ -407,7 +419,6 @@ export default function PaymongoDashboardPage() {
                 </div>
               </div>
 
-              {/* Info rows */}
               {[
                 { icon: <CreditCard className="h-3.5 w-3.5 text-purple-400" />, label: "UID", value: user?.cardUid || "----", mono: true },
                 { icon: <Phone className="h-3.5 w-3.5 text-orange-400" />, label: "Contact", value: user?.contactNumber || "None", mono: false },
@@ -457,7 +468,7 @@ export default function PaymongoDashboardPage() {
           </div>
         </div>
 
-        {/* ── Footer (desktop only) ── */}
+        {/* Footer (desktop only) */}
         <footer className="hidden md:block border-t border-slate-800/60 pt-4 pb-2">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-widest text-slate-700">
             <span>Fare Collection System</span>
@@ -466,7 +477,7 @@ export default function PaymongoDashboardPage() {
         </footer>
       </div>
 
-      {/* ── Mobile Bottom Nav ── */}
+      {/* Mobile Bottom Nav */}
       <nav className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 bg-[#0a0f1e]/95 backdrop-blur-md border-t border-slate-800/60 transition-all duration-300 ${
         linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
       }`}>
