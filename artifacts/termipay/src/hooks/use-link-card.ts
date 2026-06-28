@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import ReCAPTCHA from "react-google-recaptcha";
 import { cleanCardUid, saveLinkedCardUid, validateCardUidExists } from "@/lib/api";
 import type { CardValidationState } from "@/lib/types";
@@ -11,50 +11,60 @@ export function useLinkCard(onLinked: (uid: string) => void) {
   const [validation, setValidation] = useState<CardValidationState>({ status: "idle" });
   const [isConfirmStep, setIsConfirmStep] = useState(false);
 
-  // ── Lockout countdown ─────────────────────────────────────────────────────
+  // ── Lockout countdown (timestamp-based — mobile-safe) ────────────────────
   const [lockoutSecs, setLockoutSecs] = useState(0);
+  const lockoutEndRef = useRef<number | null>(null);       // absolute end timestamp
   const lockoutTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const startLockoutCountdown = (initialSecs: number) => {
-    // Clear any existing timer first
-    if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current);
+  const clearLockoutTimer = useCallback(() => {
+    if (lockoutTimerRef.current) {
+      clearInterval(lockoutTimerRef.current);
+      lockoutTimerRef.current = null;
+    }
+    lockoutEndRef.current = null;
+  }, []);
 
+  const startLockoutCountdown = useCallback((initialSecs: number) => {
+    clearLockoutTimer();
+
+    const endTime = Date.now() + initialSecs * 1000;
+    lockoutEndRef.current = endTime;
+
+    // Set initial value immediately so UI shows right away
     setLockoutSecs(initialSecs);
 
     lockoutTimerRef.current = setInterval(() => {
-      setLockoutSecs((prev) => {
-        if (prev <= 1) {
-          clearInterval(lockoutTimerRef.current!);
-          lockoutTimerRef.current = null;
-          // Auto-unlock: go back to idle so user can try again
-          setValidation({ status: "idle" });
-          setError("");
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
+      const remaining = Math.ceil((lockoutEndRef.current! - Date.now()) / 1000);
+
+      if (remaining <= 0) {
+        clearLockoutTimer();
+        setLockoutSecs(0);
+        // Auto-unlock
+        setValidation({ status: "idle" });
+        setError("");
+        return;
+      }
+
+      setLockoutSecs(remaining);
+    }, 500); // tick every 500ms instead of 1000ms — more resilient on mobile
+  }, [clearLockoutTimer]);
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current);
-    };
-  }, []);
+    return () => clearLockoutTimer();
+  }, [clearLockoutTimer]);
   // ─────────────────────────────────────────────────────────────────────────
 
   const recaptchaRef = useRef<ReCAPTCHA>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaError, setCaptchaError] = useState("");
 
-  const resetCaptcha = () => {
+  const resetCaptcha = useCallback(() => {
     recaptchaRef.current?.reset();
     setCaptchaToken(null);
-  };
+  }, []);
 
   const checkCard = async () => {
-    // Block if currently locked out
     if (validation.status === "locked") return;
 
     const cleaned = cleanCardUid(input.trim());
@@ -82,7 +92,6 @@ export function useLinkCard(onLinked: (uid: string) => void) {
       const message = err instanceof Error ? err.message : "Card UID not found. Please check and try again.";
       const errAny = err as any;
 
-      // ✅ forceExit = locked out (3 failed attempts)
       if (errAny?.forceExit) {
         const secs = errAny?.lockoutRemainingMs
           ? Math.ceil(errAny.lockoutRemainingMs / 1000)
@@ -94,7 +103,6 @@ export function useLinkCard(onLinked: (uid: string) => void) {
         return;
       }
 
-      // Normal failed attempt — show remaining attempts
       setValidation(/not found/i.test(message) ? { status: "not_found" } : { status: "error", message });
       setError(message);
       resetCaptcha();
@@ -131,7 +139,7 @@ export function useLinkCard(onLinked: (uid: string) => void) {
     loading, error,
     validation, setValidation,
     isConfirmStep,
-    lockoutSecs,           // ← expose for UI countdown
+    lockoutSecs,
     recaptchaRef, captchaToken, setCaptchaToken, captchaError, setCaptchaError,
     checkCard, confirmLink, backToInput,
   };
