@@ -11,9 +11,9 @@ export function useLinkCard(onLinked: (uid: string) => void) {
   const [validation, setValidation] = useState<CardValidationState>({ status: "idle" });
   const [isConfirmStep, setIsConfirmStep] = useState(false);
 
-  // ── Lockout countdown (timestamp-based — mobile-safe) ────────────────────
+  // ── Lockout countdown (timestamp-based) ──────────────────────────────────
   const [lockoutSecs, setLockoutSecs] = useState(0);
-  const lockoutEndRef = useRef<number | null>(null);       // absolute end timestamp
+  const lockoutEndRef = useRef<number | null>(null);
   const lockoutTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const clearLockoutTimer = useCallback(() => {
@@ -30,26 +30,24 @@ export function useLinkCard(onLinked: (uid: string) => void) {
     const endTime = Date.now() + initialSecs * 1000;
     lockoutEndRef.current = endTime;
 
-    // Set initial value immediately so UI shows right away
     setLockoutSecs(initialSecs);
 
     lockoutTimerRef.current = setInterval(() => {
-      const remaining = Math.ceil((lockoutEndRef.current! - Date.now()) / 1000);
+      if (!lockoutEndRef.current) return;
+      const remaining = Math.ceil((lockoutEndRef.current - Date.now()) / 1000);
 
       if (remaining <= 0) {
         clearLockoutTimer();
         setLockoutSecs(0);
-        // Auto-unlock
         setValidation({ status: "idle" });
         setError("");
         return;
       }
 
       setLockoutSecs(remaining);
-    }, 500); // tick every 500ms instead of 1000ms — more resilient on mobile
+    }, 500);
   }, [clearLockoutTimer]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => clearLockoutTimer();
   }, [clearLockoutTimer]);
@@ -89,21 +87,29 @@ export function useLinkCard(onLinked: (uid: string) => void) {
       setIsConfirmStep(true);
 
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Card UID not found. Please check and try again.";
+      const message =
+        err instanceof Error ? err.message : "Card UID not found. Please check and try again.";
       const errAny = err as any;
 
+      // ✅ FIXED: early return — never falls through to the generic handler below
       if (errAny?.forceExit) {
         const secs = errAny?.lockoutRemainingMs
           ? Math.ceil(errAny.lockoutRemainingMs / 1000)
           : 60;
-        setValidation({ status: "locked" });
         setError(message);
         resetCaptcha();
         startLockoutCountdown(secs);
-        return;
+        // Set locked LAST so it's the final state — nothing overrides it
+        setValidation({ status: "locked" });
+        return; // ← this was missing / ineffective before
       }
 
-      setValidation(/not found/i.test(message) ? { status: "not_found" } : { status: "error", message });
+      // Only reached if NOT a forceExit
+      setValidation(
+        /not found/i.test(message)
+          ? { status: "not_found" }
+          : { status: "error", message }
+      );
       setError(message);
       resetCaptcha();
     }
@@ -119,7 +125,9 @@ export function useLinkCard(onLinked: (uid: string) => void) {
       onLinked(confirmed);
       setIsOpen(false);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to link card. Please try again.");
+      setError(
+        err instanceof Error ? err.message : "Failed to link card. Please try again."
+      );
     } finally {
       setLoading(false);
     }
