@@ -8,6 +8,11 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useCardData } from "@/hooks/use-card-data";
 import { useChangePassword } from "@/hooks/use-change-password";
 import { useLinkCard } from "@/hooks/use-link-card";
@@ -90,6 +95,8 @@ export default function PaymongoDashboardPage() {
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [routes, setRoutes] = useState<FareRoute[]>([]);
+  // ✅ Logout confirmation dialog state
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
   const { user, transactions, loading, error, lastUpdated, isPulsing } = useCardData(cardUid);
   const currentBalance = Number(user?.balance || 0);
@@ -144,9 +151,21 @@ export default function PaymongoDashboardPage() {
     })();
   }, []);
 
+  // ✅ Actual logout logic — only runs after user confirms
   const handleLogout = () => {
     window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
     setLocation("/signin");
+  };
+
+  // ✅ Opens the confirmation dialog instead of logging out immediately
+  const requestLogout = () => {
+    setLogoutConfirmOpen(true);
+  };
+
+  // ✅ Called when user taps "Yes" in the dialog
+  const confirmLogout = () => {
+    setLogoutConfirmOpen(false);
+    handleLogout();
   };
 
   const balanceText = useMemo(() => {
@@ -177,6 +196,33 @@ export default function PaymongoDashboardPage() {
       <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} routes={routes} />
       <style>{DASHBOARD_STYLES}</style>
 
+      {/* ✅ Logout confirmation dialog — compact, Yes/No always one line, small boxes */}
+      <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+        <AlertDialogContent className="bg-slate-950 border-slate-800 max-w-[85vw] sm:max-w-xs p-4 rounded-xl">
+          <AlertDialogHeader className="space-y-1">
+            <AlertDialogTitle className="text-white font-bold text-sm leading-snug">
+              Are you sure you want to logout?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400 text-[11px] leading-snug">
+              You will need to sign in again to access your account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-row justify-end items-center gap-1.5 mt-3 sm:gap-1.5">
+            <AlertDialogCancel
+              className="bg-slate-900 border-slate-800 text-white hover:bg-slate-800 text-[11px] h-7 px-2.5 min-w-0 mt-0"
+            >
+              No
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmLogout}
+              className="bg-red-600 text-white hover:bg-red-500 font-bold text-[11px] h-7 px-2.5 min-w-0"
+            >
+              Yes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* STICKY HEADER */}
       <div className="sticky top-0 z-40 w-full bg-[#020617]/95 backdrop-blur-md border-b border-slate-800">
         <div className="mx-auto w-full max-w-6xl px-4 sm:px-8 py-3 flex items-center justify-between">
@@ -193,7 +239,7 @@ export default function PaymongoDashboardPage() {
               className="text-slate-400 hover:text-violet-400 hover:bg-violet-400/10 gap-2 text-sm">
               <KeyRound className="h-4 w-4" /><span>Change Password</span>
             </Button>
-            <Button variant="ghost" onClick={handleLogout}
+            <Button variant="ghost" onClick={requestLogout}
               className="text-slate-400 hover:text-red-400 hover:bg-red-400/10 gap-2 text-sm">
               <LogOut className="h-4 w-4" /><span>Logout</span>
             </Button>
@@ -449,7 +495,7 @@ export default function PaymongoDashboardPage() {
                 </div>
                 <ChevronRight className="h-3.5 w-3.5 text-slate-600 shrink-0" />
               </button>
-              <button onClick={handleLogout}
+              <button onClick={requestLogout}
                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-500/5 active:bg-red-500/10 transition-colors">
                 <div className="h-8 w-8 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
                   <LogOut className="h-3.5 w-3.5 text-red-400" />
