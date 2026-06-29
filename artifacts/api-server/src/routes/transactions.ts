@@ -24,18 +24,18 @@ router.get("/transactions", async (req, res): Promise<void> => {
   if (typeFilter) conditions.push(eq(transactionsTable.type, typeFilter));
   if (statusFilter) conditions.push(eq(transactionsTable.status, statusFilter));
 
-  const rows = await db
-    .select({
-      // ✅ FIXED: Cast BIGINT id to text para hindi mag-precision loss
-      id: sql<string>`${transactionsTable.id}::text`.as("id"),
-      timestamp: transactionsTable.timestamp,
-      cardUid: transactionsTable.cardUid,
-      fullName: sql<string>`COALESCE(${usersTable.fullName}, 'Unknown')`.as("full_name"),
-      type: transactionsTable.type,
-      amount: transactionsTable.amount,
-      status: transactionsTable.status,
-      payment_method: transactionsTable.payment_method, // ✅ dagdag
-    })
+const rows = await db
+  .select({
+    id: sql<string>`${transactionsTable.id}::text`.as("id"),
+    timestamp: transactionsTable.timestamp,
+    cardUid: transactionsTable.cardUid,
+    fullName: sql<string>`COALESCE(${usersTable.fullName}, 'Unknown')`.as("full_name"),
+    type: transactionsTable.type,
+    amount: transactionsTable.amount,
+    status: transactionsTable.status,
+    payment_method: transactionsTable.payment_method,
+    route_id: transactionsTable.routeId, // ✅ DAGDAG ITO
+  })
     .from(transactionsTable)
     .leftJoin(usersTable, eq(transactionsTable.cardUid, usersTable.cardUid))
     .where(conditions.length > 0 ? and(...conditions) : undefined)

@@ -124,7 +124,7 @@ export const ListTransactionsResponseItem = zod.object({
   amount: zod.number(),
   status: zod.string(),
   payment_method: zod.string().nullable().optional(),
-  route_id: zod.number().nullable().optional(), // ✅ dagdag ito
+ route_id: zod.coerce.number().nullable().optional(),
 });
 export const ListTransactionsResponse = zod.array(ListTransactionsResponseItem);
 
