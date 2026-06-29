@@ -146,7 +146,15 @@
   * {
     @apply border-border;
   }
+  html, body {
+    /* ✅ FIX: prevent Chrome PWA edge-swipe (back/forward gesture)
+       from being mistaken for "logout" / accidental navigation */
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: auto;
+  }
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    /* ✅ FIX: allow vertical scroll/tap, block the horizontal swipe-nav gesture */
+    touch-action: pan-y;
   }
 }
