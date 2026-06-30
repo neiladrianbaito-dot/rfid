@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
@@ -17,7 +17,6 @@ import TransactionsPage from "@/pages/transactions";
 import UserManagementPage from "@/pages/user-management";
 import FareMatrixPage from "@/pages/fare-matrix";
 import ReportsPage from "@/pages/reports";
-import ReportPreviewPage from "@/pages/report-preview";
 import Layout from "@/components/layout";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -30,116 +29,33 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string | null {
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
 }
 
+// FIX: Call these IMMEDIATELY at module load time, before any component renders
+// Previously inside useEffect — too late, first API call fires before effect runs
 const baseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
 setBaseUrl(baseUrl);
 setAuthTokenGetter(() => window.localStorage.getItem("termipay_auth_token"));
 
-// ── Loading duration config ─────────────────────────────────────────────
-const LOADING_DURATION_MS = 60_000; // exact 60 seconds — palitan dito kung iba
-const FAST_FINISH_MS = 400;         // pag tapos na ang server, ganito katagal
-                                     // ang "sprint" papuntang 100% (smooth,
-                                     // hindi biglaang jump)
-const CAP_WHILE_WAITING = 98;       // max % habang naghihintay pa sa server,
-                                     // para laging may "room" papuntang 100%
-
-function FullPageLoading({ isDone }: { isDone: boolean }) {
-  const [progress, setProgress] = useState(0);
-
-  useEffect(() => {
-    let raf: number;
-    let startTime: number | null = null;
-    let finishStartTime: number | null = null;
-    let finishStartProgress = 0;
-    let cancelled = false;
-
-    const tick = (now: number) => {
-      if (cancelled) return;
-
-      if (!isDone) {
-        // ── Normal pacing: exact 60 seconds papunta 0% → 98% ────────────
-        if (startTime === null) startTime = now;
-        const elapsed = now - startTime;
-        const pct = Math.min(
-          CAP_WHILE_WAITING,
-          (elapsed / LOADING_DURATION_MS) * 100
-        );
-        setProgress(pct);
-      } else {
-        // ── Server tapos na: i-sprint papuntang 100% sa loob ng
-        //    FAST_FINISH_MS, smooth mula sa kasalukuyang % (di jarring) ──
-        if (finishStartTime === null) {
-          finishStartTime = now;
-          setProgress(prev => {
-            finishStartProgress = prev;
-            return prev;
-          });
-        }
-        const finishElapsed = now - finishStartTime;
-        const finishPct = Math.min(1, finishElapsed / FAST_FINISH_MS);
-        const pct =
-          finishStartProgress + (100 - finishStartProgress) * finishPct;
-        setProgress(pct);
-
-        if (finishPct >= 1) return; // nasa 100% na, huminto
-      }
-
-      raf = requestAnimationFrame(tick);
-    };
-
-    raf = requestAnimationFrame(tick);
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-    };
-  }, [isDone]);
-
-  const displayPct = Math.round(progress);
-
+function FullPageLoading() {
   return (
     <div className="flex h-screen w-full flex-col items-center justify-center bg-background">
-      <div className="w-64 space-y-3">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-muted-foreground">
-            TermiPay: Validating Session...
-          </p>
-          <span className="text-sm font-semibold tabular-nums text-primary">
-            {displayPct}%
-          </span>
-        </div>
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-75 ease-linear"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      </div>
+      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
+      <p className="mt-4 text-sm font-medium text-muted-foreground animate-pulse">
+        TermiPay: Validating Session...
+      </p>
     </div>
   );
 }
 
-// ── Minimum display-time gate ────────────────────────────────────────────
-// Pinipilit manatili sa loading screen ng EXACT na ibinigay na duration
-// (default 60s), kahit matapos na agad ang aktwal na auth check. "isReady"
-// ay nagiging true lang kapag (a) tapos na ang auth check AT (b) lumipas
-// na ang minimum time — alin man ang matagal, hihintayin.
-function useMinimumLoadingTime(actuallyDone: boolean, minMs: number = 60_000) {
-  const [timeElapsed, setTimeElapsed] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setTimeElapsed(true), minMs);
-    return () => clearTimeout(timer);
-  }, [minMs]);
-
-  return actuallyDone && timeElapsed;
-}
-
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
-  const isReady = useMinimumLoadingTime(!isLoading, 60_000);
 
-  if (!isReady) return <FullPageLoading isDone={false} />;
-  if (!isAuthenticated) return <Redirect to="/login" />;
+  if (isLoading) {
+    return <FullPageLoading />;
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect to="/login" />;
+  }
 
   return (
     <Layout>
@@ -150,10 +66,14 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 
 function LoginRoute() {
   const { isAuthenticated, isLoading } = useAuth();
-  const isReady = useMinimumLoadingTime(!isLoading, 60_000);
 
-  if (!isReady) return <FullPageLoading isDone={false} />;
-  if (isAuthenticated) return <Redirect to="/" />;
+  if (isLoading) {
+    return <FullPageLoading />;
+  }
+
+  if (isAuthenticated) {
+    return <Redirect to="/" />;
+  }
 
   return <LoginPage />;
 }
@@ -166,7 +86,9 @@ function PaymongoRoute() {
   const hasUserToken =
     typeof window !== "undefined" && !!window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
 
-  if (!hasUserToken) return <Redirect to="/signin" />;
+  if (!hasUserToken) {
+    return <Redirect to="/signin" />;
+  }
 
   return <PaymongoDashboardPage />;
 }
@@ -180,8 +102,7 @@ function AppRouter() {
       <Route path="/signup" component={SignupPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/paymongo-topup" component={PaymongoTopup} />
-      <Route path="/user-dashboard" component={PaymongoRoute} />
-      <Route path="/reports/preview" component={ReportPreviewPage} />
+      <Route path="/paymongo-dashboard" component={PaymongoRoute} />
 
       {/* PROTECTED ROUTES */}
       <Route path="/">
@@ -220,6 +141,7 @@ const queryClient = new QueryClient({
 });
 
 function App() {
+  // Removed useEffect — setup already done at module level abovey
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
