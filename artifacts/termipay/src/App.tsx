@@ -118,10 +118,27 @@ function FullPageLoading({ isDone }: { isDone: boolean }) {
   );
 }
 
+// ── Minimum display-time gate ────────────────────────────────────────────
+// Pinipilit manatili sa loading screen ng EXACT na ibinigay na duration
+// (default 60s), kahit matapos na agad ang aktwal na auth check. "isReady"
+// ay nagiging true lang kapag (a) tapos na ang auth check AT (b) lumipas
+// na ang minimum time — alin man ang matagal, hihintayin.
+function useMinimumLoadingTime(actuallyDone: boolean, minMs: number = 60_000) {
+  const [timeElapsed, setTimeElapsed] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setTimeElapsed(true), minMs);
+    return () => clearTimeout(timer);
+  }, [minMs]);
+
+  return actuallyDone && timeElapsed;
+}
+
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const isReady = useMinimumLoadingTime(!isLoading, 60_000);
 
-  if (isLoading) return <FullPageLoading isDone={false} />;
+  if (!isReady) return <FullPageLoading isDone={false} />;
   if (!isAuthenticated) return <Redirect to="/login" />;
 
   return (
@@ -133,8 +150,9 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 
 function LoginRoute() {
   const { isAuthenticated, isLoading } = useAuth();
+  const isReady = useMinimumLoadingTime(!isLoading, 60_000);
 
-  if (isLoading) return <FullPageLoading isDone={false} />;
+  if (!isReady) return <FullPageLoading isDone={false} />;
   if (isAuthenticated) return <Redirect to="/" />;
 
   return <LoginPage />;
