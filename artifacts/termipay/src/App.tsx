@@ -34,19 +34,67 @@ const baseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
 setBaseUrl(baseUrl);
 setAuthTokenGetter(() => window.localStorage.getItem("termipay_auth_token"));
 
+// ── Loading duration config ─────────────────────────────────────────────
+const LOADING_DURATION_MS = 60_000; // exact 60 seconds — palitan dito kung iba
+const FAST_FINISH_MS = 400;         // pag tapos na ang server, ganito katagal
+                                     // ang "sprint" papuntang 100% (smooth,
+                                     // hindi biglaang jump)
+const CAP_WHILE_WAITING = 98;       // max % habang naghihintay pa sa server,
+                                     // para laging may "room" papuntang 100%
+
 function FullPageLoading({ isDone }: { isDone: boolean }) {
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        if (isDone) return 100;
-        if (prev >= 90) return prev;
-        return Math.min(90, prev + 3);
-      });
-    }, 50);
-    return () => clearInterval(interval);
+    let raf: number;
+    let startTime: number | null = null;
+    let finishStartTime: number | null = null;
+    let finishStartProgress = 0;
+    let cancelled = false;
+
+    const tick = (now: number) => {
+      if (cancelled) return;
+
+      if (!isDone) {
+        // ── Normal pacing: exact 60 seconds papunta 0% → 98% ────────────
+        if (startTime === null) startTime = now;
+        const elapsed = now - startTime;
+        const pct = Math.min(
+          CAP_WHILE_WAITING,
+          (elapsed / LOADING_DURATION_MS) * 100
+        );
+        setProgress(pct);
+      } else {
+        // ── Server tapos na: i-sprint papuntang 100% sa loob ng
+        //    FAST_FINISH_MS, smooth mula sa kasalukuyang % (di jarring) ──
+        if (finishStartTime === null) {
+          finishStartTime = now;
+          setProgress(prev => {
+            finishStartProgress = prev;
+            return prev;
+          });
+        }
+        const finishElapsed = now - finishStartTime;
+        const finishPct = Math.min(1, finishElapsed / FAST_FINISH_MS);
+        const pct =
+          finishStartProgress + (100 - finishStartProgress) * finishPct;
+        setProgress(pct);
+
+        if (finishPct >= 1) return; // nasa 100% na, huminto
+      }
+
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
   }, [isDone]);
+
+  const displayPct = Math.round(progress);
 
   return (
     <div className="flex h-screen w-full flex-col items-center justify-center bg-background">
@@ -56,7 +104,7 @@ function FullPageLoading({ isDone }: { isDone: boolean }) {
             TermiPay: Validating Session...
           </p>
           <span className="text-sm font-semibold tabular-nums text-primary">
-            {progress}%
+            {displayPct}%
           </span>
         </div>
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
