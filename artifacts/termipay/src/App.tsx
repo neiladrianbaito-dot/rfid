@@ -17,6 +17,7 @@ import TransactionsPage from "@/pages/transactions";
 import UserManagementPage from "@/pages/user-management";
 import FareMatrixPage from "@/pages/fare-matrix";
 import ReportsPage from "@/pages/reports";
+import ReportPreviewPage from "@/pages/report-preview";
 import Layout from "@/components/layout";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -102,7 +103,8 @@ function AppRouter() {
       <Route path="/signup" component={SignupPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/paymongo-topup" component={PaymongoTopup} />
-      <Route path="/paymongo-dashboard" component={PaymongoRoute} />
+      <Route path="/user-dashboard" component={PaymongoRoute} />
+      <Route path="/reports/preview" component={ReportPreviewPage} />
 
       {/* PROTECTED ROUTES */}
       <Route path="/">
