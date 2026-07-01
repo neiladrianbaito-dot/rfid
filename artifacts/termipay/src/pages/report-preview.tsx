@@ -4,7 +4,7 @@ import { useGetReportSummary, useListTransactions } from "@workspace/api-client-
 import { useAuth } from "@/hooks/use-auth";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch"; // ⚠️ adjust path to match where you saved that hook
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Printer, Loader2, Wallet } from "lucide-react";
+import { ArrowLeft, Printer, Loader2, Wallet, Plus, Minus, RotateCcw } from "lucide-react";
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -20,10 +20,49 @@ const getLocalDateString = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+const ZOOM_MIN = 50;
+const ZOOM_MAX = 200;
+const ZOOM_STEP = 10;
+const ZOOM_DEFAULT = 100;
+
 export default function ReportPreviewPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const adminName = user?.name || "System Administrator";
+
+  const [zoom, setZoom] = React.useState(ZOOM_DEFAULT);
+  const zoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, z + ZOOM_STEP));
+  const zoomOut = () => setZoom((z) => Math.max(ZOOM_MIN, z - ZOOM_STEP));
+  const zoomReset = () => setZoom(ZOOM_DEFAULT);
+
+  // ══ MOUSE-WHEEL ZOOM ══
+  // Ctrl/Cmd + wheel (or trackpad pinch, which browsers report as
+  // wheel + ctrlKey) zooms the document instead of scrolling the page.
+  // Plain wheel still scrolls normally.
+  // React's onWheel is attached as a passive listener under the hood,
+  // so preventDefault() inside it is silently ignored — we have to
+  // attach a native, non-passive listener via a ref instead.
+  const pageWrapRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const el = pageWrapRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return; // let normal scrolling through
+      e.preventDefault();
+
+      setZoom((z) => {
+        // Smaller, smoother steps for wheel/pinch than the toolbar buttons.
+        const delta = e.deltaY > 0 ? -5 : 5;
+        const next = z + delta;
+        return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+      });
+    };
+
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, []);
 
   const traceId = React.useRef(Math.random().toString(36).substr(2, 9).toUpperCase()).current;
   const timestamp = React.useRef(
@@ -111,12 +150,14 @@ export default function ReportPreviewPage() {
       width: 100%;
       box-shadow: none !important;
       padding: 12mm 14mm !important;
+      /* zoom must never affect the printed output */
+      transform: none !important;
     }
   }
 `}</style>
-      <div className="min-h-screen bg-slate-200">
-        {/* ══ TOOLBAR ══ */}
-        <div className="preview-toolbar sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-slate-300 bg-white px-6 py-4 shadow-sm">
+      <div className="flex min-h-screen flex-col bg-slate-200">
+        {/* ══ TOOLBAR (fixed to top, like a header) ══ */}
+        <div className="preview-toolbar sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-slate-300 bg-white px-6 py-4 shadow-sm">
           <Button
             variant="outline"
             onClick={handleBack}
@@ -126,21 +167,60 @@ export default function ReportPreviewPage() {
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
+
           <div className="text-xs font-black uppercase tracking-widest text-slate-500">
             Revenue Audit Report Preview
           </div>
-          <Button
-            onClick={handlePrint}
-            className="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-black uppercase text-xs tracking-widest cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-blue-500/30"
-            data-testid="button-print"
-          >
-            <Printer className="w-4 h-4 mr-2" />
-            Print / Save as PDF
-          </Button>
+
+          <div className="flex items-center gap-3">
+            {/* ══ ZOOM CONTROLS ══ */}
+            <div className="flex items-center gap-1 rounded-md border border-slate-300 bg-slate-50 px-1 py-1">
+              <button
+                type="button"
+                onClick={zoomOut}
+                disabled={zoom <= ZOOM_MIN}
+                title="Zoom out"
+                data-testid="button-zoom-out"
+                className="flex h-7 w-7 items-center justify-center rounded cursor-pointer text-slate-600 transition-colors duration-150 hover:bg-slate-200 active:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={zoomReset}
+                title="Reset zoom"
+                data-testid="button-zoom-reset"
+                className="min-w-[3.25rem] cursor-pointer rounded px-1.5 py-1 text-center text-[11px] font-bold tabular-nums text-slate-600 transition-colors duration-150 hover:bg-slate-200 active:bg-slate-300"
+              >
+                {zoom}%
+              </button>
+
+              <button
+                type="button"
+                onClick={zoomIn}
+                disabled={zoom >= ZOOM_MAX}
+                title="Zoom in"
+                data-testid="button-zoom-in"
+                className="flex h-7 w-7 items-center justify-center rounded cursor-pointer text-slate-600 transition-colors duration-150 hover:bg-slate-200 active:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <Button
+              onClick={handlePrint}
+              className="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-black uppercase text-xs tracking-widest cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-blue-500/30"
+              data-testid="button-print"
+            >
+              <Printer className="w-4 h-4 mr-2" />
+              Print / Save as PDF
+            </Button>
+          </div>
         </div>
 
         {/* ══ PAGE WRAP ══ */}
-        <div className="flex justify-center py-10 px-4">
+        <div ref={pageWrapRef} className="flex flex-1 justify-center overflow-auto py-10 px-4">
           <div
             className="audit-doc bg-white shadow-2xl"
             style={{
@@ -151,6 +231,11 @@ export default function ReportPreviewPage() {
               color: "#000",
               lineHeight: 1.4,
               boxSizing: "border-box",
+              transform: `scale(${zoom / 100})`,
+              transformOrigin: "top center",
+              transition: "transform 150ms ease-out",
+              // keep layout flow sane while scaled so it doesn't overlap the footer
+              marginBottom: zoom > 100 ? `${(zoom - 100) * 3}mm` : 0,
             }}
           >
             {/* Letterhead */}
@@ -343,17 +428,17 @@ export default function ReportPreviewPage() {
           </div>
         </div>
 
-        {/* ══ DASHBOARD FOOTER ══ */}
-        <footer className="border-t border-slate-800/60 pt-4 pb-2">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-widest text-slate-700">
+        {/* ══ DASHBOARD FOOTER (fixed to bottom, like the toolbar is fixed to top) ══ */}
+        <footer className="sticky bottom-0 z-20 border-t border-slate-300 bg-white px-6 py-3 shadow-[0_-1px_4px_rgba(0,0,0,0.05)]">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-widest text-slate-500">
             <div className="flex items-center gap-2">
-              <Wallet size={10} className="text-emerald-500/30" />
+              <Wallet size={10} className="text-slate-400" />
               <span>Fare Collection System</span>
             </div>
             <div className="flex items-center gap-3">
               <span>© {new Date().getFullYear()} All rights reserved.</span>
-              <span className="text-slate-800">|</span>
-              <span className="text-emerald-500/30">v1.0.0</span>
+              <span className="text-slate-300">|</span>
+              <span className="text-slate-500">v1.0.0</span>
             </div>
           </div>
         </footer>
