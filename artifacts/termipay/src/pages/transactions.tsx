@@ -90,14 +90,14 @@ function ReceiptModal({
     : null;
 
   const StatusIcon =
-    tx.status === "Success" ? CheckCircle2
-    : tx.status === "Failed" ? XCircle
-    : Clock;
+    tx.status === "Failed" ? XCircle
+    : tx.status === "Pending" ? Clock
+    : CheckCircle2;
 
-  const statusRingClass =
-    tx.status === "Success" ? "ring-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-    : tx.status === "Failed" ? "ring-red-500/30 bg-red-500/10 text-red-400"
-    : "ring-amber-500/30 bg-amber-500/10 text-amber-400";
+  // Ring/icon color follows the TYPE theme (Fare = red, Top-up = green)
+  const statusRingClass = isFare
+    ? "ring-red-500/30 bg-red-500/10 text-red-400"
+    : "ring-emerald-500/30 bg-emerald-500/10 text-emerald-400";
 
   const amountColor = isFare ? "text-red-400" : "text-emerald-400";
   const accentColor = isFare ? "from-red-600 to-rose-400" : "from-emerald-600 to-cyan-400";
@@ -107,7 +107,7 @@ function ReceiptModal({
     <Dialog open={!!tx} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="bg-[#07090f] border-slate-800 max-w-sm p-0 overflow-hidden rounded-2xl gap-0">
 
-        {/* ✅ FIX: a11y — DialogContent needs a Title + Description for screen readers */}
+        {/* a11y — DialogContent needs a Title + Description for screen readers */}
         <VisuallyHidden>
           <DialogTitle>Transaction Receipt</DialogTitle>
           <DialogDescription>
@@ -131,18 +131,7 @@ function ReceiptModal({
             <p className={`text-4xl font-black tabular-nums tracking-tight ${amountColor}`}>
               {isFare ? "−" : "+"}₱{amount}
             </p>
-            <Badge
-              variant="outline"
-              className={`text-[9px] font-black uppercase mt-1 ${
-                tx.status === "Success"
-                  ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/5"
-                  : tx.status === "Failed"
-                  ? "border-red-500/30 text-red-400 bg-red-500/5"
-                  : "border-amber-500/30 text-amber-400 bg-amber-500/5"
-              }`}
-            >
-              {tx.status}
-            </Badge>
+            {/* ✅ FIX: "SUCCESS" badge removed */}
           </div>
 
           {/* Dashed divider */}
