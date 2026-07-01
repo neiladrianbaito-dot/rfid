@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import {
   Wallet, User, Phone, Tag, ShieldCheck,
   LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings,
-  ChevronRight, ArrowDownLeft, ArrowUpRight, List,
+  ChevronRight, ArrowDownLeft, ArrowUpRight, List, Pencil, Check, X as XIcon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import { useCardData } from "@/hooks/use-card-data";
 import { useChangePassword } from "@/hooks/use-change-password";
 import { useLinkCard } from "@/hooks/use-link-card";
 import { useTopup } from "@/hooks/use-topup";
+import { useToast } from "@/hooks/use-toast";
 import { LinkCardModal } from "@/components/link-card-modal";
 import { TopupModal } from "@/components/topup-modal";
 import { ChangePasswordModal } from "@/components/change-password-modal";
@@ -41,6 +42,11 @@ function getInitials(name: string): string {
     .slice(0, 2)
     .map((n) => n[0].toUpperCase())
     .join("");
+}
+
+// ✅ Basic email format check for the inline editor
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 // ✅ Fix: memo — hindi na mag-re-render ang row kapag hindi nagbago ang tx
@@ -104,9 +110,107 @@ export default function PaymongoDashboardPage() {
   const linkCard = useLinkCard((uid) => setCardUid(uid));
   const topup = useTopup(cardUid, currentBalance);
   const changePassword = useChangePassword();
+  const { toast } = useToast();
 
   const remainingTopup = Math.max(0, 20000 - currentBalance);
   const isAtMaxBalance = remainingTopup <= 0;
+
+  // ✅ NEW: editable Contact + Email state
+  const [editingContact, setEditingContact] = useState(false);
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [contactValue, setContactValue] = useState("");
+  const [emailValue, setEmailValue] = useState("");
+  const [savingField, setSavingField] = useState<"contact" | "email" | null>(null);
+  // Local optimistic overrides so the UI updates immediately after save,
+  // even if useCardData doesn't refetch right away.
+  const [localContact, setLocalContact] = useState<string | null>(null);
+  const [localEmail, setLocalEmail] = useState<string | null>(null);
+
+  const displayContact = localContact ?? user?.contactNumber ?? "";
+  const displayEmail = localEmail ?? user?.email ?? "";
+
+  // Reset local overrides + editing state whenever a different card is loaded
+  useEffect(() => {
+    setLocalContact(null);
+    setLocalEmail(null);
+    setEditingContact(false);
+    setEditingEmail(false);
+  }, [cardUid]);
+
+  const startEditContact = () => {
+    setContactValue(displayContact);
+    setEditingContact(true);
+  };
+  const cancelEditContact = () => {
+    setEditingContact(false);
+    setContactValue(displayContact);
+  };
+  const handleSaveContact = async () => {
+    const trimmed = contactValue.trim();
+    if (!trimmed) {
+      toast({ title: "Contact number cannot be empty", variant: "destructive" });
+      return;
+    }
+    setSavingField("contact");
+    try {
+      // ⚠️ No phone/contact column found in the auth_users schema you shared.
+      // Adjust table/column names here once you confirm where contact number lives.
+      const { error } = await supabase
+        .from("users")
+        .update({ contact_number: trimmed })
+        .eq("card_uid", cardUid);
+      if (error) throw error;
+      setLocalContact(trimmed);
+      setEditingContact(false);
+      toast({ title: "Contact number updated" });
+    } catch (err: any) {
+      toast({
+        title: "Failed to update contact number",
+        description: err?.message || "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingField(null);
+    }
+  };
+
+  const startEditEmail = () => {
+    setEmailValue(displayEmail);
+    setEditingEmail(true);
+  };
+  const cancelEditEmail = () => {
+    setEditingEmail(false);
+    setEmailValue(displayEmail);
+  };
+  const handleSaveEmail = async () => {
+    const trimmed = emailValue.trim();
+    if (!trimmed || !isValidEmail(trimmed)) {
+      toast({ title: "Please enter a valid email address", variant: "destructive" });
+      return;
+    }
+    setSavingField("email");
+    try {
+      // ✅ auth_users table — matched via linked_card_uid, per your schema:
+      // id (uuid), supabase_auth_id (uuid), full_name (text), email (text),
+      // created_at, password_hash, linked_card_uid, password_change..., updated_at
+      const { error } = await supabase
+        .from("auth_users")
+        .update({ email: trimmed, updated_at: new Date().toISOString() })
+        .eq("linked_card_uid", cardUid);
+      if (error) throw error;
+      setLocalEmail(trimmed);
+      setEditingEmail(false);
+      toast({ title: "Email updated" });
+    } catch (err: any) {
+      toast({
+        title: "Failed to update email",
+        description: err?.message || "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingField(null);
+    }
+  };
 
   useEffect(() => {
     const loadRoutes = async () => {
@@ -317,7 +421,6 @@ export default function PaymongoDashboardPage() {
                 {[
                   { icon: <User className="h-4 w-4 text-blue-400" />, bg: "bg-blue-500/10 border-blue-500/20", label: "Name", value: user?.fullName || "Not Linked" },
                   { icon: <CreditCard className="h-4 w-4 text-purple-400" />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID", value: user?.cardUid || "----", mono: true },
-                  { icon: <Phone className="h-4 w-4 text-orange-400" />, bg: "bg-orange-500/10 border-orange-500/20", label: "Contact", value: user?.contactNumber || "None" },
                   { icon: <Tag className="h-4 w-4 text-emerald-400" />, bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: user?.type || "General" },
                 ].map(({ icon, bg, label, value, mono }) => (
                   <div key={label} className="flex items-center gap-3">
@@ -328,13 +431,110 @@ export default function PaymongoDashboardPage() {
                     </div>
                   </div>
                 ))}
+
+                {/* ✅ Contact — editable */}
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-full flex items-center justify-center border bg-orange-500/10 border-orange-500/20 shrink-0">
+                    <Phone className="h-4 w-4 text-orange-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold uppercase text-slate-500 leading-none mb-0.5">Contact</p>
+                    {editingContact ? (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="tel"
+                          value={contactValue}
+                          onChange={(e) => setContactValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSaveContact();
+                            if (e.key === "Escape") cancelEditContact();
+                          }}
+                          disabled={savingField === "contact"}
+                          autoFocus
+                          className="text-sm font-semibold text-slate-200 bg-slate-950 border border-slate-700 rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                        />
+                        <button
+                          onClick={handleSaveContact}
+                          disabled={savingField === "contact"}
+                          className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 shrink-0 disabled:opacity-50"
+                          title="Save"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={cancelEditContact}
+                          disabled={savingField === "contact"}
+                          className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 hover:bg-slate-700 shrink-0 disabled:opacity-50"
+                          title="Cancel"
+                        >
+                          <XIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 group">
+                        <p className="text-sm font-semibold text-slate-200 truncate">{displayContact || "None"}</p>
+                        <button
+                          onClick={startEditContact}
+                          className="h-5 w-5 flex items-center justify-center rounded text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          title="Edit contact number"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ✅ Email — editable (auth_users, matched by linked_card_uid) */}
                 <div className="flex items-center gap-3 sm:col-span-2">
-                  <div className="h-9 w-9 rounded-full bg-sky-500/10 flex items-center justify-center border border-sky-500/20">
+                  <div className="h-9 w-9 rounded-full bg-sky-500/10 flex items-center justify-center border border-sky-500/20 shrink-0">
                     <Mail className="h-4 w-4 text-sky-400" />
                   </div>
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <p className="text-[10px] font-bold uppercase text-slate-500 leading-none mb-0.5">Email</p>
-                    <p className="text-sm text-slate-200">{user?.email || "Not linked"}</p>
+                    {editingEmail ? (
+                      <div className="flex items-center gap-1.5 max-w-sm">
+                        <input
+                          type="email"
+                          value={emailValue}
+                          onChange={(e) => setEmailValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSaveEmail();
+                            if (e.key === "Escape") cancelEditEmail();
+                          }}
+                          disabled={savingField === "email"}
+                          autoFocus
+                          className="text-sm text-slate-200 bg-slate-950 border border-slate-700 rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                        />
+                        <button
+                          onClick={handleSaveEmail}
+                          disabled={savingField === "email"}
+                          className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 shrink-0 disabled:opacity-50"
+                          title="Save"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={cancelEditEmail}
+                          disabled={savingField === "email"}
+                          className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 hover:bg-slate-700 shrink-0 disabled:opacity-50"
+                          title="Cancel"
+                        >
+                          <XIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 group">
+                        <p className="text-sm text-slate-200 truncate">{displayEmail || "Not linked"}</p>
+                        <button
+                          onClick={startEditEmail}
+                          className="h-5 w-5 flex items-center justify-center rounded text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          title="Edit email"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -451,7 +651,7 @@ export default function PaymongoDashboardPage() {
                   <p className="text-sm font-bold text-white leading-tight truncate">
                     {user?.fullName || "Not linked"}
                   </p>
-                  <p className="text-[11px] text-slate-400 mt-0.5 truncate">{user?.email || "—"}</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5 truncate">{displayEmail || "—"}</p>
                   <div className="flex gap-1.5 mt-1.5 flex-wrap">
                     <Badge className={user?.status === "Active"
                       ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-1.5 py-0 text-[9px]"
@@ -467,11 +667,9 @@ export default function PaymongoDashboardPage() {
 
               {[
                 { icon: <CreditCard className="h-3.5 w-3.5 text-purple-400" />, label: "UID", value: user?.cardUid || "----", mono: true },
-                { icon: <Phone className="h-3.5 w-3.5 text-orange-400" />, label: "Contact", value: user?.contactNumber || "None", mono: false },
                 { icon: <Tag className="h-3.5 w-3.5 text-emerald-400" />, label: "Class", value: user?.type || "General", mono: false },
-                { icon: <Mail className="h-3.5 w-3.5 text-sky-400" />, label: "Email", value: user?.email || "Not linked", mono: false },
-              ].map(({ icon, label, value, mono }, i, arr) => (
-                <div key={label} className={`flex items-center gap-3 px-4 py-3 ${i < arr.length - 1 ? "border-b border-slate-800/50" : ""}`}>
+              ].map(({ icon, label, value, mono }) => (
+                <div key={label} className="flex items-center gap-3 px-4 py-3 border-b border-slate-800/50">
                   <div className="shrink-0 opacity-80">{icon}</div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 leading-none mb-0.5">{label}</p>
@@ -479,6 +677,94 @@ export default function PaymongoDashboardPage() {
                   </div>
                 </div>
               ))}
+
+              {/* ✅ Contact — editable (mobile) */}
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800/50">
+                <div className="shrink-0 opacity-80"><Phone className="h-3.5 w-3.5 text-orange-400" /></div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 leading-none mb-0.5">Contact</p>
+                  {editingContact ? (
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <input
+                        type="tel"
+                        value={contactValue}
+                        onChange={(e) => setContactValue(e.target.value)}
+                        disabled={savingField === "contact"}
+                        autoFocus
+                        className="text-xs text-slate-200 bg-slate-950 border border-slate-700 rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                      />
+                      <button
+                        onClick={handleSaveContact}
+                        disabled={savingField === "contact"}
+                        className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 shrink-0 disabled:opacity-50"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={cancelEditContact}
+                        disabled={savingField === "contact"}
+                        className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 shrink-0 disabled:opacity-50"
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs text-slate-200 font-medium truncate">{displayContact || "None"}</p>
+                      <button
+                        onClick={startEditContact}
+                        className="h-5 w-5 flex items-center justify-center rounded text-slate-600 active:text-emerald-400 shrink-0"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ✅ Email — editable (mobile, auth_users) */}
+              <div className="flex items-center gap-3 px-4 py-3">
+                <div className="shrink-0 opacity-80"><Mail className="h-3.5 w-3.5 text-sky-400" /></div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 leading-none mb-0.5">Email</p>
+                  {editingEmail ? (
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <input
+                        type="email"
+                        value={emailValue}
+                        onChange={(e) => setEmailValue(e.target.value)}
+                        disabled={savingField === "email"}
+                        autoFocus
+                        className="text-xs text-slate-200 bg-slate-950 border border-slate-700 rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                      />
+                      <button
+                        onClick={handleSaveEmail}
+                        disabled={savingField === "email"}
+                        className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 shrink-0 disabled:opacity-50"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={cancelEditEmail}
+                        disabled={savingField === "email"}
+                        className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 shrink-0 disabled:opacity-50"
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs text-slate-200 truncate">{displayEmail || "Not linked"}</p>
+                      <button
+                        onClick={startEditEmail}
+                        className="h-5 w-5 flex items-center justify-center rounded text-slate-600 active:text-emerald-400 shrink-0"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Account actions */}
