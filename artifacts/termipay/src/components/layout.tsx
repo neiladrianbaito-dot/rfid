@@ -8,8 +8,6 @@ import {
   Map,
   FileBarChart,
   LogOut,
-  Menu,
-  X,
   User,
   Lock,
   Loader2,
@@ -49,6 +47,16 @@ const navItems = [
   { path: "/reports", label: "Reports", icon: FileBarChart },
 ];
 
+// Shorter labels for the tight mobile bottom nav
+const mobileNavLabels: Record<string, string> = {
+  "/": "Home",
+  "/card-registration": "Cards",
+  "/transactions": "Logs",
+  "/users": "Users",
+  "/fare-matrix": "Fares",
+  "/reports": "Reports",
+};
+
 function CurrentDateTime() {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
@@ -67,12 +75,58 @@ function CurrentDateTime() {
   );
 }
 
+function MobileBottomNav({ location }: { location: string }) {
+  return (
+    <nav
+      className="
+        fixed bottom-0 inset-x-0 z-50 lg:hidden
+        bg-slate-950/90 border-t border-slate-800 backdrop-blur-xl
+        print:hidden
+      "
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
+      <div className="flex items-stretch justify-between overflow-x-auto no-scrollbar px-1">
+        {navItems.map((item) => {
+          const isActive =
+            location === item.path || (item.path !== "/" && location.startsWith(item.path));
+          const Icon = item.icon;
+          return (
+            <Link key={item.path} href={item.path} className="flex-1 min-w-[64px]">
+              <div
+                className={`
+                  relative flex flex-col items-center justify-center gap-1
+                  py-2.5 px-1 cursor-pointer transition-colors duration-200
+                  ${isActive ? "text-blue-400" : "text-slate-500 active:text-slate-300"}
+                `}
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="activeMobileNav"
+                    className="absolute top-0 inset-x-3 h-[2px] bg-blue-500 rounded-full shadow-[0_0_8px_#3b82f6]"
+                  />
+                )}
+                <Icon size={18} strokeWidth={isActive ? 2.5 : 2} />
+                <span
+                  className={`text-[9px] font-black uppercase tracking-wider leading-none ${
+                    isActive ? "text-blue-400" : "text-slate-600"
+                  }`}
+                >
+                  {mobileNavLabels[item.path] ?? item.label}
+                </span>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout, isLoggingOut, refetchUser } = useAuth();
   const [location] = useLocation();
   const { toast } = useToast();
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
 
   const [isUpdating, setIsUpdating] = useState(false);
@@ -190,16 +244,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen bg-[#020617] text-slate-200 overflow-hidden font-sans">
-      {/* Sidebar */}
-      <aside
-        className={`
-          fixed inset-y-0 left-0 z-50 w-72 bg-slate-950/80 border-r border-slate-800 backdrop-blur-xl print:hidden
-          transform transition-transform duration-300 ease-in-out
-          lg:relative lg:translate-x-0
-          ${sidebarOpen ? "translate-x-0 shadow-[20px_0_50px_rgba(0,0,0,0.5)]" : "-translate-x-full"}
-        `}
-      >
-        <div className="flex flex-col h-full">
+      {/* Sidebar — desktop only, unchanged look */}
+      <aside className="hidden lg:flex lg:relative w-72 bg-slate-950/80 border-r border-slate-800 backdrop-blur-xl print:hidden">
+        <div className="flex flex-col h-full w-full">
           {/* Logo Section */}
           <div className="p-6 border-b border-slate-900">
             <div className="flex items-center gap-3">
@@ -225,7 +272,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               return (
                 <Link key={item.path} href={item.path}>
                   <div
-                    onClick={() => setSidebarOpen(false)}
                     className={`
                       group flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-black uppercase tracking-widest cursor-pointer
                       transition-all duration-200 border
@@ -261,33 +307,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Mobile Overlay */}
-      <AnimatePresence>
-        {sidebarOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm lg:hidden"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="h-16 border-b border-slate-900 bg-slate-950/50 backdrop-blur-md flex items-center justify-between px-6 shrink-0 z-30 print:hidden">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="lg:hidden text-slate-400 hover:text-white"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-            >
-              {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
-            </Button>
-            <CurrentDateTime />
+        <header className="h-16 border-b border-slate-900 bg-slate-950/50 backdrop-blur-md flex items-center justify-between px-4 lg:px-6 shrink-0 z-30 print:hidden">
+          <div className="flex items-center gap-3">
+            {/* Compact logo shown only on mobile since sidebar is hidden */}
+            <div className="flex items-center gap-2 lg:hidden">
+              <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-[0_0_10px_rgba(37,99,235,0.4)] border border-blue-400/50">
+                <Cpu className="w-4 h-4 text-white" />
+              </div>
+              <h1 className="text-xs font-black text-white tracking-tighter uppercase italic">
+                FCS<span className="text-blue-500">.</span>
+              </h1>
+            </div>
+            <div className="hidden sm:block">
+              <CurrentDateTime />
+            </div>
           </div>
 
           <div className="flex items-center gap-4">
@@ -313,7 +349,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </motion.div>
               </DialogTrigger>
 
-              {/* ✅ FIX: Added DialogDescription wrapped in VisuallyHidden to silence the Radix warning */}
               <DialogContent className="sm:max-w-[425px] bg-slate-950 border-slate-800 text-slate-200">
                 <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/50" />
                 <DialogHeader>
@@ -394,7 +429,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-auto p-6 relative print:p-0">
+        <main className="flex-1 overflow-auto p-4 lg:p-6 pb-24 lg:pb-6 relative print:p-0">
           <AnimatePresence mode="wait">
             <motion.div
               key={location}
@@ -422,6 +457,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </footer>
         </main>
       </div>
+
+      {/* Mobile Bottom Nav */}
+      <MobileBottomNav location={location} />
     </div>
   );
 }

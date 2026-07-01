@@ -149,7 +149,7 @@ function ReceiptModal({
                 }),
               },
               { label: "Card UID", value: tx.card_uid || tx.cardUid || "—", mono: true, accent: "text-blue-400" },
-              { label: "Passenger", value: tx.full_name || tx.fullName || "—", bold: true },
+              { label: "Full Name", value: tx.full_name || tx.fullName || "—", bold: true },
               { label: "Status", value: tx.status },
             ].map(({ label, value, mono, accent, bold }) => (
               <div key={label} className="flex items-center justify-between gap-3 px-3 py-2.5 bg-slate-950/40">
