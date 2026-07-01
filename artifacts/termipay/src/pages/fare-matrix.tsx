@@ -303,28 +303,25 @@ export default function FareMatrixPage() {
           </p>
         </div>
 
+        {/* ✅ FIX: Add Route button now sits on the same line as the
+            Live Telemetry Active badge (single row) instead of its
+            own row below the header. */}
         <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-            <Zap className="text-blue-400 animate-pulse" size={16} />
-            <span className="text-[10px] font-black text-blue-400 uppercase tracking-tighter">Live Telemetry Active</span>
+          <div className="flex items-center gap-3 flex-nowrap">
+            <div className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg shrink-0 whitespace-nowrap">
+              <Zap className="text-blue-400 animate-pulse" size={16} />
+              <span className="text-[10px] font-black text-blue-400 uppercase tracking-tighter">Live Telemetry Active</span>
+            </div>
+            <Button
+              onClick={() => setShowAdd(true)}
+              data-testid="button-add-route"
+              className="bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-[0.2em] shadow-[0_0_20px_rgba(37,99,235,0.3)] cursor-pointer shrink-0 whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Route
+            </Button>
           </div>
-          {lastUpdated && (
-            <span className="text-[10px] text-slate-600 font-mono pr-1">
-              Last sync: {lastUpdated.toLocaleTimeString()}
-            </span>
-          )}
         </div>
-      </div>
-
-      <div className="flex justify-end">
-        <Button
-          onClick={() => setShowAdd(true)}
-          data-testid="button-add-route"
-          className="bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-[0.2em] shadow-[0_0_20px_rgba(37,99,235,0.3)]"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Add Route
-        </Button>
       </div>
 
       <div
@@ -469,9 +466,10 @@ export default function FareMatrixPage() {
                             size="sm"
                             variant={route.isActive ? "destructive" : "default"}
                             className={
-                              route.isActive
+                              (route.isActive
                                 ? "bg-red-500 hover:bg-red-600 text-white"
-                                : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                                : "bg-emerald-600 hover:bg-emerald-500 text-white") +
+                              " cursor-pointer disabled:cursor-not-allowed"
                             }
                             onClick={() => toggleMutation.mutate({ id: route.id })}
                             disabled={toggleMutation.isPending}
@@ -491,7 +489,7 @@ export default function FareMatrixPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-blue-400/70 hover:text-blue-300 hover:bg-blue-500/10"
+                              className="h-8 w-8 text-blue-400/70 hover:text-blue-300 hover:bg-blue-500/10 cursor-pointer"
                               onClick={() => openEdit(route)}
                               data-testid={`button-edit-route-${route.id}`}
                               title="Edit route"
@@ -501,7 +499,7 @@ export default function FareMatrixPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-red-400/70 hover:text-red-400 hover:bg-red-500/10"
+                              className="h-8 w-8 text-red-400/70 hover:text-red-400 hover:bg-red-500/10 cursor-pointer"
                               onClick={() => setDeleteRoute(route)}
                               data-testid={`button-delete-route-${route.id}`}
                               title="Delete route"
@@ -529,7 +527,7 @@ export default function FareMatrixPage() {
             setAddForm({ origin: "", destination: DEFAULT_DESTINATION, fareAmount: "", viceVersa: true });
         }}
       >
-        <DialogContent className="bg-slate-950 border-slate-800 text-slate-200">
+        <DialogContent className="bg-slate-950 border-slate-800 text-slate-200 [&>button]:cursor-pointer">
           <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/60" />
           <DialogHeader>
             <DialogTitle className="text-white font-black uppercase tracking-tighter italic">
@@ -583,6 +581,7 @@ export default function FareMatrixPage() {
                 id="vice-versa"
                 checked={addForm.viceVersa}
                 onCheckedChange={(v) => setAddForm({ ...addForm, viceVersa: !!v })}
+                className="cursor-pointer"
               />
               <div>
                 <Label htmlFor="vice-versa" className="font-medium cursor-pointer flex items-center gap-1 text-slate-200">
@@ -608,7 +607,7 @@ export default function FareMatrixPage() {
             <Button
               variant="secondary"
               onClick={() => setShowAdd(false)}
-              className="bg-slate-800 text-slate-200 hover:bg-slate-700"
+              className="bg-slate-800 text-slate-200 hover:bg-slate-700 cursor-pointer"
             >
               Cancel
             </Button>
@@ -616,7 +615,7 @@ export default function FareMatrixPage() {
               onClick={handleAdd}
               disabled={createMutation.isPending}
               data-testid="button-save-route"
-              className="bg-blue-600 hover:bg-blue-500 text-white"
+              className="bg-blue-600 hover:bg-blue-500 text-white cursor-pointer disabled:cursor-not-allowed"
             >
               {createMutation.isPending ? "Adding..." : "Add Route"}
             </Button>
@@ -626,7 +625,7 @@ export default function FareMatrixPage() {
 
       {/* Edit Route Dialog */}
       <Dialog open={!!editRoute} onOpenChange={(open) => !open && setEditRoute(null)}>
-        <DialogContent className="bg-slate-950 border-slate-800 text-slate-200">
+        <DialogContent className="bg-slate-950 border-slate-800 text-slate-200 [&>button]:cursor-pointer">
           <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/60" />
           <DialogHeader>
             <DialogTitle className="text-white font-black uppercase tracking-tighter italic">
@@ -678,7 +677,7 @@ export default function FareMatrixPage() {
             <Button
               variant="secondary"
               onClick={() => setEditRoute(null)}
-              className="bg-slate-800 text-slate-200 hover:bg-slate-700"
+              className="bg-slate-800 text-slate-200 hover:bg-slate-700 cursor-pointer"
             >
               Cancel
             </Button>
@@ -686,7 +685,7 @@ export default function FareMatrixPage() {
               onClick={handleUpdate}
               disabled={updateMutation.isPending}
               data-testid="button-update-route"
-              className="bg-blue-600 hover:bg-blue-500 text-white"
+              className="bg-blue-600 hover:bg-blue-500 text-white cursor-pointer disabled:cursor-not-allowed"
             >
               {updateMutation.isPending ? "Saving..." : "Save Changes"}
             </Button>
@@ -706,11 +705,11 @@ export default function FareMatrixPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleteMutation.isPending} className="cursor-pointer disabled:cursor-not-allowed">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDelete}
               disabled={deleteMutation.isPending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer disabled:cursor-not-allowed"
             >
               {deleteMutation.isPending ? "Deleting..." : "Confirm"}
             </AlertDialogAction>

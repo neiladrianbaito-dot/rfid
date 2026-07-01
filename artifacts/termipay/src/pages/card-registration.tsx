@@ -292,14 +292,14 @@ export default function CardRegistrationPage() {
                 <div className="space-y-2">
                   <Label htmlFor="type" className="text-[10px] uppercase font-black tracking-widest text-slate-400">User Type</Label>
                   <Select value={type} onValueChange={setType}>
-                    <SelectTrigger className="bg-slate-950 border-slate-800 text-slate-300 font-bold uppercase text-xs">
+                    <SelectTrigger className="bg-slate-950 border-slate-800 text-slate-300 font-bold uppercase text-xs cursor-pointer">
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent className="bg-slate-950 border-slate-800 text-slate-300">
-                      <SelectItem value="Regular">Regular</SelectItem>
-                      <SelectItem value="Student">Student</SelectItem>
-                      <SelectItem value="Senior">Senior</SelectItem>
-                      <SelectItem value="PWD">PWD</SelectItem>
+                      <SelectItem value="Regular" className="cursor-pointer">Regular</SelectItem>
+                      <SelectItem value="Student" className="cursor-pointer">Student</SelectItem>
+                      <SelectItem value="Senior" className="cursor-pointer">Senior</SelectItem>
+                      <SelectItem value="PWD" className="cursor-pointer">PWD</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -372,7 +372,7 @@ export default function CardRegistrationPage() {
 
                 <Button
                   type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-[0.2em] py-6 shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-[0.2em] py-6 shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all active:scale-95 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   disabled={createMutation.isPending || isFormInvalid}
                 >
                   {createMutation.isPending ? (

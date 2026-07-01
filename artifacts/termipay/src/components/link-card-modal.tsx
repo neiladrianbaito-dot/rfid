@@ -124,7 +124,7 @@ export function LinkCardModal(props: Props) {
                 <Button
                   onClick={onCancel}
                   variant="outline"
-                  className="w-full border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white h-11 sm:h-12 text-sm"
+                  className="w-full border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white h-11 sm:h-12 text-sm cursor-pointer"
                 >
                   Cancel and return to sign-in
                 </Button>
@@ -215,7 +215,7 @@ export function LinkCardModal(props: Props) {
                 <div className="flex flex-col sm:flex-row gap-2">
                   <button
                     onClick={() => window.history.back()}
-                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-[#1f2622] text-[#d7ded9] text-sm px-4 py-2.5 h-11 sm:h-12 hover:border-[#4ea878] hover:text-[#7CFFB2] transition-colors"
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-[#1f2622] text-[#d7ded9] text-sm px-4 py-2.5 h-11 sm:h-12 hover:border-[#4ea878] hover:text-[#7CFFB2] transition-colors cursor-pointer"
                   >
                     <ArrowLeft className="h-4 w-4 shrink-0" />
                     Go back
@@ -223,7 +223,7 @@ export function LinkCardModal(props: Props) {
                   <Button
                     onClick={checkCard}
                     disabled={isChecking || !input.trim() || !captchaToken}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-11 sm:h-12 text-sm transition-all disabled:opacity-50"
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-11 sm:h-12 text-sm transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                   >
                     {isChecking
                       ? <><Loader2 className="h-4 w-4 mr-2 animate-spin shrink-0" />Verifying Card...</>
@@ -279,11 +279,11 @@ export function LinkCardModal(props: Props) {
 
                 <div className="flex flex-col sm:flex-row gap-2">
                   <Button onClick={backToInput} disabled={loading} variant="outline"
-                    className="flex-1 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white h-11 sm:h-12 text-sm">
+                    className="flex-1 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white h-11 sm:h-12 text-sm cursor-pointer disabled:cursor-not-allowed">
                     Back
                   </Button>
                   <Button onClick={confirmLink} disabled={loading}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-11 sm:h-12 text-sm transition-all">
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-11 sm:h-12 text-sm transition-all cursor-pointer disabled:cursor-not-allowed">
                     {loading
                       ? <><Loader2 className="h-4 w-4 mr-2 animate-spin shrink-0" />Linking...</>
                       : <><LinkIcon className="h-4 w-4 mr-2 shrink-0" />Confirm & Link</>}
@@ -293,7 +293,7 @@ export function LinkCardModal(props: Props) {
                 <button
                   onClick={onCancel}
                   disabled={loading}
-                  className="w-full text-center text-[11px] text-slate-500 hover:text-slate-300 transition-colors underline underline-offset-2 disabled:opacity-50"
+                  className="w-full text-center text-[11px] text-slate-500 hover:text-slate-300 transition-colors underline underline-offset-2 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                 >
                   Cancel and return to sign-in
                 </button>

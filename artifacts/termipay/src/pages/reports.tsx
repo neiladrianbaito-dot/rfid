@@ -371,7 +371,7 @@ export default function ReportsPage() {
           </div>
           <Button
             onClick={handleExportExcelLogs}
-            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase text-[10px] tracking-widest px-6"
+            className="bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-black uppercase text-[10px] tracking-widest px-6 cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-emerald-500/30"
             data-testid="button-export-excel-logs"
           >
             <FileSpreadsheet className="w-4 h-4 mr-2" />
@@ -379,7 +379,7 @@ export default function ReportsPage() {
           </Button>
           <Button
             onClick={handleOpenPreview}
-            className="bg-slate-100 hover:bg-white text-slate-950 font-black uppercase text-[10px] tracking-widest px-6"
+            className="bg-slate-100 hover:bg-white active:bg-slate-200 text-slate-950 font-black uppercase text-[10px] tracking-widest px-6 cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-white/20"
             data-testid="button-preview-report"
           >
             <Eye className="w-4 h-4 mr-2" />
@@ -396,7 +396,7 @@ export default function ReportsPage() {
           { label: "Total Registered Users",  value: totalUniqueTaps,               icon: Fingerprint,color: "text-indigo-400",  bg: "bg-indigo-500/10",  border: "border-indigo-500/20",  testId: "text-total-taps",         flash: false },
           { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: "text-sky-400",     bg: "bg-sky-500/10",     border: "border-sky-500/20",     testId: "text-total-linked-cards", flash: false },
         ].map((stat, idx) => (
-          <Card key={idx} className={`bg-slate-900/40 border-slate-800 backdrop-blur-md ${stat.flash ? "card-pulse" : ""}`}>
+          <Card key={idx} className={`bg-slate-900/40 border-slate-800 backdrop-blur-md transition-all duration-200 hover:border-slate-700 hover:bg-slate-900/60 ${stat.flash ? "card-pulse" : ""}`}>
             <CardContent className="p-6 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-16 h-16 opacity-5">
                 <stat.icon className="w-full h-full" />
@@ -459,9 +459,9 @@ export default function ReportsPage() {
                     itemStyle={{ color: "#3b82f6" }}
                     formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
                   />
-                  <Bar dataKey="revenue" radius={[4, 4, 0, 0]}>
+                  <Bar dataKey="revenue" radius={[4, 4, 0, 0]} className="cursor-pointer">
                     {sanitizedBreakdown.map((_entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={index === sanitizedBreakdown.length - 1 ? "#3b82f6" : "#1e293b"} />
+                      <Cell key={`cell-${index}`} fill={index === sanitizedBreakdown.length - 1 ? "#3b82f6" : "#1e293b"} className="cursor-pointer" />
                     ))}
                   </Bar>
                 </BarChart>
@@ -497,7 +497,7 @@ export default function ReportsPage() {
                 {sanitizedBreakdown.map((day: any, i: number) => {
                   const date = new Date(day.date + "T00:00:00");
                   return (
-                    <TableRow key={i} className="border-slate-800/50 hover:bg-white/5 transition-colors">
+                    <TableRow key={i} className="border-slate-800/50 hover:bg-white/5 transition-colors cursor-default">
                       <TableCell className="text-xs font-bold text-white">
                         {date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
                       </TableCell>

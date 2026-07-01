@@ -337,7 +337,7 @@ export default function UserManagementPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => openEdit(user)}
-                                  className="h-8 w-8 text-blue-400/70 hover:text-blue-300 hover:bg-blue-500/10"
+                                  className="h-8 w-8 text-blue-400/70 hover:text-blue-300 hover:bg-blue-500/10 cursor-pointer"
                                   title="Edit user"
                                 >
                                   <Pencil className="w-3.5 h-3.5" />
@@ -346,7 +346,7 @@ export default function UserManagementPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => setDeleteUser(user)}
-                                  className="h-8 w-8 text-red-400/70 hover:text-red-400 hover:bg-red-500/10"
+                                  className="h-8 w-8 text-red-400/70 hover:text-red-400 hover:bg-red-500/10 cursor-pointer"
                                   title="Delete user"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -387,7 +387,7 @@ export default function UserManagementPage() {
                     size="sm"
                     disabled={safePage <= 1}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    className="h-8 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 border border-slate-800"
+                    className="h-8 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 border border-slate-800 cursor-pointer disabled:cursor-not-allowed"
                   >
                     <ChevronLeft className="w-3 h-3 mr-1" />
                     Prev
@@ -403,7 +403,7 @@ export default function UserManagementPage() {
                     size="sm"
                     disabled={safePage >= totalPages}
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    className="h-8 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 border border-slate-800"
+                    className="h-8 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 border border-slate-800 cursor-pointer disabled:cursor-not-allowed"
                   >
                     Next
                     <ChevronRight className="w-3 h-3 ml-1" />
@@ -417,7 +417,7 @@ export default function UserManagementPage() {
 
       {/* Edit Dialog */}
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className="bg-slate-950 border-slate-800 text-white sm:max-w-lg">
+        <DialogContent className="bg-slate-950 border-slate-800 text-white sm:max-w-lg [&>button]:cursor-pointer">
           <DialogHeader>
             <DialogTitle className="text-sm font-black uppercase tracking-widest flex items-center gap-2 text-blue-500">
               <Pencil size={18} /> Update User Identity
@@ -457,14 +457,14 @@ export default function UserManagementPage() {
                 value={editForm.type}
                 onValueChange={(v) => setEditForm({ ...editForm, type: v })}
               >
-                <SelectTrigger className="bg-slate-900 border-slate-800 text-xs font-bold">
+                <SelectTrigger className="bg-slate-900 border-slate-800 text-xs font-bold cursor-pointer">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-slate-950 border-slate-800 text-white">
-                  <SelectItem value="Regular">REGULAR</SelectItem>
-                  <SelectItem value="Student">STUDENT</SelectItem>
-                  <SelectItem value="Senior">SENIOR</SelectItem>
-                  <SelectItem value="PWD">PWD</SelectItem>
+                  <SelectItem value="Regular" className="cursor-pointer">REGULAR</SelectItem>
+                  <SelectItem value="Student" className="cursor-pointer">STUDENT</SelectItem>
+                  <SelectItem value="Senior" className="cursor-pointer">SENIOR</SelectItem>
+                  <SelectItem value="PWD" className="cursor-pointer">PWD</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -475,13 +475,13 @@ export default function UserManagementPage() {
                 value={editForm.status}
                 onValueChange={(v) => setEditForm({ ...editForm, status: v })}
               >
-                <SelectTrigger className="bg-slate-900 border-slate-800 text-xs font-bold">
+                <SelectTrigger className="bg-slate-900 border-slate-800 text-xs font-bold cursor-pointer">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-slate-950 border-slate-800 text-white">
-                  <SelectItem value="Active">ACTIVE</SelectItem>
-                  <SelectItem value="Inactive">INACTIVE</SelectItem>
-                  <SelectItem value="Blocked">BLOCKED</SelectItem>
+                  <SelectItem value="Active" className="cursor-pointer">ACTIVE</SelectItem>
+                  <SelectItem value="Inactive" className="cursor-pointer">INACTIVE</SelectItem>
+                  <SelectItem value="Blocked" className="cursor-pointer">BLOCKED</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -513,14 +513,14 @@ export default function UserManagementPage() {
             <Button
               variant="ghost"
               onClick={() => setEditUser(null)}
-              className="text-slate-400 uppercase text-[10px] font-black"
+              className="text-slate-400 uppercase text-[10px] font-black cursor-pointer"
             >
               Cancel
             </Button>
             <Button
               onClick={handleUpdate}
               disabled={updateMutation.isPending}
-              className="bg-blue-600 hover:bg-blue-500 text-white uppercase text-[10px] font-black px-6"
+              className="bg-blue-600 hover:bg-blue-500 text-white uppercase text-[10px] font-black px-6 cursor-pointer disabled:cursor-not-allowed"
             >
               {updateMutation.isPending ? "Updating..." : "Save Changes"}
             </Button>
@@ -543,14 +543,14 @@ export default function UserManagementPage() {
           <AlertDialogFooter>
             <AlertDialogCancel
               disabled={deleteMutation.isPending}
-              className="bg-slate-900 border-slate-800 text-white text-[10px] uppercase font-black tracking-widest"
+              className="bg-slate-900 border-slate-800 text-white text-[10px] uppercase font-black tracking-widest cursor-pointer disabled:cursor-not-allowed"
             >
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDelete}
               disabled={deleteMutation.isPending}
-              className="bg-red-600 text-white hover:bg-red-500 font-black uppercase text-[10px] tracking-widest"
+              className="bg-red-600 text-white hover:bg-red-500 font-black uppercase text-[10px] tracking-widest cursor-pointer disabled:cursor-not-allowed"
             >
               {deleteMutation.isPending ? "Deleting..." : "Confirm Delete"}
             </AlertDialogAction>

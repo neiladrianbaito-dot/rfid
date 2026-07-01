@@ -65,7 +65,7 @@ const MobileTxRow = memo(function MobileTxRow({
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 px-4 py-3 active:bg-slate-800/40 transition-colors text-left"
+      className="w-full flex items-center gap-3 px-4 py-3 active:bg-slate-800/40 transition-colors text-left cursor-pointer"
     >
       <div className={`h-9 w-9 rounded-full flex items-center justify-center shrink-0 ${
         isFare ? "bg-red-500/10 border border-red-500/20" : "bg-emerald-500/10 border border-emerald-500/20"
@@ -313,13 +313,13 @@ export default function PaymongoDashboardPage() {
           </AlertDialogHeader>
           <AlertDialogFooter className="flex flex-row justify-end items-center gap-1.5 mt-3 sm:gap-1.5">
             <AlertDialogCancel
-              className="bg-slate-900 border-slate-800 text-white hover:bg-slate-800 text-[11px] h-7 px-2.5 min-w-0 mt-0"
+              className="bg-slate-900 border-slate-800 text-white hover:bg-slate-800 text-[11px] h-7 px-2.5 min-w-0 mt-0 cursor-pointer"
             >
               No
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmLogout}
-              className="bg-red-600 text-white hover:bg-red-500 font-bold text-[11px] h-7 px-2.5 min-w-0"
+              className="bg-red-600 text-white hover:bg-red-500 font-bold text-[11px] h-7 px-2.5 min-w-0 cursor-pointer"
             >
               Yes
             </AlertDialogAction>
@@ -340,11 +340,11 @@ export default function PaymongoDashboardPage() {
           </div>
           <div className="hidden md:flex items-center gap-2">
             <Button variant="ghost" onClick={changePassword.open}
-              className="text-slate-400 hover:text-violet-400 hover:bg-violet-400/10 gap-2 text-sm">
+              className="text-slate-400 hover:text-violet-400 hover:bg-violet-400/10 gap-2 text-sm cursor-pointer">
               <KeyRound className="h-4 w-4" /><span>Change Password</span>
             </Button>
             <Button variant="ghost" onClick={requestLogout}
-              className="text-slate-400 hover:text-red-400 hover:bg-red-400/10 gap-2 text-sm">
+              className="text-slate-400 hover:text-red-400 hover:bg-red-400/10 gap-2 text-sm cursor-pointer">
               <LogOut className="h-4 w-4" /><span>Logout</span>
             </Button>
           </div>
@@ -378,7 +378,7 @@ export default function PaymongoDashboardPage() {
                 <div className="flex justify-between items-start mb-1.5">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Available Balance</p>
                   <Button size="sm" variant="outline" onClick={() => topup.setIsOpen(true)}
-                    className="h-6 text-[10px] bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white px-2">
+                    className="h-6 text-[10px] bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white px-2 cursor-pointer">
                     <PlusCircle className="h-3 w-3 mr-1" /> TOP UP
                   </Button>
                 </div>
@@ -456,7 +456,7 @@ export default function PaymongoDashboardPage() {
                         <button
                           onClick={handleSaveContact}
                           disabled={savingField === "contact"}
-                          className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 shrink-0 disabled:opacity-50"
+                          className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                           title="Save"
                         >
                           <Check className="h-3.5 w-3.5" />
@@ -464,7 +464,7 @@ export default function PaymongoDashboardPage() {
                         <button
                           onClick={cancelEditContact}
                           disabled={savingField === "contact"}
-                          className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 hover:bg-slate-700 shrink-0 disabled:opacity-50"
+                          className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 hover:bg-slate-700 shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                           title="Cancel"
                         >
                           <XIcon className="h-3.5 w-3.5" />
@@ -475,7 +475,7 @@ export default function PaymongoDashboardPage() {
                         <p className="text-sm font-semibold text-slate-200 truncate">{displayContact || "None"}</p>
                         <button
                           onClick={startEditContact}
-                          className="h-5 w-5 flex items-center justify-center rounded text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          className="h-5 w-5 flex items-center justify-center rounded text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer"
                           title="Edit contact number"
                         >
                           <Pencil className="h-3 w-3" />
@@ -509,7 +509,7 @@ export default function PaymongoDashboardPage() {
                         <button
                           onClick={handleSaveEmail}
                           disabled={savingField === "email"}
-                          className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 shrink-0 disabled:opacity-50"
+                          className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                           title="Save"
                         >
                           <Check className="h-3.5 w-3.5" />
@@ -517,7 +517,7 @@ export default function PaymongoDashboardPage() {
                         <button
                           onClick={cancelEditEmail}
                           disabled={savingField === "email"}
-                          className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 hover:bg-slate-700 shrink-0 disabled:opacity-50"
+                          className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 hover:bg-slate-700 shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                           title="Cancel"
                         >
                           <XIcon className="h-3.5 w-3.5" />
@@ -528,7 +528,7 @@ export default function PaymongoDashboardPage() {
                         <p className="text-sm text-slate-200 truncate">{displayEmail || "Not linked"}</p>
                         <button
                           onClick={startEditEmail}
-                          className="h-5 w-5 flex items-center justify-center rounded text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          className="h-5 w-5 flex items-center justify-center rounded text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer"
                           title="Edit email"
                         >
                           <Pencil className="h-3 w-3" />
@@ -696,14 +696,14 @@ export default function PaymongoDashboardPage() {
                       <button
                         onClick={handleSaveContact}
                         disabled={savingField === "contact"}
-                        className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 shrink-0 disabled:opacity-50"
+                        className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                       >
                         <Check className="h-3.5 w-3.5" />
                       </button>
                       <button
                         onClick={cancelEditContact}
                         disabled={savingField === "contact"}
-                        className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 shrink-0 disabled:opacity-50"
+                        className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                       >
                         <XIcon className="h-3.5 w-3.5" />
                       </button>
@@ -713,7 +713,7 @@ export default function PaymongoDashboardPage() {
                       <p className="text-xs text-slate-200 font-medium truncate">{displayContact || "None"}</p>
                       <button
                         onClick={startEditContact}
-                        className="h-5 w-5 flex items-center justify-center rounded text-slate-600 active:text-emerald-400 shrink-0"
+                        className="h-5 w-5 flex items-center justify-center rounded text-slate-600 active:text-emerald-400 shrink-0 cursor-pointer"
                       >
                         <Pencil className="h-3 w-3" />
                       </button>
@@ -740,14 +740,14 @@ export default function PaymongoDashboardPage() {
                       <button
                         onClick={handleSaveEmail}
                         disabled={savingField === "email"}
-                        className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 shrink-0 disabled:opacity-50"
+                        className="h-6 w-6 flex items-center justify-center rounded bg-emerald-500/10 text-emerald-400 shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                       >
                         <Check className="h-3.5 w-3.5" />
                       </button>
                       <button
                         onClick={cancelEditEmail}
                         disabled={savingField === "email"}
-                        className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 shrink-0 disabled:opacity-50"
+                        className="h-6 w-6 flex items-center justify-center rounded bg-slate-800 text-slate-400 shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                       >
                         <XIcon className="h-3.5 w-3.5" />
                       </button>
@@ -757,7 +757,7 @@ export default function PaymongoDashboardPage() {
                       <p className="text-xs text-slate-200 truncate">{displayEmail || "Not linked"}</p>
                       <button
                         onClick={startEditEmail}
-                        className="h-5 w-5 flex items-center justify-center rounded text-slate-600 active:text-emerald-400 shrink-0"
+                        className="h-5 w-5 flex items-center justify-center rounded text-slate-600 active:text-emerald-400 shrink-0 cursor-pointer"
                       >
                         <Pencil className="h-3 w-3" />
                       </button>
@@ -771,7 +771,7 @@ export default function PaymongoDashboardPage() {
             <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
               <p className="px-4 pt-3 pb-1.5 text-[9px] font-black uppercase tracking-widest text-slate-600">Account</p>
               <button onClick={changePassword.open}
-                className="w-full flex items-center gap-3 px-4 py-3 border-b border-slate-800/50 hover:bg-slate-800/30 active:bg-slate-800/50 transition-colors">
+                className="w-full flex items-center gap-3 px-4 py-3 border-b border-slate-800/50 hover:bg-slate-800/30 active:bg-slate-800/50 transition-colors cursor-pointer">
                 <div className="h-8 w-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center shrink-0">
                   <KeyRound className="h-3.5 w-3.5 text-violet-400" />
                 </div>
@@ -782,7 +782,7 @@ export default function PaymongoDashboardPage() {
                 <ChevronRight className="h-3.5 w-3.5 text-slate-600 shrink-0" />
               </button>
               <button onClick={requestLogout}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-500/5 active:bg-red-500/10 transition-colors">
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-500/5 active:bg-red-500/10 transition-colors cursor-pointer">
                 <div className="h-8 w-8 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
                   <LogOut className="h-3.5 w-3.5 text-red-400" />
                 </div>
@@ -817,7 +817,7 @@ export default function PaymongoDashboardPage() {
           const isActive = activeTab === tab;
           return (
             <button key={tab} onClick={() => handleTabChange(tab)}
-              className={`relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors duration-150 ${
+              className={`relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors duration-150 cursor-pointer ${
                 isActive ? "text-emerald-400" : "text-slate-600 hover:text-slate-400"
               }`}>
               {isActive && (

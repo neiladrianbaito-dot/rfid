@@ -17,20 +17,20 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
 
       {/* Alert Dialog */}
       <Dialog open={alertOpen} onOpenChange={setAlertOpen}>
-        <DialogContent className="bg-slate-900 text-white border-slate-800 w-[calc(100vw-2rem)] max-w-[380px] mx-auto [&>button]:text-white [&>button]:opacity-100 [&>button:hover]:opacity-70">
+        <DialogContent className="bg-slate-900 text-white border-slate-800 w-[calc(100vw-2rem)] max-w-[380px] mx-auto [&>button]:text-white [&>button]:opacity-100 [&>button:hover]:opacity-70 [&>button]:cursor-pointer">
           <DialogHeader>
             <DialogTitle>{alertContent.title}</DialogTitle>
             <DialogDescription className="text-slate-400">{alertContent.msg}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button onClick={() => setAlertOpen(false)} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto">Got it</Button>
+            <Button onClick={() => setAlertOpen(false)} className="bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto cursor-pointer">Got it</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Topup Dialog */}
       <Dialog open={isOpen} onOpenChange={(open) => { if (!open) close(); }}>
-        <DialogContent className="p-0 border-none bg-transparent w-[calc(100vw-2rem)] max-w-[400px] mx-auto [&>button]:text-white [&>button]:opacity-100 [&>button:hover]:opacity-70">
+        <DialogContent className="p-0 border-none bg-transparent w-[calc(100vw-2rem)] max-w-[400px] mx-auto [&>button]:text-white [&>button]:opacity-100 [&>button:hover]:opacity-70 [&>button]:cursor-pointer">
           <DialogTitle className="sr-only">Top-up Wallet</DialogTitle>
           <DialogDescription className="sr-only">Add funds to your wallet via GCash or Maya through PayMongo.</DialogDescription>
           <div className="rgb-container">
@@ -86,7 +86,7 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
                 <Button
                   onClick={handleTopup}
                   disabled={loading || isAtMaxBalance || !amount || parseFloat(amount) <= 0}
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 disabled:opacity-50"
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                 >
                   {loading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via PayMongo"}
                 </Button>

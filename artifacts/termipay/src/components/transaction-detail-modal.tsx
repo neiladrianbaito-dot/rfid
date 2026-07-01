@@ -118,11 +118,11 @@ export function TransactionDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-3 sm:px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-3 sm:px-4 cursor-pointer"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl"
+        className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl cursor-default"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top accent stripe */}
@@ -155,7 +155,7 @@ export function TransactionDetailModal({
             size="icon"
             variant="ghost"
             onClick={onClose}
-            className={`h-7 w-7 rounded-lg shrink-0 ${
+            className={`h-7 w-7 rounded-lg shrink-0 cursor-pointer ${
               isFare
                 ? "text-red-500 hover:text-red-300 hover:bg-red-500/10"
                 : "text-emerald-500 hover:text-emerald-300 hover:bg-emerald-500/10"
@@ -268,7 +268,7 @@ export function TransactionDetailModal({
         <div className="px-4 sm:px-5 pt-2.5 sm:pt-3 pb-4 sm:pb-5">
           <Button
             onClick={onClose}
-            className="w-full text-white border-0 font-semibold transition-colors text-sm sm:text-base"
+            className="w-full text-white border-0 font-semibold transition-colors text-sm sm:text-base cursor-pointer"
             style={{ backgroundColor: isFare ? "#dc2626" : "#059669" }}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLButtonElement).style.backgroundColor =

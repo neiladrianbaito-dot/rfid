@@ -105,7 +105,7 @@ function ReceiptModal({
 
   return (
     <Dialog open={!!tx} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="bg-[#07090f] border-slate-800 max-w-sm p-0 overflow-hidden rounded-2xl gap-0">
+      <DialogContent className="bg-[#07090f] border-slate-800 max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer">
 
         {/* a11y — DialogContent needs a Title + Description for screen readers */}
         <VisuallyHidden>
@@ -205,7 +205,7 @@ function ReceiptModal({
           {/* Close button */}
           <Button
             onClick={onClose}
-            className={`w-full text-white font-black uppercase text-[11px] tracking-widest ${closeBg} transition-colors`}
+            className={`w-full text-white font-black uppercase text-[11px] tracking-widest ${closeBg} transition-colors cursor-pointer`}
           >
             Close
           </Button>
@@ -364,23 +364,23 @@ export default function TransactionsPage() {
             </div>
             <div className="flex gap-3 w-full lg:w-auto">
               <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="w-full lg:w-[150px] bg-slate-950 border-slate-800 text-slate-300 font-bold uppercase text-[10px] tracking-widest">
+                <SelectTrigger className="w-full lg:w-[150px] bg-slate-950 border-slate-800 text-slate-300 font-bold uppercase text-[10px] tracking-widest cursor-pointer">
                   <SelectValue placeholder="TYPE" />
                 </SelectTrigger>
                 <SelectContent className="bg-slate-950 border-slate-800 text-slate-300">
-                  <SelectItem value="all">ALL TYPES</SelectItem>
-                  <SelectItem value="Fare">FARE</SelectItem>
-                  <SelectItem value="Top-up">TOP-UP</SelectItem>
+                  <SelectItem value="all" className="cursor-pointer">ALL TYPES</SelectItem>
+                  <SelectItem value="Fare" className="cursor-pointer">FARE</SelectItem>
+                  <SelectItem value="Top-up" className="cursor-pointer">TOP-UP</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full lg:w-[150px] bg-slate-950 border-slate-800 text-slate-300 font-bold uppercase text-[10px] tracking-widest">
+                <SelectTrigger className="w-full lg:w-[150px] bg-slate-950 border-slate-800 text-slate-300 font-bold uppercase text-[10px] tracking-widest cursor-pointer">
                   <SelectValue placeholder="STATUS" />
                 </SelectTrigger>
                 <SelectContent className="bg-slate-950 border-slate-800 text-slate-300">
-                  <SelectItem value="all">ALL STATUS</SelectItem>
-                  <SelectItem value="Success">SUCCESS</SelectItem>
-                  <SelectItem value="Failed">FAILED</SelectItem>
+                  <SelectItem value="all" className="cursor-pointer">ALL STATUS</SelectItem>
+                  <SelectItem value="Success" className="cursor-pointer">SUCCESS</SelectItem>
+                  <SelectItem value="Failed" className="cursor-pointer">FAILED</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -457,7 +457,7 @@ export default function TransactionsPage() {
                             <div className="flex justify-end gap-1">
                               <Button
                                 variant="ghost" size="icon"
-                                className="h-8 w-8 text-blue-400/70 hover:text-blue-300 hover:bg-blue-500/10"
+                                className="h-8 w-8 text-blue-400/70 hover:text-blue-300 hover:bg-blue-500/10 cursor-pointer"
                                 onClick={() => setViewTx(tx)}
                                 title="View receipt"
                               >
@@ -465,7 +465,7 @@ export default function TransactionsPage() {
                               </Button>
                               <Button
                                 variant="ghost" size="icon"
-                                className="h-8 w-8 text-red-400/70 hover:text-red-400 hover:bg-red-500/10"
+                                className="h-8 w-8 text-red-400/70 hover:text-red-400 hover:bg-red-500/10 cursor-pointer"
                                 onClick={() => setDeleteTx(tx)}
                                 title="Delete record"
                               >
@@ -492,7 +492,7 @@ export default function TransactionsPage() {
                 <div className="flex items-center gap-2">
                   <Button variant="ghost" size="sm" disabled={safePage <= 1}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    className="h-8 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 border border-slate-800">
+                    className="h-8 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 border border-slate-800 cursor-pointer disabled:cursor-not-allowed">
                     <ChevronLeft className="w-3 h-3 mr-1" />Prev
                   </Button>
                   <span className="text-[10px] font-black text-slate-400 px-2 tabular-nums">
@@ -501,7 +501,7 @@ export default function TransactionsPage() {
                   </span>
                   <Button variant="ghost" size="sm" disabled={safePage >= totalPages}
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    className="h-8 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 border border-slate-800">
+                    className="h-8 px-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 border border-slate-800 cursor-pointer disabled:cursor-not-allowed">
                     Next<ChevronRight className="w-3 h-3 ml-1" />
                   </Button>
                 </div>
@@ -527,12 +527,12 @@ export default function TransactionsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleteMutation.isPending}
-              className="bg-slate-900 border-slate-800 text-white hover:bg-slate-800">
+              className="bg-slate-900 border-slate-800 text-white hover:bg-slate-800 cursor-pointer disabled:cursor-not-allowed">
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction onClick={() => deleteTx && deleteMutation.mutate({ id: deleteTx.id })}
               disabled={deleteMutation.isPending}
-              className="bg-red-600 text-white hover:bg-red-500 font-black uppercase text-[10px]">
+              className="bg-red-600 text-white hover:bg-red-500 font-black uppercase text-[10px] cursor-pointer disabled:cursor-not-allowed">
               {deleteMutation.isPending ? "Purging..." : "Confirm"}
             </AlertDialogAction>
           </AlertDialogFooter>

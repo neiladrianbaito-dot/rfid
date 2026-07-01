@@ -120,7 +120,7 @@ export default function ReportPreviewPage() {
           <Button
             variant="outline"
             onClick={handleBack}
-            className="font-bold uppercase text-xs tracking-widest"
+            className="font-bold uppercase text-xs tracking-widest cursor-pointer transition-colors duration-150 hover:bg-slate-100 active:bg-slate-200"
             data-testid="button-back-reports"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -131,7 +131,7 @@ export default function ReportPreviewPage() {
           </div>
           <Button
             onClick={handlePrint}
-            className="bg-blue-600 hover:bg-blue-500 text-white font-black uppercase text-xs tracking-widest"
+            className="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-black uppercase text-xs tracking-widest cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-blue-500/30"
             data-testid="button-print"
           >
             <Printer className="w-4 h-4 mr-2" />
