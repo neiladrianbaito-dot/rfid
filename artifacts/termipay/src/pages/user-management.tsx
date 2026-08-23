@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useTheme } from "@/hooks/use-theme";
 import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone } from "lucide-react";
 import {
   AlertDialog,
@@ -42,6 +43,7 @@ function normalizeEmail(email: string | null | undefined): string | null {
 }
 
 export default function UserManagementPage() {
+  const { isDark } = useTheme();
   const [search, setSearch] = useState("");
   const [editUser, setEditUser] = useState<any>(null);
   const [deleteUser, setDeleteUser] = useState<any>(null);
@@ -151,7 +153,7 @@ export default function UserManagementPage() {
   };
 
   return (
-    <div className="space-y-8 h-full min-h-0 flex flex-col" data-testid="users-page">
+    <div className={`space-y-8 h-full min-h-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`} data-testid="users-page">
       <style>{`
         @keyframes row-pulse {
           0% { background-color: transparent; }
@@ -168,24 +170,24 @@ export default function UserManagementPage() {
       `}</style>
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-6">
+      <div className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-            <Users className="text-blue-600" size={26} />
+          <h2 className={`text-2xl font-bold tracking-tight flex items-center gap-3 ${isDark ? "text-white" : "text-slate-900"}`}>
+            <Users className="text-blue-500" size={26} />
             User Management
           </h2>
-          <p className="text-slate-500 text-sm mt-1">
+          <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
             Manage cardholder credentials and wallet balances
           </p>
         </div>
 
         <div className="flex flex-col items-end gap-1">
-          <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 rounded-lg">
-            <Zap className="text-blue-600" size={16} />
-            <span className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">Live Telemetry Active</span>
+          <div className={`flex items-center gap-2 px-4 py-2 border rounded-lg ${isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"}`}>
+            <Zap className="text-blue-500" size={16} />
+            <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
           </div>
           {lastUpdated && (
-            <span className="text-[10px] text-slate-400 font-mono pr-1">
+            <span className={`text-[10px] font-mono pr-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
               Last sync: {lastUpdated.toLocaleTimeString()}
             </span>
           )}
@@ -193,27 +195,33 @@ export default function UserManagementPage() {
       </div>
 
       {/* Table Card */}
-      <Card className="bg-white border-slate-200 shadow-sm flex flex-col overflow-hidden relative">
+      <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
 
-        <CardHeader className="flex-none pb-4 bg-slate-50/60 border-b border-slate-100">
+        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
           <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
             <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5 shrink-0">
+              <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 shrink-0 ${
+                isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+              }`}>
                 <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
                 LIVE
               </span>
-              <CardTitle className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <CardTitle className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 Authorized Card Holders
               </CardTitle>
             </div>
             <div className="relative w-full sm:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
               <Input
                 placeholder="Search UID or name..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-10 bg-white border-slate-200 focus-visible:ring-blue-500 text-slate-800 font-medium placeholder:text-slate-400 text-sm h-10"
+                className={`pl-10 font-medium text-sm h-10 focus-visible:ring-blue-500 ${
+                  isDark
+                    ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
+                    : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
+                }`}
               />
             </div>
           </div>
@@ -223,18 +231,18 @@ export default function UserManagementPage() {
           {isLoading ? (
             <div className="space-y-4 pt-4">
               {Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                <Skeleton key={i} className="h-16 w-full bg-slate-100 rounded-lg" />
+                <Skeleton key={i} className={`h-16 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
               ))}
             </div>
           ) : (
             <>
               <div className="flex-1 min-h-0 overflow-auto">
                 <Table>
-                  <TableHeader className="sticky top-0 bg-white z-10 border-b border-slate-200">
+                  <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
                     <TableRow className="border-none hover:bg-transparent">
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Card UID</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Full Name</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card UID</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Full Name</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                         <span className="flex items-center gap-1">
                           <Phone size={10} /> Contact No.
                         </span>
@@ -242,10 +250,10 @@ export default function UserManagementPage() {
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-blue-500">
                         <span className="flex items-center gap-1"><LinkIcon size={10} /> Linked Account</span>
                       </TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Type</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-emerald-600">Balance</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Status</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 text-right">Actions</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Type</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-emerald-500" : "text-emerald-600"}`}>Balance</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -255,25 +263,25 @@ export default function UserManagementPage() {
                         return (
                           <TableRow
                             key={user.id}
-                            className={`border-slate-100 transition-colors hover:bg-slate-50 ${
+                            className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"} ${
                               newRowId === user.id ? "row-pulse" : ""
                             }`}
                           >
-                            <TableCell className="font-mono text-xs text-blue-600 font-semibold">
+                            <TableCell className="font-mono text-xs text-blue-500 font-semibold">
                               {user.cardUid}
                             </TableCell>
 
                             <TableCell>
-                              <span className="text-sm font-medium text-slate-800">
+                              <span className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                                 {user.fullName}
                               </span>
                             </TableCell>
 
                             <TableCell>
-                              <span className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-500">
-                                <Phone className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                              <span className={`inline-flex items-center gap-1.5 text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                                <Phone className={`w-3 h-3 flex-shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
                                 {user.contactNumber || (
-                                  <span className="text-slate-300 italic text-[11px]">—</span>
+                                  <span className={`italic text-[11px] ${isDark ? "text-slate-600" : "text-slate-300"}`}>—</span>
                                 )}
                               </span>
                             </TableCell>
@@ -281,20 +289,24 @@ export default function UserManagementPage() {
                             <TableCell>
                               {linkedEmail ? (
                                 <div className="flex flex-col gap-0.5">
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded w-fit">
+                                  <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${
+                                    isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+                                  }`}>
                                     <LinkIcon size={8} /> Linked
                                   </span>
-                                  <span className="flex items-center gap-1 text-xs text-blue-600 font-mono">
+                                  <span className="flex items-center gap-1 text-xs text-blue-500 font-mono">
                                     <Mail className="w-3 h-3 flex-shrink-0" />
                                     {linkedEmail}
                                   </span>
                                 </div>
                               ) : (
                                 <div className="flex flex-col gap-0.5">
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase text-slate-400 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded w-fit">
+                                  <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${
+                                    isDark ? "text-slate-500 bg-slate-800 border-slate-700" : "text-slate-400 bg-slate-100 border-slate-200"
+                                  }`}>
                                     <LinkIcon size={8} /> Not Linked
                                   </span>
-                                  <span className="text-[11px] text-slate-400 italic font-mono">
+                                  <span className={`text-[11px] italic font-mono ${isDark ? "text-slate-600" : "text-slate-400"}`}>
                                     No account registered
                                   </span>
                                 </div>
@@ -304,14 +316,18 @@ export default function UserManagementPage() {
                             <TableCell>
                               <Badge
                                 variant="outline"
-                                className="text-[10px] font-semibold border-blue-200 text-blue-600 bg-blue-50"
+                                className={`text-[10px] font-semibold ${
+                                  isDark ? "border-blue-900 text-blue-400 bg-blue-950/40" : "border-blue-200 text-blue-600 bg-blue-50"
+                                }`}
                               >
                                 {user.type || "Regular"}
                               </Badge>
                             </TableCell>
 
                             <TableCell>
-                              <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 text-xs">
+                              <span className={`inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded border text-xs ${
+                                isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+                              }`}>
                                 <Wallet className="w-3 h-3" />
                                 {formatPeso(user.balance || 0)}
                               </span>
@@ -322,8 +338,8 @@ export default function UserManagementPage() {
                                 variant="outline"
                                 className={`text-[10px] font-semibold ${
                                   user.status === "Active"
-                                    ? "bg-emerald-50 text-emerald-600 border-emerald-200"
-                                    : "bg-red-50 text-red-600 border-red-200"
+                                    ? isDark ? "bg-emerald-950/40 text-emerald-400 border-emerald-900" : "bg-emerald-50 text-emerald-600 border-emerald-200"
+                                    : isDark ? "bg-red-950/40 text-red-400 border-red-900" : "bg-red-50 text-red-600 border-red-200"
                                 }`}
                               >
                                 {user.status}
@@ -336,7 +352,7 @@ export default function UserManagementPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => openEdit(user)}
-                                  className="h-8 w-8 text-blue-500 hover:text-blue-700 hover:bg-blue-50 cursor-pointer"
+                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
                                   title="Edit user"
                                 >
                                   <Pencil className="w-3.5 h-3.5" />
@@ -345,7 +361,7 @@ export default function UserManagementPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => setDeleteUser(user)}
-                                  className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50 cursor-pointer"
+                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
                                   title="Delete user"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -359,7 +375,7 @@ export default function UserManagementPage() {
                       <TableRow>
                         <TableCell
                           colSpan={8}
-                          className="text-center py-20 text-slate-300 uppercase font-semibold tracking-widest text-xs"
+                          className={`text-center py-20 uppercase font-semibold tracking-widest text-xs ${isDark ? "text-slate-700" : "text-slate-300"}`}
                         >
                           No users found
                         </TableCell>
@@ -370,14 +386,14 @@ export default function UserManagementPage() {
               </div>
 
               {/* Pagination Footer */}
-              <div className="flex items-center justify-between pt-4 border-t border-slate-100 mt-2">
-                <span className="text-xs font-mono text-slate-400 uppercase tracking-wide">
+              <div className={`flex items-center justify-between pt-4 border-t mt-2 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+                <span className={`text-xs font-mono uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                   Showing{" "}
-                  <span className="text-slate-600 font-semibold">
+                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
                     {userList.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, userList.length)}
                   </span>{" "}
                   of{" "}
-                  <span className="text-slate-600 font-semibold">{userList.length}</span>{" "}
+                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{userList.length}</span>{" "}
                   users
                 </span>
                 <div className="flex items-center gap-2">
@@ -386,15 +402,17 @@ export default function UserManagementPage() {
                     size="sm"
                     disabled={safePage <= 1}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    className="h-8 px-3 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 border border-slate-200 cursor-pointer disabled:cursor-not-allowed"
+                    className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
+                      isDark ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
+                    }`}
                   >
                     <ChevronLeft className="w-3 h-3 mr-1" />
                     Prev
                   </Button>
 
-                  <span className="text-xs font-semibold text-slate-500 px-2 tabular-nums">
-                    <span className="text-blue-600">{safePage}</span>
-                    <span className="text-slate-300"> / {totalPages}</span>
+                  <span className="text-xs font-semibold px-2 tabular-nums">
+                    <span className="text-blue-500">{safePage}</span>
+                    <span className={isDark ? "text-slate-700" : "text-slate-300"}> / {totalPages}</span>
                   </span>
 
                   <Button
@@ -402,7 +420,9 @@ export default function UserManagementPage() {
                     size="sm"
                     disabled={safePage >= totalPages}
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    className="h-8 px-3 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 border border-slate-200 cursor-pointer disabled:cursor-not-allowed"
+                    className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
+                      isDark ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
+                    }`}
                   >
                     Next
                     <ChevronRight className="w-3 h-3 ml-1" />
@@ -416,27 +436,27 @@ export default function UserManagementPage() {
 
       {/* Edit Dialog */}
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className="bg-white border-slate-200 text-slate-800 sm:max-w-lg [&>button]:cursor-pointer">
+        <DialogContent className={`sm:max-w-lg [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
           <DialogHeader>
-            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-600">
+            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
               <Pencil size={18} /> Update User
             </DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-4 py-4">
 
             <div className="space-y-2 col-span-2">
-              <Label className="text-xs font-semibold text-slate-500">Full Name</Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Full Name</Label>
               <Input
                 value={editForm.fullName}
                 onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
-                className="bg-white border-slate-200 text-sm font-medium"
+                className={`text-sm font-medium ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
               />
             </div>
 
             <div className="space-y-2 col-span-2">
               <Label
                 className="text-xs font-semibold flex items-center gap-1"
-                style={{ color: normalizeEmail(editUser?.email) ? "#2563eb" : "#94a3b8" }}
+                style={{ color: normalizeEmail(editUser?.email) ? (isDark ? "#60a5fa" : "#2563eb") : (isDark ? "#64748b" : "#94a3b8") }}
               >
                 <LinkIcon size={10} />
                 {normalizeEmail(editUser?.email) ? "Linked Account Email (read-only)" : "Linked Account (read-only)"}
@@ -444,22 +464,26 @@ export default function UserManagementPage() {
               <Input
                 disabled
                 value={normalizeEmail(editUser?.email) ?? "No account linked to this card"}
-                className={`bg-slate-50 border-slate-200 font-mono text-xs cursor-not-allowed ${
-                  normalizeEmail(editUser?.email) ? "text-blue-600" : "text-slate-400 italic"
+                className={`font-mono text-xs cursor-not-allowed ${
+                  isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"
+                } ${
+                  normalizeEmail(editUser?.email)
+                    ? isDark ? "text-blue-400" : "text-blue-600"
+                    : isDark ? "text-slate-500 italic" : "text-slate-400 italic"
                 }`}
               />
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500">Class Type</Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Class Type</Label>
               <Select
                 value={editForm.type}
                 onValueChange={(v) => setEditForm({ ...editForm, type: v })}
               >
-                <SelectTrigger className="bg-white border-slate-200 text-sm font-medium cursor-pointer">
+                <SelectTrigger className={`text-sm font-medium cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-white border-slate-200 text-slate-700">
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
                   <SelectItem value="Regular" className="cursor-pointer">Regular</SelectItem>
                   <SelectItem value="Student" className="cursor-pointer">Student</SelectItem>
                   <SelectItem value="Senior" className="cursor-pointer">Senior</SelectItem>
@@ -469,15 +493,15 @@ export default function UserManagementPage() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500">Account Status</Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Account Status</Label>
               <Select
                 value={editForm.status}
                 onValueChange={(v) => setEditForm({ ...editForm, status: v })}
               >
-                <SelectTrigger className="bg-white border-slate-200 text-sm font-medium cursor-pointer">
+                <SelectTrigger className={`text-sm font-medium cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-white border-slate-200 text-slate-700">
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
                   <SelectItem value="Active" className="cursor-pointer">Active</SelectItem>
                   <SelectItem value="Inactive" className="cursor-pointer">Inactive</SelectItem>
                   <SelectItem value="Blocked" className="cursor-pointer">Blocked</SelectItem>
@@ -486,24 +510,26 @@ export default function UserManagementPage() {
             </div>
 
             <div className="space-y-2 col-span-2">
-              <Label className="text-xs font-semibold text-slate-500 flex items-center gap-1">
+              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 <Phone size={10} /> Contact Number
               </Label>
               <Input
                 value={editForm.contactNumber}
                 onChange={(e) => setEditForm({ ...editForm, contactNumber: e.target.value })}
-                className="bg-white border-slate-200 text-sm font-mono"
+                className={`text-sm font-mono ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
               />
             </div>
 
             <div className="space-y-2 col-span-2">
-              <Label className="text-xs font-semibold text-slate-500 flex items-center gap-1">
+              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 <Wallet size={10} /> Balance (read-only)
               </Label>
               <Input
                 disabled
                 value={formatPeso(parseFloat(editForm.balance) || 0)}
-                className="bg-slate-50 border-slate-200 text-emerald-600 font-semibold text-sm font-mono cursor-not-allowed"
+                className={`font-semibold text-sm font-mono cursor-not-allowed ${
+                  isDark ? "bg-slate-950/60 border-slate-800 text-emerald-400" : "bg-slate-50 border-slate-200 text-emerald-600"
+                }`}
               />
             </div>
 
@@ -512,7 +538,7 @@ export default function UserManagementPage() {
             <Button
               variant="ghost"
               onClick={() => setEditUser(null)}
-              className="text-slate-500 text-xs font-medium cursor-pointer"
+              className={`text-xs font-medium cursor-pointer ${isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500"}`}
             >
               Cancel
             </Button>
@@ -529,12 +555,12 @@ export default function UserManagementPage() {
 
       {/* Delete Confirm */}
       <AlertDialog open={!!deleteUser} onOpenChange={(open) => !open && setDeleteUser(null)}>
-        <AlertDialogContent className="bg-white border-slate-200">
+        <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-slate-900 font-bold tracking-tight flex items-center gap-2">
+            <AlertDialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
               <ShieldAlert className="text-red-500" size={18} /> Confirm Deletion
             </AlertDialogTitle>
-            <AlertDialogDescription className="text-slate-500 text-sm leading-relaxed">
+            <AlertDialogDescription className={`text-sm leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               This will permanently remove the user and all associated transaction history from the database.
               This action cannot be undone.
             </AlertDialogDescription>
@@ -542,7 +568,9 @@ export default function UserManagementPage() {
           <AlertDialogFooter>
             <AlertDialogCancel
               disabled={deleteMutation.isPending}
-              className="bg-white border-slate-200 text-slate-700 text-xs font-medium hover:bg-slate-50 cursor-pointer disabled:cursor-not-allowed"
+              className={`text-xs font-medium cursor-pointer disabled:cursor-not-allowed ${
+                isDark ? "bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
             >
               Cancel
             </AlertDialogCancel>
