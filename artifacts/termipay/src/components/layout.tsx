@@ -35,9 +35,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
-
-const THEME_KEY = "termipay_theme";
-type Theme = "light" | "dark";
+import { useTheme } from "@/hooks/use-theme";
 
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
@@ -53,29 +51,6 @@ const navItems = [
   { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
   { path: "/reports", label: "Reports", icon: FileBarChart },
 ];
-
-function useTheme() {
-  const [theme, setTheme] = useState<Theme>("light");
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem(THEME_KEY) as Theme | null;
-    if (stored === "dark" || stored === "light") {
-      setTheme(stored);
-    } else if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
-      setTheme("dark");
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    setTheme((prev) => {
-      const next = prev === "light" ? "dark" : "light";
-      window.localStorage.setItem(THEME_KEY, next);
-      return next;
-    });
-  };
-
-  return { theme, isDark: theme === "dark", toggleTheme };
-}
 
 function CurrentDateTime({ isDark }: { isDark: boolean }) {
   const [now, setNow] = useState(new Date());
