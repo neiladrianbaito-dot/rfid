@@ -6,14 +6,19 @@ import { getGetMeQueryKey } from "@workspace/api-client-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { CreditCard, Lock, User, Loader2, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { CreditCard, Lock, User, Loader2, Eye, EyeOff, AlertCircle, Sun, Moon } from "lucide-react";
 import { motion } from "framer-motion";
 
 const FORCE_LOGGED_OUT_KEY = "termipay_force_logged_out";
 const AUTH_TOKEN_KEY = "termipay_auth_token";
+const THEME_KEY = "termipay_theme";
 
-const ParticleNetworkBackground = () => {
+type Theme = "light" | "dark";
+
+const ParticleNetworkBackground = ({ theme }: { theme: Theme }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -25,8 +30,11 @@ const ParticleNetworkBackground = () => {
     const R = 3.5;
     const ALPHA_F = 0.025;
     const DIS_LIMIT = 140;
-    // Bright, clearly visible blue
-    const BALL_COLOR = { r: 37, g: 99, b: 235 };
+    // Bright, clearly visible blue (slightly lighter for dark backgrounds)
+    const COLORS = {
+      light: { r: 37, g: 99, b: 235 },
+      dark: { r: 96, g: 165, b: 250 },
+    };
 
     type Particle = {
       x: number; y: number; vx: number; vy: number;
@@ -81,11 +89,12 @@ const ParticleNetworkBackground = () => {
 
     const render = () => {
       ctx.clearRect(0, 0, canW, canH);
+      const c = COLORS[themeRef.current];
 
       // Draw dots
       particles.forEach((p) => {
         if (p.isMouse) return;
-        ctx.fillStyle = `rgba(${BALL_COLOR.r},${BALL_COLOR.g},${BALL_COLOR.b},${p.alpha * 0.75})`;
+        ctx.fillStyle = `rgba(${c.r},${c.g},${c.b},${p.alpha * 0.75})`;
         ctx.beginPath();
         ctx.arc(p.x, p.y, R, 0, Math.PI * 2);
         ctx.fill();
@@ -96,7 +105,7 @@ const ParticleNetworkBackground = () => {
         for (let j = i + 1; j < particles.length; j++) {
           const d = dist(particles[i], particles[j]);
           if (d < DIS_LIMIT) {
-            ctx.strokeStyle = `rgba(37,99,235,${(1 - d / DIS_LIMIT) * 0.35})`;
+            ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${(1 - d / DIS_LIMIT) * 0.35})`;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(particles[i].x, particles[i].y);
@@ -157,8 +166,14 @@ const ParticleNetworkBackground = () => {
   }, []);
 
   return (
-    <div className="fixed inset-0 -z-10 bg-white overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_35%,rgba(37,99,235,0.08)_0%,rgba(255,255,255,1)_65%)]" />
+    <div className={`fixed inset-0 -z-10 overflow-hidden transition-colors duration-300 ${theme === "dark" ? "bg-[#020617]" : "bg-white"}`}>
+      <div
+        className={`absolute inset-0 transition-opacity duration-300 ${
+          theme === "dark"
+            ? "bg-[radial-gradient(ellipse_at_50%_35%,rgba(30,41,59,0.6)_0%,rgba(2,6,23,1)_70%)]"
+            : "bg-[radial-gradient(ellipse_at_50%_35%,rgba(37,99,235,0.08)_0%,rgba(255,255,255,1)_65%)]"
+        }`}
+      />
       <canvas ref={canvasRef} className="absolute inset-0" />
     </div>
   );
@@ -169,8 +184,28 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [theme, setTheme] = useState<Theme>("light");
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(THEME_KEY) as Theme | null;
+    if (stored === "dark" || stored === "light") {
+      setTheme(stored);
+    } else if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
+      setTheme("dark");
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === "light" ? "dark" : "light";
+      window.localStorage.setItem(THEME_KEY, next);
+      return next;
+    });
+  };
+
+  const isDark = theme === "dark";
 
   const loginMutation = useLogin({
     mutation: {
@@ -201,7 +236,22 @@ export default function LoginPage() {
       className="relative min-h-screen flex flex-col items-center justify-center px-4 py-8"
       data-testid="login-page"
     >
-      <ParticleNetworkBackground />
+      <ParticleNetworkBackground theme={theme} />
+
+      {/* Theme toggle */}
+      <button
+        type="button"
+        onClick={toggleTheme}
+        aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+        data-testid="button-theme-toggle"
+        className={`fixed top-5 right-5 z-20 flex items-center justify-center w-10 h-10 rounded-full border-2 transition-colors ${
+          isDark
+            ? "bg-slate-950/80 border-slate-700 text-blue-300 hover:border-blue-500"
+            : "bg-white border-slate-200 text-blue-600 hover:border-blue-400 shadow-sm"
+        }`}
+      >
+        {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+      </button>
 
       <motion.div
         initial={{ opacity: 0, y: 16 }}
@@ -220,30 +270,42 @@ export default function LoginPage() {
           </motion.div>
 
           <h1
-            className="text-2xl font-black text-slate-900 tracking-tight uppercase italic leading-tight text-center"
+            className={`text-2xl font-black tracking-tight uppercase italic leading-tight text-center transition-colors ${
+              isDark ? "text-white" : "text-slate-900"
+            }`}
             data-testid="text-app-title"
           >
-            Fare <span className="text-blue-600">Collection</span> System
+            Fare <span className={isDark ? "text-blue-400" : "text-blue-600"}>Collection</span> System
           </h1>
-          <p className="text-[10px] text-slate-400 mt-1 font-semibold tracking-widest uppercase text-center">
+          <p className={`text-[10px] mt-1 font-semibold tracking-widest uppercase text-center transition-colors ${
+            isDark ? "text-blue-200/50" : "text-slate-400"
+          }`}>
             LTC Calbayog City
           </p>
         </div>
 
         {/* Card */}
-        <div className="relative bg-white border-2 border-slate-200 rounded-3xl shadow-[0_8px_40px_rgba(15,23,42,0.08)] overflow-hidden">
+        <div
+          className={`relative border-2 rounded-3xl overflow-hidden backdrop-blur-2xl transition-colors duration-300 ${
+            isDark
+              ? "bg-slate-950/80 border-slate-800 shadow-[0_8px_40px_rgba(0,0,0,0.6)]"
+              : "bg-white border-slate-200 shadow-[0_8px_40px_rgba(15,23,42,0.08)]"
+          }`}
+        >
           {/* Top accent line */}
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-blue-600 to-blue-500" />
 
           <div className="px-6 pt-7 pb-7">
-            <p className="text-slate-500 text-xs text-center mb-5 tracking-wide">
+            <p className={`text-xs text-center mb-5 tracking-wide transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               Admin authentication
             </p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Error */}
               {error && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs font-medium">
+                <div className={`flex items-start gap-2 p-3 rounded-lg border text-xs font-medium ${
+                  isDark ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-red-50 border-red-200 text-red-600"
+                }`}>
                   <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   {error}
                 </div>
@@ -253,19 +315,23 @@ export default function LoginPage() {
               <div className="space-y-1.5">
                 <Label
                   htmlFor="username"
-                  className="text-slate-500 font-semibold uppercase text-[10px] tracking-wider"
+                  className={`font-semibold uppercase text-[10px] tracking-wider transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}
                 >
                   Username
                 </Label>
                 <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <User className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors ${isDark ? "text-slate-600" : "text-slate-400"}`} />
                   <Input
                     id="username"
                     type="text"
                     placeholder="ADMIN_ID"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="pl-9 h-10 text-sm bg-slate-50 border-2 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 rounded-xl"
+                    className={`pl-9 h-10 text-sm border-2 rounded-xl transition-colors focus:ring-1 focus:ring-blue-500/30 ${
+                      isDark
+                        ? "bg-slate-900/60 border-slate-700/70 text-white placeholder:text-slate-600 focus:border-blue-500"
+                        : "bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-500"
+                    }`}
                     required
                     disabled={loginMutation.isPending}
                   />
@@ -276,26 +342,32 @@ export default function LoginPage() {
               <div className="space-y-1.5">
                 <Label
                   htmlFor="password"
-                  className="text-slate-500 font-semibold uppercase text-[10px] tracking-wider"
+                  className={`font-semibold uppercase text-[10px] tracking-wider transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}
                 >
                   Password
                 </Label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Lock className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors ${isDark ? "text-slate-600" : "text-slate-400"}`} />
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-9 pr-9 h-10 text-sm bg-slate-50 border-2 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 rounded-xl"
+                    className={`pl-9 pr-9 h-10 text-sm border-2 rounded-xl transition-colors focus:ring-1 focus:ring-blue-500/30 ${
+                      isDark
+                        ? "bg-slate-900/60 border-slate-700/70 text-white placeholder:text-slate-600 focus:border-blue-500"
+                        : "bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-500"
+                    }`}
                     required
                     disabled={loginMutation.isPending}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    className={`absolute right-3 top-1/2 -translate-y-1/2 transition-colors ${
+                      isDark ? "text-slate-600 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"
+                    }`}
                     tabIndex={-1}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -323,7 +395,9 @@ export default function LoginPage() {
         </div>
 
         {/* Footer */}
-        <p className="text-center text-[10px] text-slate-400 mt-5 font-semibold uppercase tracking-widest">
+        <p className={`text-center text-[10px] mt-5 font-semibold uppercase tracking-widest transition-colors ${
+          isDark ? "text-slate-700" : "text-slate-400"
+        }`}>
           © 2026 LTC Calbayog City · V1.0
         </p>
       </motion.div>

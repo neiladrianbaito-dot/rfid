@@ -12,7 +12,7 @@ import {
   Eye,
   TrendingUp,
   Calendar,
-  Fingerprint,
+  User,
   BarChart3,
   Activity,
   PieChart,
@@ -393,7 +393,7 @@ export default function ReportsPage() {
         {[
           { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100", testId: "text-total-revenue",      flash: false },
           { label: "Today's Revenue",         value: formatPeso(todayRevenue),      icon: Calendar,   color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100", testId: "text-today-revenue",      flash: revenueFlash },
-          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: Fingerprint,color: "text-indigo-600",  bg: "bg-indigo-50",  border: "border-indigo-100",  testId: "text-total-taps",         flash: false },
+          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: User, color: "text-indigo-600",  bg: "bg-indigo-50",  border: "border-indigo-100",  testId: "text-total-taps",         flash: false },
           { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: "text-sky-600",     bg: "bg-sky-50",     border: "border-sky-100",     testId: "text-total-linked-cards", flash: false },
         ].map((stat, idx) => (
           <Card key={idx} className={`bg-white border-slate-200 shadow-sm transition-all duration-200 hover:shadow-md hover:border-slate-300 ${stat.flash ? "card-pulse" : ""}`}>
