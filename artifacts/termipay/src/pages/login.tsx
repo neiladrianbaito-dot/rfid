@@ -21,8 +21,8 @@ const ParticleNetworkBackground = () => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const BALL_NUM = 90;
-    const R = 2.5;
+    const BALL_NUM = 150;
+    const R = 3.5;
     const ALPHA_F = 0.025;
     const DIS_LIMIT = 140;
     // Bright, clearly visible blue
