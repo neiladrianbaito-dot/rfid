@@ -31,6 +31,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { useTheme } from "@/hooks/use-theme";
 import {
   Plus,
   Pencil,
@@ -83,6 +84,7 @@ const CALBAYOG_BARANGAYS = [
 const DEFAULT_DESTINATION = "Calbayog";
 
 export default function FareMatrixPage() {
+  const { isDark } = useTheme();
   const [showAdd, setShowAdd] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [addForm, setAddForm] = useState({
@@ -280,7 +282,7 @@ export default function FareMatrixPage() {
   };
 
   return (
-    <div className="space-y-8" data-testid="fare-matrix-page">
+    <div className={`space-y-8 ${isDark ? "text-slate-200" : "text-slate-800"}`} data-testid="fare-matrix-page">
       <style>{`
         @keyframes realtime-dot {
           0%, 100% { opacity: 1; }
@@ -289,22 +291,22 @@ export default function FareMatrixPage() {
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
       `}</style>
 
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-6">
+      <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-6 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-            <MapPin className="w-6 h-6 text-blue-600" />
+          <h2 className={`text-2xl font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+            <MapPin className="w-6 h-6 text-blue-500" />
             Fare Matrix
           </h2>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
             Manage transit routes and fares for RFID tap deduction
           </p>
         </div>
 
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-3 flex-nowrap">
-            <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 rounded-lg shrink-0 whitespace-nowrap">
-              <Zap className="text-blue-600" size={16} />
-              <span className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">Live Telemetry Active</span>
+            <div className={`flex items-center gap-2 px-4 py-2 border rounded-lg shrink-0 whitespace-nowrap ${isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"}`}>
+              <Zap className="text-blue-500" size={16} />
+              <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
             </div>
             <Button
               onClick={() => setShowAdd(true)}
@@ -321,29 +323,37 @@ export default function FareMatrixPage() {
       <div
         className={`rounded-xl border p-4 sm:p-5 flex items-center gap-4 ${
           activeRoute
-            ? "border-emerald-200 bg-emerald-50"
-            : "border-amber-200 bg-amber-50"
+            ? isDark ? "border-emerald-900 bg-emerald-950/30" : "border-emerald-200 bg-emerald-50"
+            : isDark ? "border-amber-900 bg-amber-950/30" : "border-amber-200 bg-amber-50"
         }`}
       >
         <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-full ${activeRoute ? "bg-emerald-100" : "bg-amber-100"}`}>
+          <div className={`p-2 rounded-full ${
+            activeRoute
+              ? isDark ? "bg-emerald-900/50" : "bg-emerald-100"
+              : isDark ? "bg-amber-900/50" : "bg-amber-100"
+          }`}>
             {activeRoute ? (
-              <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+              <CheckCircle2 className={`w-6 h-6 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
             ) : (
-              <AlertCircle className="w-6 h-6 text-amber-600" />
+              <AlertCircle className={`w-6 h-6 ${isDark ? "text-amber-400" : "text-amber-600"}`} />
             )}
           </div>
           <div>
-            <p className={`font-semibold text-sm ${activeRoute ? "text-emerald-700" : "text-amber-700"}`}>
+            <p className={`font-semibold text-sm ${
+              activeRoute
+                ? isDark ? "text-emerald-400" : "text-emerald-700"
+                : isDark ? "text-amber-400" : "text-amber-700"
+            }`}>
               {activeRoute ? "Active Route — RFID Ready" : "No Active Route"}
             </p>
             {activeRoute ? (
-              <p className="text-slate-900 font-bold text-lg tracking-tight">
+              <p className={`font-bold text-lg tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
                 {activeRoute.origin} → {activeRoute.destination} &nbsp;·&nbsp; ₱
                 {activeRoute.fareAmount.toFixed(2)} per tap
               </p>
             ) : (
-              <p className="text-amber-700 text-sm">
+              <p className={`text-sm ${isDark ? "text-amber-400" : "text-amber-700"}`}>
                 Activate a route below so the ESP32 RFID reader can process fare deductions.
               </p>
             )}
@@ -351,30 +361,36 @@ export default function FareMatrixPage() {
         </div>
       </div>
 
-      <Card className="bg-white border-slate-200 h-full shadow-sm overflow-hidden relative">
+      <Card className={`h-full shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
-        <CardHeader className="pb-4 bg-slate-50/60 border-b border-slate-100">
+        <CardHeader className={`pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1 flex items-center gap-3">
-              <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5 shrink-0">
+              <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 shrink-0 ${
+                isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+              }`}>
                 <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
                 LIVE
               </span>
               <div>
-                <CardTitle className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                  <MapPin className="w-4 h-4 text-blue-600" />
+                <CardTitle className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                  <MapPin className="w-4 h-4 text-blue-500" />
                   Configured Routes
                 </CardTitle>
-                <p className="text-xs text-slate-500">
+                <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   Only <strong>one route</strong> can be active at a time. Active route is pinned to the top.
                 </p>
               </div>
             </div>
             <div className="relative w-full md:w-72">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+              <Search className={`absolute left-2.5 top-2.5 h-4 w-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
               <Input
                 placeholder="Search origin or destination..."
-                className="pl-9 bg-white border-slate-200 text-slate-800 placeholder:text-slate-400 focus-visible:ring-blue-500"
+                className={`pl-9 focus-visible:ring-blue-500 ${
+                  isDark
+                    ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
+                    : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
+                }`}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -385,28 +401,28 @@ export default function FareMatrixPage() {
           {isLoading ? (
             <div className="space-y-4 pt-6">
               {[1, 2, 3, 4, 5, 6].map((i) => (
-                <Skeleton key={i} className="h-14 w-full bg-slate-100 rounded-lg" />
+                <Skeleton key={i} className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
               ))}
             </div>
           ) : (
-            <div className="relative mt-6 overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border border-slate-200">
+            <div className={`relative mt-6 overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border ${isDark ? "border-slate-800" : "border-slate-200"}`}>
               <Table>
-                <TableHeader className="sticky top-0 bg-white z-10 border-b border-slate-200">
+                <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
                   <TableRow className="border-none hover:bg-transparent">
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Origin</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Origin</TableHead>
                     <TableHead />
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Destination</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Fare Amount</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Status</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Activate</TableHead>
-                    <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-slate-400">Actions</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Destination</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fare Amount</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Activate</TableHead>
+                    <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredRoutes.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-20">
-                        <div className="flex flex-col items-center text-slate-300">
+                        <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                           <MapPin size={48} className="mb-2" />
                           <p className="text-xs font-semibold uppercase tracking-widest">
                             {searchTerm ? "No routes matched" : "No routes configured"}
@@ -419,27 +435,31 @@ export default function FareMatrixPage() {
                       <TableRow
                         key={route.id}
                         data-testid={`row-route-${route.id}`}
-                        className={`border-slate-100 transition-all duration-300 ease-in-out ${
+                        className={`transition-all duration-300 ease-in-out ${
                           route.isActive
-                            ? "bg-emerald-50/50 shadow-[inset_2px_0_0_0_rgb(16,185,129)]"
-                            : "hover:bg-slate-50"
+                            ? isDark
+                              ? "bg-emerald-950/20 shadow-[inset_2px_0_0_0_rgb(16,185,129)] border-slate-800"
+                              : "bg-emerald-50/50 shadow-[inset_2px_0_0_0_rgb(16,185,129)] border-slate-100"
+                            : isDark
+                              ? "hover:bg-slate-800/50 border-slate-800"
+                              : "hover:bg-slate-50 border-slate-100"
                         }`}
                       >
-                        <TableCell className="font-medium text-slate-700">
+                        <TableCell className={`font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
                           <div className="flex items-center gap-2">
                             <MapPin className="w-3.5 h-3.5 text-blue-500" />
                             {route.origin}
                           </div>
                         </TableCell>
-                        <TableCell className="text-slate-300 text-xs px-1">→</TableCell>
-                        <TableCell className="font-medium text-slate-600">
+                        <TableCell className={`text-xs px-1 ${isDark ? "text-slate-600" : "text-slate-300"}`}>→</TableCell>
+                        <TableCell className={`font-medium ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                           <div className="flex items-center gap-2">
-                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                            <MapPin className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
                             {route.destination}
                           </div>
                         </TableCell>
                         <TableCell>
-                          <span className={`font-bold text-slate-900 ${route.isActive ? "text-base" : "text-sm"}`}>
+                          <span className={`font-bold ${isDark ? "text-white" : "text-slate-900"} ${route.isActive ? "text-base" : "text-sm"}`}>
                             ₱{route.fareAmount.toFixed(2)}
                           </span>
                         </TableCell>
@@ -448,8 +468,12 @@ export default function FareMatrixPage() {
                             variant={route.isActive ? "default" : "secondary"}
                             className={
                               route.isActive
-                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                : "bg-slate-100 text-slate-500 border border-slate-200"
+                                ? isDark
+                                  ? "bg-emerald-950/40 text-emerald-400 border border-emerald-900"
+                                  : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : isDark
+                                  ? "bg-slate-800 text-slate-400 border border-slate-700"
+                                  : "bg-slate-100 text-slate-500 border border-slate-200"
                             }
                           >
                             {route.isActive ? "Active" : "Inactive"}
@@ -482,7 +506,7 @@ export default function FareMatrixPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-blue-500 hover:text-blue-700 hover:bg-blue-50 cursor-pointer"
+                              className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
                               onClick={() => openEdit(route)}
                               data-testid={`button-edit-route-${route.id}`}
                               title="Edit route"
@@ -492,7 +516,7 @@ export default function FareMatrixPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50 cursor-pointer"
+                              className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
                               onClick={() => setDeleteRoute(route)}
                               data-testid={`button-delete-route-${route.id}`}
                               title="Delete route"
@@ -520,34 +544,34 @@ export default function FareMatrixPage() {
             setAddForm({ origin: "", destination: DEFAULT_DESTINATION, fareAmount: "", viceVersa: true });
         }}
       >
-        <DialogContent className="bg-white border-slate-200 text-slate-800 [&>button]:cursor-pointer">
+        <DialogContent className={`[&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
           <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/60" />
           <DialogHeader>
-            <DialogTitle className="text-slate-900 font-bold tracking-tight">
+            <DialogTitle className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
               Add New Route
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500">Origin (Barangay)</Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Origin (Barangay)</Label>
               <Input
                 data-testid="input-add-origin"
                 list="barangay-suggestions"
                 placeholder="Type or select barangay..."
                 value={addForm.origin}
                 onChange={(e) => setAddForm({ ...addForm, origin: e.target.value })}
-                className="bg-white border-slate-200 text-slate-800"
+                className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}
               />
             </div>
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500">Destination</Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Destination</Label>
               <Input
                 data-testid="input-add-destination"
                 list="barangay-suggestions"
                 placeholder="Type or select destination..."
                 value={addForm.destination}
                 onChange={(e) => setAddForm({ ...addForm, destination: e.target.value })}
-                className="bg-white border-slate-200 text-slate-800"
+                className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}
               />
             </div>
             <datalist id="barangay-suggestions">
@@ -557,19 +581,19 @@ export default function FareMatrixPage() {
               ))}
             </datalist>
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500">Fare Amount (PHP)</Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Fare Amount (PHP)</Label>
               <Input
                 type="number"
                 step="0.01"
                 min="0"
                 placeholder="0.00"
-                className="bg-white border-slate-200 text-emerald-600 font-semibold focus-visible:ring-emerald-500"
+                className={`font-semibold focus-visible:ring-emerald-500 ${isDark ? "bg-slate-950 border-slate-800 text-emerald-400" : "bg-white border-slate-200 text-emerald-600"}`}
                 value={addForm.fareAmount}
                 onChange={(e) => setAddForm({ ...addForm, fareAmount: e.target.value })}
                 data-testid="input-add-fare"
               />
             </div>
-            <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <div className={`flex items-center gap-3 p-3 border rounded-lg ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
               <Checkbox
                 id="vice-versa"
                 checked={addForm.viceVersa}
@@ -577,18 +601,18 @@ export default function FareMatrixPage() {
                 className="cursor-pointer"
               />
               <div>
-                <Label htmlFor="vice-versa" className="font-medium cursor-pointer flex items-center gap-1 text-slate-700">
+                <Label htmlFor="vice-versa" className={`font-medium cursor-pointer flex items-center gap-1 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
                   <ArrowLeftRight className="w-3.5 h-3.5" />
                   Add vice versa route
                 </Label>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className={`text-xs mt-0.5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
                   Also creates the reverse direction at the same fare
                 </p>
               </div>
             </div>
             {addForm.origin && addForm.destination && (
-              <div className="text-sm text-slate-700 bg-blue-50 border border-blue-100 rounded-lg p-3 space-y-1">
-                <p className="font-medium text-blue-700">Routes to be created:</p>
+              <div className={`text-sm border rounded-lg p-3 space-y-1 ${isDark ? "text-slate-300 bg-blue-950/30 border-blue-900" : "text-slate-700 bg-blue-50 border-blue-100"}`}>
+                <p className={`font-medium ${isDark ? "text-blue-400" : "text-blue-700"}`}>Routes to be created:</p>
                 <p>• {addForm.origin} → {addForm.destination} @ ₱{addForm.fareAmount || "0.00"}</p>
                 {addForm.viceVersa && addForm.origin !== addForm.destination && (
                   <p>• {addForm.destination} → {addForm.origin} @ ₱{addForm.fareAmount || "0.00"}</p>
@@ -600,7 +624,7 @@ export default function FareMatrixPage() {
             <Button
               variant="secondary"
               onClick={() => setShowAdd(false)}
-              className="bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer"
+              className={`cursor-pointer ${isDark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
             >
               Cancel
             </Button>
@@ -618,34 +642,34 @@ export default function FareMatrixPage() {
 
       {/* Edit Route Dialog */}
       <Dialog open={!!editRoute} onOpenChange={(open) => !open && setEditRoute(null)}>
-        <DialogContent className="bg-white border-slate-200 text-slate-800 [&>button]:cursor-pointer">
+        <DialogContent className={`[&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
           <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/60" />
           <DialogHeader>
-            <DialogTitle className="text-slate-900 font-bold tracking-tight">
+            <DialogTitle className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
               Edit Route
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500">Origin</Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Origin</Label>
               <Input
                 data-testid="input-edit-origin"
                 list="barangay-suggestions-edit"
                 placeholder="Type or select barangay..."
                 value={editForm.origin}
                 onChange={(e) => setEditForm({ ...editForm, origin: e.target.value })}
-                className="bg-white border-slate-200 text-slate-800"
+                className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}
               />
             </div>
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500">Destination</Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Destination</Label>
               <Input
                 data-testid="input-edit-destination"
                 list="barangay-suggestions-edit"
                 placeholder="Type or select destination..."
                 value={editForm.destination}
                 onChange={(e) => setEditForm({ ...editForm, destination: e.target.value })}
-                className="bg-white border-slate-200 text-slate-800"
+                className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}
               />
             </div>
             <datalist id="barangay-suggestions-edit">
@@ -655,11 +679,11 @@ export default function FareMatrixPage() {
               ))}
             </datalist>
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500">Fare Amount (PHP)</Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Fare Amount (PHP)</Label>
               <Input
                 type="number"
                 step="0.01"
-                className="bg-white border-slate-200 text-emerald-600 font-semibold focus-visible:ring-emerald-500"
+                className={`font-semibold focus-visible:ring-emerald-500 ${isDark ? "bg-slate-950 border-slate-800 text-emerald-400" : "bg-white border-slate-200 text-emerald-600"}`}
                 value={editForm.fareAmount}
                 onChange={(e) => setEditForm({ ...editForm, fareAmount: e.target.value })}
                 data-testid="input-edit-fare"
@@ -670,7 +694,7 @@ export default function FareMatrixPage() {
             <Button
               variant="secondary"
               onClick={() => setEditRoute(null)}
-              className="bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer"
+              className={`cursor-pointer ${isDark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
             >
               Cancel
             </Button>
@@ -688,17 +712,22 @@ export default function FareMatrixPage() {
 
       {/* Delete Confirm */}
       <AlertDialog open={!!deleteRoute} onOpenChange={(open) => !open && setDeleteRoute(null)}>
-        <AlertDialogContent className="bg-white border-slate-200 text-slate-800">
+        <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}>
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-slate-900 font-bold tracking-tight">
+            <AlertDialogTitle className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
               Delete route?
             </AlertDialogTitle>
-            <AlertDialogDescription className="text-slate-500">
+            <AlertDialogDescription className={isDark ? "text-slate-400" : "text-slate-500"}>
               This action cannot be undone. The selected route will be permanently removed from the fare matrix.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteMutation.isPending} className="cursor-pointer disabled:cursor-not-allowed">Cancel</AlertDialogCancel>
+            <AlertDialogCancel
+              disabled={deleteMutation.isPending}
+              className={`cursor-pointer disabled:cursor-not-allowed ${isDark ? "bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800" : ""}`}
+            >
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDelete}
               disabled={deleteMutation.isPending}
