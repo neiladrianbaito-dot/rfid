@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { useAuth } from "@/hooks/use-auth";
+import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import {
   Eye,
@@ -38,6 +39,7 @@ function getLocalDateString(): string {
 export default function ReportsPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
+  const { isDark } = useTheme();
   const adminName = user?.name || "System Administrator";
 
   const prevRevenueRef = useRef<number | null>(null);
@@ -337,7 +339,7 @@ export default function ReportsPage() {
 
   return (
     <div
-      className="space-y-8 h-full flex flex-col"
+      className={`space-y-8 h-full flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}
       style={{ overflowX: "hidden", maxWidth: "100%", boxSizing: "border-box" }}
       data-testid="reports-page"
     >
@@ -352,20 +354,20 @@ export default function ReportsPage() {
       `}</style>
 
       {/* ══ HEADER ══ */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-6">
+      <div className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-            <BarChart3 className="text-blue-600" size={26} />
+          <h2 className={`text-2xl font-bold tracking-tight flex items-center gap-3 ${isDark ? "text-white" : "text-slate-900"}`}>
+            <BarChart3 className="text-blue-500" size={26} />
             Revenue Report
           </h2>
-          <p className="text-slate-500 text-sm mt-1">
+          <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
             Strategic financial intelligence and 7-day performance metrics
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="hidden lg:flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 rounded-lg">
-            <Activity className="text-blue-600" size={16} />
-            <span className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">
+          <div className={`hidden lg:flex items-center gap-2 px-4 py-2 border rounded-lg ${isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"}`}>
+            <Activity className="text-blue-500" size={16} />
+            <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>
               Real-time Stream Active
             </span>
           </div>
@@ -379,7 +381,11 @@ export default function ReportsPage() {
           </Button>
           <Button
             onClick={handleOpenPreview}
-            className="bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm"
+            className={`font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm border ${
+              isDark
+                ? "bg-slate-900 hover:bg-slate-800 active:bg-slate-800 text-slate-300 border-slate-800"
+                : "bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 border-slate-200"
+            }`}
             data-testid="button-preview-report"
           >
             <Eye className="w-4 h-4 mr-2" />
@@ -391,22 +397,27 @@ export default function ReportsPage() {
       {/* ══ SUMMARY CARDS ══ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100", testId: "text-total-revenue",      flash: false },
-          { label: "Today's Revenue",         value: formatPeso(todayRevenue),      icon: Calendar,   color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100", testId: "text-today-revenue",      flash: revenueFlash },
-          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: User, color: "text-indigo-600",  bg: "bg-indigo-50",  border: "border-indigo-100",  testId: "text-total-taps",         flash: false },
-          { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: "text-sky-600",     bg: "bg-sky-50",     border: "border-sky-100",     testId: "text-total-linked-cards", flash: false },
+          { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-total-revenue",      flash: false },
+          { label: "Today's Revenue",         value: formatPeso(todayRevenue),      icon: Calendar,   color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-today-revenue",      flash: revenueFlash },
+          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: User, color: isDark ? "text-indigo-400" : "text-indigo-600",  bg: isDark ? "bg-indigo-950/40" : "bg-indigo-50",  border: isDark ? "border-indigo-900" : "border-indigo-100",  testId: "text-total-taps",         flash: false },
+          { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: isDark ? "text-sky-400" : "text-sky-600",     bg: isDark ? "bg-sky-950/40" : "bg-sky-50",     border: isDark ? "border-sky-900" : "border-sky-100",     testId: "text-total-linked-cards", flash: false },
         ].map((stat, idx) => (
-          <Card key={idx} className={`bg-white border-slate-200 shadow-sm transition-all duration-200 hover:shadow-md hover:border-slate-300 ${stat.flash ? "card-pulse" : ""}`}>
+          <Card
+            key={idx}
+            className={`shadow-sm transition-all duration-200 hover:shadow-md ${
+              isDark ? "bg-slate-900 border-slate-800 hover:border-slate-700" : "bg-white border-slate-200 hover:border-slate-300"
+            } ${stat.flash ? "card-pulse" : ""}`}
+          >
             <CardContent className="p-6 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-16 h-16 opacity-5">
+              <div className={`absolute top-0 right-0 w-16 h-16 ${isDark ? "opacity-10" : "opacity-5"}`}>
                 <stat.icon className="w-full h-full" />
               </div>
               {isLoading ? (
-                <Skeleton className="h-12 w-full bg-slate-100" />
+                <Skeleton className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
               ) : (
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">{stat.label}</p>
+                    <p className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
                     <p className={`text-2xl font-bold mt-1 tracking-tight ${stat.color}`} data-testid={stat.testId}>
                       {stat.value}
                     </p>
@@ -422,46 +433,58 @@ export default function ReportsPage() {
       </div>
 
       {/* ══ BAR CHART ══ */}
-      <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative">
+      <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
-        <CardHeader className="border-b border-slate-100">
+        <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-2">
-              <PieChart size={14} className="text-blue-600" />
+            <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <PieChart size={14} className="text-blue-500" />
               Daily Revenue Breakdown
             </CardTitle>
-            <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Performance Matrix</div>
+            <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Performance Matrix</div>
           </div>
         </CardHeader>
         <CardContent className="pt-8">
           {isLoading ? (
-            <Skeleton className="h-72 w-full bg-slate-100" />
+            <Skeleton className={`h-72 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
           ) : (
             <div className="h-[300px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={sanitizedBreakdown}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
                   <XAxis
                     dataKey="date"
                     tickFormatter={(d: string) => {
                       const date = new Date(d + "T00:00:00");
                       return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
                     }}
-                    stroke="#94a3b8" fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
+                    stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
                   />
                   <YAxis
-                    stroke="#94a3b8" fontSize={11} fontWeight="600"
+                    stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
                     tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false}
                   />
                   <Tooltip
-                    cursor={{ fill: "rgba(37,99,235,0.05)" }}
-                    contentStyle={{ backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", fontSize: "11px", fontWeight: "600", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
-                    itemStyle={{ color: "#2563eb" }}
+                    cursor={{ fill: isDark ? "rgba(96,165,250,0.08)" : "rgba(37,99,235,0.05)" }}
+                    contentStyle={{
+                      backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                      border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                      borderRadius: "8px",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                    }}
+                    labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
+                    itemStyle={{ color: isDark ? "#60a5fa" : "#2563eb" }}
                     formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
                   />
                   <Bar dataKey="revenue" radius={[4, 4, 0, 0]} className="cursor-pointer">
                     {sanitizedBreakdown.map((_entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={index === sanitizedBreakdown.length - 1 ? "#2563eb" : "#cbd5e1"} className="cursor-pointer" />
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={index === sanitizedBreakdown.length - 1 ? "#3b82f6" : isDark ? "#334155" : "#cbd5e1"}
+                        className="cursor-pointer"
+                      />
                     ))}
                   </Bar>
                 </BarChart>
@@ -472,39 +495,42 @@ export default function ReportsPage() {
       </Card>
 
       {/* ══ DATA TABLE ══ */}
-      <Card className="bg-white border-slate-200 shadow-sm flex-1 flex flex-col overflow-hidden">
-        <CardHeader className="flex-none pb-4 bg-slate-50/60 border-b border-slate-100">
-          <CardTitle className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-2">
-            <FileText size={14} className="text-blue-600" />
+      <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
+          <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            <FileText size={14} className="text-blue-500" />
             Detailed Revenue Log
           </CardTitle>
         </CardHeader>
         <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
           {isLoading ? (
             <div className="space-y-4">
-              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full bg-slate-100" />)}
+              {[1, 2, 3].map((i) => <Skeleton key={i} className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />)}
             </div>
           ) : (
             <Table>
-              <TableHeader className="bg-white">
-                <TableRow className="border-slate-200 hover:bg-transparent">
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Log Date</TableHead>
-                  <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Standard Day</TableHead>
-                  <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-600">Revenue Credited</TableHead>
+              <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
+                <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Log Date</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Standard Day</TableHead>
+                  <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Revenue Credited</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sanitizedBreakdown.map((day: any, i: number) => {
                   const date = new Date(day.date + "T00:00:00");
                   return (
-                    <TableRow key={i} className="border-slate-100 hover:bg-slate-50 transition-colors cursor-default">
-                      <TableCell className="text-sm font-medium text-slate-800">
+                    <TableRow
+                      key={i}
+                      className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
+                    >
+                      <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                         {date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
                       </TableCell>
-                      <TableCell className="text-[11px] font-semibold text-slate-400 uppercase">
+                      <TableCell className={`text-[11px] font-semibold uppercase ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                         {date.toLocaleDateString("en-US", { weekday: "long" })}
                       </TableCell>
-                      <TableCell className="text-right font-semibold text-emerald-600 font-mono text-sm">
+                      <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
                         {formatPeso(day.revenue)}
                       </TableCell>
                     </TableRow>
