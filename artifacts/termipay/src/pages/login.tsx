@@ -6,7 +6,7 @@ import { getGetMeQueryKey } from "@workspace/api-client-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { CreditCard, Lock, User, Loader2, Eye, EyeOff, AlertCircle, ShieldCheck } from "lucide-react";
+import { CreditCard, Lock, User, Loader2, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
 const FORCE_LOGGED_OUT_KEY = "termipay_force_logged_out";
@@ -21,11 +21,12 @@ const ParticleNetworkBackground = () => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const BALL_NUM = 55;
-    const R = 2.4;
+    const BALL_NUM = 45;
+    const R = 1.5;
     const ALPHA_F = 0.025;
-    const DIS_LIMIT = 140;
-    const BALL_COLOR = { r: 37, g: 99, b: 235 }; // blue-600
+    const DIS_LIMIT = 120;
+    // Muted indigo, tuned for a light background
+    const BALL_COLOR = { r: 79, g: 70, b: 229 };
 
     type Particle = {
       x: number; y: number; vx: number; vy: number;
@@ -84,19 +85,19 @@ const ParticleNetworkBackground = () => {
       // Draw dots
       particles.forEach((p) => {
         if (p.isMouse) return;
-        ctx.fillStyle = `rgba(${BALL_COLOR.r},${BALL_COLOR.g},${BALL_COLOR.b},${p.alpha * 0.85})`;
+        ctx.fillStyle = `rgba(${BALL_COLOR.r},${BALL_COLOR.g},${BALL_COLOR.b},${p.alpha * 0.45})`;
         ctx.beginPath();
         ctx.arc(p.x, p.y, R, 0, Math.PI * 2);
         ctx.fill();
       });
 
-      // Draw connecting lines
+      // Draw lines
       for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
           const d = dist(particles[i], particles[j]);
           if (d < DIS_LIMIT) {
-            ctx.strokeStyle = `rgba(${BALL_COLOR.r},${BALL_COLOR.g},${BALL_COLOR.b},${(1 - d / DIS_LIMIT) * 0.45})`;
-            ctx.lineWidth = 1.1;
+            ctx.strokeStyle = `rgba(99,102,241,${(1 - d / DIS_LIMIT) * 0.18})`;
+            ctx.lineWidth = 0.7;
             ctx.beginPath();
             ctx.moveTo(particles[i].x, particles[i].y);
             ctx.lineTo(particles[j].x, particles[j].y);
@@ -157,6 +158,7 @@ const ParticleNetworkBackground = () => {
 
   return (
     <div className="fixed inset-0 -z-10 bg-white overflow-hidden">
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_35%,rgba(99,102,241,0.06)_0%,rgba(255,255,255,1)_65%)]" />
       <canvas ref={canvasRef} className="absolute inset-0" />
     </div>
   );
@@ -196,7 +198,7 @@ export default function LoginPage() {
 
   return (
     <div
-      className="relative min-h-screen flex flex-col items-center justify-center px-4 py-8 bg-white"
+      className="relative min-h-screen flex flex-col items-center justify-center px-4 py-8"
       data-testid="login-page"
     >
       <ParticleNetworkBackground />
@@ -209,33 +211,39 @@ export default function LoginPage() {
       >
         {/* Logo + title */}
         <div className="flex flex-col items-center mb-6">
-          <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-blue-600 text-white mb-4 shadow-sm">
+          <motion.div
+            animate={{ boxShadow: ["0 0 0px rgba(79,70,229,0.25)", "0 6px 24px rgba(79,70,229,0.28)", "0 0 0px rgba(79,70,229,0.25)"] }}
+            transition={{ duration: 2.5, repeat: Infinity }}
+            className="flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600 text-white mb-4"
+          >
             <CreditCard className="w-7 h-7" />
-          </div>
+          </motion.div>
 
           <h1
-            className="text-2xl font-bold text-slate-900 tracking-tight text-center"
+            className="text-2xl font-black text-slate-900 tracking-tight uppercase italic leading-tight text-center"
             data-testid="text-app-title"
           >
-            Fare <span className="text-blue-600">Collection</span> System
+            Fare <span className="text-indigo-600">Collection</span> System
           </h1>
-          <p className="text-xs text-slate-400 mt-1.5 font-medium tracking-wide text-center">
+          <p className="text-[10px] text-slate-400 mt-1 font-semibold tracking-widest uppercase text-center">
             LTC Calbayog City
           </p>
         </div>
 
         {/* Card */}
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="px-6 pt-6 pb-7">
-            <div className="flex items-center justify-center gap-1.5 text-slate-400 text-xs mb-5">
-              <ShieldCheck size={13} />
-              <span>Admin authentication</span>
-            </div>
+        <div className="relative bg-white border border-slate-200 rounded-2xl shadow-[0_8px_40px_rgba(15,23,42,0.08)] overflow-hidden">
+          {/* Top accent line */}
+          <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-indigo-500 via-blue-500 to-indigo-500" />
+
+          <div className="px-6 pt-7 pb-7">
+            <p className="text-slate-500 text-xs text-center mb-5 tracking-wide">
+              Admin authentication
+            </p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Error */}
               {error && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-100 text-red-600 text-xs font-medium">
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs font-medium">
                   <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   {error}
                 </div>
@@ -254,10 +262,10 @@ export default function LoginPage() {
                   <Input
                     id="username"
                     type="text"
-                    placeholder="Admin ID"
+                    placeholder="ADMIN_ID"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="pl-9 h-10 text-sm bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 rounded-lg"
+                    className="pl-9 h-10 text-sm bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 rounded-lg"
                     required
                     disabled={loginMutation.isPending}
                   />
@@ -280,7 +288,7 @@ export default function LoginPage() {
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-9 pr-9 h-10 text-sm bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 rounded-lg"
+                    className="pl-9 pr-9 h-10 text-sm bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 rounded-lg"
                     required
                     disabled={loginMutation.isPending}
                   />
@@ -298,7 +306,7 @@ export default function LoginPage() {
               {/* Submit */}
               <Button
                 type="submit"
-                className="w-full h-11 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors rounded-lg shadow-sm mt-1"
+                className="w-full h-11 text-sm font-bold uppercase tracking-widest bg-indigo-600 hover:bg-indigo-500 text-white transition-all rounded-lg shadow-[0_4px_14px_rgba(79,70,229,0.3)] hover:shadow-[0_6px_20px_rgba(79,70,229,0.4)] mt-1"
                 disabled={loginMutation.isPending}
               >
                 {loginMutation.isPending ? (
@@ -315,7 +323,7 @@ export default function LoginPage() {
         </div>
 
         {/* Footer */}
-        <p className="text-center text-[10px] text-slate-400 mt-5 font-medium tracking-wide">
+        <p className="text-center text-[10px] text-slate-400 mt-5 font-semibold uppercase tracking-widest">
           © 2026 LTC Calbayog City · V1.0
         </p>
       </motion.div>
