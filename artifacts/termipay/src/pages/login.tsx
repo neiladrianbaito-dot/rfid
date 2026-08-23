@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useLogin } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,6 +11,156 @@ import { motion } from "framer-motion";
 
 const FORCE_LOGGED_OUT_KEY = "termipay_force_logged_out";
 const AUTH_TOKEN_KEY = "termipay_auth_token";
+
+const ParticleNetworkBackground = () => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const BALL_NUM = 45;
+    const R = 1.8;
+    const ALPHA_F = 0.025;
+    const DIS_LIMIT = 120;
+    const BALL_COLOR = { r: 37, g: 99, b: 235 }; // blue-600
+
+    type Particle = {
+      x: number; y: number; vx: number; vy: number;
+      alpha: number; phase: number; isMouse?: boolean;
+    };
+
+    let canW = window.innerWidth;
+    let canH = window.innerHeight;
+    let particles: Particle[] = [];
+    let rafId = 0;
+    let mouseParticle: Particle | null = null;
+
+    const randomNumFrom = (min: number, max: number) => Math.random() * (max - min) + min;
+    const randomSidePos = (len: number) => Math.ceil(Math.random() * len);
+    const randomArrayItem = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
+
+    const getRandomSpeed = (pos: "top" | "right" | "bottom" | "left"): [number, number] => {
+      const mn = -0.5, mx = 0.5;
+      switch (pos) {
+        case "top":    return [randomNumFrom(mn, mx), randomNumFrom(0.05, mx)];
+        case "right":  return [randomNumFrom(mn, -0.05), randomNumFrom(mn, mx)];
+        case "bottom": return [randomNumFrom(mn, mx), randomNumFrom(mn, -0.05)];
+        case "left":   return [randomNumFrom(0.05, mx), randomNumFrom(mn, mx)];
+      }
+    };
+
+    const getRandomParticle = (): Particle => {
+      const pos = randomArrayItem(["top", "right", "bottom", "left"] as const);
+      const [vx, vy] = getRandomSpeed(pos);
+      const base = { vx, vy, alpha: 1, phase: randomNumFrom(0, 10) };
+      switch (pos) {
+        case "top":    return { ...base, x: randomSidePos(canW), y: -R };
+        case "right":  return { ...base, x: canW + R, y: randomSidePos(canH) };
+        case "bottom": return { ...base, x: randomSidePos(canW), y: canH + R };
+        case "left":   return { ...base, x: -R, y: randomSidePos(canH) };
+      }
+    };
+
+    const dist = (a: Particle, b: Particle) => Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
+
+    const initParticles = (n: number) => {
+      particles = Array.from({ length: n }, () => {
+        const [vx, vy] = getRandomSpeed("top");
+        return { x: randomSidePos(canW), y: randomSidePos(canH), vx, vy, alpha: 1, phase: randomNumFrom(0, 10) };
+      });
+    };
+
+    const resize = () => {
+      canW = window.innerWidth; canH = window.innerHeight;
+      canvas.width = canW; canvas.height = canH;
+    };
+
+    const render = () => {
+      ctx.clearRect(0, 0, canW, canH);
+
+      // Draw dots
+      particles.forEach((p) => {
+        if (p.isMouse) return;
+        ctx.fillStyle = `rgba(${BALL_COLOR.r},${BALL_COLOR.g},${BALL_COLOR.b},${p.alpha * 0.55})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, R, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Draw connecting lines
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const d = dist(particles[i], particles[j]);
+          if (d < DIS_LIMIT) {
+            ctx.strokeStyle = `rgba(${BALL_COLOR.r},${BALL_COLOR.g},${BALL_COLOR.b},${(1 - d / DIS_LIMIT) * 0.22})`;
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      // Update
+      particles = particles.filter((p) => {
+        if (p.isMouse) return true;
+        p.x += p.vx; p.y += p.vy; p.phase += ALPHA_F;
+        p.alpha = Math.abs(Math.cos(p.phase));
+        return p.x > -50 && p.x < canW + 50 && p.y > -50 && p.y < canH + 50;
+      });
+      if (particles.length < BALL_NUM) particles.push(getRandomParticle());
+
+      rafId = requestAnimationFrame(render);
+    };
+
+    const setMouse = (cx: number, cy: number) => {
+      const rect = canvas.getBoundingClientRect();
+      if (!mouseParticle) {
+        mouseParticle = { x: 0, y: 0, vx: 0, vy: 0, alpha: 1, phase: 0, isMouse: true };
+        particles.push(mouseParticle);
+      }
+      mouseParticle.x = cx - rect.left;
+      mouseParticle.y = cy - rect.top;
+    };
+    const clearMouse = () => { particles = particles.filter(p => !p.isMouse); mouseParticle = null; };
+
+    const onMouseMove = (e: MouseEvent) => setMouse(e.clientX, e.clientY);
+    const onMouseOut  = (e: MouseEvent) => { if (!e.relatedTarget) clearMouse(); };
+    const onTouchStart = (e: TouchEvent) => { const t = e.touches[0]; if (t) setMouse(t.clientX, t.clientY); };
+    const onTouchMove  = (e: TouchEvent) => { e.preventDefault(); const t = e.touches[0]; if (t) setMouse(t.clientX, t.clientY); };
+    const onTouchEnd   = () => clearMouse();
+
+    resize(); initParticles(BALL_NUM); rafId = requestAnimationFrame(render);
+    window.addEventListener("resize", resize);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseout", onMouseOut);
+    canvas.addEventListener("touchstart", onTouchStart, { passive: true });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd);
+    canvas.addEventListener("touchcancel", onTouchEnd);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseout", onMouseOut);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+      canvas.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 -z-10 bg-white overflow-hidden">
+      <canvas ref={canvasRef} className="absolute inset-0" />
+    </div>
+  );
+};
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -49,11 +199,7 @@ export default function LoginPage() {
       className="relative min-h-screen flex flex-col items-center justify-center px-4 py-8 bg-slate-50"
       data-testid="login-page"
     >
-      {/* Subtle background accents, matching dashboard's light theme */}
-      <div className="absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-blue-100/60 blur-3xl" />
-        <div className="absolute -bottom-24 -left-24 w-96 h-96 rounded-full bg-blue-50 blur-3xl" />
-      </div>
+      <ParticleNetworkBackground />
 
       <motion.div
         initial={{ opacity: 0, y: 16 }}
