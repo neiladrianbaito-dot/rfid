@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTheme } from "@/hooks/use-theme"; // ✅ added
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,8 @@ export function TransactionDetailModal({
   onClose,
   routes,
 }: TransactionDetailModalProps) {
+  const { isDark } = useTheme(); // ✅ added
+
   if (!tx) return null;
 
   const isFare = tx.type === "Fare";
@@ -84,6 +87,11 @@ export function TransactionDetailModal({
     : null;
 
   const paymentMethodLabel = formatPaymentMethod(tx.payment_method);
+
+  // ✅ theme-aware amount/status colors
+  const amountColor = isFare
+    ? isDark ? "text-red-400" : "text-red-600"
+    : isDark ? "text-emerald-400" : "text-emerald-600";
 
   const rows = [
     {
@@ -122,14 +130,18 @@ export function TransactionDetailModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl cursor-default"
+        className={`w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl cursor-default border ${
+          isDark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top accent stripe */}
         <div className={`h-1 w-full ${isFare ? "bg-red-500" : "bg-emerald-500"}`} />
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-800">
+        <div className={`flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b ${
+          isDark ? "border-slate-800" : "border-slate-100"
+        }`}>
           <div className="flex items-center gap-2 sm:gap-2.5">
             <div
               className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center shrink-0 ${
@@ -143,10 +155,14 @@ export function TransactionDetailModal({
               />
             </div>
             <div>
-              <p className="text-xs sm:text-sm font-semibold text-white leading-none">
+              <p className={`text-xs sm:text-sm font-semibold leading-none ${
+                isDark ? "text-white" : "text-slate-900"
+              }`}>
                 Receipt
               </p>
-              <p className="text-[9px] sm:text-[10px] font-mono text-slate-500 mt-0.5">
+              <p className={`text-[9px] sm:text-[10px] font-mono mt-0.5 ${
+                isDark ? "text-slate-500" : "text-slate-400"
+              }`}>
                 #TXN-{tx.id}
               </p>
             </div>
@@ -166,15 +182,15 @@ export function TransactionDetailModal({
         </div>
 
         {/* Amount hero */}
-        <div className="px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4 border-b border-dashed border-slate-700 text-center">
-          <p
-            className={`text-3xl sm:text-4xl font-black tracking-tighter ${
-              isFare ? "text-red-400" : "text-emerald-400"
-            }`}
-          >
+        <div className={`px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4 border-b border-dashed text-center ${
+          isDark ? "border-slate-700" : "border-slate-300"
+        }`}>
+          <p className={`text-3xl sm:text-4xl font-black tracking-tighter ${amountColor}`}>
             {formatAmount(tx.amount)}
           </p>
-          <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
+          <p className={`text-[10px] sm:text-[11px] mt-1 ${
+            isDark ? "text-slate-500" : "text-slate-400"
+          }`}>
             {date.toLocaleDateString(undefined, {
               month: "long",
               day: "numeric",
@@ -186,23 +202,31 @@ export function TransactionDetailModal({
 
         {/* Detail rows */}
         <div className="px-4 sm:px-5 pt-3 sm:pt-4 pb-2">
-          <p className="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-2">
+          <p className={`text-[9px] font-black uppercase tracking-widest mb-2 ${
+            isDark ? "text-slate-600" : "text-slate-400"
+          }`}>
             Transaction details
           </p>
-          <div className="rounded-xl overflow-hidden border border-slate-800 divide-y divide-slate-800">
+          <div className={`rounded-xl overflow-hidden border divide-y ${
+            isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-200"
+          }`}>
             {rows.map(({ icon, label, value, mono }) => (
               <div
                 key={label}
-                className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40"
+                className={`flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 ${
+                  isDark ? "bg-slate-950/40" : "bg-slate-50"
+                }`}
               >
-                <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
+                <span className={`flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] shrink-0 ${
+                  isDark ? "text-slate-500" : "text-slate-400"
+                }`}>
                   {icon}
                   {label}
                 </span>
                 <span
-                  className={`text-[10px] sm:text-xs text-slate-200 text-right truncate max-w-[55%] ${
-                    mono ? "font-mono" : "font-medium"
-                  }`}
+                  className={`text-[10px] sm:text-xs text-right truncate max-w-[55%] ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  } ${mono ? "font-mono" : "font-medium"}`}
                 >
                   {value}
                 </span>
@@ -211,42 +235,60 @@ export function TransactionDetailModal({
 
             {/* Payment method — only for Top-up (non-Fare) transactions */}
             {!isFare && (
-              <div className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40">
-                <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
+              <div className={`flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 ${
+                isDark ? "bg-slate-950/40" : "bg-slate-50"
+              }`}>
+                <span className={`flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] shrink-0 ${
+                  isDark ? "text-slate-500" : "text-slate-400"
+                }`}>
                   <Wallet className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
                   Payment method
                 </span>
-                <span className="text-[10px] sm:text-xs font-medium text-slate-200 text-right truncate max-w-[55%]">
+                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${
+                  isDark ? "text-slate-200" : "text-slate-700"
+                }`}>
                   {paymentMethodLabel ?? (
-                    <span className="text-slate-600">—</span>
+                    <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>
                   )}
                 </span>
               </div>
             )}
 
             {/* Status row */}
-            <div className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40">
-              <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
+            <div className={`flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 ${
+              isDark ? "bg-slate-950/40" : "bg-slate-50"
+            }`}>
+              <span className={`flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] shrink-0 ${
+                isDark ? "text-slate-500" : "text-slate-400"
+              }`}>
                 <ShieldCheck className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
                 Status
               </span>
-              <span style={{ color: "#ffffff" }} className="text-[10px] sm:text-xs font-medium">
+              <span className={`text-[10px] sm:text-xs font-medium ${
+                isDark ? "text-white" : "text-slate-900"
+              }`}>
                 {tx.status}
               </span>
             </div>
 
             {/* Route — only for Fare type (single combined line) */}
             {isFare && (
-              <div className="flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 bg-slate-950/40">
-                <span className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] text-slate-500 shrink-0">
+              <div className={`flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 ${
+                isDark ? "bg-slate-950/40" : "bg-slate-50"
+              }`}>
+                <span className={`flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] shrink-0 ${
+                  isDark ? "text-slate-500" : "text-slate-400"
+                }`}>
                   <Route className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
                   Route
                 </span>
-                <span className="text-[10px] sm:text-xs font-medium text-slate-200 text-right truncate max-w-[55%]">
+                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${
+                  isDark ? "text-slate-200" : "text-slate-700"
+                }`}>
                   {matchedRoute ? (
                     `${matchedRoute.origin} → ${matchedRoute.destination}`
                   ) : (
-                    <span className="text-slate-600">—</span>
+                    <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>
                   )}
                 </span>
               </div>
@@ -255,11 +297,15 @@ export function TransactionDetailModal({
         </div>
 
         {/* Total line */}
-        <div className="mx-4 sm:mx-5 mt-2.5 sm:mt-3 mb-1 border-t border-dashed border-slate-700 pt-2.5 sm:pt-3 flex items-center justify-between gap-2">
-          <span className="text-[10px] sm:text-xs font-semibold text-slate-400">
+        <div className={`mx-4 sm:mx-5 mt-2.5 sm:mt-3 mb-1 border-t border-dashed pt-2.5 sm:pt-3 flex items-center justify-between gap-2 ${
+          isDark ? "border-slate-700" : "border-slate-300"
+        }`}>
+          <span className={`text-[10px] sm:text-xs font-semibold ${
+            isDark ? "text-slate-400" : "text-slate-500"
+          }`}>
             {isFare ? "Amount deducted" : "Amount credited"}
           </span>
-          <span className={`text-xs sm:text-sm font-black ${isFare ? "text-red-400" : "text-emerald-400"}`}>
+          <span className={`text-xs sm:text-sm font-black ${amountColor}`}>
             {formatAmount(tx.amount)}
           </span>
         </div>
