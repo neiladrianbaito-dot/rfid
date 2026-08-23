@@ -12,12 +12,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useTheme } from "@/hooks/use-theme";
 import { CreditCard, Plus, Cpu, ShieldCheck, Zap } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion } from "framer-motion";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 
 export default function CardRegistrationPage() {
+  const { isDark } = useTheme();
   const [cardUid, setCardUid] = useState("");
   const [fullName, setFullName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
@@ -196,7 +198,7 @@ export default function CardRegistrationPage() {
     !initialBalance;
 
   return (
-    <div className="space-y-8" data-testid="card-registration-page">
+    <div className={`space-y-8 ${isDark ? "text-slate-200" : "text-slate-800"}`} data-testid="card-registration-page">
       <style>{`
         @keyframes row-pulse {
           0% { background-color: transparent; }
@@ -213,51 +215,53 @@ export default function CardRegistrationPage() {
       `}</style>
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-6">
+      <div className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-            <Cpu className="text-blue-600" size={26} />
+          <h2 className={`text-2xl font-bold tracking-tight flex items-center gap-3 ${isDark ? "text-white" : "text-slate-900"}`}>
+            <Cpu className="text-blue-500" size={26} />
             Card Registration
           </h2>
-          <p className="text-slate-500 text-sm mt-1">
+          <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
             Register new RFID cards for transit
           </p>
         </div>
-        <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 rounded-lg">
-          <ShieldCheck className="text-blue-600" size={16} />
-          <span className="text-xs font-semibold text-blue-700">System Link Active</span>
+        <div className={`flex items-center gap-2 px-4 py-2 border rounded-lg ${isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"}`}>
+          <ShieldCheck className="text-blue-500" size={16} />
+          <span className={`text-xs font-semibold ${isDark ? "text-blue-400" : "text-blue-700"}`}>System Link Active</span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Registration Form */}
         <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
-          <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative">
+          <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
             <CardHeader className="space-y-1">
-              <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Plus size={18} className="text-blue-600" />
+              <CardTitle className={`text-base font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+                <Plus size={18} className="text-blue-500" />
                 Register New Card
               </CardTitle>
-              <CardDescription className="text-xs text-slate-500">Fill in cardholder details</CardDescription>
+              <CardDescription className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>Fill in cardholder details</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-5">
 
                 {/* ✅ Card UID — exactly 8 alphanumeric characters */}
                 <div className="space-y-2">
-                  <Label htmlFor="cardUid" className="text-xs font-semibold text-slate-600">
+                  <Label htmlFor="cardUid" className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                     Card UID
-                    <span className="ml-2 text-slate-400 font-normal">(8 characters)</span>
+                    <span className={`ml-2 font-normal ${isDark ? "text-slate-500" : "text-slate-400"}`}>(8 characters)</span>
                   </Label>
                   <div className="relative">
                     <Input
                       id="cardUid"
-                      className={`bg-white font-mono text-slate-900 pr-14 ${
+                      className={`font-mono pr-14 ${isDark ? "bg-slate-950 text-white" : "bg-white text-slate-900"} ${
                         cardUidError
                           ? "border-red-400 focus-visible:ring-red-400"
                           : cardUid.length === 8
                           ? "border-emerald-400 focus-visible:ring-emerald-400"
+                          : isDark
+                          ? "border-slate-800 focus-visible:ring-blue-500"
                           : "border-slate-200 focus-visible:ring-blue-500"
                       }`}
                       placeholder="e.g. A1B2C3D4"
@@ -267,7 +271,7 @@ export default function CardRegistrationPage() {
                     />
                     {/* character counter badge */}
                     <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold tabular-nums ${
-                      cardUid.length === 8 ? "text-emerald-600" : "text-slate-400"
+                      cardUid.length === 8 ? "text-emerald-500" : isDark ? "text-slate-500" : "text-slate-400"
                     }`}>
                       {cardUid.length}/8
                     </span>
@@ -278,10 +282,14 @@ export default function CardRegistrationPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="fullName" className="text-xs font-semibold text-slate-600">Full Name</Label>
+                  <Label htmlFor="fullName" className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>Full Name</Label>
                   <Input
                     id="fullName"
-                    className="bg-white border-slate-200 focus-visible:ring-blue-500 text-slate-900 placeholder:text-slate-400"
+                    className={`focus-visible:ring-blue-500 ${
+                      isDark
+                        ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600"
+                        : "bg-white border-slate-200 text-slate-900 placeholder:text-slate-400"
+                    }`}
                     placeholder="Enter full name"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
@@ -290,12 +298,12 @@ export default function CardRegistrationPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="type" className="text-xs font-semibold text-slate-600">User Type</Label>
+                  <Label htmlFor="type" className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>User Type</Label>
                   <Select value={type} onValueChange={setType}>
-                    <SelectTrigger className="bg-white border-slate-200 text-slate-700 font-medium text-sm cursor-pointer">
+                    <SelectTrigger className={`font-medium text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}`}>
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
-                    <SelectContent className="bg-white border-slate-200 text-slate-700">
+                    <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
                       <SelectItem value="Regular" className="cursor-pointer">Regular</SelectItem>
                       <SelectItem value="Student" className="cursor-pointer">Student</SelectItem>
                       <SelectItem value="Senior" className="cursor-pointer">Senior</SelectItem>
@@ -306,19 +314,21 @@ export default function CardRegistrationPage() {
 
                 {/* ✅ Contact Number — exactly 11 digits, locks at 11 */}
                 <div className="space-y-2">
-                  <Label htmlFor="contactNumber" className="text-xs font-semibold text-slate-600">
+                  <Label htmlFor="contactNumber" className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                     Contact Number
-                    <span className="ml-2 text-slate-400 font-normal">(11 digits)</span>
+                    <span className={`ml-2 font-normal ${isDark ? "text-slate-500" : "text-slate-400"}`}>(11 digits)</span>
                   </Label>
                   <div className="relative">
                     <Input
                       id="contactNumber"
                       inputMode="numeric"
-                      className={`bg-white font-mono text-slate-900 pr-14 ${
+                      className={`font-mono pr-14 ${isDark ? "bg-slate-950 text-white" : "bg-white text-slate-900"} ${
                         contactError
                           ? "border-red-400 focus-visible:ring-red-400"
                           : contactNumber.length === 11
                           ? "border-emerald-400 focus-visible:ring-emerald-400"
+                          : isDark
+                          ? "border-slate-800 focus-visible:ring-blue-500"
                           : "border-slate-200 focus-visible:ring-blue-500"
                       }`}
                       placeholder="09XXXXXXXXX"
@@ -328,7 +338,7 @@ export default function CardRegistrationPage() {
                     />
                     {/* digit counter badge */}
                     <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold tabular-nums ${
-                      contactNumber.length === 11 ? "text-emerald-600" : "text-slate-400"
+                      contactNumber.length === 11 ? "text-emerald-500" : isDark ? "text-slate-500" : "text-slate-400"
                     }`}>
                       {contactNumber.length}/11
                     </span>
@@ -340,9 +350,9 @@ export default function CardRegistrationPage() {
 
                 {/* ✅ Initial Balance — 1 to 100 only */}
                 <div className="space-y-2">
-                  <Label htmlFor="initialBalance" className="text-xs font-semibold text-slate-600">
+                  <Label htmlFor="initialBalance" className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                     Initial Balance (PHP)
-                    <span className="ml-2 text-slate-400 font-normal">(₱1 – ₱100)</span>
+                    <span className={`ml-2 font-normal ${isDark ? "text-slate-500" : "text-slate-400"}`}>(₱1 – ₱100)</span>
                   </Label>
                   <div className="relative">
                     <Input
@@ -351,11 +361,13 @@ export default function CardRegistrationPage() {
                       step="0.01"
                       min="1"
                       max="100"
-                      className={`bg-white font-semibold pl-8 text-emerald-600 ${
+                      className={`font-semibold pl-8 text-emerald-500 ${isDark ? "bg-slate-950" : "bg-white"} ${
                         balanceError
                           ? "border-red-400 focus-visible:ring-red-400"
                           : initialBalance && !balanceError
                           ? "border-emerald-400 focus-visible:ring-emerald-400"
+                          : isDark
+                          ? "border-slate-800 focus-visible:ring-emerald-400"
                           : "border-slate-200 focus-visible:ring-emerald-400"
                       }`}
                       placeholder="0.00"
@@ -389,22 +401,24 @@ export default function CardRegistrationPage() {
 
         {/* History Table */}
         <motion.div className="lg:col-span-2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-          <Card className="bg-white border-slate-200 h-full shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between border-b border-slate-100">
+          <Card className={`h-full shadow-sm ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+            <CardHeader className={`flex flex-row items-center justify-between border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
               <div>
-                <CardTitle className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                <CardTitle className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
                   Recently Registered
                   {/* ✅ LIVE badge */}
-                  <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5 ml-2">
+                  <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ml-2 ${
+                    isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+                  }`}>
                     <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
                     LIVE
                   </span>
                 </CardTitle>
-                <CardDescription className="text-xs text-slate-500 flex items-center gap-2 mt-1">
+                <CardDescription className={`text-xs flex items-center gap-2 mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   Last 5 registered cards
                   {/* ✅ Last updated time */}
                   {lastUpdated && (
-                    <span className="text-slate-400">· {lastUpdated.toLocaleTimeString()}</span>
+                    <span className={isDark ? "text-slate-500" : "text-slate-400"}>· {lastUpdated.toLocaleTimeString()}</span>
                   )}
                 </CardDescription>
               </div>
@@ -413,20 +427,20 @@ export default function CardRegistrationPage() {
               {isLoading ? (
                 <div className="space-y-4">
                   {[1, 2, 3, 4, 5].map((i) => (
-                    <Skeleton key={i} className="h-14 w-full bg-slate-100 rounded-lg" />
+                    <Skeleton key={i} className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
                   ))}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
-                    <TableHeader className="border-b border-slate-200 hover:bg-transparent">
+                    <TableHeader className={`border-b hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
                       <TableRow className="border-none hover:bg-transparent">
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Card UID</TableHead>
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Full Name</TableHead>
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Type</TableHead>
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Contact</TableHead>
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Balance</TableHead>
-                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 text-right">Status</TableHead>
+                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card UID</TableHead>
+                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Full Name</TableHead>
+                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Type</TableHead>
+                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</TableHead>
+                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Balance</TableHead>
+                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -434,36 +448,40 @@ export default function CardRegistrationPage() {
                         recentUsers.map((user, index) => (
                           <TableRow
                             key={user.id}
-                            className={`border-slate-100 transition-colors hover:bg-slate-50 group ${
+                            className={`transition-colors group ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"} ${
                               // ✅ Pulse the newest row when data updates
                               isPulsing && index === 0 ? "row-pulse" : ""
                             }`}
                           >
-                            <TableCell className="font-mono text-xs text-blue-600 font-semibold">
+                            <TableCell className="font-mono text-xs text-blue-500 font-semibold">
                               {user.cardUid}
                             </TableCell>
-                            <TableCell className="text-sm font-medium text-slate-800">
+                            <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                               {user.fullName}
                             </TableCell>
                             <TableCell>
                               <Badge
                                 variant="outline"
-                                className="text-[10px] font-semibold border-slate-200 text-slate-500"
+                                className={`text-[10px] font-semibold ${isDark ? "border-slate-700 text-slate-400" : "border-slate-200 text-slate-500"}`}
                               >
                                 {user.type || "Regular"}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-xs text-slate-500 font-mono">
+                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                               {user.contactNumber}
                             </TableCell>
-                            <TableCell className="text-sm font-semibold text-emerald-600">
+                            <TableCell className="text-sm font-semibold text-emerald-500">
                               ₱{Number(user.balance || 0).toFixed(2)}
                             </TableCell>
                             <TableCell className="text-right">
                               <Badge className={`${
                                 user.status === "Active"
-                                  ? "bg-emerald-50 text-emerald-600 border-emerald-200"
-                                  : "bg-slate-100 text-slate-500 border-slate-200"
+                                  ? isDark
+                                    ? "bg-emerald-950/40 text-emerald-400 border-emerald-900"
+                                    : "bg-emerald-50 text-emerald-600 border-emerald-200"
+                                  : isDark
+                                    ? "bg-slate-800 text-slate-400 border-slate-700"
+                                    : "bg-slate-100 text-slate-500 border-slate-200"
                               } text-[10px] font-semibold px-2 py-0.5 border`}>
                                 {user.status}
                               </Badge>
@@ -473,7 +491,7 @@ export default function CardRegistrationPage() {
                       ) : (
                         <TableRow>
                           <TableCell colSpan={6} className="text-center py-20">
-                            <div className="flex flex-col items-center text-slate-300">
+                            <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                               <Plus size={48} className="mb-2" />
                               <p className="text-xs font-semibold uppercase tracking-widest">No cards registered yet</p>
                             </div>
