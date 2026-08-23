@@ -344,34 +344,34 @@ export default function ReportsPage() {
       <style>{`
         html, body { overflow-x: hidden !important; }
         @keyframes card-pulse {
-          0%   { box-shadow: 0 0 20px rgba(16,185,129,0.3); }
-          50%  { box-shadow: 0 0 40px rgba(16,185,129,0.7); }
-          100% { box-shadow: 0 0 20px rgba(16,185,129,0.3); }
+          0%   { box-shadow: 0 0 0 rgba(16,185,129,0); }
+          50%  { box-shadow: 0 0 0 4px rgba(16,185,129,0.15); }
+          100% { box-shadow: 0 0 0 rgba(16,185,129,0); }
         }
         .card-pulse { animation: card-pulse 0.8s ease-in-out; }
       `}</style>
 
       {/* ══ HEADER ══ */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-6">
         <div>
-          <h2 className="text-3xl font-black text-white tracking-tighter uppercase italic flex items-center gap-3">
-            <BarChart3 className="text-blue-500" />
-            Revenue <span className="text-blue-500">Report</span>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
+            <BarChart3 className="text-blue-600" size={26} />
+            Revenue Report
           </h2>
-          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">
+          <p className="text-slate-500 text-sm mt-1">
             Strategic financial intelligence and 7-day performance metrics
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="hidden lg:flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-            <Activity className="text-blue-400 animate-pulse" size={16} />
-            <span className="text-[10px] font-black text-blue-400 uppercase tracking-tighter">
+          <div className="hidden lg:flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 rounded-lg">
+            <Activity className="text-blue-600" size={16} />
+            <span className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">
               Real-time Stream Active
             </span>
           </div>
           <Button
             onClick={handleExportExcelLogs}
-            className="bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-black uppercase text-[10px] tracking-widest px-6 cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-emerald-500/30"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm"
             data-testid="button-export-excel-logs"
           >
             <FileSpreadsheet className="w-4 h-4 mr-2" />
@@ -379,7 +379,7 @@ export default function ReportsPage() {
           </Button>
           <Button
             onClick={handleOpenPreview}
-            className="bg-slate-100 hover:bg-white active:bg-slate-200 text-slate-950 font-black uppercase text-[10px] tracking-widest px-6 cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-white/20"
+            className="bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm"
             data-testid="button-preview-report"
           >
             <Eye className="w-4 h-4 mr-2" />
@@ -391,23 +391,23 @@ export default function ReportsPage() {
       {/* ══ SUMMARY CARDS ══ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-total-revenue",      flash: false },
-          { label: "Today's Revenue",         value: formatPeso(todayRevenue),      icon: Calendar,   color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", testId: "text-today-revenue",      flash: revenueFlash },
-          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: Fingerprint,color: "text-indigo-400",  bg: "bg-indigo-500/10",  border: "border-indigo-500/20",  testId: "text-total-taps",         flash: false },
-          { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: "text-sky-400",     bg: "bg-sky-500/10",     border: "border-sky-500/20",     testId: "text-total-linked-cards", flash: false },
+          { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100", testId: "text-total-revenue",      flash: false },
+          { label: "Today's Revenue",         value: formatPeso(todayRevenue),      icon: Calendar,   color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100", testId: "text-today-revenue",      flash: revenueFlash },
+          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: Fingerprint,color: "text-indigo-600",  bg: "bg-indigo-50",  border: "border-indigo-100",  testId: "text-total-taps",         flash: false },
+          { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: "text-sky-600",     bg: "bg-sky-50",     border: "border-sky-100",     testId: "text-total-linked-cards", flash: false },
         ].map((stat, idx) => (
-          <Card key={idx} className={`bg-slate-900/40 border-slate-800 backdrop-blur-md transition-all duration-200 hover:border-slate-700 hover:bg-slate-900/60 ${stat.flash ? "card-pulse" : ""}`}>
+          <Card key={idx} className={`bg-white border-slate-200 shadow-sm transition-all duration-200 hover:shadow-md hover:border-slate-300 ${stat.flash ? "card-pulse" : ""}`}>
             <CardContent className="p-6 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-16 h-16 opacity-5">
                 <stat.icon className="w-full h-full" />
               </div>
               {isLoading ? (
-                <Skeleton className="h-12 w-full bg-slate-800/50" />
+                <Skeleton className="h-12 w-full bg-slate-100" />
               ) : (
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
-                    <p className={`text-2xl font-black mt-1 tracking-tighter ${stat.color}`} data-testid={stat.testId}>
+                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">{stat.label}</p>
+                    <p className={`text-2xl font-bold mt-1 tracking-tight ${stat.color}`} data-testid={stat.testId}>
                       {stat.value}
                     </p>
                   </div>
@@ -422,46 +422,46 @@ export default function ReportsPage() {
       </div>
 
       {/* ══ BAR CHART ══ */}
-      <Card className="bg-slate-900/40 border-slate-800 backdrop-blur-md shadow-2xl overflow-hidden">
+      <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
-        <CardHeader className="border-b border-slate-800/50 bg-slate-900/20">
+        <CardHeader className="border-b border-slate-100">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-              <PieChart size={14} className="text-blue-500" />
+            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-2">
+              <PieChart size={14} className="text-blue-600" />
               Daily Revenue Breakdown
             </CardTitle>
-            <div className="text-[10px] font-bold text-slate-600 uppercase tracking-tighter">Performance Matrix</div>
+            <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Performance Matrix</div>
           </div>
         </CardHeader>
         <CardContent className="pt-8">
           {isLoading ? (
-            <Skeleton className="h-72 w-full bg-slate-800/30" />
+            <Skeleton className="h-72 w-full bg-slate-100" />
           ) : (
             <div className="h-[300px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={sanitizedBreakdown}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                   <XAxis
                     dataKey="date"
                     tickFormatter={(d: string) => {
                       const date = new Date(d + "T00:00:00");
                       return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
                     }}
-                    stroke="#475569" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false}
+                    stroke="#94a3b8" fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
                   />
                   <YAxis
-                    stroke="#475569" fontSize={10} fontWeight="bold"
+                    stroke="#94a3b8" fontSize={11} fontWeight="600"
                     tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false}
                   />
                   <Tooltip
-                    cursor={{ fill: "rgba(255,255,255,0.05)" }}
-                    contentStyle={{ backgroundColor: "#020617", border: "1px solid #1e293b", borderRadius: "8px", fontSize: "10px", fontWeight: "bold", textTransform: "uppercase" }}
-                    itemStyle={{ color: "#3b82f6" }}
+                    cursor={{ fill: "rgba(37,99,235,0.05)" }}
+                    contentStyle={{ backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", fontSize: "11px", fontWeight: "600", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
+                    itemStyle={{ color: "#2563eb" }}
                     formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
                   />
                   <Bar dataKey="revenue" radius={[4, 4, 0, 0]} className="cursor-pointer">
                     {sanitizedBreakdown.map((_entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={index === sanitizedBreakdown.length - 1 ? "#3b82f6" : "#1e293b"} className="cursor-pointer" />
+                      <Cell key={`cell-${index}`} fill={index === sanitizedBreakdown.length - 1 ? "#2563eb" : "#cbd5e1"} className="cursor-pointer" />
                     ))}
                   </Bar>
                 </BarChart>
@@ -472,39 +472,39 @@ export default function ReportsPage() {
       </Card>
 
       {/* ══ DATA TABLE ══ */}
-      <Card className="bg-slate-900/40 border-slate-800 backdrop-blur-md shadow-2xl flex-1 flex flex-col overflow-hidden">
-        <CardHeader className="flex-none pb-4 bg-slate-900/20 border-b border-slate-800/50">
-          <CardTitle className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-            <FileText size={14} className="text-blue-500" />
+      <Card className="bg-white border-slate-200 shadow-sm flex-1 flex flex-col overflow-hidden">
+        <CardHeader className="flex-none pb-4 bg-slate-50/60 border-b border-slate-100">
+          <CardTitle className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-2">
+            <FileText size={14} className="text-blue-600" />
             Detailed Revenue Log
           </CardTitle>
         </CardHeader>
         <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
           {isLoading ? (
             <div className="space-y-4">
-              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full bg-slate-800/30" />)}
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full bg-slate-100" />)}
             </div>
           ) : (
             <Table>
-              <TableHeader className="bg-slate-950/50">
-                <TableRow className="border-slate-800 hover:bg-transparent">
-                  <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">Log Date</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase tracking-widest text-slate-500">Standard Day</TableHead>
-                  <TableHead className="text-right text-[10px] font-black uppercase tracking-widest text-blue-500">Revenue Credited</TableHead>
+              <TableHeader className="bg-white">
+                <TableRow className="border-slate-200 hover:bg-transparent">
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Log Date</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Standard Day</TableHead>
+                  <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-600">Revenue Credited</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sanitizedBreakdown.map((day: any, i: number) => {
                   const date = new Date(day.date + "T00:00:00");
                   return (
-                    <TableRow key={i} className="border-slate-800/50 hover:bg-white/5 transition-colors cursor-default">
-                      <TableCell className="text-xs font-bold text-white">
+                    <TableRow key={i} className="border-slate-100 hover:bg-slate-50 transition-colors cursor-default">
+                      <TableCell className="text-sm font-medium text-slate-800">
                         {date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
                       </TableCell>
-                      <TableCell className="text-[10px] font-black text-slate-500 uppercase">
+                      <TableCell className="text-[11px] font-semibold text-slate-400 uppercase">
                         {date.toLocaleDateString("en-US", { weekday: "long" })}
                       </TableCell>
-                      <TableCell className="text-right font-black text-emerald-400 font-mono text-xs">
+                      <TableCell className="text-right font-semibold text-emerald-600 font-mono text-sm">
                         {formatPeso(day.revenue)}
                       </TableCell>
                     </TableRow>
