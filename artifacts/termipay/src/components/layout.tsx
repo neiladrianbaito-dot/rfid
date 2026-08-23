@@ -16,6 +16,8 @@ import {
   Cpu,
   ShieldCheck,
   Clock,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
@@ -34,6 +36,9 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 
+const THEME_KEY = "termipay_theme";
+type Theme = "light" | "dark";
+
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
   if (!trimmed) return "";
@@ -49,19 +54,46 @@ const navItems = [
   { path: "/reports", label: "Reports", icon: FileBarChart },
 ];
 
-function CurrentDateTime() {
+function useTheme() {
+  const [theme, setTheme] = useState<Theme>("light");
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(THEME_KEY) as Theme | null;
+    if (stored === "dark" || stored === "light") {
+      setTheme(stored);
+    } else if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
+      setTheme("dark");
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === "light" ? "dark" : "light";
+      window.localStorage.setItem(THEME_KEY, next);
+      return next;
+    });
+  };
+
+  return { theme, isDark: theme === "dark", toggleTheme };
+}
+
+function CurrentDateTime({ isDark }: { isDark: boolean }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-md font-mono text-[11px] text-slate-600">
-      <Clock size={12} className="text-blue-600" />
+    <div
+      className={`flex items-center gap-2 px-3 py-1.5 border rounded-md font-mono text-[11px] transition-colors ${
+        isDark ? "bg-slate-900 border-slate-800 text-slate-400" : "bg-slate-50 border-slate-200 text-slate-600"
+      }`}
+    >
+      <Clock size={12} className="text-blue-500" />
       <span>
         {now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
       </span>
-      <span className="text-slate-300">|</span>
+      <span className={isDark ? "text-slate-700" : "text-slate-300"}>|</span>
       <span>{now.toLocaleTimeString("en-US", { hour12: false })}</span>
     </div>
   );
@@ -71,6 +103,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout, isLoggingOut, refetchUser } = useAuth();
   const [location] = useLocation();
   const { toast } = useToast();
+  const { isDark, toggleTheme } = useTheme();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -189,28 +222,33 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-800 overflow-hidden font-sans">
+    <div
+      className={`flex h-screen overflow-hidden font-sans transition-colors duration-300 ${
+        isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
+      }`}
+    >
       {/* Sidebar */}
       <aside
         className={`
-          fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-200 print:hidden
+          fixed inset-y-0 left-0 z-50 w-72 border-r print:hidden
           transform transition-transform duration-300 ease-in-out
           lg:relative lg:translate-x-0
           ${sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}
+          ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}
         `}
       >
         <div className="flex flex-col h-full">
           {/* Logo Section */}
-          <div className="p-6 border-b border-slate-200">
+          <div className={`p-6 border-b transition-colors ${isDark ? "border-slate-800" : "border-slate-200"}`}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-sm">
                 <Cpu className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-sm font-bold text-slate-900 tracking-tight">
-                  Fare Collection<span className="text-blue-600"> System</span>
+                <h1 className={`text-sm font-bold tracking-tight transition-colors ${isDark ? "text-white" : "text-slate-900"}`}>
+                  Fare Collection<span className="text-blue-500"> System</span>
                 </h1>
-                <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-widest leading-tight">
+                <p className={`text-[10px] font-semibold uppercase tracking-widest leading-tight transition-colors ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                   Admin Console
                 </p>
               </div>
@@ -230,15 +268,28 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       group flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer
                       transition-all duration-150
                       ${isActive
-                        ? "bg-blue-50 text-blue-700"
-                        : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                        ? isDark
+                          ? "bg-blue-950/50 text-blue-400"
+                          : "bg-blue-50 text-blue-700"
+                        : isDark
+                          ? "text-slate-400 hover:text-white hover:bg-slate-900"
+                          : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
                       }
                     `}
                   >
-                    <Icon size={17} className={isActive ? "text-blue-600" : "text-slate-400 group-hover:text-slate-600"} />
+                    <Icon
+                      size={17}
+                      className={
+                        isActive
+                          ? "text-blue-500"
+                          : isDark
+                            ? "text-slate-600 group-hover:text-slate-300"
+                            : "text-slate-400 group-hover:text-slate-600"
+                      }
+                    />
                     {item.label}
                     {isActive && (
-                      <motion.div layoutId="activeNav" className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-600" />
+                      <motion.div layoutId="activeNav" className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-500" />
                     )}
                   </div>
                 </Link>
@@ -247,12 +298,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </nav>
 
           {/* User Section at bottom of Sidebar */}
-          <div className="p-4 border-t border-slate-200">
+          <div className={`p-4 border-t transition-colors ${isDark ? "border-slate-800" : "border-slate-200"}`}>
             <Button
               variant="ghost"
               onClick={logout}
               disabled={isLoggingOut}
-              className="w-full justify-start gap-3 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium"
+              className={`w-full justify-start gap-3 rounded-lg text-sm font-medium ${
+                isDark
+                  ? "text-slate-400 hover:text-red-400 hover:bg-red-950/30"
+                  : "text-slate-500 hover:text-red-600 hover:bg-red-50"
+              }`}
             >
               <LogOut size={17} />
               Sign Out
@@ -277,25 +332,44 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="h-16 border-b border-slate-200 bg-white flex items-center justify-between px-6 shrink-0 z-30 print:hidden">
+        <header
+          className={`h-16 border-b flex items-center justify-between px-6 shrink-0 z-30 print:hidden transition-colors ${
+            isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"
+          }`}
+        >
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
               size="icon"
-              className="lg:hidden text-slate-500 hover:text-slate-900"
+              className={isDark ? "lg:hidden text-slate-400 hover:text-white" : "lg:hidden text-slate-500 hover:text-slate-900"}
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
               {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
             </Button>
-            <CurrentDateTime />
+            <CurrentDateTime isDark={isDark} />
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {/* Theme toggle */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+              data-testid="button-theme-toggle"
+              className={`flex items-center justify-center w-9 h-9 rounded-full border transition-colors ${
+                isDark
+                  ? "bg-slate-900 border-slate-800 text-blue-400 hover:border-blue-600"
+                  : "bg-white border-slate-200 text-blue-600 hover:border-blue-400"
+              }`}
+            >
+              {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+
             <div className="text-right hidden sm:block">
-              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
+              <p className={`text-[10px] font-semibold uppercase tracking-widest transition-colors ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                 Super Admin
               </p>
-              <p className="text-sm font-semibold text-slate-800">
+              <p className={`text-sm font-semibold transition-colors ${isDark ? "text-slate-100" : "text-slate-800"}`}>
                 {user?.name || "Admin_User"}
               </p>
             </div>
@@ -305,18 +379,26 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <motion.div
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center cursor-pointer overflow-hidden group hover:border-blue-300 transition-colors"
+                  className={`w-10 h-10 rounded-xl border flex items-center justify-center cursor-pointer overflow-hidden group transition-colors ${
+                    isDark
+                      ? "bg-blue-950/40 border-blue-900 hover:border-blue-600"
+                      : "bg-blue-50 border-blue-100 hover:border-blue-300"
+                  }`}
                 >
-                  <span className="text-blue-600 font-bold text-sm group-hover:text-blue-700 transition-colors">
+                  <span className={`font-bold text-sm transition-colors ${isDark ? "text-blue-400 group-hover:text-blue-300" : "text-blue-600 group-hover:text-blue-700"}`}>
                     {user?.name ? user.name.trim().charAt(0).toUpperCase() : "A"}
                   </span>
                 </motion.div>
               </DialogTrigger>
 
-              <DialogContent className="sm:max-w-[425px] bg-white border-slate-200 text-slate-800">
+              <DialogContent
+                className={`sm:max-w-[425px] transition-colors ${
+                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+                }`}
+              >
                 <div className="absolute top-0 left-0 w-full h-[3px] bg-blue-600 rounded-t-lg" />
                 <DialogHeader>
-                  <DialogTitle className="text-slate-900 font-bold tracking-tight">
+                  <DialogTitle className={`font-bold tracking-tight transition-colors ${isDark ? "text-white" : "text-slate-900"}`}>
                     Security & Profile
                   </DialogTitle>
                   <VisuallyHidden>
@@ -328,39 +410,59 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
                 <div className="grid gap-6 py-4">
                   <div className="space-y-2">
-                    <Label className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Full Name</Label>
+                    <Label className={`text-xs uppercase tracking-wide font-semibold transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      Full Name
+                    </Label>
                     <Input
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="bg-white border-slate-200 text-slate-900 focus:border-blue-500 focus-visible:ring-blue-500"
+                      className={`focus:border-blue-500 focus-visible:ring-blue-500 transition-colors ${
+                        isDark ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"
+                      }`}
                     />
                   </div>
-                  <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-100 space-y-4">
-                    <div className="flex items-center gap-2 text-blue-700">
+                  <div
+                    className={`p-4 rounded-xl border space-y-4 transition-colors ${
+                      isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"
+                    }`}
+                  >
+                    <div className={`flex items-center gap-2 ${isDark ? "text-blue-400" : "text-blue-700"}`}>
                       <ShieldCheck size={14} />
                       <span className="text-xs font-semibold uppercase tracking-wide">Authentication Update</span>
                     </div>
-                    <p className="text-xs text-slate-500 leading-relaxed">
+                    <p className={`text-xs leading-relaxed transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                       To change your password, fill in both fields below. To update your name only, leave the password fields blank.
                     </p>
                     <div className="space-y-2">
-                      <Label className="text-xs text-slate-500 font-medium">Current Password</Label>
+                      <Label className={`text-xs font-medium transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                        Current Password
+                      </Label>
                       <Input
                         type="password"
                         placeholder="Required if changing password"
                         value={formData.currentPassword}
                         onChange={(e) => setFormData({ ...formData, currentPassword: e.target.value })}
-                        className="bg-white border-slate-200 h-9 placeholder:text-slate-400"
+                        className={`h-9 transition-colors ${
+                          isDark
+                            ? "bg-slate-900 border-slate-800 text-white placeholder:text-slate-600"
+                            : "bg-white border-slate-200 placeholder:text-slate-400"
+                        }`}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-xs text-slate-500 font-medium">New Password</Label>
+                      <Label className={`text-xs font-medium transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                        New Password
+                      </Label>
                       <Input
                         type="password"
                         placeholder="Leave blank if not changing password"
                         value={formData.newPassword}
                         onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
-                        className="bg-white border-slate-200 h-9 placeholder:text-slate-400"
+                        className={`h-9 transition-colors ${
+                          isDark
+                            ? "bg-slate-900 border-slate-800 text-white placeholder:text-slate-600"
+                            : "bg-white border-slate-200 placeholder:text-slate-400"
+                        }`}
                       />
                     </div>
                   </div>
@@ -370,7 +472,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <Button
                     variant="ghost"
                     onClick={() => setProfileModalOpen(false)}
-                    className="text-slate-500 font-medium"
+                    className={`font-medium ${isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500"}`}
                   >
                     Cancel
                   </Button>
@@ -388,7 +490,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-auto p-6 relative bg-slate-50 print:p-0">
+        <main className={`flex-1 overflow-auto p-6 relative print:p-0 transition-colors ${isDark ? "bg-slate-950" : "bg-slate-50"}`}>
           <AnimatePresence mode="wait">
             <motion.div
               key={location}
@@ -401,16 +503,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </AnimatePresence>
 
           {/* Footer */}
-          <footer className="mt-10 border-t border-slate-200 pt-4 pb-1 print:hidden">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400">
+          <footer className={`mt-10 border-t pt-4 pb-1 print:hidden transition-colors ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+            <div className={`flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] transition-colors ${isDark ? "text-slate-500" : "text-slate-400"}`}>
               <div className="flex items-center gap-2">
-                <Cpu size={11} className="text-slate-300" />
+                <Cpu size={11} className={isDark ? "text-slate-600" : "text-slate-300"} />
                 <span>Fare Collection System — Admin Console</span>
               </div>
               <div className="flex items-center gap-3">
                 <span>&copy; {new Date().getFullYear()} All rights reserved.</span>
-                <span className="text-slate-200">|</span>
-                <span className="text-slate-400">v1.0.0</span>
+                <span className={isDark ? "text-slate-700" : "text-slate-200"}>|</span>
+                <span className={isDark ? "text-slate-500" : "text-slate-400"}>v1.0.0</span>
               </div>
             </div>
           </footer>
