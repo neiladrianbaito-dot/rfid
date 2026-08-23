@@ -5,7 +5,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { MAX_BALANCE } from "@/lib/api";
-import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 import { useTheme } from "@/hooks/use-theme";
 import type { useTopup } from "@/hooks/use-topup";
 
@@ -16,8 +15,6 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
 
   return (
     <>
-      <style>{DASHBOARD_STYLES}</style>
-
       {/* Alert Dialog */}
       <Dialog open={alertOpen} onOpenChange={setAlertOpen}>
         <DialogContent
@@ -46,7 +43,16 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
         >
           <DialogTitle className="sr-only">Top-up Wallet</DialogTitle>
           <DialogDescription className="sr-only">Add funds to your wallet via GCash or Maya through PayMongo.</DialogDescription>
-          <div className={isDark ? "rgb-container" : "rgb-container-light"}>
+
+          {/* ✅ FIX: solid bordered card shell (same pattern as TransactionDetailModal) — the old
+              rgb-container / rgb-container-light class relied on DASHBOARD_STYLES CSS that
+              wasn't rendering a visible box, so it's replaced with plain Tailwind classes. */}
+          <div className={`rounded-2xl overflow-hidden shadow-2xl border ${
+            isDark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"
+          }`}>
+            {/* Top accent stripe */}
+            <div className="h-1 w-full bg-emerald-500" />
+
             <div className={`p-5 sm:p-6 ${isDark ? "text-white" : "text-slate-900"}`}>
 
               {/* Header */}
@@ -84,7 +90,7 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
 
               {/* Form */}
               <div className="space-y-4">
-                
+
                 <div>
                   <label className={`text-[10px] font-bold uppercase block mb-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Amount (PHP)</label>
                   <Input
