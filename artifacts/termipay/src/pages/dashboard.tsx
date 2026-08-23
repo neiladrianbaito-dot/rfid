@@ -5,7 +5,7 @@ import {
 import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DollarSign, Fingerprint, CreditCard, Route, Activity, Zap, ShieldCheck } from "lucide-react";
+import { PhilippinePeso, Fingerprint, CreditCard, Route, Activity, Zap, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { motion } from "framer-motion";
@@ -113,7 +113,7 @@ export default function DashboardPage() {
       value: stats?.totalRevenueToday != null
         ? formatPeso(Math.abs(Number(stats.totalRevenueToday)))
         : "P0.00",
-      icon: DollarSign,
+      icon: PhilippinePeso,
       border: isDark ? "border-emerald-900" : "border-emerald-100",
       text: isDark ? "text-emerald-400" : "text-emerald-600",
       bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50",
