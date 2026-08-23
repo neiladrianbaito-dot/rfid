@@ -198,7 +198,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className={`flex h-screen overflow-hidden font-sans transition-colors duration-300 ${
+      className={`flex h-screen overflow-hidden font-sans ${
         isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
       }`}
     >
@@ -465,7 +465,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Main Content Area */}
-        <main className={`flex-1 overflow-auto p-6 relative print:p-0 transition-colors ${isDark ? "bg-slate-950" : "bg-slate-50"}`}>
+        <main className={`flex-1 overflow-auto p-6 relative print:p-0 ${isDark ? "bg-slate-950" : "bg-slate-50"}`}>
           <AnimatePresence mode="wait">
             <motion.div
               key={location}

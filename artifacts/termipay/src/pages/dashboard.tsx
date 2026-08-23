@@ -154,9 +154,7 @@ export default function DashboardPage() {
 
   return (
     <div
-      className={`space-y-8 min-h-screen p-2 lg:p-6 transition-colors duration-300 ${
-        isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
-      }`}
+      className={`space-y-8 min-h-screen p-2 lg:p-6 ${isDark ? "text-slate-200" : "text-slate-800"}`}
       data-testid="dashboard-page"
     >
       <style>{`
