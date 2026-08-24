@@ -152,6 +152,7 @@ export default function CardRegistrationPage() {
         fullName,
         contactNumber,
         type,
+        initialBalance: 0, // default value dahil required pa rin ito sa backend
       },
     });
   };
