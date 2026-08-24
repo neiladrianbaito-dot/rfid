@@ -378,19 +378,18 @@ export default function ReportsPage() {
           >
             <FileSpreadsheet className="w-4 h-4 mr-2" />
             Export Excel Logs
-          </Button>
           <Button
-            onClick={handleOpenPreview}
-            className={`font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm border ${
-              isDark
-                ? "bg-slate-900 hover:bg-slate-800 active:bg-slate-800 text-slate-300 border-slate-800"
-                : "bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 border-slate-200"
-            }`}
-            data-testid="button-preview-report"
-          >
-            <Eye className="w-4 h-4 mr-2" />
-            Preview Report
-          </Button>
+  onClick={handleOpenPreview}
+  className={`font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm border ${
+    isDark
+      ? "bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white border-blue-600"
+      : "bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white border-blue-600"
+  }`}
+  data-testid="button-preview-report"
+>
+  <Eye className="w-4 h-4 mr-2" />
+  Preview Report
+</Button>
         </div>
       </div>
 
