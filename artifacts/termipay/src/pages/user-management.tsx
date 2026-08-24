@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,6 +60,10 @@ export default function UserManagementPage() {
   const [newRowId, setNewRowId] = useState<number | null>(null);
   const prevTopIdRef = useRef<number | null>(null);
 
+  // ✅ Success check state — shown briefly inside the modal after a successful save
+  const [showSuccess, setShowSuccess] = useState(false);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -100,12 +104,26 @@ export default function UserManagementPage() {
     setLastUpdated(new Date());
   }, [userList]);
 
+  // ✅ Cleanup any pending success timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    };
+  }, []);
+
   const updateMutation = useUpdateUser({
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
-        setEditUser(null);
         toast({ title: "User Updated Successfully" });
+
+        // ✅ Show green check icon in the modal first, then close it shortly after
+        setShowSuccess(true);
+        if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+        successTimeoutRef.current = setTimeout(() => {
+          setShowSuccess(false);
+          setEditUser(null);
+        }, 900);
       },
     },
   });
@@ -120,6 +138,7 @@ export default function UserManagementPage() {
   });
 
   const openEdit = (user: any) => {
+    setShowSuccess(false);
     setEditUser(user);
     setEditForm({
       fullName: user.fullName,
@@ -167,6 +186,13 @@ export default function UserManagementPage() {
           50% { opacity: 0.2; }
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+
+        @keyframes success-pop {
+          0% { transform: scale(0.5); opacity: 0; }
+          60% { transform: scale(1.1); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .success-pop { animation: success-pop 0.35s ease-out; }
       `}</style>
 
       {/* Header */}
@@ -435,8 +461,27 @@ export default function UserManagementPage() {
       </Card>
 
       {/* Edit Dialog */}
-      <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className={`sm:max-w-lg [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+      <Dialog open={!!editUser} onOpenChange={(open) => { if (!open) { setEditUser(null); setShowSuccess(false); } }}>
+        <DialogContent className={`sm:max-w-lg [&>button]:cursor-pointer relative ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+
+          {/* ✅ Success overlay — green check icon shown briefly after a successful save */}
+          {showSuccess && (
+            <div
+              className={`absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-lg ${
+                isDark ? "bg-slate-900/95" : "bg-white/95"
+              }`}
+            >
+              <div className={`success-pop flex items-center justify-center w-16 h-16 rounded-full border-2 ${
+                isDark ? "bg-emerald-950/40 border-emerald-800" : "bg-emerald-50 border-emerald-200"
+              }`}>
+                <CheckCircle2 className="w-9 h-9 text-emerald-500" strokeWidth={2.5} />
+              </div>
+              <span className={`success-pop text-sm font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                Changes Saved
+              </span>
+            </div>
+          )}
+
           <DialogHeader>
             <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
               <Pencil size={18} /> Update User
