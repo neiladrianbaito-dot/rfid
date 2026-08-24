@@ -4,7 +4,7 @@ import { useGetReportSummary, useListTransactions } from "@workspace/api-client-
 import { useAuth } from "@/hooks/use-auth";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch"; // ⚠️ adjust path to match where you saved that hook
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Printer, Loader2, Wallet, Plus, Minus, RotateCcw } from "lucide-react";
+import { ArrowLeft, Printer, Loader2, Wallet, Plus, Minus, RotateCcw, CheckCircle2 } from "lucide-react";
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -25,6 +25,12 @@ const ZOOM_MAX = 200;
 const ZOOM_STEP = 10;
 const ZOOM_DEFAULT = 100;
 
+// How long the "Preparing to print..." toast stays on screen before
+// the actual browser print dialog is triggered. Gives the layout a
+// beat to settle and gives the user visual confirmation their click
+// registered.
+const PRINT_TOAST_DELAY_MS = 900;
+
 export default function ReportPreviewPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
@@ -34,6 +40,27 @@ export default function ReportPreviewPage() {
   const zoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, z + ZOOM_STEP));
   const zoomOut = () => setZoom((z) => Math.max(ZOOM_MIN, z - ZOOM_STEP));
   const zoomReset = () => setZoom(ZOOM_DEFAULT);
+
+  // ══ PRINT TOAST ══
+  // Shows a small "Preparing to print the report..." toast the moment
+  // the user clicks Print, then fires window.print() shortly after.
+  const [isPreparingPrint, setIsPreparingPrint] = React.useState(false);
+  const printTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (printTimeoutRef.current) clearTimeout(printTimeoutRef.current);
+    };
+  }, []);
+
+  const handlePrint = () => {
+    if (isPreparingPrint) return; // guard against double-clicks
+    setIsPreparingPrint(true);
+    printTimeoutRef.current = setTimeout(() => {
+      window.print();
+      setIsPreparingPrint(false);
+    }, PRINT_TOAST_DELAY_MS);
+  };
 
   // ══ MOUSE-WHEEL ZOOM ══
   // Ctrl/Cmd + wheel (or trackpad pinch, which browsers report as
@@ -115,7 +142,6 @@ export default function ReportPreviewPage() {
 
   const grandTotal = sanitizedBreakdown.reduce((sum: number, d: any) => sum + d.revenue, 0);
 
-  const handlePrint = () => window.print();
   const handleBack = () => navigate("/reports");
 
   if (isLoading) {
@@ -153,8 +179,33 @@ export default function ReportPreviewPage() {
       /* zoom must never affect the printed output */
       transform: none !important;
     }
+    .print-toast {
+      display: none !important;
+    }
+  }
+
+  @keyframes print-toast-in {
+    from { opacity: 0; transform: translate(-50%, 8px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
   }
 `}</style>
+
+      {/* ══ "PREPARING TO PRINT" TOAST ══ */}
+      {isPreparingPrint && (
+        <div
+          className="print-toast fixed bottom-6 left-1/2 z-50 flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-xl"
+          style={{ animation: "print-toast-in 180ms ease-out" }}
+          role="status"
+          aria-live="polite"
+          data-testid="toast-preparing-print"
+        >
+          <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-blue-600" />
+          <span className="text-xs font-semibold text-slate-700">
+            Preparing to print the report<span className="animate-pulse">…</span>
+          </span>
+        </div>
+      )}
+
       <div className="flex min-h-screen flex-col bg-slate-200">
         {/* ══ TOOLBAR (fixed to top, like a header) ══ */}
         <div className="preview-toolbar sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-slate-300 bg-white px-6 py-4 shadow-sm">
@@ -210,11 +261,21 @@ export default function ReportPreviewPage() {
 
             <Button
               onClick={handlePrint}
-              className="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-black uppercase text-xs tracking-widest cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-blue-500/30"
+              disabled={isPreparingPrint}
+              className="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-black uppercase text-xs tracking-widest cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-blue-500/30 disabled:cursor-not-allowed disabled:opacity-70"
               data-testid="button-print"
             >
-              <Printer className="w-4 h-4 mr-2" />
-              Print / Save as PDF
+              {isPreparingPrint ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Preparing...
+                </>
+              ) : (
+                <>
+                  <Printer className="w-4 h-4 mr-2" />
+                  Print / Save as PDF
+                </>
+              )}
             </Button>
           </div>
         </div>
