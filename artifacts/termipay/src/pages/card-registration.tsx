@@ -23,11 +23,9 @@ export default function CardRegistrationPage() {
   const [cardUid, setCardUid] = useState("");
   const [fullName, setFullName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
-  const [initialBalance, setInitialBalance] = useState("");
   const [type, setType] = useState("Regular");
 
   // ✅ Validation error states
-  const [balanceError, setBalanceError] = useState("");
   const [contactError, setContactError] = useState("");
   const [cardUidError, setCardUidError] = useState(""); // ✅ NEW
 
@@ -93,22 +91,6 @@ export default function CardRegistrationPage() {
     }
   };
 
-  // ✅ Initial balance handler — allow 1 to 100 only
-  const handleBalanceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    setInitialBalance(raw);
-    const num = parseFloat(raw);
-    if (raw === "" || isNaN(num)) {
-      setBalanceError("");
-    } else if (num < 1) {
-      setBalanceError("Minimum balance is ₱1.00");
-    } else if (num > 100) {
-      setBalanceError("Maximum balance is ₱100.00");
-    } else {
-      setBalanceError("");
-    }
-  };
-
   const createMutation = useCreateUser({
     mutation: {
       onSuccess: () => {
@@ -116,9 +98,7 @@ export default function CardRegistrationPage() {
         setCardUid("");
         setFullName("");
         setContactNumber("");
-        setInitialBalance("");
         setType("Regular");
-        setBalanceError("");
         setContactError("");
         setCardUidError(""); // ✅ NEW
         toast({ title: "Card registered successfully" });
@@ -166,36 +146,24 @@ export default function CardRegistrationPage() {
       return;
     }
 
-    // ✅ Balance must be 1–100
-    const balanceNum = parseFloat(initialBalance);
-    if (isNaN(balanceNum) || balanceNum < 1 || balanceNum > 100) {
-      setBalanceError("Balance must be between ₱1.00 and ₱100.00");
-      return;
-    }
-
     createMutation.mutate({
       data: {
         cardUid,
         fullName,
         contactNumber,
         type,
-        initialBalance: balanceNum,
       },
     });
   };
 
   // ✅ Disable submit if there are validation errors or fields are incomplete
   const isFormInvalid =
-    !!balanceError ||
     !!contactError ||
     !!cardUidError ||                          // ✅ NEW
     cardUid.length !== 8 ||                   // ✅ NEW
     contactNumber.length !== 11 ||
-    parseFloat(initialBalance) < 1 ||
-    parseFloat(initialBalance) > 100 ||
     !cardUid ||
-    !fullName ||
-    !initialBalance;
+    !fullName;
 
   return (
     <div className={`space-y-8 ${isDark ? "text-slate-200" : "text-slate-800"}`} data-testid="card-registration-page">
@@ -345,40 +313,6 @@ export default function CardRegistrationPage() {
                   </div>
                   {contactError && (
                     <p className="text-xs font-medium text-red-500">{contactError}</p>
-                  )}
-                </div>
-
-                {/* ✅ Initial Balance — 1 to 100 only */}
-                <div className="space-y-2">
-                  <Label htmlFor="initialBalance" className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                    Initial Balance (PHP)
-                    <span className={`ml-2 font-normal ${isDark ? "text-slate-500" : "text-slate-400"}`}>(₱1 – ₱100)</span>
-                  </Label>
-                  <div className="relative">
-                    <Input
-                      id="initialBalance"
-                      type="number"
-                      step="0.01"
-                      min="1"
-                      max="100"
-                      className={`font-semibold pl-8 text-emerald-500 ${isDark ? "bg-slate-950" : "bg-white"} ${
-                        balanceError
-                          ? "border-red-400 focus-visible:ring-red-400"
-                          : initialBalance && !balanceError
-                          ? "border-emerald-400 focus-visible:ring-emerald-400"
-                          : isDark
-                          ? "border-slate-800 focus-visible:ring-emerald-400"
-                          : "border-slate-200 focus-visible:ring-emerald-400"
-                      }`}
-                      placeholder="0.00"
-                      value={initialBalance}
-                      onChange={handleBalanceChange}
-                      required
-                    />
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-500 font-semibold text-xs">₱</span>
-                  </div>
-                  {balanceError && (
-                    <p className="text-xs font-medium text-red-500">{balanceError}</p>
                   )}
                 </div>
 
