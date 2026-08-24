@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,6 +60,10 @@ export default function UserManagementPage() {
   const [newRowId, setNewRowId] = useState<number | null>(null);
   const prevTopIdRef = useRef<number | null>(null);
 
+  // ✅ Success check state — shown briefly inside the modal after a successful save
+  const [showSuccess, setShowSuccess] = useState(false);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -100,12 +104,26 @@ export default function UserManagementPage() {
     setLastUpdated(new Date());
   }, [userList]);
 
+  // ✅ Cleanup any pending success timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    };
+  }, []);
+
   const updateMutation = useUpdateUser({
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
-        setEditUser(null);
         toast({ title: "User Updated Successfully" });
+
+        // ✅ Close the edit modal right away — success check shows separately at the bottom
+        setEditUser(null);
+        setShowSuccess(true);
+        if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+        successTimeoutRef.current = setTimeout(() => {
+          setShowSuccess(false);
+        }, 2000);
       },
     },
   });
@@ -167,6 +185,13 @@ export default function UserManagementPage() {
           50% { opacity: 0.2; }
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+
+        @keyframes success-pop {
+          0% { transform: scale(0.5); opacity: 0; }
+          60% { transform: scale(1.1); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .success-pop { animation: success-pop 0.35s ease-out; }
       `}</style>
 
       {/* Header */}
@@ -552,6 +577,20 @@ export default function UserManagementPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ✅ Success notification — appears at the bottom of the screen, separate from the edit modal */}
+      {showSuccess && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] success-pop">
+          <div className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border shadow-lg ${
+            isDark ? "bg-slate-900 border-emerald-900" : "bg-white border-emerald-200"
+          }`}>
+            <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" strokeWidth={2.5} />
+            <span className={`text-sm font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+              Changes Saved
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirm */}
       <AlertDialog open={!!deleteUser} onOpenChange={(open) => !open && setDeleteUser(null)}>
