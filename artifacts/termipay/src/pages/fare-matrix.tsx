@@ -640,104 +640,104 @@ export default function FareMatrixPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Route Dialog */}
-      <Dialog open={!!editRoute} onOpenChange={(open) => !open && setEditRoute(null)}>
-        <DialogContent className={`[&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
-          <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/60" />
-          <DialogHeader>
-            <DialogTitle className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
-              Edit Route
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Origin</Label>
-              <Input
-                data-testid="input-edit-origin"
-                list="barangay-suggestions-edit"
-                placeholder="Type or select barangay..."
-                value={editForm.origin}
-                onChange={(e) => setEditForm({ ...editForm, origin: e.target.value })}
-                className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Destination</Label>
-              <Input
-                data-testid="input-edit-destination"
-                list="barangay-suggestions-edit"
-                placeholder="Type or select destination..."
-                value={editForm.destination}
-                onChange={(e) => setEditForm({ ...editForm, destination: e.target.value })}
-                className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}
-              />
-            </div>
-            <datalist id="barangay-suggestions-edit">
-              <option value={DEFAULT_DESTINATION} />
-              {CALBAYOG_BARANGAYS.map((b) => (
-                <option key={b} value={b} />
-              ))}
-            </datalist>
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Fare Amount (PHP)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                className={`font-semibold focus-visible:ring-emerald-500 ${isDark ? "bg-slate-950 border-slate-800 text-emerald-400" : "bg-white border-slate-200 text-emerald-600"}`}
-                value={editForm.fareAmount}
-                onChange={(e) => setEditForm({ ...editForm, fareAmount: e.target.value })}
-                data-testid="input-edit-fare"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="secondary"
-              onClick={() => setEditRoute(null)}
-              className={`cursor-pointer ${isDark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleUpdate}
-              disabled={updateMutation.isPending}
-              data-testid="button-update-route"
-              className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed"
-            >
-              {updateMutation.isPending ? "Saving..." : "Save Changes"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+ {/* Edit Route Dialog */}
+<Dialog open={!!editRoute} onOpenChange={(open) => !open && setEditRoute(null)}>
+  <DialogContent className={`[&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+    <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/60" />
+    <DialogHeader>
+      <DialogTitle className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
+        Edit Route
+      </DialogTitle>
+    </DialogHeader>
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Origin</Label>
+        <Input
+          data-testid="input-edit-origin"
+          list="barangay-suggestions-edit"
+          placeholder="Type or select barangay..."
+          value={editForm.origin}
+          onChange={(e) => setEditForm({ ...editForm, origin: e.target.value })}
+          className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Destination</Label>
+        <Input
+          data-testid="input-edit-destination"
+          list="barangay-suggestions-edit"
+          placeholder="Type or select destination..."
+          value={editForm.destination}
+          onChange={(e) => setEditForm({ ...editForm, destination: e.target.value })}
+          className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}
+        />
+      </div>
+      <datalist id="barangay-suggestions-edit">
+        <option value={DEFAULT_DESTINATION} />
+        {CALBAYOG_BARANGAYS.map((b) => (
+          <option key={b} value={b} />
+        ))}
+      </datalist>
+      <div className="space-y-2">
+        <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Fare Amount (PHP)</Label>
+        <Input
+          type="number"
+          step="0.01"
+          className={`font-semibold focus-visible:ring-emerald-500 ${isDark ? "bg-slate-950 border-slate-800 text-emerald-400" : "bg-white border-slate-200 text-emerald-600"}`}
+          value={editForm.fareAmount}
+          onChange={(e) => setEditForm({ ...editForm, fareAmount: e.target.value })}
+          data-testid="input-edit-fare"
+        />
+      </div>
+    </div>
+    <DialogFooter>
+      <Button
+        variant="outline"
+        onClick={() => setEditRoute(null)}
+        className={`cursor-pointer bg-transparent border ${isDark ? "border-slate-700 text-slate-300 hover:bg-slate-800/50" : "border-slate-300 text-slate-700 hover:bg-slate-100/50"}`}
+      >
+        Cancel
+      </Button>
+      <Button
+        onClick={handleUpdate}
+        disabled={updateMutation.isPending}
+        data-testid="button-update-route"
+        className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed"
+      >
+        {updateMutation.isPending ? "Saving..." : "Save Changes"}
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
 
-      {/* Delete Confirm */}
-      <AlertDialog open={!!deleteRoute} onOpenChange={(open) => !open && setDeleteRoute(null)}>
-        <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}>
-          <AlertDialogHeader>
-            <AlertDialogTitle className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
-              Delete route?
-            </AlertDialogTitle>
-            <AlertDialogDescription className={isDark ? "text-slate-400" : "text-slate-500"}>
-              This action cannot be undone. The selected route will be permanently removed from the fare matrix.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              disabled={deleteMutation.isPending}
-              className={`cursor-pointer disabled:cursor-not-allowed ${isDark ? "bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800" : ""}`}
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDelete}
-              disabled={deleteMutation.isPending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer disabled:cursor-not-allowed"
-            >
-              {deleteMutation.isPending ? "Deleting..." : "Confirm"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+{/* Delete Confirm */}
+<AlertDialog open={!!deleteRoute} onOpenChange={(open) => !open && setDeleteRoute(null)}>
+  <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}>
+    <AlertDialogHeader>
+      <AlertDialogTitle className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
+        Delete route?
+      </AlertDialogTitle>
+      <AlertDialogDescription className={isDark ? "text-slate-400" : "text-slate-500"}>
+        This action cannot be undone. The selected route will be permanently removed from the fare matrix.
+      </AlertDialogDescription>
+    </AlertDialogHeader>
+    <AlertDialogFooter>
+      <AlertDialogCancel
+        disabled={deleteMutation.isPending}
+        className={`cursor-pointer disabled:cursor-not-allowed bg-transparent border ${isDark ? "border-slate-700 text-slate-300 hover:bg-slate-800/50" : "border-slate-300 text-slate-700 hover:bg-slate-100/50"}`}
+      >
+        Cancel
+      </AlertDialogCancel>
+      <AlertDialogAction
+        onClick={confirmDelete}
+        disabled={deleteMutation.isPending}
+        className="bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer disabled:cursor-not-allowed"
+      >
+        {deleteMutation.isPending ? "Deleting..." : "Confirm"}
+      </AlertDialogAction>
+    </AlertDialogFooter>
+  </AlertDialogContent>
+</AlertDialog>
     </div>
   );
 }
