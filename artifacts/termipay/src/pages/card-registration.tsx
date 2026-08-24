@@ -474,19 +474,14 @@ export default function CardRegistrationPage() {
                               ₱{Number(user.balance || 0).toFixed(2)}
                             </TableCell>
                             <TableCell className="text-right">
-                              {/* ✅ CHANGED: Inactive/Blocked now render red instead of gray */}
                               <Badge className={`${
                                 user.status === "Active"
                                   ? isDark
                                     ? "bg-emerald-950/40 text-emerald-400 border-emerald-900"
                                     : "bg-emerald-50 text-emerald-600 border-emerald-200"
-                                  : user.status === "Inactive" || user.status === "Blocked"
-                                    ? isDark
-                                      ? "bg-red-950/40 text-red-400 border-red-900"
-                                      : "bg-red-50 text-red-600 border-red-200"
-                                    : isDark
-                                      ? "bg-slate-800 text-slate-400 border-slate-700"
-                                      : "bg-slate-100 text-slate-500 border-slate-200"
+                                  : isDark
+                                    ? "bg-slate-800 text-slate-400 border-slate-700"
+                                    : "bg-slate-100 text-slate-500 border-slate-200"
                               } text-[10px] font-semibold px-2 py-0.5 border`}>
                                 {user.status}
                               </Badge>
