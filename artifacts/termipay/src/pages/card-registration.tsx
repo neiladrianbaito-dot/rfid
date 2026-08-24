@@ -315,7 +315,7 @@ export default function CardRegistrationPage() {
                 {/* ✅ Contact Number — exactly 11 digits, locks at 11 */}
                 <div className="space-y-2">
                   <Label htmlFor="contactNumber" className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                    Contact Number
+                    Contact Number111
                     <span className={`ml-2 font-normal ${isDark ? "text-slate-500" : "text-slate-400"}`}>(11 digits)</span>
                   </Label>
                   <div className="relative">
