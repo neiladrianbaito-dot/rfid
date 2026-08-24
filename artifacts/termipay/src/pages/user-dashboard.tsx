@@ -431,7 +431,7 @@ export default function PaymongoDashboardPage() {
                     {isAtMaxBalance ? (
                       <span className={isDark ? "text-red-400/70" : "text-red-500/80"}>Max balance reached</span>
                     ) : (
-                      <>\u20B1{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })} remaining</>
+                      <>₱{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })} remaining</>
                     )}
                   </p>
                 </div>
