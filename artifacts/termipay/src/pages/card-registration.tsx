@@ -13,10 +13,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { CreditCard, Plus, Cpu, ShieldCheck, Zap } from "lucide-react";
+import { CreditCard, Plus, Cpu, ShieldCheck, Zap, CheckCircle2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion } from "framer-motion";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
+
+// ✅ Small helper so the toast title shows a green check icon next to the text
+function SuccessTitle({ text }: { text: string }) {
+  return (
+    <span className="flex items-center gap-2">
+      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" strokeWidth={2.5} />
+      {text}
+    </span>
+  );
+}
 
 export default function CardRegistrationPage() {
   const { isDark } = useTheme();
@@ -101,7 +111,7 @@ export default function CardRegistrationPage() {
         setType("Regular");
         setContactError("");
         setCardUidError(""); // ✅ NEW
-        toast({ title: "Card registered successfully" });
+        toast({ title: <SuccessTitle text="Card Registered Successfully" /> });
       },
       onError: (error: any) => {
         const status = error?.response?.status ?? error?.status;
