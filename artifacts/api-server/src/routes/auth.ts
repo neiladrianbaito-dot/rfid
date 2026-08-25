@@ -107,6 +107,21 @@ async function checkLinkedCardStatus(linkedCardUid: string | null | undefined): 
   return { blocked, status };
 }
 
+// ── NAME-ALREADY-LINKED helper ────────────────────────────────────────────────
+// Checks whether a full_name is already tied to an existing auth_users account
+// (i.e. someone already signed up / created an account using this exact name).
+// This is separate from "email already registered" — a name can only ever be
+// used to create ONE account, even if a different email is used.
+
+async function isNameAlreadyLinkedToAccount(fullName: string): Promise<boolean> {
+  const result = await db.execute(sql`
+    select id from auth_users
+    where lower(trim(full_name)) = lower(trim(${fullName}))
+    limit 1
+  `);
+  return extractRows<{ id: string }>(result).length > 0;
+}
+
 // ── SIGNUP ────────────────────────────────────────────────────────────────────
 
 router.post("/auth/signup", async (req, res): Promise<void> => {
@@ -126,6 +141,36 @@ router.post("/auth/signup", async (req, res): Promise<void> => {
     }
     if (password.length < 6) {
       res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+      return;
+    }
+
+    // ── CHECK 1: full name must match a pre-registered record in `users` ──
+    // This is the real enforcement point — the frontend check can be
+    // bypassed, so signup independently re-verifies the name here.
+    const nameMatchRaw = await db.execute(sql`
+      select full_name from users
+      where lower(trim(full_name)) = lower(trim(${fullName}))
+      limit 1
+    `);
+    const nameMatchRows = extractRows<{ full_name: string }>(nameMatchRaw);
+    if (nameMatchRows.length === 0) {
+      res.status(403).json({
+        success: false,
+        message: "This name is not registered in our system. Please contact your admin.",
+      });
+      return;
+    }
+
+    // ── CHECK 2 (NEW): full name must NOT already be linked to an existing
+    // account. Even if the name is a valid pre-registered name, it can only
+    // ever be used to create ONE auth_users account — regardless of which
+    // email is used for the new signup attempt. ──
+    const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName);
+    if (nameAlreadyUsed) {
+      res.status(409).json({
+        success: false,
+        message: "This name is already linked to an existing account.",
+      });
       return;
     }
 
@@ -443,16 +488,24 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
   }
 });
 
+// ── CHECK FULL NAME ───────────────────────────────────────────────────────────
+// Used by the signup form for live/instant feedback BEFORE the user submits.
+// Two things are reported back:
+//   1. Does this name exist in the pre-registered `users` table at all?
+//   2. Is this name already linked to an existing `auth_users` account?
+// The signup route re-verifies both independently (frontend checks can be
+// bypassed), so this endpoint exists purely for UX (instant validation).
+
 router.get("/auth/check-full-name", async (req, res): Promise<void> => {
   try {
     const fullName =
       typeof req.query.fullName === "string" ? req.query.fullName.trim() : "";
- 
+
     if (!fullName) {
       res.status(400).json({ success: false, message: "fullName query param is required" });
       return;
     }
- 
+
     const userRaw = await db.execute(sql`
       select full_name, status
       from users
@@ -460,7 +513,7 @@ router.get("/auth/check-full-name", async (req, res): Promise<void> => {
       limit 1
     `);
     const userRows = extractRows<{ full_name: string; status: string }>(userRaw);
- 
+
     if (userRows.length === 0) {
       res.status(404).json({
         success: false,
@@ -468,7 +521,17 @@ router.get("/auth/check-full-name", async (req, res): Promise<void> => {
       });
       return;
     }
- 
+
+    // ── NEW: also check if this name already has an account ──
+    const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName);
+    if (nameAlreadyUsed) {
+      res.status(409).json({
+        success: false,
+        message: "This name is already linked to an existing account.",
+      });
+      return;
+    }
+
     const matched = userRows[0];
     res.json({
       success: true,
@@ -482,68 +545,7 @@ router.get("/auth/check-full-name", async (req, res): Promise<void> => {
     res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
   }
 });
- 
-// ── 2. SIGNUP (REPLACE your existing router.post("/auth/signup", ...) with
-// this version — it's identical except for the new name-check block added
-// right after the existing field validation, before the password is hashed) ──
- 
-router.post("/auth/signup", async (req, res): Promise<void> => {
-  try {
-    const body = req.body as { fullName?: string; email?: string; password?: string };
-    const fullName = typeof body?.fullName === "string" ? body.fullName.trim() : "";
-    const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
-    const password = typeof body?.password === "string" ? body.password : "";
- 
-    if (!fullName || !email || !password) {
-      res.status(400).json({ success: false, message: "Full name, email, and password are required" });
-      return;
-    }
-    if (!email.includes("@")) {
-      res.status(400).json({ success: false, message: "Please provide a valid email address" });
-      return;
-    }
-    if (password.length < 6) {
-      res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
-      return;
-    }
- 
-    // ── NEW: full name must match a pre-registered record in `users` ──
-    // This is the real enforcement point — the frontend check can be
-    // bypassed, so signup independently re-verifies the name here.
-    const nameMatchRaw = await db.execute(sql`
-      select full_name from users
-      where lower(trim(full_name)) = lower(trim(${fullName}))
-      limit 1
-    `);
-    const nameMatchRows = extractRows<{ full_name: string }>(nameMatchRaw);
-    if (nameMatchRows.length === 0) {
-      res.status(403).json({
-        success: false,
-        message: "This name is not registered in our system. Please contact your admin.",
-      });
-      return;
-    }
- 
-    const passwordHash = hashPassword(password);
-    const insertResult = await db.execute(sql`
-      insert into auth_users (supabase_auth_id, full_name, email, password_hash)
-      values (gen_random_uuid(), ${fullName}, ${email}, ${passwordHash})
-      on conflict (email) do nothing
-      returning id as uid
-    `);
- 
-    const inserted = extractRows<{ uid: string }>(insertResult);
-    if (inserted.length === 0) {
-      res.status(409).json({ success: false, message: "Email is already registered" });
-      return;
-    }
- 
-    res.status(201).json({ success: true, message: "Signup successful. You can now sign in." });
-  } catch (error) {
-    console.error("Signup error:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
-  }
-});
+
 // ── LINK CARD ─────────────────────────────────────────────────────────────────
 
 router.post("/auth/user/link-card", async (req, res): Promise<void> => {
