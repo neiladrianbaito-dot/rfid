@@ -216,8 +216,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {/* Logo Section */}
           <div className={`p-6 border-b transition-colors ${isDark ? "border-slate-800" : "border-slate-200"}`}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-sm">
-                <Cpu className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0">
+                <img
+                  src="/calbayog.jpg"
+                  alt="Calbayog Logo"
+                  className="w-full h-full object-cover"
+                />
               </div>
               <div>
                 <h1 className={`text-sm font-bold tracking-tight transition-colors ${isDark ? "text-white" : "text-slate-900"}`}>
