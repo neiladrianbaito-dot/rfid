@@ -313,7 +313,7 @@ export default function ReportPreviewPage() {
                   City Accounting Office &nbsp;•&nbsp; Calbayog City, Western Samar
                 </div>
               </div>
-              <img src="/calbayog.svg" alt="Calbayog City Seal" style={{ width: "72px", height: "72px", flexShrink: 0, objectFit: "contain" }} />
+              <img src="/calbayog.jpg" alt="Calbayog City Seal" style={{ width: "72px", height: "72px", flexShrink: 0, objectFit: "contain" }} />
             </div>
 
             {/* Document title */}
