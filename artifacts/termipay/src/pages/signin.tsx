@@ -666,17 +666,11 @@ export default function SigninPage() {
       <div className="w-full max-w-[420px] z-10">
         {/* Header */}
         <div className="text-center mb-6 sm:mb-8">
-          <div
-            className={`inline-flex items-center justify-center p-3 rounded-2xl border mb-4 overflow-hidden transition-colors duration-300 ${
-              isDark
-                ? "bg-blue-500/10 border-blue-500/20"
-                : "bg-blue-50 border-blue-100"
-            }`}
-          >
+          <div className="inline-flex items-center justify-center mb-4">
             <img
               src="/calbayog.jpg"
               alt="Calbayog Logo"
-              className="h-7 w-7 sm:h-8 sm:w-8 object-cover rounded-lg"
+              className="h-16 w-16 sm:h-20 sm:w-20 object-contain rounded-lg"
             />
           </div>
 
