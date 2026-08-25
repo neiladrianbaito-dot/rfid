@@ -267,7 +267,7 @@ export default function LoginPage() {
             className="flex items-center justify-center w-14 h-14 rounded-3xl border-2 border-blue-400 overflow-hidden mb-4"
           >
             <img
-              src="/calbayog.jpg"
+              src="/calbayog.png"
               alt="Calbayog Logo"
               className="w-full h-full object-cover"
             />

@@ -218,7 +218,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0">
                 <img
-                  src="/calbayog.jpg"
+                  src="/calbayog.png"
                   alt="Calbayog Logo"
                   className="w-full h-full object-cover"
                 />
