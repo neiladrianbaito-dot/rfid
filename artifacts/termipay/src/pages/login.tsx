@@ -264,9 +264,13 @@ export default function LoginPage() {
           <motion.div
             animate={{ boxShadow: ["0 0 0px rgba(37,99,235,0.35)", "0 8px 28px rgba(37,99,235,0.45)", "0 0 0px rgba(37,99,235,0.35)"] }}
             transition={{ duration: 2.5, repeat: Infinity }}
-            className="flex items-center justify-center w-14 h-14 rounded-3xl bg-blue-600 border-2 border-blue-400 text-white mb-4"
+            className="flex items-center justify-center w-14 h-14 rounded-3xl border-2 border-blue-400 overflow-hidden mb-4"
           >
-            <CreditCard className="w-7 h-7" />
+            <img
+              src="/calbayog.jpg"
+              alt="Calbayog Logo"
+              className="w-full h-full object-cover"
+            />
           </motion.div>
 
           <h1
