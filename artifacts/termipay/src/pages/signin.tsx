@@ -667,18 +667,16 @@ export default function SigninPage() {
         {/* Header */}
         <div className="text-center mb-6 sm:mb-8">
           <div
-            className={`inline-flex items-center justify-center p-3 rounded-2xl border mb-4 transition-colors duration-300 ${
+            className={`inline-flex items-center justify-center p-3 rounded-2xl border mb-4 overflow-hidden transition-colors duration-300 ${
               isDark
                 ? "bg-blue-500/10 border-blue-500/20"
                 : "bg-blue-50 border-blue-100"
             }`}
           >
-            <CreditCard
-              className={`h-7 w-7 sm:h-8 sm:w-8 ${
-                isDark
-                  ? "text-blue-400"
-                  : "text-blue-600"
-              }`}
+            <img
+              src="/calbayog.jpg"
+              alt="Calbayog Logo"
+              className="h-7 w-7 sm:h-8 sm:w-8 object-cover rounded-lg"
             />
           </div>
 
