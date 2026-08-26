@@ -20,15 +20,9 @@ import {
 } from "recharts";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch"; // ayusin ang path kung saan mo nilagay
 
+// Same approach as ReportsPage — plain ₱ text character, walang icon workaround.
 const formatPeso = (value: number) =>
-  `P${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-// Numeric-only formatter (no currency symbol) — ginagamit ito sa "Total Revenue
-// Today" card kasama ng PhilippinePeso ICON (hindi text character), para hindi
-// umasa sa font support ng ₱ glyph. Kapag walang glyph ang font, lumalabas na
-// parang "tofu box" / mukhang "=" sign — kaya icon na lang ang gagamitin.
-const formatPesoNumber = (value: number) =>
-  value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -117,12 +111,9 @@ export default function DashboardPage() {
   const statCards = [
     {
       title: "Total Revenue Today",
-      // "value" dito ay numero na lang (walang symbol) — ang icon ang gagawa
-      // ng peso sign sa render, para consistent laging lumabas nang tama.
       value: stats?.totalRevenueToday != null
-        ? formatPesoNumber(Math.abs(Number(stats.totalRevenueToday)))
-        : "0.00",
-      isCurrency: true,
+        ? formatPeso(Math.abs(Number(stats.totalRevenueToday)))
+        : "₱0.00",
       icon: PhilippinePeso,
       border: isDark ? "border-emerald-900" : "border-emerald-100",
       text: isDark ? "text-emerald-400" : "text-emerald-600",
@@ -133,7 +124,6 @@ export default function DashboardPage() {
     {
       title: "Total Taps Today",
       value: stats?.totalTapsToday ?? "0",
-      isCurrency: false,
       icon: Fingerprint,
       border: isDark ? "border-blue-900" : "border-blue-100",
       text: isDark ? "text-blue-400" : "text-blue-600",
@@ -144,7 +134,6 @@ export default function DashboardPage() {
     {
       title: "Registered Cards",
       value: stats?.registeredCards ?? "0",
-      isCurrency: false,
       icon: CreditCard,
       border: isDark ? "border-purple-900" : "border-purple-100",
       text: isDark ? "text-purple-400" : "text-purple-600",
@@ -155,7 +144,6 @@ export default function DashboardPage() {
     {
       title: "Active Routes",
       value: stats?.activeRoutes ?? "0",
-      isCurrency: false,
       icon: Route,
       border: isDark ? "border-amber-900" : "border-amber-100",
       text: isDark ? "text-amber-400" : "text-amber-600",
@@ -264,13 +252,7 @@ export default function DashboardPage() {
                       <p className={`text-[11px] font-semibold uppercase tracking-wide mb-1 transition-colors ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                         {card.title}
                       </p>
-                      <p
-                        className={`text-2xl font-bold tracking-tight flex items-center gap-1 transition-colors ${isDark ? "text-white" : "text-slate-900"}`}
-                        data-testid={`text-stat-${i}`}
-                      >
-                        {card.isCurrency && (
-                          <PhilippinePeso size={18} strokeWidth={2.6} className={card.text} />
-                        )}
+                      <p className={`text-2xl font-bold tracking-tight transition-colors ${isDark ? "text-white" : "text-slate-900"}`} data-testid={`text-stat-${i}`}>
                         {card.value}
                       </p>
                     </div>
@@ -329,7 +311,7 @@ export default function DashboardPage() {
                     stroke={isDark ? "#64748b" : "#94a3b8"}
                     fontSize={11}
                     fontWeight={600}
-                    tickFormatter={(v: number) => `P${v.toLocaleString("en-US")}`}
+                    tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`}
                   />
                   <Tooltip
                     contentStyle={{
