@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo, useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import {
-  Wallet, User, Phone, Tag, ShieldCheck,
+  User, Phone, Tag, ShieldCheck,
   LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings,
   ChevronRight, ArrowDownLeft, ArrowUpRight, List, Pencil, Check, X as XIcon,
   Sun, Moon,
@@ -348,9 +348,6 @@ export default function PaymongoDashboardPage() {
               alt="Calbayog logo"
               className="h-9 w-9 rounded-lg object-contain shrink-0"
             />
-            <div className="p-1.5 bg-emerald-500/10 rounded-xl">
-              <Wallet className={`h-6 w-6 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
-            </div>
             <h1 className={`text-base font-bold tracking-tight leading-none ${isDark ? "text-white" : "text-slate-900"}`}>
               Fare Collection System
             </h1>
