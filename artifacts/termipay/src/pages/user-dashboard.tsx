@@ -27,8 +27,6 @@ import { getSignedInUser, cleanCardUid, USER_AUTH_TOKEN_KEY } from "@/lib/api";
 import { TransactionDetailModal, type Transaction, type FareRoute } from "@/components/transaction-detail-modal";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 import { supabase } from "@/lib/supabase";
-// ✅ Logo asset — place calbayog.png in your assets/public folder and adjust this import/path if needed
-import calbayogLogo from "@/assets/calbayog.png";
 
 function formatAmount(type: string, amount: number | string): string {
   const sign = type === "Fare" ? "-" : "+";
@@ -344,9 +342,9 @@ export default function PaymongoDashboardPage() {
       <div className={`sticky top-0 z-40 w-full backdrop-blur-md border-b ${isDark ? "bg-[#020617]/95 border-slate-800" : "bg-white/95 border-slate-200"}`}>
         <div className="mx-auto w-full max-w-6xl px-4 sm:px-8 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            {/* ✅ Calbayog logo — swap the import path above if your bundler needs a different location */}
+            {/* ✅ Calbayog logo — served from /public, same as login page */}
             <img
-              src={calbayogLogo}
+              src="/calbayog.png"
               alt="Calbayog logo"
               className="h-9 w-9 rounded-lg object-contain shrink-0"
             />
