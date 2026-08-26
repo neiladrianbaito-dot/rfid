@@ -23,6 +23,10 @@ import { useRealtimeRefetch } from "@/lib/use-realtime-refetch"; // ayusin ang p
 const formatPeso = (value: number) =>
   `P${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// Used only for the "Total Revenue Today" stat card — uses the real ₱ sign
+const formatPesoSign = (value: number) =>
+  `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const { isDark } = useTheme();
@@ -111,8 +115,8 @@ export default function DashboardPage() {
     {
       title: "Total Revenue Today",
       value: stats?.totalRevenueToday != null
-        ? formatPeso(Math.abs(Number(stats.totalRevenueToday)))
-        : "P0.00",
+        ? formatPesoSign(Math.abs(Number(stats.totalRevenueToday)))
+        : "₱0.00",
       icon: PhilippinePeso,
       border: isDark ? "border-emerald-900" : "border-emerald-100",
       text: isDark ? "text-emerald-400" : "text-emerald-600",
