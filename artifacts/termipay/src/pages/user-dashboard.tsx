@@ -666,8 +666,16 @@ export default function PaymongoDashboardPage() {
         </div>
 
         {/* TRANSACTIONS — Mobile */}
+        {/* ✅ FIX: solid bg added to outer fixed wrapper (was transparent, letting the
+            page's default white background show through during iOS overscroll/bounce —
+            this was the "puting nakaharang" bar near the bottom nav). Also added
+            overscroll-contain so the bounce doesn't leak past this panel. */}
         <div
-          className={activeTab === "Transactions" ? "fixed inset-0 flex flex-col md:hidden z-10" : "hidden"}
+          className={
+            activeTab === "Transactions"
+              ? `fixed inset-0 flex flex-col md:hidden z-10 ${isDark ? "bg-[#020617]" : "bg-slate-50"}`
+              : "hidden"
+          }
           style={{ top: "57px", bottom: "64px" }}
         >
           <div className={`backdrop-blur-md px-4 py-2.5 border-b shrink-0 ${isDark ? "bg-[#020617]/95 border-slate-800/60" : "bg-white/95 border-slate-200"}`}>
@@ -676,7 +684,9 @@ export default function PaymongoDashboardPage() {
               Transactions History
             </p>
           </div>
-          <div className={`flex-1 overflow-y-auto ${isDark ? "" : "bg-slate-50"}`}>
+          {/* ✅ FIX: was `isDark ? "" : "bg-slate-50"` — empty string meant NO background
+              at all in dark mode. Now always has a solid bg + overscroll-contain. */}
+          <div className={`flex-1 overflow-y-auto overscroll-contain ${isDark ? "bg-[#020617]" : "bg-slate-50"}`}>
             {transactions.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
                 <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
