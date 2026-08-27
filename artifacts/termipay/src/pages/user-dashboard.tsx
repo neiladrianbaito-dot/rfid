@@ -950,8 +950,8 @@ export default function PaymongoDashboardPage() {
       {/* Mobile Bottom Nav */}
       <nav
         ref={navRef}
-        className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 backdrop-blur-md border-t transition-all duration-300 ${
-          isDark ? "bg-[#0a0f1e]/95 border-slate-800/60" : "bg-white/95 border-slate-200"
+        className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 border-t transition-all duration-300 ${
+          isDark ? "bg-[#020617] border-slate-800/60" : "bg-slate-50 border-slate-200"
         } ${
           linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
         }`}
