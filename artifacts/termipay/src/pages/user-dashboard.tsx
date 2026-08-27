@@ -676,7 +676,7 @@ export default function PaymongoDashboardPage() {
               ? `fixed inset-0 flex flex-col md:hidden z-10 ${isDark ? "bg-[#020617]" : "bg-slate-50"}`
               : "hidden"
           }
-          style={{ top: "57px", bottom: "64px" }}
+          style={{ top: "57px", bottom: "calc(64px + env(safe-area-inset-bottom, 0px))" }}
         >
           <div className={`backdrop-blur-md px-4 py-2.5 border-b shrink-0 ${isDark ? "bg-[#020617]/95 border-slate-800/60" : "bg-white/95 border-slate-200"}`}>
             <p className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
@@ -922,11 +922,14 @@ export default function PaymongoDashboardPage() {
       </div>
 
       {/* Mobile Bottom Nav */}
-      <nav className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 backdrop-blur-md border-t transition-all duration-300 ${
-        isDark ? "bg-[#0a0f1e]/95 border-slate-800/60" : "bg-white/95 border-slate-200"
-      } ${
-        linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
-      }`}>
+      <nav
+        className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden min-h-16 backdrop-blur-md border-t transition-all duration-300 ${
+          isDark ? "bg-[#0a0f1e]/95 border-slate-800/60" : "bg-white/95 border-slate-200"
+        } ${
+          linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
+        }`}
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+      >
         {navItems.map(({ tab, icon, label }) => {
           const isActive = activeTab === tab;
           return (
