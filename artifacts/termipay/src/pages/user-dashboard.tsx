@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState, useEffect } from "react";
+import { memo, useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import {
   User, Phone, Tag, ShieldCheck,
@@ -295,6 +295,32 @@ export default function PaymongoDashboardPage() {
     setSelectedTx(tx);
   }, []);
 
+  // ✅ Fix: measure the ACTUAL rendered header/nav heights instead of guessing
+  // fixed pixel values (57px / 64px). This guarantees the mobile Transactions
+  // panel sits pixel-perfect flush against the bottom nav with zero gap,
+  // regardless of device, font scaling, or safe-area insets.
+  const headerRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(57);
+  const [navHeight, setNavHeight] = useState(64);
+
+  useEffect(() => {
+    const headerEl = headerRef.current;
+    const navEl = navRef.current;
+    if (!headerEl || !navEl) return;
+
+    const updateHeights = () => {
+      setHeaderHeight(headerEl.offsetHeight);
+      setNavHeight(navEl.offsetHeight);
+    };
+    updateHeights();
+
+    const ro = new ResizeObserver(updateHeights);
+    ro.observe(headerEl);
+    ro.observe(navEl);
+    return () => ro.disconnect();
+  }, []);
+
   const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
     { tab: "home", icon: <Home className="h-5 w-5" />, label: "Home" },
     { tab: "Transactions", icon: <List className="h-5 w-5" />, label: "Transactions" },
@@ -339,7 +365,7 @@ export default function PaymongoDashboardPage() {
       </AlertDialog>
 
       {/* STICKY HEADER */}
-      <div className={`sticky top-0 z-40 w-full backdrop-blur-md border-b ${isDark ? "bg-[#020617]/95 border-slate-800" : "bg-white/95 border-slate-200"}`}>
+      <div ref={headerRef} className={`sticky top-0 z-40 w-full backdrop-blur-md border-b ${isDark ? "bg-[#020617]/95 border-slate-800" : "bg-white/95 border-slate-200"}`}>
         <div className="mx-auto w-full max-w-6xl px-4 sm:px-8 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             {/* ✅ Calbayog logo — served from /public, same as login page */}
@@ -666,9 +692,17 @@ export default function PaymongoDashboardPage() {
         </div>
 
         {/* TRANSACTIONS — Mobile */}
+        {/* ✅ FIX: solid bg added to outer fixed wrapper (was transparent, letting the
+            page's default white background show through during iOS overscroll/bounce —
+            this was the "puting nakaharang" bar near the bottom nav). Also added
+            overscroll-contain so the bounce doesn't leak past this panel. */}
         <div
-          className={activeTab === "Transactions" ? "fixed inset-0 flex flex-col md:hidden z-10" : "hidden"}
-          style={{ top: "57px", bottom: "64px" }}
+          className={
+            activeTab === "Transactions"
+              ? `fixed inset-0 flex flex-col md:hidden z-10 ${isDark ? "bg-[#020617]" : "bg-slate-50"}`
+              : "hidden"
+          }
+          style={{ top: `${headerHeight}px`, bottom: `${navHeight}px` }}
         >
           <div className={`backdrop-blur-md px-4 py-2.5 border-b shrink-0 ${isDark ? "bg-[#020617]/95 border-slate-800/60" : "bg-white/95 border-slate-200"}`}>
             <p className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
@@ -676,7 +710,9 @@ export default function PaymongoDashboardPage() {
               Transactions History
             </p>
           </div>
-          <div className={`flex-1 overflow-y-auto ${isDark ? "" : "bg-slate-50"}`}>
+          {/* ✅ FIX: was `isDark ? "" : "bg-slate-50"` — empty string meant NO background
+              at all in dark mode. Now always has a solid bg + overscroll-contain. */}
+          <div className={`flex-1 overflow-y-auto overscroll-contain ${isDark ? "bg-[#020617]" : "bg-slate-50"}`}>
             {transactions.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
                 <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
@@ -912,11 +948,14 @@ export default function PaymongoDashboardPage() {
       </div>
 
       {/* Mobile Bottom Nav */}
-      <nav className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 backdrop-blur-md border-t transition-all duration-300 ${
-        isDark ? "bg-[#0a0f1e]/95 border-slate-800/60" : "bg-white/95 border-slate-200"
-      } ${
-        linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
-      }`}>
+      <nav
+        ref={navRef}
+        className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 backdrop-blur-md border-t transition-all duration-300 ${
+          isDark ? "bg-[#0a0f1e]/95 border-slate-800/60" : "bg-white/95 border-slate-200"
+        } ${
+          linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
+        }`}
+      >
         {navItems.map(({ tab, icon, label }) => {
           const isActive = activeTab === tab;
           return (
