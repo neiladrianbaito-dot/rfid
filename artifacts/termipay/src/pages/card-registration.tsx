@@ -18,6 +18,46 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { motion } from "framer-motion";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 
+// 🎨 Card type -> color mapping
+// 🟥 Regular  🟦 Student  🟨 Senior  🟩 PWD
+function getTypeBadgeStyle(type: string | null | undefined, isDark: boolean) {
+  const t = (type || "Regular").toLowerCase();
+  switch (t) {
+    case "student":
+      return isDark
+        ? "border-blue-900 text-blue-400 bg-blue-950/40"
+        : "border-blue-200 text-blue-600 bg-blue-50";
+    case "senior":
+      return isDark
+        ? "border-yellow-900 text-yellow-400 bg-yellow-950/40"
+        : "border-yellow-300 text-yellow-700 bg-yellow-50";
+    case "pwd":
+      return isDark
+        ? "border-emerald-900 text-emerald-400 bg-emerald-950/40"
+        : "border-emerald-200 text-emerald-600 bg-emerald-50";
+    case "regular":
+    default:
+      return isDark
+        ? "border-red-900 text-red-400 bg-red-950/40"
+        : "border-red-200 text-red-600 bg-red-50";
+  }
+}
+
+function getTypeDotColor(type: string | null | undefined) {
+  const t = (type || "Regular").toLowerCase();
+  switch (t) {
+    case "student":
+      return "bg-blue-500";
+    case "senior":
+      return "bg-yellow-500";
+    case "pwd":
+      return "bg-emerald-500";
+    case "regular":
+    default:
+      return "bg-red-500";
+  }
+}
+
 // ✅ Small helper so the toast title shows a green check icon next to the text
 function SuccessTitle({ text }: { text: string }) {
   return (
@@ -280,13 +320,32 @@ export default function CardRegistrationPage() {
                   <Label htmlFor="type" className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>User Type</Label>
                   <Select value={type} onValueChange={setType}>
                     <SelectTrigger className={`font-medium text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}`}>
-                      <SelectValue placeholder="Select type" />
+                      <span className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(type)}`} />
+                        <SelectValue placeholder="Select type" />
+                      </span>
                     </SelectTrigger>
                     <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                      <SelectItem value="Regular" className="cursor-pointer">Regular</SelectItem>
-                      <SelectItem value="Student" className="cursor-pointer">Student</SelectItem>
-                      <SelectItem value="Senior" className="cursor-pointer">Senior</SelectItem>
-                      <SelectItem value="PWD" className="cursor-pointer">PWD</SelectItem>
+                      <SelectItem value="Regular" className="cursor-pointer">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Regular
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="Student" className="cursor-pointer">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" /> Student
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="Senior" className="cursor-pointer">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-yellow-500 inline-block" /> Senior
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="PWD" className="cursor-pointer">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> PWD
+                        </span>
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -407,8 +466,9 @@ export default function CardRegistrationPage() {
                             <TableCell>
                               <Badge
                                 variant="outline"
-                                className={`text-[10px] font-semibold ${isDark ? "border-slate-700 text-slate-400" : "border-slate-200 text-slate-500"}`}
+                                className={`text-[10px] font-semibold flex items-center gap-1 w-fit ${getTypeBadgeStyle(user.type, isDark)}`}
                               >
+                                <span className={`w-1.5 h-1.5 rounded-full inline-block ${getTypeDotColor(user.type)}`} />
                                 {user.type || "Regular"}
                               </Badge>
                             </TableCell>
