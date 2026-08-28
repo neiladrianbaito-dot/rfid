@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, Bus } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -645,8 +645,8 @@ export default function UserManagementPage() {
                       <div className="relative h-full w-full flex flex-col justify-between p-5 sm:p-7">
                         {/* Header / logo badge */}
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-white/10 border-2 border-white/30 flex items-center justify-center flex-shrink-0">
-                            <Bus className="w-4 h-4 text-white/90" strokeWidth={2.5} />
+                          <div className="w-9 h-9 rounded-full bg-white/10 border-2 border-white/30 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
                           </div>
                           <span className="text-white font-bold tracking-wide text-sm sm:text-base uppercase">
                             Fare Collection System
@@ -693,8 +693,8 @@ export default function UserManagementPage() {
                           <li>• Tampering or unauthorized duplication is strictly prohibited.</li>
                         </ul>
                         <div className={`flex items-center gap-2 border-t pt-1.5 sm:pt-2 mt-1 ${isDark ? "border-slate-400/40" : "border-slate-300"}`}>
-                          <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0">
-                            <Bus className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" strokeWidth={2.5} />
+                          <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden">
+                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
                           </div>
                           <span className="text-[9px] sm:text-[11px] font-extrabold tracking-wide text-slate-900 uppercase">
                             Fare Collection System
