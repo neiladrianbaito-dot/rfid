@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Filter } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -282,9 +282,7 @@ export default function UserManagementPage() {
                   }`}
                 >
                   <span className="flex items-center gap-2">
-                    {typeFilter === "All" ? (
-                      <Filter className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                    ) : (
+                    {typeFilter !== "All" && (
                       <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(typeFilter)}`} />
                     )}
                     <SelectValue />
@@ -294,9 +292,7 @@ export default function UserManagementPage() {
                   {TYPE_FILTERS.map((t) => (
                     <SelectItem key={t} value={t} className="cursor-pointer">
                       <span className="flex items-center gap-2">
-                        {t === "All" ? (
-                          <Filter className="w-3 h-3" />
-                        ) : (
+                        {t !== "All" && (
                           <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(t)}`} />
                         )}
                         {t}
