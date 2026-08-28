@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2 } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -84,6 +84,22 @@ function getTypeDotColor(type: string | null | undefined) {
   }
 }
 
+// 🪪 Card preview theming — accent color + label color per type, matching the physical card design
+function getCardTheme(type: string | null | undefined) {
+  const t = (type || "Regular").toLowerCase();
+  switch (t) {
+    case "student":
+      return { accent: "#60a5fa", pattern: "#3b82f6", label: "STUDENT" };
+    case "senior":
+      return { accent: "#facc15", pattern: "#eab308", label: "SENIOR" };
+    case "pwd":
+      return { accent: "#34d399", pattern: "#10b981", label: "PWD" };
+    case "regular":
+    default:
+      return { accent: "#f87171", pattern: "#f97316", label: "REGULAR" };
+  }
+}
+
 // ✅ Small helper so the toast title shows a green check icon next to the text
 function SuccessTitle({ text }: { text: string }) {
   return (
@@ -100,6 +116,7 @@ export default function UserManagementPage() {
   const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>("All");
   const [editUser, setEditUser] = useState<any>(null);
   const [deleteUser, setDeleteUser] = useState<any>(null);
+  const [previewUser, setPreviewUser] = useState<any>(null);
   const [editForm, setEditForm] = useState({
     fullName: "",
     contactNumber: "",
@@ -442,6 +459,15 @@ export default function UserManagementPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
+                                  onClick={() => setPreviewUser(user)}
+                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-slate-400 hover:text-slate-200 hover:bg-slate-800" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`}
+                                  title="Preview card"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
                                   onClick={() => openEdit(user)}
                                   className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
                                   title="Edit user"
@@ -524,6 +550,107 @@ export default function UserManagementPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Card Preview Dialog */}
+      <Dialog open={!!previewUser} onOpenChange={(open) => !open && setPreviewUser(null)}>
+        <DialogContent className={`sm:max-w-lg [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
+              <CreditCard size={18} /> Card Preview
+            </DialogTitle>
+          </DialogHeader>
+
+          {previewUser && (() => {
+            const theme = getCardTheme(previewUser.type);
+            return (
+              <div className="py-2">
+                {/* Physical card mockup */}
+                <div
+                  className="relative w-full aspect-[1376/774] rounded-2xl overflow-hidden shadow-lg"
+                  style={{ backgroundColor: "#1e2260" }}
+                >
+                  {/* Decorative diagonal pattern, colored by card type */}
+                  <div
+                    className="absolute inset-0 opacity-90"
+                    style={{
+                      backgroundImage: `repeating-linear-gradient(135deg, ${theme.pattern}33 0px, ${theme.pattern}33 6px, transparent 6px, transparent 12px)`,
+                      maskImage: "linear-gradient(to left, black 0%, black 55%, transparent 85%)",
+                      WebkitMaskImage: "linear-gradient(to left, black 0%, black 55%, transparent 85%)",
+                    }}
+                  />
+
+                  <div className="relative h-full w-full flex flex-col justify-between p-5 sm:p-7">
+                    {/* Header */}
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-white/10 border border-white/30 flex items-center justify-center flex-shrink-0">
+                        <Radio className="w-4 h-4 text-white/80" />
+                      </div>
+                      <span className="text-white font-bold tracking-wide text-sm sm:text-base uppercase">
+                        Fare Collection System
+                      </span>
+                    </div>
+
+                    {/* Body */}
+                    <div className="space-y-1">
+                      <div
+                        className="font-mono font-extrabold text-2xl sm:text-3xl tracking-wide"
+                        style={{ color: theme.accent }}
+                      >
+                        {previewUser.cardUid}
+                      </div>
+                      <div className="text-white font-semibold text-base sm:text-lg">
+                        {previewUser.fullName}
+                      </div>
+                    </div>
+
+                    {/* Footer label */}
+                    <div
+                      className="font-extrabold text-lg sm:text-xl tracking-wide"
+                      style={{ color: theme.accent }}
+                    >
+                      {theme.label}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick facts below the card */}
+                <div className="grid grid-cols-2 gap-3 mt-5">
+                  <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                    <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Balance</span>
+                    <div className={`text-sm font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                      {formatPeso(previewUser.balance || 0)}
+                    </div>
+                  </div>
+                  <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                    <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</span>
+                    <div className={`text-sm font-semibold ${previewUser.status === "Active" ? (isDark ? "text-emerald-400" : "text-emerald-600") : (isDark ? "text-red-400" : "text-red-600")}`}>
+                      {previewUser.status}
+                    </div>
+                  </div>
+                  <div className={`rounded-lg border px-3 py-2 col-span-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                    <span className={`text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                      <LinkIcon size={10} /> Linked Account
+                    </span>
+                    <div className={`text-sm font-mono ${normalizeEmail(previewUser.email) ? (isDark ? "text-blue-400" : "text-blue-600") : (isDark ? "text-slate-500 italic" : "text-slate-400 italic")}`}>
+                      {normalizeEmail(previewUser.email) ?? "No account linked"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setPreviewUser(null)}
+              className={`text-xs font-medium cursor-pointer ${isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500"}`}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Dialog */}
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
