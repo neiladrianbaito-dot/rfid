@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, Bus } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -110,6 +110,42 @@ function SuccessTitle({ text }: { text: string }) {
   );
 }
 
+// 🪪 Staircase chevron pattern used on the physical card face, built to mirror
+// the printed card design (rows of nested arrows, descending left-to-right).
+function ChevronStaircase({ color }: { color: string }) {
+  const rows = 6;
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {Array.from({ length: rows }).map((_, i) => {
+        const offset = (rows - 1 - i) * 11; // % pushed in from the right per row
+        return (
+          <div
+            key={i}
+            className="absolute right-0 h-[15%] w-full"
+            style={{ top: `${i * (100 / rows)}%`, transform: `translateX(${offset}%)` }}
+          >
+            {/* dashed accent rule on top of each step */}
+            <div
+              className="absolute top-0 left-0 right-0 h-[2px]"
+              style={{
+                backgroundImage: `repeating-linear-gradient(90deg, ${color} 0 10px, transparent 10px 16px)`,
+              }}
+            />
+            {/* the chevron teeth themselves */}
+            <div
+              className="absolute inset-x-0 bottom-0 h-[70%] opacity-80"
+              style={{
+                backgroundImage: `repeating-linear-gradient(135deg, ${color}55 0px, ${color}55 7px, transparent 7px, transparent 14px), repeating-linear-gradient(45deg, ${color}55 0px, ${color}55 7px, transparent 7px, transparent 14px)`,
+                backgroundSize: "28px 100%",
+              }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function UserManagementPage() {
   const { isDark } = useTheme();
   const [search, setSearch] = useState("");
@@ -117,6 +153,7 @@ export default function UserManagementPage() {
   const [editUser, setEditUser] = useState<any>(null);
   const [deleteUser, setDeleteUser] = useState<any>(null);
   const [previewUser, setPreviewUser] = useState<any>(null);
+  const [previewFlipped, setPreviewFlipped] = useState(false);
   const [editForm, setEditForm] = useState({
     fullName: "",
     contactNumber: "",
@@ -245,6 +282,23 @@ export default function UserManagementPage() {
           50% { opacity: 0.2; }
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+
+        .card-flip-scene { perspective: 1600px; }
+        .card-flip-inner {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+          transform-style: preserve-3d;
+        }
+        .card-flip-inner.is-flipped { transform: rotateY(180deg); }
+        .card-face {
+          position: absolute;
+          inset: 0;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+        }
+        .card-face-back { transform: rotateY(180deg); }
       `}</style>
 
       {/* Header */}
@@ -459,7 +513,7 @@ export default function UserManagementPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => setPreviewUser(user)}
+                                  onClick={() => { setPreviewFlipped(false); setPreviewUser(user); }}
                                   className={`h-8 w-8 cursor-pointer ${isDark ? "text-slate-400 hover:text-slate-200 hover:bg-slate-800" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`}
                                   title="Preview card"
                                 >
@@ -551,12 +605,23 @@ export default function UserManagementPage() {
         </CardContent>
       </Card>
 
-      {/* Card Preview Dialog */}
+      {/* Card Preview Dialog — flippable front/back, styled to match the printed card */}
       <Dialog open={!!previewUser} onOpenChange={(open) => !open && setPreviewUser(null)}>
         <DialogContent className={`sm:max-w-lg [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
           <DialogHeader>
-            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
-              <CreditCard size={18} /> Card Preview
+            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center justify-between gap-2 text-blue-500 pr-6">
+              <span className="flex items-center gap-2">
+                <CreditCard size={18} /> Card Preview
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setPreviewFlipped((f) => !f)}
+                className={`h-7 px-2.5 text-[11px] font-semibold normal-case cursor-pointer ${isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"}`}
+              >
+                <RotateCw className="w-3 h-3 mr-1" />
+                Flip to {previewFlipped ? "front" : "back"}
+              </Button>
             </DialogTitle>
           </DialogHeader>
 
@@ -564,54 +629,84 @@ export default function UserManagementPage() {
             const theme = getCardTheme(previewUser.type);
             return (
               <div className="py-2">
-                {/* Physical card mockup */}
+                {/* Physical card mockup — click to flip, same as the "Flip" button */}
                 <div
-                  className="relative w-full aspect-[1376/774] rounded-2xl overflow-hidden shadow-lg"
-                  style={{ backgroundColor: "#1e2260" }}
+                  className="card-flip-scene relative w-full aspect-[1376/774] cursor-pointer"
+                  onClick={() => setPreviewFlipped((f) => !f)}
                 >
-                  {/* Decorative diagonal pattern, colored by card type */}
-                  <div
-                    className="absolute inset-0 opacity-90"
-                    style={{
-                      backgroundImage: `repeating-linear-gradient(135deg, ${theme.pattern}33 0px, ${theme.pattern}33 6px, transparent 6px, transparent 12px)`,
-                      maskImage: "linear-gradient(to left, black 0%, black 55%, transparent 85%)",
-                      WebkitMaskImage: "linear-gradient(to left, black 0%, black 55%, transparent 85%)",
-                    }}
-                  />
-
-                  <div className="relative h-full w-full flex flex-col justify-between p-5 sm:p-7">
-                    {/* Header */}
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-white/10 border border-white/30 flex items-center justify-center flex-shrink-0">
-                        <Radio className="w-4 h-4 text-white/80" />
-                      </div>
-                      <span className="text-white font-bold tracking-wide text-sm sm:text-base uppercase">
-                        Fare Collection System
-                      </span>
-                    </div>
-
-                    {/* Body */}
-                    <div className="space-y-1">
-                      <div
-                        className="font-mono font-extrabold text-2xl sm:text-3xl tracking-wide"
-                        style={{ color: theme.accent }}
-                      >
-                        {previewUser.cardUid}
-                      </div>
-                      <div className="text-white font-semibold text-base sm:text-lg">
-                        {previewUser.fullName}
-                      </div>
-                    </div>
-
-                    {/* Footer label */}
+                  <div className={`card-flip-inner ${previewFlipped ? "is-flipped" : ""}`}>
+                    {/* ---- FRONT FACE ---- */}
                     <div
-                      className="font-extrabold text-lg sm:text-xl tracking-wide"
-                      style={{ color: theme.accent }}
+                      className="card-face rounded-2xl overflow-hidden shadow-lg"
+                      style={{ backgroundColor: "#1b1f5c" }}
                     >
-                      {theme.label}
+                      <ChevronStaircase color={theme.pattern} />
+
+                      <div className="relative h-full w-full flex flex-col justify-between p-5 sm:p-7">
+                        {/* Header / logo badge */}
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-white/10 border-2 border-white/30 flex items-center justify-center flex-shrink-0">
+                            <Bus className="w-4 h-4 text-white/90" strokeWidth={2.5} />
+                          </div>
+                          <span className="text-white font-bold tracking-wide text-sm sm:text-base uppercase">
+                            Fare Collection System
+                          </span>
+                        </div>
+
+                        {/* Body */}
+                        <div className="space-y-1">
+                          <div
+                            className="font-mono font-extrabold text-2xl sm:text-3xl tracking-wide"
+                            style={{ color: "#5eead4" }}
+                          >
+                            {previewUser.cardUid}
+                          </div>
+                          <div className="text-white font-semibold text-base sm:text-lg">
+                            {previewUser.fullName}
+                          </div>
+                        </div>
+
+                        {/* Footer label */}
+                        <div
+                          className="font-extrabold text-lg sm:text-xl tracking-wide"
+                          style={{ color: theme.accent }}
+                        >
+                          {theme.label}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ---- BACK FACE ---- */}
+                    <div className="card-face card-face-back rounded-2xl overflow-hidden shadow-lg bg-[#eceae4] flex flex-col">
+                      <div className="h-[18%] bg-[#221f20] flex-shrink-0" />
+                      <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-6 py-2 sm:py-3">
+                        <div className="bg-white border-y border-slate-300 py-1.5 px-3 mb-2 sm:mb-3">
+                          <span className="text-[13px] sm:text-base font-extrabold text-slate-900">Terms and Condition</span>
+                        </div>
+                        <ul className="space-y-0.5 sm:space-y-1 text-[9px] sm:text-[11px] leading-tight text-slate-800 flex-1 min-h-0 overflow-hidden">
+                          <li>• Property of the Fare Collection System Operator.</li>
+                          <li>• Non-transferable and subject to transit system rules.</li>
+                          <li>• Positive balance required to pass through.</li>
+                          <li>• Non-refundable card issuance fee applies.</li>
+                          <li>• Operator is not responsible for lost or stolen cards.</li>
+                          <li>• Unused balances on unregistered cards are non-refundable.</li>
+                          <li>• Tampering or unauthorized duplication is strictly prohibited.</li>
+                        </ul>
+                        <div className={`flex items-center gap-2 border-t pt-1.5 sm:pt-2 mt-1 ${isDark ? "border-slate-400/40" : "border-slate-300"}`}>
+                          <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0">
+                            <Bus className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" strokeWidth={2.5} />
+                          </div>
+                          <span className="text-[9px] sm:text-[11px] font-extrabold tracking-wide text-slate-900 uppercase">
+                            Fare Collection System
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
+                <p className={`text-center text-[10px] mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  Tap the card to flip
+                </p>
 
                 {/* Quick facts below the card */}
                 <div className="grid grid-cols-2 gap-3 mt-5">
