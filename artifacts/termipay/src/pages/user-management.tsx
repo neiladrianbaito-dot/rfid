@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2 } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Filter } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,6 +31,8 @@ import {
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 
 const PAGE_SIZE = 10;
+
+const TYPE_FILTERS = ["All", "Regular", "Student", "Senior", "PWD"] as const;
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -95,6 +97,7 @@ function SuccessTitle({ text }: { text: string }) {
 export default function UserManagementPage() {
   const { isDark } = useTheme();
   const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>("All");
   const [editUser, setEditUser] = useState<any>(null);
   const [deleteUser, setDeleteUser] = useState<any>(null);
   const [editForm, setEditForm] = useState({
@@ -115,7 +118,7 @@ export default function UserManagementPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search]);
+  }, [search, typeFilter]);
 
   const { data: users, isLoading, refetch: refetchUsers } = useListUsers(
     search ? { search } : undefined,
@@ -132,10 +135,18 @@ export default function UserManagementPage() {
 
   const userList = Array.isArray(users) ? users : [];
 
-  const totalPages = Math.max(1, Math.ceil(userList.length / PAGE_SIZE));
+  // Apply the type filter on top of whatever the search endpoint returned
+  const filteredList =
+    typeFilter === "All"
+      ? userList
+      : userList.filter(
+          (u: any) => (u.type || "Regular").toLowerCase() === typeFilter.toLowerCase()
+        );
+
+  const totalPages = Math.max(1, Math.ceil(filteredList.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const startIndex = (safePage - 1) * PAGE_SIZE;
-  const paginatedList = userList.slice(startIndex, startIndex + PAGE_SIZE);
+  const paginatedList = filteredList.slice(startIndex, startIndex + PAGE_SIZE);
 
   useEffect(() => {
     if (userList.length === 0) return;
@@ -261,18 +272,53 @@ export default function UserManagementPage() {
                 Authorized Card Holders
               </CardTitle>
             </div>
-            <div className="relative w-full sm:w-80">
-              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-              <Input
-                placeholder="Search UID or name..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className={`pl-10 font-medium text-sm h-10 focus-visible:ring-blue-500 ${
-                  isDark
-                    ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
-                    : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
-                }`}
-              />
+
+            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto items-stretch sm:items-center">
+              {/* Type filter */}
+              <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as (typeof TYPE_FILTERS)[number])}>
+                <SelectTrigger
+                  className={`h-10 w-full sm:w-40 text-sm font-medium cursor-pointer ${
+                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    {typeFilter === "All" ? (
+                      <Filter className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+                    ) : (
+                      <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(typeFilter)}`} />
+                    )}
+                    <SelectValue />
+                  </span>
+                </SelectTrigger>
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+                  {TYPE_FILTERS.map((t) => (
+                    <SelectItem key={t} value={t} className="cursor-pointer">
+                      <span className="flex items-center gap-2">
+                        {t === "All" ? (
+                          <Filter className="w-3 h-3" />
+                        ) : (
+                          <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(t)}`} />
+                        )}
+                        {t}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="relative w-full sm:w-80">
+                <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+                <Input
+                  placeholder="Search UID or name..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className={`pl-10 font-medium text-sm h-10 focus-visible:ring-blue-500 ${
+                    isDark
+                      ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
+                      : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
+                  }`}
+                />
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -439,10 +485,10 @@ export default function UserManagementPage() {
                 <span className={`text-xs font-mono uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                   Showing{" "}
                   <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                    {userList.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, userList.length)}
+                    {filteredList.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, filteredList.length)}
                   </span>{" "}
                   of{" "}
-                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{userList.length}</span>{" "}
+                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{filteredList.length}</span>{" "}
                   users
                 </span>
                 <div className="flex items-center gap-2">
