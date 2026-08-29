@@ -338,7 +338,7 @@ export default function FareMatrixPage() {
       </div>
 
       <div
-        className={`rounded-xl border p-4 sm:p-5 flex items-center gap-4 ${
+        className={`rounded-xl border p-4 sm:p-5 flex items-center justify-between gap-4 ${
           activeRoute
             ? isDark ? "border-emerald-900 bg-emerald-950/30" : "border-emerald-200 bg-emerald-50"
             : isDark ? "border-amber-900 bg-amber-950/30" : "border-amber-200 bg-amber-50"
@@ -376,6 +376,20 @@ export default function FareMatrixPage() {
             )}
           </div>
         </div>
+
+        {/* RFID Reader badge — placed at the end (right side) of the active route card */}
+        {activeRoute && (
+          <div
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
+              isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
+            }`}
+          >
+            <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
+            <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
+              Reader: RFID-001
+            </span>
+          </div>
+        )}
       </div>
 
       <Card className={`h-full shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
