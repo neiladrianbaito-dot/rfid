@@ -18,6 +18,7 @@ import {
   Clock,
   Sun,
   Moon,
+  History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
@@ -83,6 +84,7 @@ const navItems = [
   { path: "/transactions", label: "Transaction Logs", icon: ArrowLeftRight },
   { path: "/users", label: "User Management", icon: Users },
   { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
+  { path: "/audit-logs", label: "Audit Logs", icon: History },
   { path: "/reports", label: "Reports", icon: FileBarChart },
 ];
 
