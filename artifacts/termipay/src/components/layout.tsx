@@ -19,6 +19,7 @@ import {
   Sun,
   Moon,
   History,
+  Wifi,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
@@ -81,6 +82,7 @@ async function logAuditEvent(action: string, details: Record<string, unknown> = 
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/card-registration", label: "Card Registration", icon: CreditCard },
+  { path: "/device-reader", label: "Device Reader", icon: Wifi },
   { path: "/transactions", label: "Transaction Logs", icon: ArrowLeftRight },
   { path: "/users", label: "User Management", icon: Users },
   { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
