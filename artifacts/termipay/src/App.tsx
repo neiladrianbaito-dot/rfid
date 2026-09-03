@@ -107,11 +107,13 @@ function AppRouter() {
       <Route path="/paymongo-topup" component={PaymongoTopup} />
       <Route path="/user-dashboard" component={PaymongoRoute} />
       <Route path="/reports/preview" component={ReportPreviewPage} />
-      <Route path="/audit-logs" component={AuditLogs} />
 
       {/* PROTECTED ROUTES */}
       <Route path="/">
         <ProtectedRoute component={DashboardPage} />
+      </Route>
+      <Route path="/audit-logs">
+        <ProtectedRoute component={AuditLogs} />
       </Route>
       <Route path="/card-registration">
         <ProtectedRoute component={CardRegistrationPage} />
@@ -146,7 +148,7 @@ const queryClient = new QueryClient({
 });
 
 function App() {
-  // Removed useEffect — setup already done at module level abovey
+  // Removed useEffect — setup already done at module level above
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
