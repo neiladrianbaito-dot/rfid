@@ -20,6 +20,8 @@ import ReportsPage from "@/pages/reports";
 import ReportPreviewPage from "@/pages/report-preview";
 import Layout from "@/components/layout";
 import { useAuth } from "@/hooks/use-auth";
+import AuditLogs from "@/pages/AuditLogs";
+
 
 const USER_AUTH_TOKEN_KEY = "termipay_user_auth_token";
 
@@ -105,6 +107,7 @@ function AppRouter() {
       <Route path="/paymongo-topup" component={PaymongoTopup} />
       <Route path="/user-dashboard" component={PaymongoRoute} />
       <Route path="/reports/preview" component={ReportPreviewPage} />
+      <Route path="/audit-logs" component={AuditLogs} />
 
       {/* PROTECTED ROUTES */}
       <Route path="/">
