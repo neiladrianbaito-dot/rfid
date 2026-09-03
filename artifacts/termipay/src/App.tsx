@@ -20,8 +20,6 @@ import ReportsPage from "@/pages/reports";
 import ReportPreviewPage from "@/pages/report-preview";
 import Layout from "@/components/layout";
 import { useAuth } from "@/hooks/use-auth";
-import AuditLogs from "@/pages/AuditLogs";
-
 
 const USER_AUTH_TOKEN_KEY = "termipay_user_auth_token";
 
@@ -112,9 +110,6 @@ function AppRouter() {
       <Route path="/">
         <ProtectedRoute component={DashboardPage} />
       </Route>
-      <Route path="/audit-logs">
-        <ProtectedRoute component={AuditLogs} />
-      </Route>
       <Route path="/card-registration">
         <ProtectedRoute component={CardRegistrationPage} />
       </Route>
@@ -148,7 +143,7 @@ const queryClient = new QueryClient({
 });
 
 function App() {
-  // Removed useEffect — setup already done at module level above
+  // Removed useEffect — setup already done at module level abovey
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>

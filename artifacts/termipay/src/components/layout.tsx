@@ -18,7 +18,6 @@ import {
   Clock,
   Sun,
   Moon,
-  History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
@@ -44,47 +43,12 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string {
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
 }
 
-/**
- * Writes a row to the `audit_logs` table in Supabase.
- *
- * Assumed schema (adjust to match your actual table):
- *   id          uuid / bigint, primary key, default
- *   user_id     uuid, nullable
- *   user_email  text, nullable
- *   action      text
- *   details     jsonb
- *   created_at  timestamptz, default now()
- *
- * Failures are swallowed (logged to console only) so a logging problem
- * never blocks the user-facing action that triggered it.
- */
-async function logAuditEvent(action: string, details: Record<string, unknown> = {}) {
-  try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const currentUser = sessionData.session?.user;
-
-    const { error } = await supabase.from("audit_logs").insert({
-      user_id: currentUser?.id ?? null,
-      user_email: currentUser?.email ?? null,
-      action,
-      details,
-    });
-
-    if (error) {
-      console.error("Audit log insert failed:", error.message);
-    }
-  } catch (err) {
-    console.error("Audit log insert threw:", err);
-  }
-}
-
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/card-registration", label: "Card Registration", icon: CreditCard },
   { path: "/transactions", label: "Transaction Logs", icon: ArrowLeftRight },
   { path: "/users", label: "User Management", icon: Users },
   { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
-  { path: "/audit-logs", label: "Audit Logs", icon: History },
   { path: "/reports", label: "Reports", icon: FileBarChart },
 ];
 
@@ -118,7 +82,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
-  const [isLoggingOutLocal, setIsLoggingOutLocal] = useState(false);
 
   const [isUpdating, setIsUpdating] = useState(false);
   const [formData, setFormData] = useState({
@@ -138,12 +101,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, [profileModalOpen, user]);
 
   const handleSaveChanges = async () => {
-    const trimmedName = formData.name.trim();
-    const trimmedCurrentPassword = formData.currentPassword.trim();
-    const trimmedNewPassword = formData.newPassword.trim();
-
-    const wantsPasswordChange = trimmedNewPassword.length > 0;
-    const wantsNameChange = trimmedName !== (user?.name || "").trim();
+    const wantsPasswordChange = formData.newPassword.trim().length > 0;
+    const wantsNameChange = formData.name.trim() !== (user?.name || "").trim();
 
     if (!wantsNameChange && !wantsPasswordChange) {
       toast({
@@ -154,7 +113,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (wantsPasswordChange && !trimmedCurrentPassword) {
+    if (wantsPasswordChange && !formData.currentPassword.trim()) {
       toast({
         title: "Security Check",
         description: "Please enter your Current Password to authorize the password change.",
@@ -163,7 +122,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (wantsPasswordChange && trimmedNewPassword === trimmedCurrentPassword) {
+    if (wantsPasswordChange && formData.newPassword.trim() === formData.currentPassword.trim()) {
       toast({
         title: "Invalid Password",
         description: "Your new password must be different from your current password.",
@@ -184,7 +143,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           }
           const { error: verifyError } = await supabase.auth.signInWithPassword({
             email: supabaseSession.user.email,
-            password: trimmedCurrentPassword,
+            password: formData.currentPassword,
           });
           if (verifyError) throw new Error("Incorrect current password. Please try again.");
         }
@@ -193,24 +152,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         if (wantsNameChange) {
           payload.data = {
-            full_name: trimmedName,
-            name: trimmedName,
+            full_name: formData.name.trim(),
+            name: formData.name.trim(),
           };
         }
 
         if (wantsPasswordChange) {
-          payload.password = trimmedNewPassword;
+          payload.password = formData.newPassword.trim();
         }
 
         const { error: updateError } = await supabase.auth.updateUser(payload);
         if (updateError) throw new Error(updateError.message);
-
-        await logAuditEvent("PROFILE_UPDATE", {
-          name_changed: wantsNameChange,
-          password_changed: wantsPasswordChange,
-          previous_name: wantsNameChange ? user?.name ?? null : undefined,
-          new_name: wantsNameChange ? trimmedName : undefined,
-        });
 
         await refetchUser();
         toast({ title: "Success", description: "Profile updated successfully." });
@@ -227,25 +179,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({
-          name: trimmedName,
-          currentPassword: trimmedCurrentPassword,
-          newPassword: trimmedNewPassword,
-        }),
+        body: JSON.stringify(formData),
       });
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to update profile");
 
       if (data?.token) window.localStorage.setItem("termipay_auth_token", data.token);
-
-      await logAuditEvent("PROFILE_UPDATE", {
-        name_changed: wantsNameChange,
-        password_changed: wantsPasswordChange,
-        previous_name: wantsNameChange ? user?.name ?? null : undefined,
-        new_name: wantsNameChange ? trimmedName : undefined,
-      });
-
       await refetchUser();
       setProfileModalOpen(false);
       toast({ title: "Success", description: "Profile updated successfully." });
@@ -253,17 +193,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       toast({ title: "Update Failed", description: error.message, variant: "destructive" });
     } finally {
       setIsUpdating(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    setIsLoggingOutLocal(true);
-    try {
-      await logAuditEvent("LOGOUT");
-    } finally {
-      // Always proceed with logout even if the audit write failed.
-      logout();
-      setIsLoggingOutLocal(false);
     }
   };
 
@@ -351,8 +280,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className={`p-4 border-t transition-colors ${isDark ? "border-slate-800" : "border-slate-200"}`}>
             <Button
               variant="ghost"
-              onClick={handleLogout}
-              disabled={isLoggingOut || isLoggingOutLocal}
+              onClick={logout}
+              disabled={isLoggingOut}
               className={`w-full justify-start gap-3 rounded-lg text-sm font-medium ${
                 isDark
                   ? "text-slate-400 hover:text-red-400 hover:bg-red-950/30"
