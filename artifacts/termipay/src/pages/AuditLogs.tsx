@@ -9,7 +9,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Search, LogIn, LogOut, Plus, Pencil, Trash2, History } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Search, LogIn, LogOut, Plus, Pencil, Trash2, History, Activity } from "lucide-react";
 
 type AuditLog = {
   id: string;
@@ -67,7 +77,7 @@ export default function AuditLogs() {
 
     fetchLogs();
 
-    // Realtime: bagong logs, instant lumalabas nang walang refresh
+    // Realtime: new logs stream in instantly without a refresh
     const channel = supabase
       .channel("audit_logs_realtime")
       .on(
@@ -100,22 +110,35 @@ export default function AuditLogs() {
   }, [logs, actionFilter, search]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className={`p-2.5 rounded-xl ${isDark ? "bg-blue-950/40" : "bg-blue-50"}`}>
-          <History className="text-blue-500" size={20} />
+    <div
+      className={`space-y-8 h-full flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}
+      style={{ overflowX: "hidden", maxWidth: "100%", boxSizing: "border-box" }}
+      data-testid="audit-logs-page"
+    >
+      {/* ══ HEADER ══ */}
+      <div className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+        <div className="flex items-center gap-3">
+          <div className={`p-2.5 rounded-xl ${isDark ? "bg-blue-950/40" : "bg-blue-50"}`}>
+            <History className="text-blue-500" size={22} />
+          </div>
+          <div>
+            <h2 className={`text-2xl font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
+              Audit Logs
+            </h2>
+            <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Login, create, update, and delete activity across the system
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className={`text-lg font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
-            Audit Logs
-          </h1>
-          <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-            Login, create, update, and delete activity across the system
-          </p>
+        <div className={`hidden lg:flex items-center gap-2 px-4 py-2 border rounded-lg ${isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"}`}>
+          <Activity className="text-blue-500" size={16} />
+          <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>
+            Real-time Stream Active
+          </span>
         </div>
       </div>
 
-      {/* Filters */}
+      {/* ══ FILTERS ══ */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search
@@ -145,42 +168,43 @@ export default function AuditLogs() {
         </Select>
       </div>
 
-      {/* Table */}
-      <div
-        className={`rounded-xl border overflow-hidden ${
-          isDark ? "border-slate-800 bg-slate-950" : "border-slate-200 bg-white"
-        }`}
-      >
-        {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-          </div>
-        ) : error ? (
-          <div className="p-6 text-sm text-red-500">
-            Failed to load audit logs: {error}
-          </div>
-        ) : filteredLogs.length === 0 ? (
-          <div className={`p-10 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-            No audit log entries found.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr
-                  className={`border-b text-left text-[11px] font-semibold uppercase tracking-wide ${
-                    isDark ? "border-slate-800 text-slate-500" : "border-slate-200 text-slate-400"
-                  }`}
-                >
-                  <th className="px-4 py-3">Date &amp; Time</th>
-                  <th className="px-4 py-3">Action</th>
-                  <th className="px-4 py-3">User</th>
-                  <th className="px-4 py-3">Entity</th>
-                  <th className="px-4 py-3">IP Address</th>
-                  <th className="px-4 py-3">Details</th>
-                </tr>
-              </thead>
-              <tbody>
+      {/* ══ TABLE ══ */}
+      <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
+        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
+          <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            <History size={14} className="text-blue-500" />
+            Activity Log
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex-1 overflow-y-auto overflow-x-auto p-0 px-6 pb-6 mt-6">
+          {isLoading ? (
+            <div className="space-y-4">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+              ))}
+            </div>
+          ) : error ? (
+            <div className="py-10 text-center text-sm text-red-500">
+              Failed to load audit logs: {error}
+            </div>
+          ) : filteredLogs.length === 0 ? (
+            <div className={`py-10 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              No audit log entries found.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
+                <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date &amp; Time</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Action</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>User</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Entity</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>IP Address</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Details</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {filteredLogs.map((log) => {
                   const style = ACTION_STYLES[log.action] || {
                     icon: History,
@@ -188,13 +212,11 @@ export default function AuditLogs() {
                   };
                   const Icon = style.icon;
                   return (
-                    <tr
+                    <TableRow
                       key={log.id}
-                      className={`border-b last:border-0 ${
-                        isDark ? "border-slate-900 hover:bg-slate-900/50" : "border-slate-100 hover:bg-slate-50"
-                      }`}
+                      className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
                     >
-                      <td className={`px-4 py-3 whitespace-nowrap font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      <TableCell className={`whitespace-nowrap font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         {new Date(log.created_at).toLocaleString("en-US", {
                           month: "short",
                           day: "numeric",
@@ -202,37 +224,37 @@ export default function AuditLogs() {
                           minute: "2-digit",
                           second: "2-digit",
                         })}
-                      </td>
-                      <td className="px-4 py-3">
+                      </TableCell>
+                      <TableCell>
                         <span
                           className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ${style.className}`}
                         >
                           <Icon size={12} />
                           {log.action}
                         </span>
-                      </td>
-                      <td className={`px-4 py-3 ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                      </TableCell>
+                      <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                         {log.actor_username || "—"}
-                      </td>
-                      <td className={`px-4 py-3 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      </TableCell>
+                      <TableCell className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         {log.entity ? `${log.entity}${log.entity_id ? ` #${log.entity_id}` : ""}` : "—"}
-                      </td>
-                      <td className={`px-4 py-3 font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      </TableCell>
+                      <TableCell className={`font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         {log.ip_address || "—"}
-                      </td>
-                      <td className={`px-4 py-3 text-xs max-w-xs truncate ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                      </TableCell>
+                      <TableCell className={`text-xs max-w-xs truncate ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                         {log.details && Object.keys(log.details).length > 0
                           ? JSON.stringify(log.details)
                           : "—"}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
