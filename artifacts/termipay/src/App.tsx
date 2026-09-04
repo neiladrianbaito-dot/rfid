@@ -16,6 +16,7 @@ import CardRegistrationPage from "@/pages/card-registration";
 import TransactionsPage from "@/pages/transactions";
 import UserManagementPage from "@/pages/user-management";
 import FareMatrixPage from "@/pages/fare-matrix";
+import DeviceReaderPage from "@/pages/DeviceReaderPage";
 import AuditLogsPage from "@/pages/audit-logs";
 import ReportsPage from "@/pages/reports";
 import ReportPreviewPage from "@/pages/report-preview";
@@ -122,6 +123,9 @@ function AppRouter() {
       </Route>
       <Route path="/fare-matrix">
         <ProtectedRoute component={FareMatrixPage} />
+      </Route>
+      <Route path="/device-reader">
+        <ProtectedRoute component={DeviceReaderPage} />
       </Route>
       <Route path="/audit-logs">
         <ProtectedRoute component={AuditLogsPage} />
