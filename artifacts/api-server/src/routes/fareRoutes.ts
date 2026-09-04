@@ -11,8 +11,6 @@ import {
   ToggleRouteParams,
   ToggleRouteResponse,
 } from "@workspace/api-zod";
-import { verifyAdminToken } from "../lib/admin-token";
-import { logAudit } from "../lib/audit-logger";
 
 const router: IRouter = Router();
 
@@ -21,24 +19,6 @@ function formatRoute(r: typeof fareRoutesTable.$inferSelect) {
     ...r,
     fareAmount: Number(r.fareAmount),
   };
-}
-
-// ── Who's making this request? ──────────────────────────────────────────────
-// Same pattern as users.ts — best-effort actor resolution for the audit
-// trail. Falls back to "unknown" rather than blocking the request.
-
-function getBearerToken(authorization?: string): string | null {
-  if (!authorization) return null;
-  const [scheme, token] = authorization.split(" ");
-  if (scheme?.toLowerCase() !== "bearer" || !token) return null;
-  return token;
-}
-
-function getActorFromRequest(authorization?: string): string {
-  const token = getBearerToken(authorization);
-  if (!token) return "unknown";
-  const adminUser = verifyAdminToken(token);
-  return adminUser?.username ?? "unknown";
 }
 
 router.get("/routes", async (_req, res): Promise<void> => {
@@ -62,17 +42,6 @@ router.post("/routes", async (req, res): Promise<void> => {
       isActive: true,
     })
     .returning();
-
-  try {
-    await logAudit({
-      user: getActorFromRequest(req.headers.authorization),
-      action: "CREATE",
-      entity: "Fare Route",
-      details: `created route: ${route.origin} → ${route.destination} (₱${Number(route.fareAmount)})`,
-    });
-  } catch (auditError) {
-    console.error("[POST /routes] audit log failed:", auditError);
-  }
 
   res.status(201).json(formatRoute(route));
 });
@@ -114,17 +83,6 @@ router.patch("/routes/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  try {
-    await logAudit({
-      user: getActorFromRequest(req.headers.authorization),
-      action: "UPDATE",
-      entity: "Fare Route",
-      details: `updated route: ${route.origin} → ${route.destination} — fields changed: ${Object.keys(updateData).join(", ")}`,
-    });
-  } catch (auditError) {
-    console.error("[PATCH /routes/:id] audit log failed:", auditError);
-  }
-
   res.json(UpdateRouteResponse.parse(formatRoute(route)));
 });
 
@@ -143,17 +101,6 @@ router.delete("/routes/:id", async (req, res): Promise<void> => {
   if (!route) {
     res.status(404).json({ error: "Route not found" });
     return;
-  }
-
-  try {
-    await logAudit({
-      user: getActorFromRequest(req.headers.authorization),
-      action: "DELETE",
-      entity: "Fare Route",
-      details: `deleted route: ${route.origin} → ${route.destination} (₱${Number(route.fareAmount)})`,
-    });
-  } catch (auditError) {
-    console.error("[DELETE /routes/:id] audit log failed:", auditError);
   }
 
   res.sendStatus(204);
@@ -190,19 +137,6 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
     .set({ isActive: willBeActive })
     .where(eq(fareRoutesTable.id, params.data.id))
     .returning();
-
-  try {
-    await logAudit({
-      user: getActorFromRequest(req.headers.authorization),
-      action: "UPDATE",
-      entity: "Fare Route",
-      details: willBeActive
-        ? `activated route: ${route.origin} → ${route.destination} (deactivated all others)`
-        : `deactivated route: ${route.origin} → ${route.destination}`,
-    });
-  } catch (auditError) {
-    console.error("[PATCH /routes/:id/toggle] audit log failed:", auditError);
-  }
 
   res.json(ToggleRouteResponse.parse(formatRoute(route)));
 });
