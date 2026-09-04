@@ -5,6 +5,7 @@ import { LoginBody, GetMeResponse } from "@workspace/api-zod";
 import { createAdminToken, verifyAdminToken } from "../lib/admin-token";
 import { createUserToken, verifyUserToken } from "../lib/user-token";
 import { signInSupabaseWithPassword } from "../lib/supabase";
+import { logAudit } from "../lib/audit-logger";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
 const router: IRouter = Router();
@@ -188,6 +189,13 @@ router.post("/auth/signup", async (req, res): Promise<void> => {
       return;
     }
 
+    await logAudit({
+      user: email,
+      action: "CREATE",
+      entity: "User",
+      details: `${fullName} (${email}) signed up`,
+    });
+
     res.status(201).json({ success: true, message: "Signup successful. You can now sign in." });
   } catch (error) {
     console.error("Signup error:", error);
@@ -292,6 +300,13 @@ router.post("/auth/user-signin", async (req, res): Promise<void> => {
       });
       return;
     }
+
+    await logAudit({
+      user: user.email,
+      action: "LOGIN",
+      entity: "User",
+      details: `${user.email} logged in`,
+    });
 
     res.json({
       success: true,
@@ -602,6 +617,13 @@ router.post("/auth/user/link-card", async (req, res): Promise<void> => {
       where id = ${currentUser.id}
     `);
 
+    await logAudit({
+      user: currentUser.email ?? String(currentUser.id),
+      action: "UPDATE",
+      entity: "User",
+      details: `${currentUser.email ?? currentUser.id} linked card ${cardUid}`,
+    });
+
     res.json({ success: true, linkedCardUid: cardUid });
   } catch (error) {
     console.error("Link card error:", error);
@@ -705,6 +727,13 @@ router.post("/auth/user/change-password", async (req, res): Promise<void> => {
       where id = ${currentUser.id}
     `);
 
+    await logAudit({
+      user: currentUser.email ?? String(currentUser.id),
+      action: "UPDATE",
+      entity: "User",
+      details: `${currentUser.email ?? currentUser.id} changed their password`,
+    });
+
     res.json({ success: true, message: "Password changed successfully." });
   } catch (error) {
     console.error("Change password error:", error);
@@ -714,7 +743,16 @@ router.post("/auth/user/change-password", async (req, res): Promise<void> => {
 
 // ── USER LOGOUT ───────────────────────────────────────────────────────────────
 
-router.post("/auth/user/logout", (_req, res): void => {
+router.post("/auth/user/logout", async (req, res): Promise<void> => {
+  const currentUser = getUserFromAuthHeader(req.headers.authorization);
+  if (currentUser) {
+    await logAudit({
+      user: currentUser.email ?? String(currentUser.id),
+      action: "LOGOUT",
+      entity: "User",
+      details: `${currentUser.email ?? currentUser.id} logged out`,
+    });
+  }
   res.status(200).json({ success: true });
 });
 
@@ -763,6 +801,13 @@ router.post("/auth/login", async (req, res): Promise<void> => {
         ? supabaseUser.user_metadata.full_name
         : null) ||
       normalizedUsername;
+
+    await logAudit({
+      user: admin?.username ?? normalizedUsername,
+      action: "LOGIN",
+      entity: "Admin",
+      details: `${admin?.username ?? normalizedUsername} logged in`,
+    });
 
     res.json({
       success: true,
@@ -835,6 +880,15 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
       .set({ full_name: nextFullName, password_hash: nextPasswordHash })
       .where(eq(adminsTable.id, admin.id));
 
+    await logAudit({
+      user: admin.username,
+      action: "UPDATE",
+      entity: "Admin",
+      details: newPassword
+        ? `${admin.username} updated their profile and changed their password`
+        : `${admin.username} updated their profile`,
+    });
+
     res.json({
       success: true,
       message: "Profile updated successfully",
@@ -850,7 +904,17 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
 
 // ── ADMIN LOGOUT ──────────────────────────────────────────────────────────────
 
-router.post("/auth/logout", (_req, res): void => {
+router.post("/auth/logout", async (req, res): Promise<void> => {
+  const token = getBearerToken(req.headers.authorization);
+  const adminUser = token ? verifyAdminToken(token) : null;
+  if (adminUser) {
+    await logAudit({
+      user: adminUser.username,
+      action: "LOGOUT",
+      entity: "Admin",
+      details: `${adminUser.username} logged out`,
+    });
+  }
   res.status(200).json({ success: true });
 });
 
