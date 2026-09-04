@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -25,19 +25,11 @@ const PAGE_SIZE = 10;
 type AuditLog = {
   id: number;
   timestamp: string;
-  action: string;      // LOGIN, LOGOUT, CREATE, UPDATE, DELETE, RESTORE, EXPORT
-  entity: string;       // User, Scholars, Database, ...
-  details: string;      // free-text description, e.g. "admin updated scholar: ..."
+  user: string;          // username of whoever performed the action
+  action: string;        // LOGIN, LOGOUT, CREATE, UPDATE, DELETE, RESTORE, EXPORT
+  entity: string;        // User, Scholars, Database, ...
+  details: string;       // free-text description, e.g. "admin updated scholar: ..."
 };
-
-// ── Action → user extraction ────────────────────────────────────────────────
-// Details text is formatted like "<user> did something", so pull the actor
-// name off the front of the sentence for its own column.
-
-function extractActor(details: string): string {
-  const match = details.match(/^([a-zA-Z0-9_.]+)\s/);
-  return match ? match[1] : "—";
-}
 
 // ── Action badge styling ────────────────────────────────────────────────────
 
@@ -76,7 +68,7 @@ export default function AuditLogsPage() {
   const loadLogs = async () => {
     const { data, error } = await supabase
       .from("audit_logs")
-      .select("id, timestamp, action, entity, details")
+      .select("id, timestamp, user, action, entity, details")
       .order("timestamp", { ascending: false });
     if (!error && data) setLogs(data as AuditLog[]);
     setIsLoading(false);
@@ -98,22 +90,26 @@ export default function AuditLogsPage() {
   const entityOptions = Array.from(new Set(logs.map((l) => l.entity))).sort();
 
   // ── Filtering ────────────────────────────────────────────────────────────
-  const filteredList = logs.filter((log) => {
-    if (actionFilter !== "all" && log.action !== actionFilter) return false;
-    if (entityFilter !== "all" && log.entity !== entityFilter) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      const actor = extractActor(log.details).toLowerCase();
-      if (
-        !log.details.toLowerCase().includes(q) &&
-        !log.entity.toLowerCase().includes(q) &&
-        !actor.includes(q)
-      ) {
-        return false;
+  // useMemo is required here — without it this array gets a brand new
+  // reference on every render, which the useEffect below depends on,
+  // causing an infinite render loop (React error #185).
+  const filteredList = useMemo(() => {
+    return logs.filter((log) => {
+      if (actionFilter !== "all" && log.action !== actionFilter) return false;
+      if (entityFilter !== "all" && log.entity !== entityFilter) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        if (
+          !log.details.toLowerCase().includes(q) &&
+          !log.entity.toLowerCase().includes(q) &&
+          !log.user.toLowerCase().includes(q)
+        ) {
+          return false;
+        }
       }
-    }
-    return true;
-  });
+      return true;
+    });
+  }, [logs, actionFilter, entityFilter, search]);
 
   useEffect(() => { setPage(1); }, [search, actionFilter, entityFilter]);
 
@@ -267,7 +263,7 @@ export default function AuditLogsPage() {
                               {new Date(log.timestamp).toLocaleString()}
                             </TableCell>
                             <TableCell className="font-mono text-xs text-blue-500 font-semibold">
-                              {extractActor(log.details)}
+                              {log.user}
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${className}`}>
