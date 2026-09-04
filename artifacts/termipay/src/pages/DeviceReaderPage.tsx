@@ -13,16 +13,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTheme } from "@/hooks/use-theme";
 import {
   Search, ScanLine, ChevronLeft, ChevronRight, Zap,
-  Wifi, WifiOff, Wrench, HelpCircle, Plus, Loader2,
+  Wifi, WifiOff, Wrench, HelpCircle,
 } from "lucide-react";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
-import { useToast } from "@/hooks/use-toast";
 
 const PAGE_SIZE = 10;
 
@@ -57,7 +51,6 @@ function statusMeta(status: string, isDark: boolean) {
 
 export default function DeviceReaderPage() {
   const { isDark } = useTheme();
-  const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [locationFilter, setLocationFilter] = useState<string>("all");
@@ -68,17 +61,6 @@ export default function DeviceReaderPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [newRowId, setNewRowId] = useState<number | null>(null);
   const prevTopIdRef = useRef<number | null>(null);
-
-  // ── Add Device dialog state ──────────────────────────────────────────────
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [newDevice, setNewDevice] = useState({
-    device_id: "",
-    name: "",
-    location: "",
-    ip_address: "",
-    firmware_version: "",
-  });
 
   // ── Fetch devices from Supabase, with realtime updates ─────────────────
   const loadDevices = async () => {
@@ -100,48 +82,6 @@ export default function DeviceReaderPage() {
   }, []);
 
   useRealtimeRefetch(["devices"], () => { loadDevices(); });
-
-  // ── Update status (dropdown sa row) ─────────────────────────────────────────
-  const handleStatusChange = async (deviceId: number, newStatus: string) => {
-    const { error } = await supabase
-      .from("devices")
-      .update({ status: newStatus })
-      .eq("id", deviceId);
-
-    if (error) {
-      toast({ title: "Update Failed", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Status Updated", description: `Device set to ${newStatus}.` });
-    }
-  };
-
-  // ── Create new device ────────────────────────────────────────────────────────
-  const handleAddDevice = async () => {
-    if (!newDevice.device_id.trim() || !newDevice.name.trim() || !newDevice.location.trim()) {
-      toast({ title: "Missing Fields", description: "Device ID, name, and location are required.", variant: "destructive" });
-      return;
-    }
-
-    setIsSaving(true);
-    const { error } = await supabase.from("devices").insert({
-      device_id: newDevice.device_id.trim(),
-      name: newDevice.name.trim(),
-      location: newDevice.location.trim(),
-      ip_address: newDevice.ip_address.trim() || null,
-      firmware_version: newDevice.firmware_version.trim() || null,
-      status: "OFFLINE",
-    });
-    setIsSaving(false);
-
-    if (error) {
-      toast({ title: "Failed to Add Device", description: error.message, variant: "destructive" });
-      return;
-    }
-
-    toast({ title: "Device Added", description: `${newDevice.name} has been registered.` });
-    setNewDevice({ device_id: "", name: "", location: "", ip_address: "", firmware_version: "" });
-    setAddDialogOpen(false);
-  };
 
   // ── Derive filter option lists from the data itself ────────────────────────
   const statusOptions = Array.from(new Set(devices.map((d) => d.status))).sort();
@@ -212,77 +152,7 @@ export default function DeviceReaderPage() {
             Monitor registered card readers and their connection status
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white font-medium gap-2">
-                <Plus size={14} />
-                Add Device
-              </Button>
-            </DialogTrigger>
-            <DialogContent className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}>
-              <DialogHeader>
-                <DialogTitle className={isDark ? "text-white" : "text-slate-900"}>Register New Device</DialogTitle>
-                <VisuallyHidden>
-                  <DialogDescription>Add a new device reader to the system.</DialogDescription>
-                </VisuallyHidden>
-              </DialogHeader>
-              <div className="grid gap-4 py-2">
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide">Device ID</Label>
-                  <Input
-                    placeholder="e.g. RDR-004"
-                    value={newDevice.device_id}
-                    onChange={(e) => setNewDevice({ ...newDevice, device_id: e.target.value })}
-                    className={isDark ? "bg-slate-900 border-slate-800 text-white" : ""}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide">Name</Label>
-                  <Input
-                    placeholder="e.g. Terminal 2 - Gate C"
-                    value={newDevice.name}
-                    onChange={(e) => setNewDevice({ ...newDevice, name: e.target.value })}
-                    className={isDark ? "bg-slate-900 border-slate-800 text-white" : ""}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide">Location</Label>
-                  <Input
-                    placeholder="e.g. Calbayog Terminal"
-                    value={newDevice.location}
-                    onChange={(e) => setNewDevice({ ...newDevice, location: e.target.value })}
-                    className={isDark ? "bg-slate-900 border-slate-800 text-white" : ""}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide">IP Address (optional)</Label>
-                  <Input
-                    placeholder="e.g. 192.168.1.104"
-                    value={newDevice.ip_address}
-                    onChange={(e) => setNewDevice({ ...newDevice, ip_address: e.target.value })}
-                    className={isDark ? "bg-slate-900 border-slate-800 text-white" : ""}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide">Firmware Version (optional)</Label>
-                  <Input
-                    placeholder="e.g. v1.0.0"
-                    value={newDevice.firmware_version}
-                    onChange={(e) => setNewDevice({ ...newDevice, firmware_version: e.target.value })}
-                    className={isDark ? "bg-slate-900 border-slate-800 text-white" : ""}
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <Button variant="ghost" onClick={() => setAddDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleAddDevice} disabled={isSaving} className="bg-blue-600 hover:bg-blue-700 text-white">
-                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add Device"}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-
+        <div className="flex flex-col items-end gap-1">
           <div className="flex items-center gap-2">
             <div className={`flex items-center gap-2 px-3 py-2 border rounded-lg ${isDark ? "bg-emerald-950/40 border-emerald-900" : "bg-emerald-50 border-emerald-100"}`}>
               <Wifi className="text-emerald-500" size={14} />
@@ -410,19 +280,10 @@ export default function DeviceReaderPage() {
                               {device.location}
                             </TableCell>
                             <TableCell>
-                              <Select value={device.status} onValueChange={(val) => handleStatusChange(device.id, val)}>
-                                <SelectTrigger className={`h-7 w-[140px] text-[10px] font-semibold gap-1 border cursor-pointer ${className}`}>
-                                  <div className="flex items-center gap-1">
-                                    <Icon className="w-3 h-3" />
-                                    <SelectValue />
-                                  </div>
-                                </SelectTrigger>
-                                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                                  <SelectItem value="ONLINE" className="cursor-pointer">ONLINE</SelectItem>
-                                  <SelectItem value="OFFLINE" className="cursor-pointer">OFFLINE</SelectItem>
-                                  <SelectItem value="MAINTENANCE" className="cursor-pointer">MAINTENANCE</SelectItem>
-                                </SelectContent>
-                              </Select>
+                              <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${className}`}>
+                                <Icon className="w-3 h-3" />
+                                {device.status}
+                              </Badge>
                             </TableCell>
                             <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                               {device.ip_address}
