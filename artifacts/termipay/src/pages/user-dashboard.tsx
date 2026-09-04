@@ -51,6 +51,14 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+// ── NEW: shared helper to normalize the API base URL for direct fetch()
+// calls (same logic used in Layout.tsx / ReportsPage.tsx) ──
+function normalizeApiBaseUrl(rawUrl?: string | null): string {
+  const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
+}
+
 // ✅ Fix: memo — hindi na mag-re-render ang row kapag hindi nagbago ang tx
 const MobileTxRow = memo(function MobileTxRow({
   tx,
@@ -265,7 +273,28 @@ export default function PaymongoDashboardPage() {
   }, []);
 
   // ✅ Actual logout logic — only runs after user confirms
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const token = window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
+
+    // ── Call the backend logout endpoint WHILE the token is still valid,
+    // so the server can resolve currentUser and write the audit_logs row.
+    // We wait briefly for it, but never let a slow/failed request block
+    // the actual logout from completing. ──
+    if (token) {
+      try {
+        const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
+        await Promise.race([
+          fetch(`${apiBaseUrl}/api/auth/user/logout`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 1500)),
+        ]);
+      } catch (err) {
+        console.warn("Logout API call failed (ignoring):", err);
+      }
+    }
+
     window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
     setLocation("/signin");
   };
@@ -278,7 +307,7 @@ export default function PaymongoDashboardPage() {
   // ✅ Called when user taps "Yes" in the dialog
   const confirmLogout = () => {
     setLogoutConfirmOpen(false);
-    handleLogout();
+    void handleLogout();
   };
 
   const balanceText = useMemo(() => {
