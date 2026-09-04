@@ -108,15 +108,29 @@ export function useAuth() {
 
     try {
       window.localStorage.setItem(FORCE_LOGGED_OUT_KEY, "1");
-      window.localStorage.removeItem(AUTH_TOKEN_KEY);
+
       await withTimeout(queryClient.cancelQueries(), 1000);
-      logoutMutation.mutate(undefined as any);
+
+      // IMPORTANT: call the logout API WHILE the token is still in
+      // localStorage. The API client reads AUTH_TOKEN_KEY to build the
+      // Authorization header, and the backend needs that header to resolve
+      // currentUser and write the audit_logs row. If we clear the token
+      // before this call, the request goes out with no Authorization
+      // header, the backend silently skips the audit write, and we still
+      // get a 200 back — which is exactly the bug we just fixed.
+      try {
+        await withTimeout(logoutMutation.mutateAsync(undefined as any), 1000);
+      } catch (apiErr) {
+        console.warn("TermiPay: API logout error (ignoring for redirect)", apiErr);
+      }
     } catch (err) {
-      console.warn("TermiPay: API logout error (ignoring for redirect)", err);
+      console.warn("TermiPay: logout flow error (ignoring for redirect)", err);
     } finally {
       window.clearTimeout(redirectTimer);
-      queryClient.clear();
+      // Only clear the token AFTER the authenticated logout request has
+      // been sent (or has failed/timed out).
       window.localStorage.removeItem(AUTH_TOKEN_KEY);
+      queryClient.clear();
       forceRedirect();
       setIsLoggingOut(false);
     }
