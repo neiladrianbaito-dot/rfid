@@ -11,6 +11,8 @@ import {
   ToggleRouteParams,
   ToggleRouteResponse,
 } from "@workspace/api-zod";
+import { verifyAdminToken } from "../lib/admin-token";
+import { logAudit } from "../lib/audit-logger";
 
 const router: IRouter = Router();
 
@@ -21,9 +23,46 @@ function formatRoute(r: typeof fareRoutesTable.$inferSelect) {
   };
 }
 
+// ── Who's making this request? ──────────────────────────────────────────────
+// Same pattern as users.ts — best-effort actor resolution for the audit
+// trail. Falls back to "unknown" rather than blocking the request.
+
+function getBearerToken(authorization?: string): string | null {
+  if (!authorization) return null;
+  const [scheme, token] = authorization.split(" ");
+  if (scheme?.toLowerCase() !== "bearer" || !token) return null;
+  return token;
+}
+
+function getActorFromRequest(authorization?: string): string {
+  const token = getBearerToken(authorization);
+  if (!token) return "unknown";
+  const adminUser = verifyAdminToken(token);
+  return adminUser?.username ?? "unknown";
+}
+
+// ── Postgres foreign key violation helper ───────────────────────────────────
+function isForeignKeyViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const err = error as Record<string, unknown>;
+  if (err.code === "23503") return true;
+  const cause = err.cause as Record<string, unknown> | undefined;
+  if (cause?.code === "23503") return true;
+  const message = String(err.message ?? "").toLowerCase();
+  if (message.includes("foreign key constraint")) return true;
+  const causeMessage = String(cause?.message ?? "").toLowerCase();
+  if (causeMessage.includes("foreign key constraint")) return true;
+  return false;
+}
+
 router.get("/routes", async (_req, res): Promise<void> => {
-  const routes = await db.select().from(fareRoutesTable);
-  res.json(ListRoutesResponse.parse(routes.map(formatRoute)));
+  try {
+    const routes = await db.select().from(fareRoutesTable);
+    res.json(ListRoutesResponse.parse(routes.map(formatRoute)));
+  } catch (error) {
+    console.error("[GET /routes] error:", error);
+    res.status(500).json({ error: "Failed to fetch routes" });
+  }
 });
 
 router.post("/routes", async (req, res): Promise<void> => {
@@ -33,24 +72,45 @@ router.post("/routes", async (req, res): Promise<void> => {
     return;
   }
 
-  const [route] = await db
-    .insert(fareRoutesTable)
-    .values({
-      origin: parsed.data.origin,
-      destination: parsed.data.destination,
-      fareAmount: String(parsed.data.fareAmount),
-      isActive: true,
-    })
-    .returning();
+  try {
+    const [route] = await db
+      .insert(fareRoutesTable)
+      .values({
+        origin: parsed.data.origin,
+        destination: parsed.data.destination,
+        fareAmount: String(parsed.data.fareAmount),
+        isActive: true,
+      })
+      .returning();
 
-  res.status(201).json(formatRoute(route));
+    try {
+      await logAudit({
+        user: getActorFromRequest(req.headers.authorization),
+        action: "CREATE",
+        entity: "Fare Route",
+        details: `created route: ${route.origin} → ${route.destination} (₱${Number(route.fareAmount)})`,
+      });
+    } catch (auditError) {
+      console.error("[POST /routes] audit log failed:", auditError);
+    }
+
+    res.status(201).json(formatRoute(route));
+  } catch (error) {
+    console.error("[POST /routes] error:", error);
+    res.status(500).json({ error: "Failed to create route" });
+  }
 });
 
 // Public endpoint — no auth required
 router.get("/routes/active", async (_req, res): Promise<void> => {
-  const routes = await db.select().from(fareRoutesTable)
-    .where(eq(fareRoutesTable.isActive, true));
-  res.json(routes.map(formatRoute));
+  try {
+    const routes = await db.select().from(fareRoutesTable)
+      .where(eq(fareRoutesTable.isActive, true));
+    res.json(routes.map(formatRoute));
+  } catch (error) {
+    console.error("[GET /routes/active] error:", error);
+    res.status(500).json({ error: "Failed to fetch active routes" });
+  }
 });
 
 router.patch("/routes/:id", async (req, res): Promise<void> => {
@@ -72,18 +132,34 @@ router.patch("/routes/:id", async (req, res): Promise<void> => {
   if (parsed.data.fareAmount !== undefined) updateData.fareAmount = String(parsed.data.fareAmount);
   if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
 
-  const [route] = await db
-    .update(fareRoutesTable)
-    .set(updateData)
-    .where(eq(fareRoutesTable.id, params.data.id))
-    .returning();
+  try {
+    const [route] = await db
+      .update(fareRoutesTable)
+      .set(updateData)
+      .where(eq(fareRoutesTable.id, params.data.id))
+      .returning();
 
-  if (!route) {
-    res.status(404).json({ error: "Route not found" });
-    return;
+    if (!route) {
+      res.status(404).json({ error: "Route not found" });
+      return;
+    }
+
+    try {
+      await logAudit({
+        user: getActorFromRequest(req.headers.authorization),
+        action: "UPDATE",
+        entity: "Fare Route",
+        details: `updated route: ${route.origin} → ${route.destination} — fields changed: ${Object.keys(updateData).join(", ")}`,
+      });
+    } catch (auditError) {
+      console.error("[PATCH /routes/:id] audit log failed:", auditError);
+    }
+
+    res.json(UpdateRouteResponse.parse(formatRoute(route)));
+  } catch (error) {
+    console.error("[PATCH /routes/:id] error:", error);
+    res.status(500).json({ error: "Failed to update route" });
   }
-
-  res.json(UpdateRouteResponse.parse(formatRoute(route)));
 });
 
 router.delete("/routes/:id", async (req, res): Promise<void> => {
@@ -93,17 +169,42 @@ router.delete("/routes/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [route] = await db
-    .delete(fareRoutesTable)
-    .where(eq(fareRoutesTable.id, params.data.id))
-    .returning();
+  try {
+    const [route] = await db
+      .delete(fareRoutesTable)
+      .where(eq(fareRoutesTable.id, params.data.id))
+      .returning();
 
-  if (!route) {
-    res.status(404).json({ error: "Route not found" });
-    return;
+    if (!route) {
+      res.status(404).json({ error: "Route not found" });
+      return;
+    }
+
+    try {
+      await logAudit({
+        user: getActorFromRequest(req.headers.authorization),
+        action: "DELETE",
+        entity: "Fare Route",
+        details: `deleted route: ${route.origin} → ${route.destination} (₱${Number(route.fareAmount)})`,
+      });
+    } catch (auditError) {
+      console.error("[DELETE /routes/:id] audit log failed:", auditError);
+    }
+
+    res.sendStatus(204);
+  } catch (error) {
+    console.error("[DELETE /routes/:id] delete failed:", error);
+
+    if (isForeignKeyViolation(error)) {
+      res.status(409).json({
+        error:
+          "Cannot delete this route — it is still referenced by existing transactions or records. Try deactivating it instead.",
+      });
+      return;
+    }
+
+    res.status(500).json({ error: "Failed to delete route" });
   }
-
-  res.sendStatus(204);
 });
 
 router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
@@ -113,32 +214,50 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
     return;
   }
 
-  const [existing] = await db
-    .select()
-    .from(fareRoutesTable)
-    .where(eq(fareRoutesTable.id, params.data.id));
+  try {
+    const [existing] = await db
+      .select()
+      .from(fareRoutesTable)
+      .where(eq(fareRoutesTable.id, params.data.id));
 
-  if (!existing) {
-    res.status(404).json({ error: "Route not found" });
-    return;
-  }
+    if (!existing) {
+      res.status(404).json({ error: "Route not found" });
+      return;
+    }
 
-  const willBeActive = !existing.isActive;
+    const willBeActive = !existing.isActive;
 
-  if (willBeActive) {
-    await db
+    if (willBeActive) {
+      await db
+        .update(fareRoutesTable)
+        .set({ isActive: false })
+        .where(ne(fareRoutesTable.id, params.data.id));
+    }
+
+    const [route] = await db
       .update(fareRoutesTable)
-      .set({ isActive: false })
-      .where(ne(fareRoutesTable.id, params.data.id));
+      .set({ isActive: willBeActive })
+      .where(eq(fareRoutesTable.id, params.data.id))
+      .returning();
+
+    try {
+      await logAudit({
+        user: getActorFromRequest(req.headers.authorization),
+        action: "UPDATE",
+        entity: "Fare Route",
+        details: willBeActive
+          ? `activated route: ${route.origin} → ${route.destination} (deactivated all others)`
+          : `deactivated route: ${route.origin} → ${route.destination}`,
+      });
+    } catch (auditError) {
+      console.error("[PATCH /routes/:id/toggle] audit log failed:", auditError);
+    }
+
+    res.json(ToggleRouteResponse.parse(formatRoute(route)));
+  } catch (error) {
+    console.error("[PATCH /routes/:id/toggle] error:", error);
+    res.status(500).json({ error: "Failed to toggle route" });
   }
-
-  const [route] = await db
-    .update(fareRoutesTable)
-    .set({ isActive: willBeActive })
-    .where(eq(fareRoutesTable.id, params.data.id))
-    .returning();
-
-  res.json(ToggleRouteResponse.parse(formatRoute(route)));
 });
 
 export default router;
