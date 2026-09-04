@@ -8,6 +8,7 @@ import {
   getListRoutesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase"; // 👈 adjust to your actual supabase client path
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
@@ -45,6 +53,9 @@ import {
   Search,
   Zap,
   ShieldAlert,
+  Cpu,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -94,6 +105,19 @@ function SuccessTitle({ text }: { text: string }) {
   );
 }
 
+// ✅ Device type coming from Supabase `devices` table
+type Device = {
+  device_id: string;
+  name: string;
+  location: string | null;
+  status: string;
+  ip_address: string | null;
+  firmware_version: string | null;
+  last_ping: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export default function FareMatrixPage() {
   const { isDark } = useTheme();
   const [showAdd, setShowAdd] = useState(false);
@@ -113,6 +137,12 @@ export default function FareMatrixPage() {
   });
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  // ✅ Activate-with-device modal state
+  const [activateRoute, setActivateRoute] = useState<any>(null);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [loadingDevices, setLoadingDevices] = useState(false);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -229,6 +259,55 @@ export default function FareMatrixPage() {
       destination: route.destination,
       fareAmount: String(route.fareAmount),
     });
+  };
+
+  // ✅ Fetch active devices from Supabase — fully dynamic, no hardcoding
+  const fetchActiveDevices = async () => {
+    setLoadingDevices(true);
+    const { data, error } = await supabase
+      .from("devices")
+      .select(
+        "device_id, name, location, status, ip_address, firmware_version, last_ping, created_at, updated_at"
+      )
+      .eq("status", "active") // 👈 adjust value if your enum uses "online" instead
+      .order("name", { ascending: true });
+
+    if (error) {
+      toast({ title: "Failed to load devices", variant: "destructive" });
+      setDevices([]);
+    } else {
+      setDevices((data as Device[]) ?? []);
+    }
+    setLoadingDevices(false);
+  };
+
+  // ✅ Live refetch of devices while modal is open, so status stays fresh
+  useRealtimeRefetch(["devices"], () => {
+    if (activateRoute) {
+      fetchActiveDevices();
+    }
+  });
+
+  const openActivateModal = (route: any) => {
+    setActivateRoute(route);
+    setSelectedDeviceId("");
+    fetchActiveDevices();
+  };
+
+  const confirmActivate = () => {
+    if (!activateRoute || !selectedDeviceId) return;
+    toggleMutation.mutate(
+      {
+        id: activateRoute.id,
+        data: { deviceId: selectedDeviceId }, // 👈 adjust field name to match your API payload
+      } as any,
+      {
+        onSuccess: () => {
+          setActivateRoute(null);
+          setSelectedDeviceId("");
+        },
+      }
+    );
   };
 
   const handleAdd = async () => {
@@ -386,7 +465,7 @@ export default function FareMatrixPage() {
           >
             <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
             <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
-              Reader: RFID-001
+              {activeRoute.deviceName ? `Reader: ${activeRoute.deviceName}` : "Reader: RFID-001"}
             </span>
           </div>
         )}
@@ -520,7 +599,15 @@ export default function FareMatrixPage() {
                                 : "bg-emerald-600 hover:bg-emerald-700 text-white") +
                               " cursor-pointer disabled:cursor-not-allowed"
                             }
-                            onClick={() => toggleMutation.mutate({ id: route.id })}
+                            onClick={() => {
+                              if (route.isActive) {
+                                // Deactivating doesn't need a device selection
+                                toggleMutation.mutate({ id: route.id });
+                              } else {
+                                // Activating opens the device-selection modal
+                                openActivateModal(route);
+                              }
+                            }}
                             disabled={toggleMutation.isPending}
                             data-testid={`toggle-route-${route.id}`}
                           >
@@ -735,6 +822,101 @@ export default function FareMatrixPage() {
               className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-6 cursor-pointer disabled:cursor-not-allowed"
             >
               {updateMutation.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ✅ Activate Route Dialog — device selection, pulled live from Supabase `devices` table */}
+      <Dialog
+        open={!!activateRoute}
+        onOpenChange={(open) => {
+          if (!open) {
+            setActivateRoute(null);
+            setSelectedDeviceId("");
+          }
+        }}
+      >
+        <DialogContent className={`[&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-emerald-500">
+              <Power size={18} /> Activate Route
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {activateRoute && (
+              <div className={`text-sm border rounded-lg p-3 ${isDark ? "text-slate-300 bg-slate-950/60 border-slate-800" : "text-slate-700 bg-slate-50 border-slate-200"}`}>
+                <p className="font-semibold flex items-center gap-2">
+                  <MapPin className="w-3.5 h-3.5 text-blue-500" />
+                  {activateRoute.origin} → {activateRoute.destination}
+                </p>
+                <p className={`mt-1 ${isDark ? "text-emerald-400" : "text-emerald-600"} font-bold`}>
+                  ₱{activateRoute.fareAmount?.toFixed(2)} per tap
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <Cpu className="w-3.5 h-3.5" />
+                Select Active Device (RFID Reader)
+              </Label>
+              <Select value={selectedDeviceId} onValueChange={setSelectedDeviceId} disabled={loadingDevices}>
+                <SelectTrigger
+                  data-testid="select-activate-device"
+                  className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}
+                >
+                  <SelectValue placeholder={loadingDevices ? "Loading devices..." : "Choose a device"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {!loadingDevices && devices.length === 0 && (
+                    <div className={`px-3 py-4 text-xs text-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                      No active devices found
+                    </div>
+                  )}
+                  {devices.map((d) => (
+                    <SelectItem key={d.device_id} value={d.device_id} data-testid={`device-option-${d.device_id}`}>
+                      <div className="flex items-center gap-2">
+                        <Wifi className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>
+                          {d.name}
+                          {d.location ? ` · ${d.location}` : ""}
+                          {d.ip_address ? ` · ${d.ip_address}` : ""}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {!loadingDevices && devices.length === 0 && (
+                <p className={`text-xs flex items-center gap-1 mt-1 ${isDark ? "text-amber-400" : "text-amber-600"}`}>
+                  <WifiOff className="w-3 h-3" />
+                  No devices are currently online. Check ESP32 connectivity.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setActivateRoute(null);
+                setSelectedDeviceId("");
+              }}
+              className={`cursor-pointer ${isDark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmActivate}
+              disabled={!selectedDeviceId || toggleMutation.isPending}
+              data-testid="button-confirm-activate"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer disabled:cursor-not-allowed"
+            >
+              {toggleMutation.isPending ? "Activating..." : "Activate"}
             </Button>
           </DialogFooter>
         </DialogContent>
