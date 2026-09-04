@@ -13,6 +13,8 @@ import {
   DeleteUserParams,
   ListRecentUsersResponse,
 } from "@workspace/api-zod";
+import { verifyAdminToken } from "../lib/admin-token";
+import { logAudit } from "../lib/audit-logger";
 
 const router: IRouter = Router();
 
@@ -36,6 +38,25 @@ function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
   const r = result as Record<string, unknown>;
   if (Array.isArray(r.rows)) return r.rows as T[];
   return [];
+}
+
+// ── Who's making this request? ──────────────────────────────────────────────
+// This router has no auth-check middleware of its own, so we pull the admin
+// identity straight from the bearer token — best-effort, used only for the
+// audit trail. Falls back to "unknown" rather than blocking the request.
+
+function getBearerToken(authorization?: string): string | null {
+  if (!authorization) return null;
+  const [scheme, token] = authorization.split(" ");
+  if (scheme?.toLowerCase() !== "bearer" || !token) return null;
+  return token;
+}
+
+function getActorFromRequest(authorization?: string): string {
+  const token = getBearerToken(authorization);
+  if (!token) return "unknown";
+  const adminUser = verifyAdminToken(token);
+  return adminUser?.username ?? "unknown";
 }
 
 async function detectUsersColumns(): Promise<{ hasType: boolean }> {
@@ -208,6 +229,14 @@ router.post("/users", async (req, res): Promise<void> => {
 
     const inserted = extractRows<UserRow>(insertResult)[0];
     inserted.email = null;
+
+    await logAudit({
+      user: getActorFromRequest(req.headers.authorization),
+      action: "CREATE",
+      entity: "User",
+      details: `created user: ${inserted.fullName} (card ${inserted.cardUid})`,
+    });
+
     res.status(201).json(GetUserResponse.parse(formatUser(inserted)));
   } catch (error) {
     console.error("[POST /users] catch error:", error);
@@ -330,6 +359,13 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
     const emailRow = extractRows<{ email: string | null }>(emailResult)[0];
     userRow.email = emailRow?.email ?? null;
 
+    await logAudit({
+      user: getActorFromRequest(req.headers.authorization),
+      action: "UPDATE",
+      entity: "User",
+      details: `updated user: ${userRow.fullName} (card ${userRow.cardUid}) — fields changed: ${updates.map((u) => u.col).join(", ")}`,
+    });
+
     res.json(UpdateUserResponse.parse(formatUser(userRow)));
   } catch (error) {
     console.error("Update user error:", error);
@@ -346,14 +382,18 @@ router.delete("/users/:id", async (req, res): Promise<void> => {
       return;
     }
 
+    let deletedUserInfo: { fullName: string; cardUid: string } | null = null;
+
     const deleted = await db.transaction(async (tx) => {
       const [existingUser] = await tx
-        .select({ id: usersTable.id, cardUid: usersTable.cardUid })
+        .select({ id: usersTable.id, cardUid: usersTable.cardUid, fullName: usersTable.fullName })
         .from(usersTable)
         .where(eq(usersTable.id, params.data.id))
         .limit(1);
 
       if (!existingUser) return false;
+
+      deletedUserInfo = { fullName: existingUser.fullName, cardUid: existingUser.cardUid };
 
       await tx
         .delete(transactionsTable)
@@ -368,6 +408,13 @@ router.delete("/users/:id", async (req, res): Promise<void> => {
       res.status(404).json({ error: "User not found" });
       return;
     }
+
+    await logAudit({
+      user: getActorFromRequest(req.headers.authorization),
+      action: "DELETE",
+      entity: "User",
+      details: `deleted user: ${deletedUserInfo?.fullName} (card ${deletedUserInfo?.cardUid})`,
+    });
 
     res.sendStatus(204);
   } catch (error) {
