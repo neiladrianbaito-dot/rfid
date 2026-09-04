@@ -163,18 +163,9 @@ export default function FareMatrixPage() {
     }
   }, [routes]);
 
-  // ────────────────────────────────────────────────────────────────────────
-  // FIX: A route is no longer "globally" the one active route. Instead,
-  // multiple routes can be active AT THE SAME TIME, as long as each one is
-  // tied to a DIFFERENT device (RFID reader). The real constraint is:
-  //   "one device can only power ONE active route at a time"
-  // Once that route is deactivated, the device is freed up again and can
-  // be picked for another route.
-  // ────────────────────────────────────────────────────────────────────────
-  const activeRoutes = useMemo(
-    () => (Array.isArray(routes) ? routes.filter((r: any) => r.isActive) : []),
-    [routes]
-  );
+  const activeRoute = Array.isArray(routes)
+    ? routes.find((r) => r.isActive) ?? null
+    : null;
 
   const sortOrderRef = useRef<(string | number)[]>([]);
 
@@ -231,38 +222,18 @@ export default function FareMatrixPage() {
     },
   });
 
-  // ────────────────────────────────────────────────────────────────────────
-  // FIX: toggleMutation used to deactivate EVERY other route the moment one
-  // route was activated (single-active-route assumption). That's gone now.
-  //   - Activating a route (payload has deviceId): only THIS route flips to
-  //     active, and gets tagged with the deviceId/deviceName it was
-  //     activated with. No other route is touched.
-  //   - Deactivating a route (no deviceId in payload): only THIS route
-  //     flips to inactive, and its device tag is cleared so the device
-  //     becomes selectable again for another route.
-  // ────────────────────────────────────────────────────────────────────────
   const toggleMutation = useToggleRoute({
     mutation: {
-      onMutate: async ({ id, data }: { id: string | number; data?: any }) => {
+      onMutate: async ({ id }: { id: string | number }) => {
         await queryClient.cancelQueries({ queryKey: getListRoutesQueryKey() });
         const previous = queryClient.getQueryData(getListRoutesQueryKey());
-        const activatingWithDeviceId: string | undefined = data?.deviceId;
-
         queryClient.setQueryData(getListRoutesQueryKey(), (old: any) => {
           if (!Array.isArray(old)) return old;
-          return old.map((r: any) => {
-            if (r.id !== id) return r;
-            if (activatingWithDeviceId) {
-              const device = devices.find((d) => d.device_id === activatingWithDeviceId);
-              return {
-                ...r,
-                isActive: true,
-                deviceId: activatingWithDeviceId,
-                deviceName: device?.name ?? r.deviceName,
-              };
-            }
-            return { ...r, isActive: false, deviceId: null, deviceName: null };
-          });
+          const clickedIsCurrentlyActive = old.find((r: any) => r.id === id)?.isActive;
+          return old.map((r: any) => ({
+            ...r,
+            isActive: clickedIsCurrentlyActive ? (r.id === id ? false : r.isActive) : r.id === id,
+          }));
         });
         return { previous };
       },
@@ -272,14 +243,8 @@ export default function FareMatrixPage() {
         }
         toast({ title: "Failed to update route status", variant: "destructive" });
       },
-      onSuccess: (_data: any, vars: any) => {
-        toast({
-          title: (
-            <SuccessTitle
-              text={vars?.data?.deviceId ? "Route Activated Successfully" : "Route Deactivated"}
-            />
-          ),
-        });
+      onSuccess: () => {
+        toast({ title: <SuccessTitle text="Route Status Updated" /> });
       },
       onSettled: () => {
         queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
@@ -296,13 +261,8 @@ export default function FareMatrixPage() {
     });
   };
 
-  // ────────────────────────────────────────────────────────────────────────
-  // FIX: Fetch ONLINE devices, then filter out any device that is currently
-  // tied to ANOTHER active route (i.e. already in use). We exclude the
-  // route being activated itself so re-opening the modal for the same
-  // route (edge case) doesn't hide its own device.
-  // ────────────────────────────────────────────────────────────────────────
-  const fetchActiveDevices = async (routeBeingActivated: any) => {
+  // ✅ Fetch active (ONLINE) devices from Supabase — fully dynamic, no hardcoding
+  const fetchActiveDevices = async () => {
     setLoadingDevices(true);
     const { data, error } = await supabase
       .from("devices")
@@ -315,45 +275,23 @@ export default function FareMatrixPage() {
     if (error) {
       toast({ title: "Failed to load devices", variant: "destructive" });
       setDevices([]);
-      setLoadingDevices(false);
-      return;
+    } else {
+      setDevices((data as Device[]) ?? []);
     }
-
-    const usedDeviceIds = new Set(
-      (Array.isArray(routes) ? routes : [])
-        .filter((r: any) => r.isActive && r.deviceId && r.id !== routeBeingActivated?.id)
-        .map((r: any) => r.deviceId)
-    );
-
-    const availableDevices = ((data as Device[]) ?? []).filter(
-      (d) => !usedDeviceIds.has(d.device_id)
-    );
-
-    setDevices(availableDevices);
     setLoadingDevices(false);
   };
 
-  // ✅ Live refetch of devices while modal is open, so status/availability stays fresh
+  // ✅ Live refetch of devices while modal is open, so status stays fresh
   useRealtimeRefetch(["devices"], () => {
     if (activateRoute) {
-      fetchActiveDevices(activateRoute);
+      fetchActiveDevices();
     }
   });
-
-  // Also re-filter available devices whenever the routes list changes while
-  // the modal is open (e.g. another admin activates/deactivates a route
-  // that frees up or claims a device in real time).
-  useEffect(() => {
-    if (activateRoute) {
-      fetchActiveDevices(activateRoute);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routes]);
 
   const openActivateModal = (route: any) => {
     setActivateRoute(route);
     setSelectedDeviceId("");
-    fetchActiveDevices(route);
+    fetchActiveDevices();
   };
 
   const confirmActivate = () => {
@@ -478,70 +416,60 @@ export default function FareMatrixPage() {
         </div>
       </div>
 
-      {/* ──────────────────────────────────────────────────────────────────
-          FIX: Replaced the single "one active route" banner with a summary
-          that supports MULTIPLE simultaneously active routes — one card per
-          device that's currently powering a route.
-      ────────────────────────────────────────────────────────────────────── */}
-      {activeRoutes.length === 0 ? (
-        <div
-          className={`rounded-xl border p-4 sm:p-5 flex items-center gap-4 ${
-            isDark ? "border-amber-900 bg-amber-950/30" : "border-amber-200 bg-amber-50"
-          }`}
-        >
-          <div className={`p-2 rounded-full ${isDark ? "bg-amber-900/50" : "bg-amber-100"}`}>
-            <AlertCircle className={`w-6 h-6 ${isDark ? "text-amber-400" : "text-amber-600"}`} />
+      <div
+        className={`rounded-xl border p-4 sm:p-5 flex items-center justify-between gap-4 ${
+          activeRoute
+            ? isDark ? "border-emerald-900 bg-emerald-950/30" : "border-emerald-200 bg-emerald-50"
+            : isDark ? "border-amber-900 bg-amber-950/30" : "border-amber-200 bg-amber-50"
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <div className={`p-2 rounded-full ${
+            activeRoute
+              ? isDark ? "bg-emerald-900/50" : "bg-emerald-100"
+              : isDark ? "bg-amber-900/50" : "bg-amber-100"
+          }`}>
+            {activeRoute ? (
+              <CheckCircle2 className={`w-6 h-6 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
+            ) : (
+              <AlertCircle className={`w-6 h-6 ${isDark ? "text-amber-400" : "text-amber-600"}`} />
+            )}
           </div>
           <div>
-            <p className={`font-semibold text-sm ${isDark ? "text-amber-400" : "text-amber-700"}`}>
-              No Active Routes
+            <p className={`font-semibold text-sm ${
+              activeRoute
+                ? isDark ? "text-emerald-400" : "text-emerald-700"
+                : isDark ? "text-amber-400" : "text-amber-700"
+            }`}>
+              {activeRoute ? "Active Route — RFID Ready" : "No Active Route"}
             </p>
-            <p className={`text-sm ${isDark ? "text-amber-400" : "text-amber-700"}`}>
-              Activate a route below so an ESP32 RFID reader can process fare deductions.
-            </p>
+            {activeRoute ? (
+              <p className={`font-bold text-lg tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
+                {activeRoute.origin} → {activeRoute.destination} &nbsp;·&nbsp; ₱
+                {activeRoute.fareAmount.toFixed(2)} per tap
+              </p>
+            ) : (
+              <p className={`text-sm ${isDark ? "text-amber-400" : "text-amber-700"}`}>
+                Activate a route below so the ESP32 RFID reader can process fare deductions.
+              </p>
+            )}
           </div>
         </div>
-      ) : (
-        <div className="space-y-3">
-          <p className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-            {activeRoutes.length} Active Route{activeRoutes.length > 1 ? "s" : ""} — RFID Ready
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            {activeRoutes.map((route: any) => (
-              <div
-                key={route.id}
-                className={`rounded-xl border p-4 flex items-center justify-between gap-3 ${
-                  isDark ? "border-emerald-900 bg-emerald-950/30" : "border-emerald-200 bg-emerald-50"
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`p-2 rounded-full shrink-0 ${isDark ? "bg-emerald-900/50" : "bg-emerald-100"}`}>
-                    <CheckCircle2 className={`w-5 h-5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className={`font-bold text-sm truncate ${isDark ? "text-white" : "text-slate-900"}`}>
-                      {route.origin} → {route.destination}
-                    </p>
-                    <p className={`text-xs ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
-                      ₱{route.fareAmount.toFixed(2)} per tap
-                    </p>
-                  </div>
-                </div>
-                <div
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border shrink-0 ${
-                    isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
-                  }`}
-                >
-                  <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
-                  <span className={`text-[11px] font-semibold whitespace-nowrap ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
-                    {route.deviceName ?? "Unnamed Reader"}
-                  </span>
-                </div>
-              </div>
-            ))}
+
+        {/* RFID Reader badge — placed at the end (right side) of the active route card */}
+        {activeRoute && (
+          <div
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
+              isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
+            }`}
+          >
+            <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
+            <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
+              {activeRoute.deviceName ? `Reader: ${activeRoute.deviceName}` : "Reader: RFID-001"}
+            </span>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <Card className={`h-full shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
@@ -560,7 +488,7 @@ export default function FareMatrixPage() {
                   Configured Routes
                 </CardTitle>
                 <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  A route can be activated as long as its assigned device isn't already powering another active route.
+                  Only <strong>one route</strong> can be active at a time. Active route is pinned to the top.
                 </p>
               </div>
             </div>
@@ -646,29 +574,20 @@ export default function FareMatrixPage() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <Badge
-                              variant={route.isActive ? "default" : "secondary"}
-                              className={
-                                route.isActive
-                                  ? isDark
-                                    ? "bg-emerald-950/40 text-emerald-400 border border-emerald-900"
-                                    : "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : isDark
-                                    ? "bg-slate-800 text-slate-400 border border-slate-700"
-                                    : "bg-slate-100 text-slate-500 border border-slate-200"
-                              }
-                            >
-                              {route.isActive ? "Active" : "Inactive"}
-                            </Badge>
-                            {/* FIX: show which device is powering this route when active */}
-                            {route.isActive && route.deviceName && (
-                              <span className={`text-[10px] flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                                <Cpu className="w-3 h-3" />
-                                {route.deviceName}
-                              </span>
-                            )}
-                          </div>
+                          <Badge
+                            variant={route.isActive ? "default" : "secondary"}
+                            className={
+                              route.isActive
+                                ? isDark
+                                  ? "bg-emerald-950/40 text-emerald-400 border border-emerald-900"
+                                  : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : isDark
+                                  ? "bg-slate-800 text-slate-400 border border-slate-700"
+                                  : "bg-slate-100 text-slate-500 border border-slate-200"
+                            }
+                          >
+                            {route.isActive ? "Active" : "Inactive"}
+                          </Badge>
                         </TableCell>
                         <TableCell>
                           <Button
@@ -682,14 +601,10 @@ export default function FareMatrixPage() {
                             }
                             onClick={() => {
                               if (route.isActive) {
-                                // FIX: Deactivating only affects THIS route/device.
-                                // No deviceId in the payload = deactivate signal.
-                                toggleMutation.mutate({ id: route.id, data: {} } as any);
+                                // Deactivating doesn't need a device selection
+                                toggleMutation.mutate({ id: route.id });
                               } else {
-                                // Activating opens the device-selection modal.
-                                // Multiple routes CAN be active at once, as long
-                                // as each uses a different device — the modal
-                                // only lists devices not already claimed.
+                                // Activating opens the device-selection modal
                                 openActivateModal(route);
                               }
                             }}
@@ -912,8 +827,7 @@ export default function FareMatrixPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ✅ Activate Route Dialog — device selection, pulled live from Supabase `devices` table.
-           FIX: only devices NOT already powering another active route are listed here. */}
+      {/* ✅ Activate Route Dialog — device selection, pulled live from Supabase `devices` table */}
       <Dialog
         open={!!activateRoute}
         onOpenChange={(open) => {
@@ -946,7 +860,7 @@ export default function FareMatrixPage() {
             <div className="space-y-2">
               <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 <Cpu className="w-3.5 h-3.5" />
-                Select Available Device (RFID Reader)
+                Select Active Device (RFID Reader)
               </Label>
               <Select value={selectedDeviceId} onValueChange={setSelectedDeviceId} disabled={loadingDevices}>
                 <SelectTrigger
@@ -958,8 +872,7 @@ export default function FareMatrixPage() {
                 <SelectContent>
                   {!loadingDevices && devices.length === 0 && (
                     <div className={`px-3 py-4 text-xs text-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      No available devices — all online readers are already
-                      powering other active routes
+                      No active devices found
                     </div>
                   )}
                   {devices.map((d) => (
@@ -980,7 +893,7 @@ export default function FareMatrixPage() {
               {!loadingDevices && devices.length === 0 && (
                 <p className={`text-xs flex items-center gap-1 mt-1 ${isDark ? "text-amber-400" : "text-amber-600"}`}>
                   <WifiOff className="w-3 h-3" />
-                  Deactivate a route first to free up its device, or connect another reader.
+                  No devices are currently online. Check ESP32 connectivity.
                 </p>
               )}
             </div>
@@ -1018,8 +931,8 @@ export default function FareMatrixPage() {
             </AlertDialogTitle>
             <AlertDialogDescription className={`text-sm leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               This will permanently remove this route from the fare matrix. If this route is
-              currently active, RFID tap deductions will stop working on its assigned device
-              until another route is activated on it. This action cannot be undone.
+              currently active, RFID tap deductions will stop working until another route is
+              activated. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
