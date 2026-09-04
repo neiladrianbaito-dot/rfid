@@ -20,6 +20,33 @@ const getLocalDateString = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+// ── NEW: shared helper to normalize the API base URL for direct fetch()
+// calls (same logic used in Layout.tsx / ReportsPage.tsx) ──
+function normalizeApiBaseUrl(rawUrl?: string | null): string {
+  const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
+}
+
+// ── NEW: fire-and-forget audit log call for the print/PDF export.
+// Never throws / never blocks the actual print dialog from opening. ──
+async function logExportAudit(params: { entity: string; format: string; details: string }) {
+  try {
+    const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
+    const token = window.localStorage.getItem("termipay_auth_token");
+    await fetch(`${apiBaseUrl}/api/audit/log-export`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(params),
+    });
+  } catch (err) {
+    console.warn("Failed to write export audit log (ignoring):", err);
+  }
+}
+
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 200;
 const ZOOM_STEP = 10;
@@ -56,6 +83,17 @@ export default function ReportPreviewPage() {
   const handlePrint = () => {
     if (isPreparingPrint) return; // guard against double-clicks
     setIsPreparingPrint(true);
+
+    // ── NEW: log the export attempt. We can't know if the user actually
+    // saved the PDF or cancelled the browser's native dialog, so we log
+    // at the moment they click Print — same limitation any app built on
+    // window.print() has. Fire-and-forget, doesn't block the timeout below.
+    logExportAudit({
+      entity: "Revenue Audit Report",
+      format: "PDF/Print",
+      details: `${adminName} opened print/PDF dialog for revenue audit report (Ref: TP-REV-${traceId})`,
+    });
+
     printTimeoutRef.current = setTimeout(() => {
       window.print();
       setIsPreparingPrint(false);

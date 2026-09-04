@@ -36,6 +36,34 @@ function getLocalDateString(): string {
   return new Date().toLocaleDateString("en-CA");
 }
 
+// ── NEW: shared helper to normalize the API base URL for direct fetch()
+// calls (same logic used in Layout.tsx) ──
+function normalizeApiBaseUrl(rawUrl?: string | null): string {
+  const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
+}
+
+// ── NEW: fire-and-forget audit log call for exports. Never throws /
+// never blocks the actual export — logging failure should never stop
+// a user from getting their file. ──
+async function logExportAudit(params: { entity: string; format: string; details: string }) {
+  try {
+    const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
+    const token = window.localStorage.getItem("termipay_auth_token");
+    await fetch(`${apiBaseUrl}/api/audit/log-export`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(params),
+    });
+  } catch (err) {
+    console.warn("Failed to write export audit log (ignoring):", err);
+  }
+}
+
 export default function ReportsPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
@@ -116,6 +144,15 @@ export default function ReportsPage() {
     const generatedAt = new Date().toLocaleString("en-PH", {
       year: "numeric", month: "long", day: "numeric",
       hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+
+    // ── NEW: fire the audit log call. Fire-and-forget — we don't await
+    // this before continuing the export, so a slow/failed request never
+    // delays or blocks the user's download. ──
+    logExportAudit({
+      entity: "Transaction Logs",
+      format: "Excel",
+      details: `${adminName} exported transaction logs as Excel (transaction-logs-${stamp}.xlsx)`,
     });
 
     // ✅ FIX: Summary rows now match the 4 stat cards on the UI exactly:

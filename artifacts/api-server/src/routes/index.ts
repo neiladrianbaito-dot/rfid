@@ -12,6 +12,8 @@ import passwordResetRouter from "./password-reset.router";
 import { requireAuth } from "../middleware/require-auth";
 import activeRouteRouter from "./activeRoute"; // ← add import
 import publicRoutesRouter from "./publicRoutes"; // ← dagdag
+import auditRouter from "./audit"; // ← NEW: export audit logging route
+
 
 const router: IRouter = Router();
 
@@ -33,5 +35,6 @@ router.use(usersRouter);
 router.use(transactionsRouter);
 router.use(fareRoutesRouter);
 router.use(dashboardRouter);
+router.use(auditRouter); // ← NEW: /audit/log-export, requires admin auth token
 
 export default router;
