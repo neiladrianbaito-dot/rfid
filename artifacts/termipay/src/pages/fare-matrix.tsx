@@ -115,7 +115,7 @@ type Device = {
   firmware_version: string | null;
   last_ping: string | null;
   created_at: string;
-  updated_at: string;
+  // updated_at removed — column does not exist on this table
 };
 
 export default function FareMatrixPage() {
@@ -261,15 +261,15 @@ export default function FareMatrixPage() {
     });
   };
 
-  // ✅ Fetch active devices from Supabase — fully dynamic, no hardcoding
+  // ✅ Fetch active (ONLINE) devices from Supabase — fully dynamic, no hardcoding
   const fetchActiveDevices = async () => {
     setLoadingDevices(true);
     const { data, error } = await supabase
       .from("devices")
       .select(
-        "device_id, name, location, status, ip_address, firmware_version, last_ping, created_at, updated_at"
+        "device_id, name, location, status, ip_address, firmware_version, last_ping, created_at"
       )
-      .eq("status", "active") // 👈 adjust value if your enum uses "online" instead
+      .eq("status", "ONLINE") // 👈 matches the actual enum value in the devices table
       .order("name", { ascending: true });
 
     if (error) {
