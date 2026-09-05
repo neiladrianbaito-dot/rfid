@@ -4,6 +4,12 @@
  * Api
  * TermiPay Admin Console API
  * OpenAPI spec version: 0.1.0
+ *
+ * ⚠️ MANUALLY PATCHED: added `deviceId` to ListRoutesResponseItem,
+ * UpdateRouteResponse, and ToggleRouteResponse so the active route's linked
+ * device survives the response `.parse()` step. This will be overwritten
+ * the next time orval regenerates from the OpenAPI spec — update the spec
+ * source (and re-run orval) to make this permanent.
  */
 import * as zod from "zod";
 
@@ -163,12 +169,16 @@ export const DeleteTransactionParams = zod.object({
   id: zod.coerce.string(),
 });
 
+// ✅ PATCHED: added deviceId so the active route's linked RFID reader
+// survives the response parse (was previously stripped, causing the
+// "Reader: Unassigned" bug in the admin console).
 export const ListRoutesResponseItem = zod.object({
   id: zod.number(),
   origin: zod.string(),
   destination: zod.string(),
   fareAmount: zod.number(),
   isActive: zod.boolean(),
+  deviceId: zod.string().nullable().optional(),
 });
 export const ListRoutesResponse = zod.array(ListRoutesResponseItem);
 
@@ -189,12 +199,14 @@ export const UpdateRouteBody = zod.object({
   isActive: zod.boolean().optional(),
 });
 
+// ✅ PATCHED: added deviceId (see note above)
 export const UpdateRouteResponse = zod.object({
   id: zod.number(),
   origin: zod.string(),
   destination: zod.string(),
   fareAmount: zod.number(),
   isActive: zod.boolean(),
+  deviceId: zod.string().nullable().optional(),
 });
 
 export const DeleteRouteParams = zod.object({
@@ -205,12 +217,23 @@ export const ToggleRouteParams = zod.object({
   id: zod.coerce.number(),
 });
 
+// ✅ NEW: request body for PATCH /routes/:id/toggle — carries the RFID
+// device to link when activating a route. Optional since deactivating
+// doesn't need a device.
+export const ToggleRouteBody = zod
+  .object({
+    deviceId: zod.string().min(1).optional(),
+  })
+  .optional();
+
+// ✅ PATCHED: added deviceId (see note above)
 export const ToggleRouteResponse = zod.object({
   id: zod.number(),
   origin: zod.string(),
   destination: zod.string(),
   fareAmount: zod.number(),
   isActive: zod.boolean(),
+  deviceId: zod.string().nullable().optional(),
 });
 
 export const GetDashboardStatsResponse = zod.object({

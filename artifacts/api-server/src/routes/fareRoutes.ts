@@ -9,6 +9,7 @@ import {
   UpdateRouteResponse,
   DeleteRouteParams,
   ToggleRouteParams,
+  ToggleRouteBody,
   ToggleRouteResponse,
 } from "@workspace/api-zod";
 import { verifyAdminToken } from "../lib/admin-token";
@@ -21,17 +22,6 @@ function formatRoute(r: typeof fareRoutesTable.$inferSelect) {
     ...r,
     fareAmount: Number(r.fareAmount),
   };
-}
-
-// ✅ NEW: validates the optional deviceId sent when activating a route.
-// Plain manual check — no zod dependency needed in this package.
-function parseToggleRouteBody(body: unknown): { deviceId?: string } | null {
-  if (body === undefined || body === null) return {};
-  if (typeof body !== "object") return null;
-  const raw = (body as Record<string, unknown>).deviceId;
-  if (raw === undefined) return {};
-  if (typeof raw !== "string" || raw.trim().length === 0) return null;
-  return { deviceId: raw };
 }
 
 // ── Who's making this request? ──────────────────────────────────────────────
@@ -226,12 +216,12 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
   }
 
   // ✅ NEW: read + validate the optional deviceId sent when activating.
-  const bodyParsed = parseToggleRouteBody(req.body);
-  if (bodyParsed === null) {
-    res.status(400).json({ error: "Invalid deviceId in request body" });
+  const bodyParsed = ToggleRouteBody.safeParse(req.body);
+  if (!bodyParsed.success) {
+    res.status(400).json({ error: bodyParsed.error.message });
     return;
   }
-  const requestedDeviceId = bodyParsed.deviceId;
+  const requestedDeviceId = bodyParsed.data?.deviceId;
 
   try {
     const [existing] = await db
