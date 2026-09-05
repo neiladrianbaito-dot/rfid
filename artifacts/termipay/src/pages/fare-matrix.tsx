@@ -118,13 +118,6 @@ type Device = {
   // updated_at removed — column does not exist on this table
 };
 
-// 👇 Helper: reads the linked device id off a route object no matter which
-// casing/field name the API happens to return (deviceId, device_id, etc.)
-function getRouteDeviceId(route: any): string | null {
-  if (!route) return null;
-  return route.deviceId ?? route.device_id ?? null;
-}
-
 export default function FareMatrixPage() {
   const { isDark } = useTheme();
   const [showAdd, setShowAdd] = useState(false);
@@ -154,8 +147,8 @@ export default function FareMatrixPage() {
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
 
-  // ✅ NEW: holds the actual device row linked to the currently active route,
-  // fetched live from Supabase — replaces the old hardcoded "RFID-001" text.
+  // ✅ Holds the actual device row linked to the currently active route,
+  // fetched live from Supabase — powers the "Reader: ..." badge.
   const [activeDeviceInfo, setActiveDeviceInfo] = useState<Device | null>(null);
   const [loadingActiveDevice, setLoadingActiveDevice] = useState(false);
 
@@ -182,14 +175,38 @@ export default function FareMatrixPage() {
     ? routes.find((r) => r.isActive) ?? null
     : null;
 
-  // ✅ NEW: fetch the linked device's live info (name, status, etc.) whenever
-  // the active route changes. This is what powers the "Reader: ..." badge.
-  const fetchActiveRouteDevice = async (deviceId: string | null) => {
-    if (!deviceId) {
+  // ✅ FIXED: fetch the device_id straight from the `fare_routes` table in
+  // Supabase instead of trusting the generated API client to expose it.
+  // The API client's serialized route object doesn't reliably include the
+  // device_id/deviceId field, so we go directly to the DB for it, then use
+  // that id to look up the device row.
+  const fetchRouteDeviceIdFromDb = async (
+    routeId: string | number
+  ): Promise<string | null> => {
+    const { data, error } = await supabase
+      .from("fare_routes") // 👈 adjust table name if different
+      .select("device_id") // 👈 adjust column name if different
+      .eq("id", routeId) // 👈 adjust PK column name if different
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return (data as { device_id: string | null }).device_id ?? null;
+  };
+
+  const fetchActiveRouteDevice = async (routeId: string | number | null) => {
+    if (!routeId) {
       setActiveDeviceInfo(null);
       return;
     }
     setLoadingActiveDevice(true);
+
+    const deviceId = await fetchRouteDeviceIdFromDb(routeId);
+    if (!deviceId) {
+      setActiveDeviceInfo(null);
+      setLoadingActiveDevice(false);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("devices")
       .select(
@@ -203,16 +220,16 @@ export default function FareMatrixPage() {
   };
 
   useEffect(() => {
-    fetchActiveRouteDevice(getRouteDeviceId(activeRoute));
+    fetchActiveRouteDevice(activeRoute?.id ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoute?.id, getRouteDeviceId(activeRoute)]);
+  }, [activeRoute?.id]);
 
   // ✅ Keep the active-route device badge live too (e.g. reflects if reader goes offline)
   useRealtimeRefetch(["devices"], () => {
     if (activateRoute) {
       fetchActiveDevices();
     }
-    fetchActiveRouteDevice(getRouteDeviceId(activeRoute));
+    fetchActiveRouteDevice(activeRoute?.id ?? null);
   });
 
   const sortOrderRef = useRef<(string | number)[]>([]);
@@ -506,8 +523,10 @@ export default function FareMatrixPage() {
           </div>
         </div>
 
-        {/* ✅ FIXED: RFID Reader badge now pulls the real device name from Supabase
-            (via activeDeviceInfo) instead of the old hardcoded "RFID-001" string. */}
+        {/* ✅ FIXED: RFID Reader badge pulls device_id straight from the fare_routes
+            table via fetchActiveRouteDevice, then resolves the device name from
+            the devices table (via activeDeviceInfo). No more hardcoded IDs and
+            no more relying on the API client to expose deviceId/device_id. */}
         {activeRoute && (
           <div
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
