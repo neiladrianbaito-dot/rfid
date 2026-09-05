@@ -135,6 +135,9 @@ export default function FareMatrixPage() {
     destination: "",
     fareAmount: "",
   });
+  // Snapshot of the edit form's values at the moment the dialog opened — used
+  // to detect whether the user actually changed anything before allowing Save.
+  const [originalEditForm, setOriginalEditForm] = useState(editForm);
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -254,12 +257,21 @@ export default function FareMatrixPage() {
 
   const openEdit = (route: any) => {
     setEditRoute(route);
-    setEditForm({
+    const initial = {
       origin: route.origin,
       destination: route.destination,
       fareAmount: String(route.fareAmount),
-    });
+    };
+    setEditForm(initial);
+    setOriginalEditForm(initial);
   };
+
+  // True only if origin, destination, or fare amount actually differ from
+  // what they were when the Edit dialog opened.
+  const hasRouteChanges =
+    editForm.origin.trim() !== originalEditForm.origin.trim() ||
+    editForm.destination.trim() !== originalEditForm.destination.trim() ||
+    editForm.fareAmount.trim() !== originalEditForm.fareAmount.trim();
 
   // ✅ Fetch active (ONLINE) devices from Supabase — fully dynamic, no hardcoding
   const fetchActiveDevices = async () => {
@@ -363,7 +375,7 @@ export default function FareMatrixPage() {
   };
 
   const handleUpdate = () => {
-    if (!editRoute) return;
+    if (!editRoute || !hasRouteChanges) return;
     const origin = editForm.origin.trim();
     const destination = editForm.destination.trim();
     const fare = parseFloat(editForm.fareAmount) || 0;
@@ -817,9 +829,10 @@ export default function FareMatrixPage() {
             </Button>
             <Button
               onClick={handleUpdate}
-              disabled={updateMutation.isPending}
+              disabled={updateMutation.isPending || !hasRouteChanges}
+              title={!hasRouteChanges ? "No changes to save" : undefined}
               data-testid="button-update-route"
-              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-6 cursor-pointer disabled:cursor-not-allowed"
+              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-6 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-blue-600"
             >
               {updateMutation.isPending ? "Saving..." : "Save Changes"}
             </Button>
