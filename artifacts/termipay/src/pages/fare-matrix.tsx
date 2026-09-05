@@ -246,7 +246,7 @@ export default function FareMatrixPage() {
   // ✅ Keep the active-route device badges live too (e.g. reflects if a reader goes offline)
   useRealtimeRefetch(["devices"], () => {
     if (activateRoute) {
-      fetchActiveDevices();
+      fetchActiveDevices(activateRoute.id);
     }
     fetchActiveRoutesDevices(activeRoutes.map((r) => r.id));
   });
@@ -324,10 +324,24 @@ export default function FareMatrixPage() {
     editForm.destination.trim() !== originalEditForm.destination.trim() ||
     editForm.fareAmount.trim() !== originalEditForm.fareAmount.trim();
 
-  // ✅ Fetch active (ONLINE) devices from Supabase — fully dynamic, no hardcoding
-  const fetchActiveDevices = async () => {
+  // ✅ Fetch active (ONLINE) devices from Supabase, excluding readers that are
+  // already assigned to another active route. Each device can only power one
+  // active route at a time — once that route is deactivated, the device
+  // becomes free and reappears here.
+  const fetchActiveDevices = async (excludeRouteId?: string | number) => {
     setLoadingDevices(true);
-    const { data, error } = await supabase
+
+    // Get device_ids currently in use by OTHER active routes.
+    const { data: activeRows, error: activeErr } = await supabase
+      .from("fare_routes") // 👈 adjust table name if different
+      .select("id, device_id") // 👈 adjust column names if different
+      .eq("is_active", true);
+
+    const inUseDeviceIds = (activeRows ?? [])
+      .filter((r: any) => r.device_id && r.id !== excludeRouteId)
+      .map((r: any) => r.device_id);
+
+    let query = supabase
       .from("devices")
       .select(
         "device_id, name, location, status, ip_address, firmware_version, last_ping, created_at"
@@ -335,7 +349,13 @@ export default function FareMatrixPage() {
       .eq("status", "ONLINE") // 👈 matches the actual enum value in the devices table
       .order("name", { ascending: true });
 
-    if (error) {
+    if (inUseDeviceIds.length > 0) {
+      query = query.not("device_id", "in", `(${inUseDeviceIds.join(",")})`);
+    }
+
+    const { data, error } = await query;
+
+    if (error || activeErr) {
       toast({ title: "Failed to load devices", variant: "destructive" });
       setDevices([]);
     } else {
@@ -347,7 +367,7 @@ export default function FareMatrixPage() {
   const openActivateModal = (route: any) => {
     setActivateRoute(route);
     setSelectedDeviceId("");
-    fetchActiveDevices();
+    fetchActiveDevices(route.id);
   };
 
   // ✅ FIXED: activate now goes through a single SECURITY DEFINER Postgres
