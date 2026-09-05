@@ -23,6 +23,17 @@ function formatRoute(r: typeof fareRoutesTable.$inferSelect) {
   };
 }
 
+// ✅ NEW: validates the optional deviceId sent when activating a route.
+// Plain manual check — no zod dependency needed in this package.
+function parseToggleRouteBody(body: unknown): { deviceId?: string } | null {
+  if (body === undefined || body === null) return {};
+  if (typeof body !== "object") return null;
+  const raw = (body as Record<string, unknown>).deviceId;
+  if (raw === undefined) return {};
+  if (typeof raw !== "string" || raw.trim().length === 0) return null;
+  return { deviceId: raw };
+}
+
 // ── Who's making this request? ──────────────────────────────────────────────
 // Same pattern as users.ts — best-effort actor resolution for the audit
 // trail. Falls back to "unknown" rather than blocking the request.
@@ -214,6 +225,14 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
     return;
   }
 
+  // ✅ NEW: read + validate the optional deviceId sent when activating.
+  const bodyParsed = parseToggleRouteBody(req.body);
+  if (bodyParsed === null) {
+    res.status(400).json({ error: "Invalid deviceId in request body" });
+    return;
+  }
+  const requestedDeviceId = bodyParsed.deviceId;
+
   try {
     const [existing] = await db
       .select()
@@ -228,15 +247,21 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
     const willBeActive = !existing.isActive;
 
     if (willBeActive) {
+      // Deactivate every other route AND clear their assigned device,
+      // since only one route (and one reader) should be live at a time.
       await db
         .update(fareRoutesTable)
-        .set({ isActive: false })
+        .set({ isActive: false, deviceId: null })
         .where(ne(fareRoutesTable.id, params.data.id));
     }
 
+    // ✅ NEW: persist deviceId when activating, clear it when deactivating.
     const [route] = await db
       .update(fareRoutesTable)
-      .set({ isActive: willBeActive })
+      .set({
+        isActive: willBeActive,
+        deviceId: willBeActive ? requestedDeviceId ?? null : null,
+      })
       .where(eq(fareRoutesTable.id, params.data.id))
       .returning();
 
@@ -246,7 +271,7 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
         action: "UPDATE",
         entity: "Fare Route",
         details: willBeActive
-          ? `activated route: ${route.origin} → ${route.destination} (deactivated all others)`
+          ? `activated route: ${route.origin} → ${route.destination} (device: ${route.deviceId ?? "none"}, deactivated all others)`
           : `deactivated route: ${route.origin} → ${route.destination}`,
       });
     } catch (auditError) {
