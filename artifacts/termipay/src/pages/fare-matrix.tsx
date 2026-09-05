@@ -118,6 +118,13 @@ type Device = {
   // updated_at removed — column does not exist on this table
 };
 
+// 👇 Helper: reads the linked device id off a route object no matter which
+// casing/field name the API happens to return (deviceId, device_id, etc.)
+function getRouteDeviceId(route: any): string | null {
+  if (!route) return null;
+  return route.deviceId ?? route.device_id ?? null;
+}
+
 export default function FareMatrixPage() {
   const { isDark } = useTheme();
   const [showAdd, setShowAdd] = useState(false);
@@ -147,6 +154,11 @@ export default function FareMatrixPage() {
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
 
+  // ✅ NEW: holds the actual device row linked to the currently active route,
+  // fetched live from Supabase — replaces the old hardcoded "RFID-001" text.
+  const [activeDeviceInfo, setActiveDeviceInfo] = useState<Device | null>(null);
+  const [loadingActiveDevice, setLoadingActiveDevice] = useState(false);
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -169,6 +181,39 @@ export default function FareMatrixPage() {
   const activeRoute = Array.isArray(routes)
     ? routes.find((r) => r.isActive) ?? null
     : null;
+
+  // ✅ NEW: fetch the linked device's live info (name, status, etc.) whenever
+  // the active route changes. This is what powers the "Reader: ..." badge.
+  const fetchActiveRouteDevice = async (deviceId: string | null) => {
+    if (!deviceId) {
+      setActiveDeviceInfo(null);
+      return;
+    }
+    setLoadingActiveDevice(true);
+    const { data, error } = await supabase
+      .from("devices")
+      .select(
+        "device_id, name, location, status, ip_address, firmware_version, last_ping, created_at"
+      )
+      .eq("device_id", deviceId)
+      .maybeSingle();
+
+    setActiveDeviceInfo(error ? null : (data as Device) ?? null);
+    setLoadingActiveDevice(false);
+  };
+
+  useEffect(() => {
+    fetchActiveRouteDevice(getRouteDeviceId(activeRoute));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoute?.id, getRouteDeviceId(activeRoute)]);
+
+  // ✅ Keep the active-route device badge live too (e.g. reflects if reader goes offline)
+  useRealtimeRefetch(["devices"], () => {
+    if (activateRoute) {
+      fetchActiveDevices();
+    }
+    fetchActiveRouteDevice(getRouteDeviceId(activeRoute));
+  });
 
   const sortOrderRef = useRef<(string | number)[]>([]);
 
@@ -292,13 +337,6 @@ export default function FareMatrixPage() {
     }
     setLoadingDevices(false);
   };
-
-  // ✅ Live refetch of devices while modal is open, so status stays fresh
-  useRealtimeRefetch(["devices"], () => {
-    if (activateRoute) {
-      fetchActiveDevices();
-    }
-  });
 
   const openActivateModal = (route: any) => {
     setActivateRoute(route);
@@ -468,7 +506,8 @@ export default function FareMatrixPage() {
           </div>
         </div>
 
-        {/* RFID Reader badge — placed at the end (right side) of the active route card */}
+        {/* ✅ FIXED: RFID Reader badge now pulls the real device name from Supabase
+            (via activeDeviceInfo) instead of the old hardcoded "RFID-001" string. */}
         {activeRoute && (
           <div
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
@@ -477,7 +516,11 @@ export default function FareMatrixPage() {
           >
             <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
             <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
-              {activeRoute.deviceName ? `Reader: ${activeRoute.deviceName}` : "Reader: RFID-001"}
+              {loadingActiveDevice
+                ? "Reader: Loading..."
+                : activeDeviceInfo?.name
+                  ? `Reader: ${activeDeviceInfo.name}`
+                  : "Reader: Unassigned"}
             </span>
           </div>
         )}
