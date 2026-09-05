@@ -206,21 +206,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
       }`}
     >
-      {/* Sidebar */}
+      {/* Sidebar — themed blue to match the app's accent color */}
       <aside
         className={`
           fixed inset-y-0 left-0 z-50 w-72 border-r print:hidden
           transform transition-transform duration-300 ease-in-out
           lg:relative lg:translate-x-0
           ${sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}
-          ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}
+          ${isDark
+            ? "bg-gradient-to-b from-blue-950 via-slate-950 to-slate-950 border-blue-950"
+            : "bg-gradient-to-b from-blue-700 to-blue-800 border-blue-900"
+          }
         `}
       >
         <div className="flex flex-col h-full">
           {/* Logo Section */}
-          <div className={`p-6 border-b transition-colors ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+          <div className={`p-6 border-b transition-colors ${isDark ? "border-blue-900/50" : "border-blue-600/60"}`}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0">
+              <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0 ring-2 ring-white/20">
                 <img
                   src="/calbayog.png"
                   alt="Calbayog Logo"
@@ -228,10 +231,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 />
               </div>
               <div>
-                <h1 className={`text-sm font-bold tracking-tight transition-colors ${isDark ? "text-white" : "text-slate-900"}`}>
-                  Fare Collection<span className="text-blue-500"> System</span>
+                <h1 className="text-sm font-bold tracking-tight text-white">
+                  Fare Collection<span className="text-blue-300"> System</span>
                 </h1>
-                <p className={`text-[10px] font-semibold uppercase tracking-widest leading-tight transition-colors ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                <p className={`text-[10px] font-semibold uppercase tracking-widest leading-tight ${isDark ? "text-blue-400/70" : "text-blue-200"}`}>
                   Admin Console
                 </p>
               </div>
@@ -252,11 +255,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       transition-all duration-150
                       ${isActive
                         ? isDark
-                          ? "bg-blue-950/50 text-blue-400"
-                          : "bg-blue-50 text-blue-700"
+                          ? "bg-blue-600/30 text-white"
+                          : "bg-white/15 text-white"
                         : isDark
-                          ? "text-slate-400 hover:text-white hover:bg-slate-900"
-                          : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                          ? "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
+                          : "text-blue-100 hover:text-white hover:bg-white/10"
                       }
                     `}
                   >
@@ -264,15 +267,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       size={17}
                       className={
                         isActive
-                          ? "text-blue-500"
+                          ? isDark ? "text-blue-300" : "text-white"
                           : isDark
-                            ? "text-slate-600 group-hover:text-slate-300"
-                            : "text-slate-400 group-hover:text-slate-600"
+                            ? "text-blue-400/60 group-hover:text-blue-200"
+                            : "text-blue-300 group-hover:text-blue-100"
                       }
                     />
                     {item.label}
                     {isActive && (
-                      <motion.div layoutId="activeNav" className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-500" />
+                      <motion.div layoutId="activeNav" className={`ml-auto w-1.5 h-1.5 rounded-full ${isDark ? "bg-blue-400" : "bg-white"}`} />
                     )}
                   </div>
                 </Link>
@@ -281,15 +284,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </nav>
 
           {/* User Section at bottom of Sidebar */}
-          <div className={`p-4 border-t transition-colors ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+          <div className={`p-4 border-t transition-colors ${isDark ? "border-blue-900/50" : "border-blue-600/60"}`}>
             <Button
               variant="ghost"
               onClick={logout}
               disabled={isLoggingOut}
               className={`w-full justify-start gap-3 rounded-lg text-sm font-medium ${
                 isDark
-                  ? "text-slate-400 hover:text-red-400 hover:bg-red-950/30"
-                  : "text-slate-500 hover:text-red-600 hover:bg-red-50"
+                  ? "text-blue-200/70 hover:text-red-300 hover:bg-red-950/40"
+                  : "text-blue-100 hover:text-white hover:bg-red-500/20"
               }`}
             >
               <LogOut size={17} />
