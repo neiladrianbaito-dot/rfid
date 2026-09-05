@@ -1,10 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   useListTransactions,
-  useDeleteTransaction,
-  getListTransactionsQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -16,17 +13,11 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
 import {
-  Search, Trash2, Zap, History, ChevronLeft, ChevronRight,
-  Eye, CheckCircle2, XCircle, Clock, Bus, CreditCard, X,
+  Search, Zap, History, ChevronLeft, ChevronRight,
+  Eye, CheckCircle2, XCircle, Clock, Bus, CreditCard,
 } from "lucide-react";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel,
-  AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
@@ -234,7 +225,6 @@ export default function TransactionsPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [deleteTx, setDeleteTx] = useState<any>(null);
   const [viewTx, setViewTx] = useState<any>(null);
   const [page, setPage] = useState(1);
   const [routes, setRoutes] = useState<FareRoute[]>([]);
@@ -242,9 +232,6 @@ export default function TransactionsPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [newRowId, setNewRowId] = useState<number | null>(null);
   const prevTopIdRef = useRef<number | null>(null);
-
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
 
   // ── Fetch fare_routes from Supabase once (same as dashboard) ──────────────
   useEffect(() => {
@@ -293,16 +280,6 @@ export default function TransactionsPage() {
     prevTopIdRef.current = topId;
     setLastUpdated(new Date());
   }, [transactionList]);
-
-  const deleteMutation = useDeleteTransaction({
-    mutation: {
-      onSettled: () => {
-        queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
-        setDeleteTx(null);
-        toast({ title: "Transaction deleted successfully" });
-      },
-    },
-  });
 
   const statusColor = (status: string) => {
     if (isDark) {
@@ -494,14 +471,6 @@ export default function TransactionsPage() {
                               >
                                 <Eye className="w-3.5 h-3.5" />
                               </Button>
-                              <Button
-                                variant="ghost" size="icon"
-                                className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
-                                onClick={() => setDeleteTx(tx)}
-                                title="Delete record"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -548,33 +517,6 @@ export default function TransactionsPage() {
 
       {/* Receipt Modal */}
       <ReceiptModal tx={viewTx} routes={routes} onClose={() => setViewTx(null)} isDark={isDark} />
-
-      {/* Delete Confirm */}
-      <AlertDialog open={!!deleteTx} onOpenChange={(open) => !open && setDeleteTx(null)}>
-        <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
-          <AlertDialogHeader>
-            <AlertDialogTitle className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
-              Delete Transaction Record?
-            </AlertDialogTitle>
-            <AlertDialogDescription className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              Warning: This clears the log entry from history. This will not trigger a database refund to the user's current balance.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteMutation.isPending}
-              className={`cursor-pointer disabled:cursor-not-allowed ${
-                isDark ? "bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-              }`}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction onClick={() => deleteTx && deleteMutation.mutate({ id: deleteTx.id })}
-              disabled={deleteMutation.isPending}
-              className="bg-red-600 text-white hover:bg-red-700 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed">
-              {deleteMutation.isPending ? "Deleting..." : "Confirm"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
