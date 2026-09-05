@@ -159,8 +159,8 @@ export default function DashboardPage() {
       data-testid="dashboard-page"
       style={{
         backgroundImage: "url('/backlogo.png')",
-        backgroundSize: "300px",
-        backgroundPosition: "center center",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
         backgroundRepeat: "no-repeat",
         backgroundAttachment: "fixed",
       }}
