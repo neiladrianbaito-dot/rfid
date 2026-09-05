@@ -146,10 +146,11 @@ export default function FareMatrixPage() {
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
 
-  // ✅ Holds the actual device row linked to the currently active route,
-  // fetched live from Supabase — powers the "Reader: ..." badge.
-  const [activeDeviceInfo, setActiveDeviceInfo] = useState<Device | null>(null);
-  const [loadingActiveDevice, setLoadingActiveDevice] = useState(false);
+  // ✅ Holds the device rows linked to EACH currently active route, keyed by
+  // route id — fetched live from Supabase, powers the "Reader: ..." badges.
+  // Multiple routes can be active at once (one per reader device).
+  const [activeDeviceMap, setActiveDeviceMap] = useState<Record<string, Device | null>>({});
+  const [loadingActiveDevices, setLoadingActiveDevices] = useState(false);
 
   // ✅ Replaces toggleMutation.isPending now that activate/deactivate go
   // through Supabase RPC calls instead of the generated toggle-route mutation.
@@ -175,80 +176,79 @@ export default function FareMatrixPage() {
     }
   }, [routes]);
 
-  const activeRoute = Array.isArray(routes)
-    ? routes.find((r) => r.isActive) ?? null
-    : null;
+  // ✅ Now supports MULTIPLE simultaneous active routes — one per reader
+  // device. "Active" is no longer exclusive globally; it's exclusive per
+  // device_id (enforced by the activate_route RPC).
+  const activeRoutes = Array.isArray(routes) ? routes.filter((r) => r.isActive) : [];
 
-  // ✅ Fetch the device_id straight from the `fare_routes` table in Supabase
-  // instead of trusting the generated API client to expose it.
-  const fetchRouteDeviceIdFromDb = async (
-    routeId: string | number
-  ): Promise<string | null> => {
-    const { data, error } = await supabase
+  // ✅ Fetches device info for ALL currently active routes in one go (instead
+  // of a single activeDeviceInfo), keyed by route id. We still go straight to
+  // the fare_routes table for device_id since the generated API client's
+  // route object doesn't reliably expose it.
+  const activeDeviceRouteIdsRef = useRef<string>("");
+
+  const fetchActiveRoutesDevices = async (routeIds: (string | number)[]) => {
+    if (routeIds.length === 0) {
+      activeDeviceRouteIdsRef.current = "";
+      setActiveDeviceMap({});
+      return;
+    }
+
+    // Only flash "Loading..." when the SET of active routes actually changed
+    // (not on every background realtime tick, e.g. devices.last_ping).
+    const key = [...routeIds].sort().join(",");
+    const isNewSet = activeDeviceRouteIdsRef.current !== key;
+    if (isNewSet) setLoadingActiveDevices(true);
+
+    const { data: routeRows, error: routeErr } = await supabase
       .from("fare_routes") // 👈 adjust table name if different
-      .select("device_id") // 👈 adjust column name if different
-      .eq("id", routeId) // 👈 adjust PK column name if different
-      .maybeSingle();
+      .select("id, device_id") // 👈 adjust column names if different
+      .in("id", routeIds);
 
-    if (error || !data) return null;
-    return (data as { device_id: string | null }).device_id ?? null;
-  };
-
-  // routeId currently backing activeDeviceInfo — lets us tell a background
-  // realtime refresh (same route, e.g. last_ping heartbeat) apart from an
-  // actual route change, so we only flash "Loading..." on real changes.
-  const activeDeviceRouteIdRef = useRef<string | number | null>(null);
-
-  const fetchActiveRouteDevice = async (routeId: string | number | null) => {
-    if (!routeId) {
-      activeDeviceRouteIdRef.current = null;
-      setActiveDeviceInfo(null);
+    if (routeErr || !routeRows) {
+      activeDeviceRouteIdsRef.current = key;
+      setActiveDeviceMap({});
+      setLoadingActiveDevices(false);
       return;
     }
 
-    // Only show the "Loading..." state when this is a genuinely new route
-    // (or the very first fetch). Background realtime refreshes for the same
-    // route (e.g. devices.last_ping heartbeat ticking) update silently so the
-    // badge doesn't flicker.
-    const isNewRoute = activeDeviceRouteIdRef.current !== routeId;
-    if (isNewRoute) {
-      setLoadingActiveDevice(true);
+    const deviceIds = Array.from(
+      new Set(routeRows.map((r: any) => r.device_id).filter(Boolean))
+    );
+
+    let devicesData: Device[] = [];
+    if (deviceIds.length > 0) {
+      const { data: devs } = await supabase
+        .from("devices")
+        .select(
+          "device_id, name, location, status, ip_address, firmware_version, last_ping, created_at"
+        )
+        .in("device_id", deviceIds);
+      devicesData = (devs as Device[]) ?? [];
     }
 
-    const deviceId = await fetchRouteDeviceIdFromDb(routeId);
-    if (!deviceId) {
-      activeDeviceRouteIdRef.current = routeId;
-      setActiveDeviceInfo(null);
-      setLoadingActiveDevice(false);
-      return;
-    }
+    const map: Record<string, Device | null> = {};
+    routeRows.forEach((r: any) => {
+      map[String(r.id)] =
+        devicesData.find((d) => d.device_id === r.device_id) ?? null;
+    });
 
-    const { data, error } = await supabase
-      .from("devices")
-      .select(
-        "device_id, name, location, status, ip_address, firmware_version, last_ping, created_at"
-      )
-      .eq("device_id", deviceId)
-      .maybeSingle();
-
-    activeDeviceRouteIdRef.current = routeId;
-    setActiveDeviceInfo(error ? null : (data as Device) ?? null);
-    if (isNewRoute) {
-      setLoadingActiveDevice(false);
-    }
+    activeDeviceRouteIdsRef.current = key;
+    setActiveDeviceMap(map);
+    if (isNewSet) setLoadingActiveDevices(false);
   };
 
   useEffect(() => {
-    fetchActiveRouteDevice(activeRoute?.id ?? null);
+    fetchActiveRoutesDevices(activeRoutes.map((r) => r.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoute?.id]);
+  }, [Array.isArray(routes) ? routes.filter((r) => r.isActive).map((r) => r.id).join(",") : ""]);
 
-  // ✅ Keep the active-route device badge live too (e.g. reflects if reader goes offline)
+  // ✅ Keep the active-route device badges live too (e.g. reflects if a reader goes offline)
   useRealtimeRefetch(["devices"], () => {
     if (activateRoute) {
       fetchActiveDevices();
     }
-    fetchActiveRouteDevice(activeRoute?.id ?? null);
+    fetchActiveRoutesDevices(activeRoutes.map((r) => r.id));
   });
 
   const sortOrderRef = useRef<(string | number)[]>([]);
@@ -378,7 +378,11 @@ export default function FareMatrixPage() {
     toast({ title: <SuccessTitle text="Route Status Updated" /> });
 
     queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
-    await fetchActiveRouteDevice(activateRoute.id);
+    await fetchActiveRoutesDevices(
+      Array.isArray(routes)
+        ? [...routes.filter((r) => r.isActive && r.id !== activateRoute.id).map((r) => r.id), activateRoute.id]
+        : [activateRoute.id]
+    );
 
     setActivateRoute(null);
     setSelectedDeviceId("");
@@ -517,19 +521,19 @@ export default function FareMatrixPage() {
       </div>
 
       <div
-        className={`rounded-xl border p-4 sm:p-5 flex items-center justify-between gap-4 ${
-          activeRoute
+        className={`rounded-xl border p-4 sm:p-5 flex flex-col gap-4 ${
+          activeRoutes.length > 0
             ? isDark ? "border-emerald-900 bg-emerald-950/30" : "border-emerald-200 bg-emerald-50"
             : isDark ? "border-amber-900 bg-amber-950/30" : "border-amber-200 bg-amber-50"
         }`}
       >
         <div className="flex items-center gap-3">
           <div className={`p-2 rounded-full ${
-            activeRoute
+            activeRoutes.length > 0
               ? isDark ? "bg-emerald-900/50" : "bg-emerald-100"
               : isDark ? "bg-amber-900/50" : "bg-amber-100"
           }`}>
-            {activeRoute ? (
+            {activeRoutes.length > 0 ? (
               <CheckCircle2 className={`w-6 h-6 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
             ) : (
               <AlertCircle className={`w-6 h-6 ${isDark ? "text-amber-400" : "text-amber-600"}`} />
@@ -537,43 +541,59 @@ export default function FareMatrixPage() {
           </div>
           <div>
             <p className={`font-semibold text-sm ${
-              activeRoute
+              activeRoutes.length > 0
                 ? isDark ? "text-emerald-400" : "text-emerald-700"
                 : isDark ? "text-amber-400" : "text-amber-700"
             }`}>
-              {activeRoute ? "Active Route — RFID Ready" : "No Active Route"}
+              {activeRoutes.length > 0
+                ? `${activeRoutes.length} Active Route${activeRoutes.length > 1 ? "s" : ""} — RFID Ready`
+                : "No Active Route"}
             </p>
-            {activeRoute ? (
-              <p className={`font-bold text-lg tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
-                {activeRoute.origin} → {activeRoute.destination} &nbsp;·&nbsp; ₱
-                {activeRoute.fareAmount.toFixed(2)} per tap
-              </p>
-            ) : (
+            {activeRoutes.length === 0 && (
               <p className={`text-sm ${isDark ? "text-amber-400" : "text-amber-700"}`}>
-                Activate a route below so the ESP32 RFID reader can process fare deductions.
+                Activate a route below so an ESP32 RFID reader can process fare deductions.
               </p>
             )}
           </div>
         </div>
 
-        {/* ✅ RFID Reader badge pulls device_id straight from the fare_routes
-            table via fetchActiveRouteDevice, then resolves the device name from
-            the devices table (via activeDeviceInfo). No more hardcoded IDs and
-            no more relying on the API client to expose deviceId/device_id. */}
-        {activeRoute && (
-          <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
-              isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
-            }`}
-          >
-            <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
-            <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
-              {loadingActiveDevice
-                ? "Reader: Loading..."
-                : activeDeviceInfo?.device_id
-                  ? `Reader: ${activeDeviceInfo.device_id}`
-                  : "Reader: Unassigned"}
-            </span>
+        {/* ✅ One row per active route, each with its own reader badge.
+            "Active" is now scoped per-device (not global), so with 5 online
+            readers you can have up to 5 routes active at once. Each route's
+            device_id comes from fare_routes and is resolved to a device row
+            via activeDeviceMap (fetched in fetchActiveRoutesDevices). */}
+        {activeRoutes.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {activeRoutes.map((route) => {
+              const device = activeDeviceMap[String(route.id)];
+              return (
+                <div
+                  key={route.id}
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border p-3 ${
+                    isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
+                  }`}
+                >
+                  <p className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
+                    {route.origin} → {route.destination} &nbsp;·&nbsp; ₱
+                    {route.fareAmount.toFixed(2)} per tap
+                  </p>
+                  <div
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
+                      isDark ? "bg-slate-950/60 border-emerald-900" : "bg-emerald-50 border-emerald-200"
+                    }`}
+                  >
+                    <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
+                    <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
+                      {loadingActiveDevices
+                        ? "Reader: Loading..."
+                        : device?.device_id
+                          ? `Reader: ${device.device_id}`
+                          : "Reader: Unassigned"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -595,7 +615,7 @@ export default function FareMatrixPage() {
                   Configured Routes
                 </CardTitle>
                 <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Only <strong>one route</strong> can be active at a time. Active route is pinned to the top.
+                  One active route per reader device. A route stays active until you deactivate it or reassign that reader.
                 </p>
               </div>
             </div>
