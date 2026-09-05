@@ -4,7 +4,6 @@ import {
   useCreateRoute,
   useUpdateRoute,
   useDeleteRoute,
-  useToggleRoute,
   getListRoutesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -152,6 +151,11 @@ export default function FareMatrixPage() {
   const [activeDeviceInfo, setActiveDeviceInfo] = useState<Device | null>(null);
   const [loadingActiveDevice, setLoadingActiveDevice] = useState(false);
 
+  // ✅ Replaces toggleMutation.isPending now that activate/deactivate go
+  // through Supabase RPC calls instead of the generated toggle-route mutation.
+  const [isTogglePending, setIsTogglePending] = useState(false);
+  const [pendingRouteId, setPendingRouteId] = useState<string | number | null>(null);
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -175,11 +179,8 @@ export default function FareMatrixPage() {
     ? routes.find((r) => r.isActive) ?? null
     : null;
 
-  // ✅ FIXED: fetch the device_id straight from the `fare_routes` table in
-  // Supabase instead of trusting the generated API client to expose it.
-  // The API client's serialized route object doesn't reliably include the
-  // device_id/deviceId field, so we go directly to the DB for it, then use
-  // that id to look up the device row.
+  // ✅ Fetch the device_id straight from the `fare_routes` table in Supabase
+  // instead of trusting the generated API client to expose it.
   const fetchRouteDeviceIdFromDb = async (
     routeId: string | number
   ): Promise<string | null> => {
@@ -287,36 +288,6 @@ export default function FareMatrixPage() {
     },
   });
 
-  const toggleMutation = useToggleRoute({
-    mutation: {
-      onMutate: async ({ id }: { id: string | number }) => {
-        await queryClient.cancelQueries({ queryKey: getListRoutesQueryKey() });
-        const previous = queryClient.getQueryData(getListRoutesQueryKey());
-        queryClient.setQueryData(getListRoutesQueryKey(), (old: any) => {
-          if (!Array.isArray(old)) return old;
-          const clickedIsCurrentlyActive = old.find((r: any) => r.id === id)?.isActive;
-          return old.map((r: any) => ({
-            ...r,
-            isActive: clickedIsCurrentlyActive ? (r.id === id ? false : r.isActive) : r.id === id,
-          }));
-        });
-        return { previous };
-      },
-      onError: (_err: any, _vars: any, context: any) => {
-        if (context?.previous !== undefined) {
-          queryClient.setQueryData(getListRoutesQueryKey(), context.previous);
-        }
-        toast({ title: "Failed to update route status", variant: "destructive" });
-      },
-      onSuccess: () => {
-        toast({ title: <SuccessTitle text="Route Status Updated" /> });
-      },
-      onSettled: () => {
-        queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
-      },
-    },
-  });
-
   const openEdit = (route: any) => {
     setEditRoute(route);
     const initial = {
@@ -361,41 +332,64 @@ export default function FareMatrixPage() {
     fetchActiveDevices();
   };
 
-  const confirmActivate = () => {
+  // ✅ FIXED: activate now goes through a single SECURITY DEFINER Postgres
+  // RPC function (`activate_route`) instead of calling the toggle-route API
+  // and then separately writing device_id via the client. The old two-step
+  // approach could silently fail to persist device_id if RLS blocked the
+  // client-side update (no thrown error, just 0 rows updated) — the RPC
+  // approach runs at the DB level, bypasses RLS, and is atomic.
+  const confirmActivate = async () => {
     if (!activateRoute || !selectedDeviceId) return;
-    toggleMutation.mutate(
-      {
-        id: activateRoute.id,
-        data: { deviceId: selectedDeviceId }, // 👈 adjust field name to match your API payload
-      } as any,
-      {
-        onSuccess: async () => {
-          // ⚠️ WORKAROUND: the toggle-route API doesn't persist device_id onto
-          // fare_routes (confirmed null in the DB), so we write it directly
-          // to Supabase here as a stopgap. The real fix belongs in the
-          // backend's toggle/activate route handler — once that's fixed,
-          // this direct write can be removed.
-          const { error } = await supabase
-            .from("fare_routes") // 👈 adjust table name if different
-            .update({ device_id: selectedDeviceId }) // 👈 adjust column name if different
-            .eq("id", activateRoute.id); // 👈 adjust PK column name if different
 
-          if (error) {
-            toast({
-              title: "Route activated, but failed to link device",
-              variant: "destructive",
-            });
-          } else {
-            // Refresh the reader badge immediately instead of waiting for
-            // the realtime subscription to catch up.
-            fetchActiveRouteDevice(activateRoute.id);
-          }
+    setIsTogglePending(true);
+    setPendingRouteId(activateRoute.id);
 
-          setActivateRoute(null);
-          setSelectedDeviceId("");
-        },
-      }
-    );
+    const { error } = await supabase.rpc("activate_route", {
+      p_route_id: activateRoute.id,
+      p_device_id: selectedDeviceId,
+    });
+
+    if (error) {
+      console.error("activate_route error:", error);
+      toast({ title: "Failed to activate route", variant: "destructive" });
+      setIsTogglePending(false);
+      setPendingRouteId(null);
+      return;
+    }
+
+    toast({ title: <SuccessTitle text="Route Status Updated" /> });
+
+    queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
+    await fetchActiveRouteDevice(activateRoute.id);
+
+    setActivateRoute(null);
+    setSelectedDeviceId("");
+    setIsTogglePending(false);
+    setPendingRouteId(null);
+  };
+
+  // ✅ FIXED: deactivate now goes through a matching `deactivate_route` RPC
+  // function that also clears device_id, instead of the old toggle mutation.
+  const handleDeactivate = async (routeId: string | number) => {
+    setIsTogglePending(true);
+    setPendingRouteId(routeId);
+
+    const { error } = await supabase.rpc("deactivate_route", {
+      p_route_id: routeId,
+    });
+
+    if (error) {
+      console.error("deactivate_route error:", error);
+      toast({ title: "Failed to update route status", variant: "destructive" });
+      setIsTogglePending(false);
+      setPendingRouteId(null);
+      return;
+    }
+
+    toast({ title: <SuccessTitle text="Route Status Updated" /> });
+    queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
+    setIsTogglePending(false);
+    setPendingRouteId(null);
   };
 
   const handleAdd = async () => {
@@ -544,7 +538,7 @@ export default function FareMatrixPage() {
           </div>
         </div>
 
-        {/* ✅ FIXED: RFID Reader badge pulls device_id straight from the fare_routes
+        {/* ✅ RFID Reader badge pulls device_id straight from the fare_routes
             table via fetchActiveRouteDevice, then resolves the device name from
             the devices table (via activeDeviceInfo). No more hardcoded IDs and
             no more relying on the API client to expose deviceId/device_id. */}
@@ -697,13 +691,13 @@ export default function FareMatrixPage() {
                             onClick={() => {
                               if (route.isActive) {
                                 // Deactivating doesn't need a device selection
-                                toggleMutation.mutate({ id: route.id });
+                                handleDeactivate(route.id);
                               } else {
                                 // Activating opens the device-selection modal
                                 openActivateModal(route);
                               }
                             }}
-                            disabled={toggleMutation.isPending}
+                            disabled={isTogglePending && pendingRouteId === route.id}
                             data-testid={`toggle-route-${route.id}`}
                           >
                             {route.isActive ? (
@@ -1008,11 +1002,11 @@ export default function FareMatrixPage() {
             </Button>
             <Button
               onClick={confirmActivate}
-              disabled={!selectedDeviceId || toggleMutation.isPending}
+              disabled={!selectedDeviceId || isTogglePending}
               data-testid="button-confirm-activate"
               className="bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer disabled:cursor-not-allowed"
             >
-              {toggleMutation.isPending ? "Activating..." : "Activate"}
+              {isTogglePending ? "Activating..." : "Activate"}
             </Button>
           </DialogFooter>
         </DialogContent>
