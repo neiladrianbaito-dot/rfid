@@ -369,7 +369,28 @@ export default function FareMatrixPage() {
         data: { deviceId: selectedDeviceId }, // 👈 adjust field name to match your API payload
       } as any,
       {
-        onSuccess: () => {
+        onSuccess: async () => {
+          // ⚠️ WORKAROUND: the toggle-route API doesn't persist device_id onto
+          // fare_routes (confirmed null in the DB), so we write it directly
+          // to Supabase here as a stopgap. The real fix belongs in the
+          // backend's toggle/activate route handler — once that's fixed,
+          // this direct write can be removed.
+          const { error } = await supabase
+            .from("fare_routes") // 👈 adjust table name if different
+            .update({ device_id: selectedDeviceId }) // 👈 adjust column name if different
+            .eq("id", activateRoute.id); // 👈 adjust PK column name if different
+
+          if (error) {
+            toast({
+              title: "Route activated, but failed to link device",
+              variant: "destructive",
+            });
+          } else {
+            // Refresh the reader badge immediately instead of waiting for
+            // the realtime subscription to catch up.
+            fetchActiveRouteDevice(activateRoute.id);
+          }
+
           setActivateRoute(null);
           setSelectedDeviceId("");
         },

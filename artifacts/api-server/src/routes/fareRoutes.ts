@@ -214,6 +214,21 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
     return;
   }
 
+  // ✅ FIX: accept an optional deviceId from the request body so the linked
+  // RFID reader actually gets persisted when a route is activated. Before
+  // this, the toggle endpoint only ever flipped isActive and silently
+  // dropped any deviceId the frontend sent — that's why device_id stayed
+  // null in fare_routes no matter what was selected in the Activate modal.
+  //
+  // NOTE: if you have a Zod schema for this body (e.g. ToggleRouteBody),
+  // swap the manual read below for a proper `ToggleRouteBody.safeParse(req.body)`
+  // so it's validated the same way the other routes are.
+  const rawDeviceId = (req.body as Record<string, unknown> | undefined)?.deviceId;
+  const deviceId =
+    typeof rawDeviceId === "string" && rawDeviceId.trim().length > 0
+      ? rawDeviceId.trim()
+      : undefined;
+
   try {
     const [existing] = await db
       .select()
@@ -228,15 +243,27 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
     const willBeActive = !existing.isActive;
 
     if (willBeActive) {
+      // Deactivate every other route, and clear their linked device too so
+      // an old reader assignment can't linger on a route that's no longer live.
       await db
         .update(fareRoutesTable)
-        .set({ isActive: false })
+        .set({ isActive: false, deviceId: null })
         .where(ne(fareRoutesTable.id, params.data.id));
+    }
+
+    const updateData: Record<string, any> = { isActive: willBeActive };
+    if (willBeActive) {
+      // Only set deviceId when activating. If none was provided, fall back
+      // to null rather than leaving whatever stale value was there before.
+      updateData.deviceId = deviceId ?? null;
+    } else {
+      // Deactivating: clear the device link since it's no longer in use.
+      updateData.deviceId = null;
     }
 
     const [route] = await db
       .update(fareRoutesTable)
-      .set({ isActive: willBeActive })
+      .set(updateData)
       .where(eq(fareRoutesTable.id, params.data.id))
       .returning();
 
@@ -246,7 +273,9 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
         action: "UPDATE",
         entity: "Fare Route",
         details: willBeActive
-          ? `activated route: ${route.origin} → ${route.destination} (deactivated all others)`
+          ? `activated route: ${route.origin} → ${route.destination} (deactivated all others)${
+              deviceId ? ` — linked device ${deviceId}` : ""
+            }`
           : `deactivated route: ${route.origin} → ${route.destination}`,
       });
     } catch (auditError) {
