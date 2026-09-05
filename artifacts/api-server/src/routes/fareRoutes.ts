@@ -11,7 +11,7 @@ import {
   ToggleRouteParams,
   ToggleRouteResponse,
 } from "@workspace/api-zod";
-import { z } from "zod/v4";
+import { z } from "zod";
 import { verifyAdminToken } from "../lib/admin-token";
 import { logAudit } from "../lib/audit-logger";
 
