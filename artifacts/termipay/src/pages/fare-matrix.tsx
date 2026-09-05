@@ -194,15 +194,30 @@ export default function FareMatrixPage() {
     return (data as { device_id: string | null }).device_id ?? null;
   };
 
+  // routeId currently backing activeDeviceInfo — lets us tell a background
+  // realtime refresh (same route, e.g. last_ping heartbeat) apart from an
+  // actual route change, so we only flash "Loading..." on real changes.
+  const activeDeviceRouteIdRef = useRef<string | number | null>(null);
+
   const fetchActiveRouteDevice = async (routeId: string | number | null) => {
     if (!routeId) {
+      activeDeviceRouteIdRef.current = null;
       setActiveDeviceInfo(null);
       return;
     }
-    setLoadingActiveDevice(true);
+
+    // Only show the "Loading..." state when this is a genuinely new route
+    // (or the very first fetch). Background realtime refreshes for the same
+    // route (e.g. devices.last_ping heartbeat ticking) update silently so the
+    // badge doesn't flicker.
+    const isNewRoute = activeDeviceRouteIdRef.current !== routeId;
+    if (isNewRoute) {
+      setLoadingActiveDevice(true);
+    }
 
     const deviceId = await fetchRouteDeviceIdFromDb(routeId);
     if (!deviceId) {
+      activeDeviceRouteIdRef.current = routeId;
       setActiveDeviceInfo(null);
       setLoadingActiveDevice(false);
       return;
@@ -216,8 +231,11 @@ export default function FareMatrixPage() {
       .eq("device_id", deviceId)
       .maybeSingle();
 
+    activeDeviceRouteIdRef.current = routeId;
     setActiveDeviceInfo(error ? null : (data as Device) ?? null);
-    setLoadingActiveDevice(false);
+    if (isNewRoute) {
+      setLoadingActiveDevice(false);
+    }
   };
 
   useEffect(() => {
