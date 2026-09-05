@@ -68,7 +68,7 @@ function CurrentDateTime({ isDark }: { isDark: boolean }) {
         isDark ? "bg-slate-900 border-slate-800 text-slate-400" : "bg-slate-50 border-slate-200 text-slate-600"
       }`}
     >
-      <Clock size={12} className="text-blue-500" />
+      <Clock size={12} className="text-red-500" />
       <span>
         {now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
       </span>
@@ -206,7 +206,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
       }`}
     >
-      {/* Sidebar — themed blue to match the app's accent color */}
+      {/* Sidebar — themed dark red to match the app's accent color */}
       <aside
         className={`
           fixed inset-y-0 left-0 z-50 w-72 border-r print:hidden
@@ -214,14 +214,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           lg:relative lg:translate-x-0
           ${sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}
           ${isDark
-            ? "bg-gradient-to-b from-blue-950 via-slate-950 to-slate-950 border-blue-950"
-            : "bg-gradient-to-b from-blue-950 to-slate-900 border-blue-950"
+            ? "bg-gradient-to-b from-red-950 via-slate-950 to-slate-950 border-red-950"
+            : "bg-gradient-to-b from-red-950 to-slate-900 border-red-950"
           }
         `}
       >
         <div className="flex flex-col h-full">
           {/* Logo Section */}
-          <div className={`p-6 border-b transition-colors ${isDark ? "border-blue-900/50" : "border-blue-900/50"}`}>
+          <div className={`p-6 border-b transition-colors ${isDark ? "border-red-900/50" : "border-red-900/50"}`}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0 ring-2 ring-white/20">
                 <img
@@ -232,9 +232,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </div>
               <div>
                 <h1 className="text-sm font-bold tracking-tight text-white">
-                  Fare Collection<span className="text-blue-300"> System</span>
+                  Fare Collection<span className="text-red-300"> System</span>
                 </h1>
-                <p className={`text-[10px] font-semibold uppercase tracking-widest leading-tight ${isDark ? "text-blue-400/70" : "text-blue-200"}`}>
+                <p className={`text-[10px] font-semibold uppercase tracking-widest leading-tight ${isDark ? "text-red-400/70" : "text-red-200"}`}>
                   Admin Console
                 </p>
               </div>
@@ -255,11 +255,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       transition-all duration-150
                       ${isActive
                         ? isDark
-                          ? "bg-blue-600/30 text-white"
-                          : "bg-blue-600/30 text-white"
+                          ? "bg-red-600/30 text-white"
+                          : "bg-red-600/30 text-white"
                         : isDark
-                          ? "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
-                          : "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
+                          ? "text-red-200/70 hover:text-white hover:bg-red-900/40"
+                          : "text-red-200/70 hover:text-white hover:bg-red-900/40"
                       }
                     `}
                   >
@@ -267,15 +267,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       size={17}
                       className={
                         isActive
-                          ? isDark ? "text-blue-300" : "text-white"
+                          ? isDark ? "text-red-300" : "text-white"
                           : isDark
-                            ? "text-blue-400/60 group-hover:text-blue-200"
-                            : "text-blue-300 group-hover:text-blue-100"
+                            ? "text-red-400/60 group-hover:text-red-200"
+                            : "text-red-300 group-hover:text-red-100"
                       }
                     />
                     {item.label}
                     {isActive && (
-                      <motion.div layoutId="activeNav" className={`ml-auto w-1.5 h-1.5 rounded-full ${isDark ? "bg-blue-400" : "bg-white"}`} />
+                      <motion.div layoutId="activeNav" className={`ml-auto w-1.5 h-1.5 rounded-full ${isDark ? "bg-red-400" : "bg-white"}`} />
                     )}
                   </div>
                 </Link>
@@ -284,15 +284,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </nav>
 
           {/* User Section at bottom of Sidebar */}
-          <div className={`p-4 border-t transition-colors ${isDark ? "border-blue-900/50" : "border-blue-600/60"}`}>
+          <div className={`p-4 border-t transition-colors ${isDark ? "border-red-900/50" : "border-red-600/60"}`}>
             <Button
               variant="ghost"
               onClick={logout}
               disabled={isLoggingOut}
               className={`w-full justify-start gap-3 rounded-lg text-sm font-medium ${
                 isDark
-                  ? "text-blue-200/70 hover:text-red-300 hover:bg-red-950/40"
-                  : "text-blue-100 hover:text-white hover:bg-red-500/20"
+                  ? "text-red-200/70 hover:text-red-300 hover:bg-red-950/40"
+                  : "text-red-100 hover:text-white hover:bg-red-500/20"
               }`}
             >
               <LogOut size={17} />
@@ -344,8 +344,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               data-testid="button-theme-toggle"
               className={`flex items-center justify-center w-9 h-9 rounded-full border transition-colors ${
                 isDark
-                  ? "bg-slate-900 border-slate-800 text-blue-400 hover:border-blue-600"
-                  : "bg-white border-slate-200 text-blue-600 hover:border-blue-400"
+                  ? "bg-slate-900 border-slate-800 text-red-400 hover:border-red-600"
+                  : "bg-white border-slate-200 text-red-600 hover:border-red-400"
               }`}
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -367,11 +367,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   whileTap={{ scale: 0.95 }}
                   className={`w-10 h-10 rounded-xl border flex items-center justify-center cursor-pointer overflow-hidden group transition-colors ${
                     isDark
-                      ? "bg-blue-950/40 border-blue-900 hover:border-blue-600"
-                      : "bg-blue-50 border-blue-100 hover:border-blue-300"
+                      ? "bg-red-950/40 border-red-900 hover:border-red-600"
+                      : "bg-red-50 border-red-100 hover:border-red-300"
                   }`}
                 >
-                  <span className={`font-bold text-sm transition-colors ${isDark ? "text-blue-400 group-hover:text-blue-300" : "text-blue-600 group-hover:text-blue-700"}`}>
+                  <span className={`font-bold text-sm transition-colors ${isDark ? "text-red-400 group-hover:text-red-300" : "text-red-600 group-hover:text-red-700"}`}>
                     {user?.name ? user.name.trim().charAt(0).toUpperCase() : "A"}
                   </span>
                 </motion.div>
@@ -382,7 +382,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
                 }`}
               >
-                <div className="absolute top-0 left-0 w-full h-[3px] bg-blue-600 rounded-t-lg" />
+                <div className="absolute top-0 left-0 w-full h-[3px] bg-red-600 rounded-t-lg" />
                 <DialogHeader>
                   <DialogTitle className={`font-bold tracking-tight transition-colors ${isDark ? "text-white" : "text-slate-900"}`}>
                     Security & Profile
@@ -402,17 +402,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     <Input
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className={`focus:border-blue-500 focus-visible:ring-blue-500 transition-colors ${
+                      className={`focus:border-red-500 focus-visible:ring-red-500 transition-colors ${
                         isDark ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"
                       }`}
                     />
                   </div>
                   <div
                     className={`p-4 rounded-xl border space-y-4 transition-colors ${
-                      isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"
+                      isDark ? "bg-red-950/20 border-red-900" : "bg-red-50/60 border-red-100"
                     }`}
                   >
-                    <div className={`flex items-center gap-2 ${isDark ? "text-blue-400" : "text-blue-700"}`}>
+                    <div className={`flex items-center gap-2 ${isDark ? "text-red-400" : "text-red-700"}`}>
                       <ShieldCheck size={14} />
                       <span className="text-xs font-semibold uppercase tracking-wide">Authentication Update</span>
                     </div>
@@ -465,7 +465,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <Button
                     onClick={handleSaveChanges}
                     disabled={isUpdating}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6"
+                    className="bg-red-600 hover:bg-red-700 text-white font-medium px-6"
                   >
                     {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Changes"}
                   </Button>
