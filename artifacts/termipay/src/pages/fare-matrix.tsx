@@ -552,8 +552,8 @@ export default function FareMatrixPage() {
             <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
               {loadingActiveDevice
                 ? "Reader: Loading..."
-                : activeDeviceInfo?.name
-                  ? `Reader: ${activeDeviceInfo.name}`
+                : activeDeviceInfo?.device_id
+                  ? `Reader: ${activeDeviceInfo.device_id}`
                   : "Reader: Unassigned"}
             </span>
           </div>
