@@ -2,7 +2,7 @@ import { pgTable, text, serial, numeric, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 // 👇 adjust the path below to wherever you save devices-schema.ts in your project
-import { devicesTable } from "./devices-schema";
+import { devicesTable } from "./device";
 
 export const fareRoutesTable = pgTable("fare_routes", {
   id: serial("id").primaryKey(),
