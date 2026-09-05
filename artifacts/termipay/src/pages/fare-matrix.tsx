@@ -376,11 +376,28 @@ export default function FareMatrixPage() {
   // approach could silently fail to persist device_id if RLS blocked the
   // client-side update (no thrown error, just 0 rows updated) — the RPC
   // approach runs at the DB level, bypasses RLS, and is atomic.
+  //
+  // ✅ VICE VERSA: one physical reader sits on one vehicle and taps riders in
+  // BOTH directions (e.g. Barangay A → Calbayog and Calbayog → Barangay A).
+  // So activating one direction also activates its reverse-direction
+  // counterpart route on the SAME device, if that reverse route exists.
+  const findReverseRoute = (route: any) =>
+    Array.isArray(routes)
+      ? routes.find(
+          (r) =>
+            r.id !== route.id &&
+            r.origin === route.destination &&
+            r.destination === route.origin
+        ) ?? null
+      : null;
+
   const confirmActivate = async () => {
     if (!activateRoute || !selectedDeviceId) return;
 
     setIsTogglePending(true);
     setPendingRouteId(activateRoute.id);
+
+    const reverseRoute = findReverseRoute(activateRoute);
 
     const { error } = await supabase.rpc("activate_route", {
       p_route_id: activateRoute.id,
@@ -395,12 +412,33 @@ export default function FareMatrixPage() {
       return;
     }
 
+    // Activate the reverse-direction route too, on the same device. Not
+    // fatal if this one fails — the primary direction is already active —
+    // but we do surface a toast so it isn't silently missed.
+    if (reverseRoute) {
+      const { error: reverseError } = await supabase.rpc("activate_route", {
+        p_route_id: reverseRoute.id,
+        p_device_id: selectedDeviceId,
+      });
+      if (reverseError) {
+        console.error("activate_route (reverse) error:", reverseError);
+        toast({
+          title: "Route activated, but couldn't activate the return direction",
+          variant: "destructive",
+        });
+      }
+    }
+
     toast({ title: <SuccessTitle text="Route Status Updated" /> });
 
     queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
     await fetchActiveRoutesDevices(
       Array.isArray(routes)
-        ? [...routes.filter((r) => r.isActive && r.id !== activateRoute.id).map((r) => r.id), activateRoute.id]
+        ? [
+            ...routes.filter((r) => r.isActive && r.id !== activateRoute.id && r.id !== reverseRoute?.id).map((r) => r.id),
+            activateRoute.id,
+            ...(reverseRoute ? [reverseRoute.id] : []),
+          ]
         : [activateRoute.id]
     );
 
@@ -412,9 +450,14 @@ export default function FareMatrixPage() {
 
   // ✅ FIXED: deactivate now goes through a matching `deactivate_route` RPC
   // function that also clears device_id, instead of the old toggle mutation.
+  // ✅ VICE VERSA: also deactivates the reverse-direction counterpart route
+  // (same reasoning as activate — one reader serves both directions).
   const handleDeactivate = async (routeId: string | number) => {
     setIsTogglePending(true);
     setPendingRouteId(routeId);
+
+    const route = Array.isArray(routes) ? routes.find((r) => r.id === routeId) : null;
+    const reverseRoute = route ? findReverseRoute(route) : null;
 
     const { error } = await supabase.rpc("deactivate_route", {
       p_route_id: routeId,
@@ -426,6 +469,19 @@ export default function FareMatrixPage() {
       setIsTogglePending(false);
       setPendingRouteId(null);
       return;
+    }
+
+    if (reverseRoute?.isActive) {
+      const { error: reverseError } = await supabase.rpc("deactivate_route", {
+        p_route_id: reverseRoute.id,
+      });
+      if (reverseError) {
+        console.error("deactivate_route (reverse) error:", reverseError);
+        toast({
+          title: "Deactivated, but couldn't deactivate the return direction",
+          variant: "destructive",
+        });
+      }
     }
 
     toast({ title: <SuccessTitle text="Route Status Updated" /> });
