@@ -161,6 +161,9 @@ export default function UserManagementPage() {
     status: "",
     type: "",
   });
+  // Snapshot of the form's values at the moment Edit was opened — used to
+  // detect whether the user has actually changed anything before allowing Save.
+  const [originalForm, setOriginalForm] = useState(editForm);
   const [page, setPage] = useState(1);
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -236,17 +239,28 @@ export default function UserManagementPage() {
 
   const openEdit = (user: any) => {
     setEditUser(user);
-    setEditForm({
+    const initial = {
       fullName: user.fullName,
       contactNumber: user.contactNumber,
       balance: String(user.balance || 0),
       status: user.status,
       type: user.type || "Regular",
-    });
+    };
+    setEditForm(initial);
+    setOriginalForm(initial);
   };
 
+  // True only if at least one field actually differs from what it was when
+  // the dialog opened. Balance is read-only in this form so it never
+  // contributes a "change" — comparing it would falsely enable Save.
+  const hasChanges =
+    editForm.fullName !== originalForm.fullName ||
+    editForm.contactNumber !== originalForm.contactNumber ||
+    editForm.status !== originalForm.status ||
+    editForm.type !== originalForm.type;
+
   const handleUpdate = () => {
-    if (!editUser) return;
+    if (!editUser || !hasChanges) return;
     updateMutation.mutate({
       id: editUser.id,
       data: {
@@ -878,8 +892,9 @@ export default function UserManagementPage() {
             </Button>
             <Button
               onClick={handleUpdate}
-              disabled={updateMutation.isPending}
-              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-6 cursor-pointer disabled:cursor-not-allowed"
+              disabled={updateMutation.isPending || !hasChanges}
+              title={!hasChanges ? "No changes to save" : undefined}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-6 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-blue-600"
             >
               {updateMutation.isPending ? "Updating..." : "Save Changes"}
             </Button>
