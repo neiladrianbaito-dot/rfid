@@ -215,13 +215,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           ${sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}
           ${isDark
             ? "bg-gradient-to-b from-blue-950 via-slate-950 to-slate-950 border-blue-950"
-            : "bg-gradient-to-b from-blue-700 to-blue-800 border-blue-900"
+            : "bg-gradient-to-b from-blue-950 to-slate-900 border-blue-950"
           }
         `}
       >
         <div className="flex flex-col h-full">
           {/* Logo Section */}
-          <div className={`p-6 border-b transition-colors ${isDark ? "border-blue-900/50" : "border-blue-600/60"}`}>
+          <div className={`p-6 border-b transition-colors ${isDark ? "border-blue-900/50" : "border-blue-900/50"}`}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0 ring-2 ring-white/20">
                 <img
@@ -256,10 +256,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       ${isActive
                         ? isDark
                           ? "bg-blue-600/30 text-white"
-                          : "bg-white/15 text-white"
+                          : "bg-blue-600/30 text-white"
                         : isDark
                           ? "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
-                          : "text-blue-100 hover:text-white hover:bg-white/10"
+                          : "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
                       }
                     `}
                   >
