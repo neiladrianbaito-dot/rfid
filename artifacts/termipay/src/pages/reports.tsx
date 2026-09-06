@@ -195,11 +195,9 @@ export default function ReportsPage() {
     [report]
   );
 
-  // ── FIX: aggregate per-day revenue directly from the FULL transaction
-  // list. report.dailyBreakdown only ever covers a short recent window
-  // (that's why the Year/Month/Day filter looked "broken" — there was
-  // simply no matching data outside that window). This gives the filter
-  // a complete dataset to search across. ──
+  // ── aggregate per-day revenue directly from the FULL transaction
+  // list. report.dailyBreakdown only ever covers a short recent window,
+  // so this gives the filter a complete dataset to search across. ──
   const aggregatedBreakdown = React.useMemo(() => {
     const map = new Map<string, number>();
     txList.forEach((tx: any) => {
@@ -237,9 +235,6 @@ export default function ReportsPage() {
     setFilterDay("all");
   };
 
-  // NOTE: dropdowns are independently selectable — no more forced
-  // "pick Year first" chain, since that disabled state was itself
-  // confusing ("filter not working" when it was just locked).
   const handleYearChange = (value: string) => setFilterYear(value);
   const handleMonthChange = (value: string) => setFilterMonth(value);
   const handleDayChange = (value: string) => setFilterDay(value);
@@ -595,95 +590,6 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* ══ DATE FILTER BAR ══ */}
-      <Card className={`shadow-sm ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <CardContent className="p-4">
-          <div className="flex flex-wrap items-end gap-4">
-            <div className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              <Filter size={14} className="text-blue-500" />
-              Filter by Date
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Year
-              </label>
-              <select
-                value={filterYear}
-                onChange={(e) => handleYearChange(e.target.value)}
-                data-testid="select-filter-year"
-                className={`h-9 rounded-md border px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
-                }`}
-              >
-                <option value="all">All Years</option>
-                {availableYears.map((y) => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Month
-              </label>
-              <select
-                value={filterMonth}
-                onChange={(e) => handleMonthChange(e.target.value)}
-                data-testid="select-filter-month"
-                className={`h-9 rounded-md border px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
-                }`}
-              >
-                <option value="all">All Months</option>
-                {MONTH_OPTIONS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Day
-              </label>
-              <select
-                value={filterDay}
-                onChange={(e) => handleDayChange(e.target.value)}
-                data-testid="select-filter-day"
-                className={`h-9 rounded-md border px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
-                }`}
-              >
-                <option value="all">All Days</option>
-                {DAY_OPTIONS.map((d) => (
-                  <option key={d.value} value={d.value}>{d.label}</option>
-                ))}
-              </select>
-            </div>
-
-            {isFilterActive && (
-              <Button
-                variant="ghost"
-                onClick={resetFilters}
-                data-testid="button-reset-filters"
-                className={`h-9 gap-2 text-xs font-semibold ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}
-              >
-                <RotateCcw size={13} />
-                Reset Filters
-              </Button>
-            )}
-
-            {isFilterActive && (
-              <div className={`ml-auto flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-semibold ${
-                isDark ? "bg-blue-950/40 border-blue-900 text-blue-300" : "bg-blue-50 border-blue-100 text-blue-700"
-              }`}>
-                Showing: {filterLabel} — {formatPeso(filteredRevenueTotal)} ({filteredBreakdown.length} day{filteredBreakdown.length === 1 ? "" : "s"})
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
       {/* ══ SUMMARY CARDS ══ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -722,21 +628,87 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* ══ BAR CHART ══ */}
+      {/* ══ BAR CHART — filter now lives right inside this card's header ══ */}
       <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
         <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-          <div className="flex items-center justify-between">
-            <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              <PieChart size={14} className="text-blue-500" />
-              Daily Revenue Breakdown
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <PieChart size={14} className="text-blue-500" />
+                Daily Revenue Breakdown
+              </CardTitle>
+              <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Performance Matrix</div>
+            </div>
+
+            {/* ── inline filter row ── */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Filter size={13} className={isDark ? "text-blue-400" : "text-blue-500"} />
+
+              <select
+                value={filterYear}
+                onChange={(e) => handleYearChange(e.target.value)}
+                data-testid="select-filter-year"
+                className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                }`}
+              >
+                <option value="all">Year</option>
+                {availableYears.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+
+              <select
+                value={filterMonth}
+                onChange={(e) => handleMonthChange(e.target.value)}
+                data-testid="select-filter-month"
+                className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                }`}
+              >
+                <option value="all">Month</option>
+                {MONTH_OPTIONS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+
+              <select
+                value={filterDay}
+                onChange={(e) => handleDayChange(e.target.value)}
+                data-testid="select-filter-day"
+                className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                }`}
+              >
+                <option value="all">Day</option>
+                {DAY_OPTIONS.map((d) => (
+                  <option key={d.value} value={d.value}>{d.label}</option>
+                ))}
+              </select>
+
               {isFilterActive && (
-                <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  — {filterLabel}
-                </span>
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  data-testid="button-reset-filters"
+                  className={`h-8 flex items-center gap-1 px-2.5 rounded-md text-xs font-semibold transition-colors ${
+                    isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                  }`}
+                >
+                  <RotateCcw size={12} />
+                  Reset
+                </button>
               )}
-            </CardTitle>
-            <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Performance Matrix</div>
+
+              {isFilterActive && (
+                <div className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-semibold ${
+                  isDark ? "bg-blue-950/40 border-blue-900 text-blue-300" : "bg-blue-50 border-blue-100 text-blue-700"
+                }`}>
+                  {filterLabel}: {formatPeso(filteredRevenueTotal)} ({filteredBreakdown.length}d)
+                </div>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="pt-8">
