@@ -21,6 +21,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
 import {
@@ -105,6 +113,9 @@ export default function SettingsPage() {
   const isSuperAdmin = myRole === "super_admin";
 
   // ── Add staff form state ───────────────────────────────────────────────
+  // ── FIX: form now lives inside a Dialog instead of an always-visible
+  // card. `isAddOpen` controls the modal's open state. ──
+  const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
     fullName: "",
@@ -160,6 +171,7 @@ export default function SettingsPage() {
         description: `${form.fullName.trim()} has been added as ${roleLabel(form.role)}.`,
       });
       resetForm();
+      setIsAddOpen(false);
       loadStaff();
     } catch (error: any) {
       toast({
@@ -178,9 +190,7 @@ export default function SettingsPage() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
 
-  // ── FIX: replaced window.confirm() with a proper modal — same pattern
-  // used for delete confirmation on the User Management page. `deleteTarget`
-  // holds the staff record pending deletion (null = dialog closed). ──
+  // ── Delete confirmation modal — same pattern as User Management page ──
   const [deleteTarget, setDeleteTarget] = useState<StaffUser | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -220,8 +230,6 @@ export default function SettingsPage() {
     });
   }, [staff, roleFilter, search]);
 
-  // ── FIX: actual deletion now runs from the modal's "Confirm Delete"
-  // button instead of from window.confirm's callback. ──
   const confirmRemoveStaff = async () => {
     if (!deleteTarget) return;
     const { id: userId, full_name: name } = deleteTarget;
@@ -259,104 +267,24 @@ export default function SettingsPage() {
             Manage staff accounts and system access
           </p>
         </div>
-        {myRoleLoaded && myRole && (
-          <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${roleBadgeClass(myRole, isDark)}`}>
-            {myRole === "super_admin" ? <Crown className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
-            You are logged in as {roleLabel(myRole)}
-          </Badge>
-        )}
+        <div className="flex items-center gap-3">
+          {myRoleLoaded && myRole && (
+            <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${roleBadgeClass(myRole, isDark)}`}>
+              {myRole === "super_admin" ? <Crown className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
+              You are logged in as {roleLabel(myRole)}
+            </Badge>
+          )}
+          {myRoleLoaded && isSuperAdmin && (
+            <Button
+              onClick={() => setIsAddOpen(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium gap-2"
+            >
+              <UserPlus className="h-4 w-4" />
+              Add Account
+            </Button>
+          )}
+        </div>
       </div>
-
-      {/* Add New Staff User — Super Admin only */}
-      {myRoleLoaded && isSuperAdmin && (
-        <Card className={`shadow-sm relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
-          <CardHeader className={`pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-            <div className="flex items-center gap-2">
-              <UserPlus className="text-blue-500" size={18} />
-              <h3 className={`text-sm font-bold uppercase tracking-wide ${isDark ? "text-slate-200" : "text-slate-700"}`}>
-                Add New Account
-              </h3>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <div className="grid gap-5 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Full Name
-                </Label>
-                <Input
-                  placeholder="Juan Dela Cruz"
-                  value={form.fullName}
-                  onChange={(e) => setForm({ ...form, fullName: e.target.value })}
-                  className={isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Username
-                </Label>
-                <Input
-                  placeholder="jdelacruz"
-                  value={form.username}
-                  onChange={(e) => setForm({ ...form, username: e.target.value })}
-                  className={isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Temporary Password
-                </Label>
-                <div className="relative">
-                  <Lock className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                  <Input
-                    type="password"
-                    placeholder="Minimum 6 characters"
-                    value={form.password}
-                    onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    className={`pl-10 ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Role
-                </Label>
-                <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
-                  <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                    <SelectItem value="staff">Staff</SelectItem>
-                    <SelectItem value="super_admin">Super Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className={`mt-5 p-3 rounded-lg border flex items-start gap-2 ${isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"}`}>
-              <ShieldCheck size={14} className={`mt-0.5 shrink-0 ${isDark ? "text-blue-400" : "text-blue-700"}`} />
-              <p className={`text-xs leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                The staff member will use this username and password to log in on the admin console. Advise them to change their password after first login.
-              </p>
-            </div>
-
-            <div className="flex justify-end mt-6">
-              <Button
-                onClick={handleAddStaff}
-                disabled={isSubmitting}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 gap-2"
-              >
-                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                {isSubmitting ? "Creating..." : "Create Account"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {myRoleLoaded && !isSuperAdmin && (
         <div className={`p-4 rounded-lg border flex items-start gap-3 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
@@ -486,6 +414,115 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── Add New Account Modal ────────────────────────────────────────── */}
+      <Dialog
+        open={isAddOpen}
+        onOpenChange={(open) => {
+          if (!isSubmitting) {
+            setIsAddOpen(open);
+            if (!open) resetForm();
+          }
+        }}
+      >
+        <DialogContent className={`sm:max-w-lg ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+          <DialogHeader>
+            <DialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+              <UserPlus className="text-blue-500" size={18} />
+              Add New Account
+            </DialogTitle>
+            <DialogDescription className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Create a login for a staff member or another super admin.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-5 py-2 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Full Name
+              </Label>
+              <Input
+                placeholder="Juan Dela Cruz"
+                value={form.fullName}
+                onChange={(e) => setForm({ ...form, fullName: e.target.value })}
+                className={isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Username
+              </Label>
+              <Input
+                placeholder="jdelacruz"
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                className={isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Temporary Password
+              </Label>
+              <div className="relative">
+                <Lock className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+                <Input
+                  type="password"
+                  placeholder="Minimum 6 characters"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  className={`pl-10 ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Role
+              </Label>
+              <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
+                <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                  <SelectItem value="staff">Staff</SelectItem>
+                  <SelectItem value="super_admin">Super Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className={`p-3 rounded-lg border flex items-start gap-2 ${isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"}`}>
+            <ShieldCheck size={14} className={`mt-0.5 shrink-0 ${isDark ? "text-blue-400" : "text-blue-700"}`} />
+            <p className={`text-xs leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              The staff member will use this username and password to log in on the admin console. Advise them to change their password after first login.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={isSubmitting}
+              onClick={() => {
+                setIsAddOpen(false);
+                resetForm();
+              }}
+              className={isDark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddStaff}
+              disabled={isSubmitting}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 gap-2"
+            >
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+              {isSubmitting ? "Creating..." : "Create Account"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Delete Confirm Modal — same AlertDialog pattern as User Management ── */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
