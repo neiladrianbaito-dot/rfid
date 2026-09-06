@@ -41,6 +41,7 @@ export const ListUsersResponseItem = zod.object({
   status: zod.string(),
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
+  expirationDate: zod.coerce.date().nullable().optional(),
 });
 export const ListUsersResponse = zod.array(ListUsersResponseItem);
 
@@ -66,6 +67,7 @@ export const GetUserResponse = zod.object({
   status: zod.string(),
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
+  expirationDate: zod.coerce.date().nullable().optional(),
 });
 
 export const UpdateUserParams = zod.object({
@@ -90,6 +92,7 @@ export const UpdateUserResponse = zod.object({
   status: zod.string(),
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
+  expirationDate: zod.coerce.date().nullable().optional(),
 });
 
 export const DeleteUserParams = zod.object({
@@ -106,6 +109,7 @@ export const ListRecentUsersResponseItem = zod.object({
   status: zod.string(),
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
+  expirationDate: zod.coerce.date().nullable().optional(),
 });
 export const ListRecentUsersResponse = zod.array(ListRecentUsersResponseItem);
 
