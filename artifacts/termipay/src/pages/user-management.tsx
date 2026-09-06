@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,6 +48,19 @@ const formatDate = (value: string | null | undefined) => {
     year: "numeric",
   });
 };
+
+// ➕ Renewal logic: extends from the LATER of (today, current expiration).
+// This means renewing a card that's still valid adds a full year on top of
+// its remaining validity, while renewing an already-expired card starts the
+// new 1-year period from today instead of stacking onto a past date.
+function computeRenewedExpiration(currentExpiration: string | null | undefined): Date {
+  const now = new Date();
+  const current = currentExpiration ? new Date(currentExpiration) : null;
+  const base = current && !isNaN(current.getTime()) && current > now ? current : now;
+  const renewed = new Date(base);
+  renewed.setFullYear(renewed.getFullYear() + 1);
+  return renewed;
+}
 
 function normalizeEmail(email: string | null | undefined): string | null {
   if (!email) return null;
@@ -166,6 +179,10 @@ export default function UserManagementPage() {
   const [deleteUser, setDeleteUser] = useState<any>(null);
   const [previewUser, setPreviewUser] = useState<any>(null);
   const [previewFlipped, setPreviewFlipped] = useState(false);
+
+  // ✅ Renew confirmation modal state — holds the user pending renewal
+  const [renewUser, setRenewUser] = useState<any>(null);
+
   const [editForm, setEditForm] = useState({
     fullName: "",
     contactNumber: "",
@@ -240,6 +257,21 @@ export default function UserManagementPage() {
     },
   });
 
+  // ✅ Separate mutation instance for renewals so we can show a distinct
+  // success toast ("Card Renewed") without touching the Edit dialog's state.
+  const renewMutation = useUpdateUser({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+        setRenewUser(null);
+        toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
+      },
+      onError: () => {
+        toast({ title: "Failed to renew card", variant: "destructive" });
+      },
+    },
+  });
+
   const deleteMutation = useDeleteUser({
     mutation: {
       onSuccess: () => {
@@ -291,6 +323,29 @@ export default function UserManagementPage() {
       { id: deleteUser.id },
       { onSettled: () => setDeleteUser(null) },
     );
+  };
+
+  // ✅ Opens the renewal confirmation dialog for a given user
+  const openRenew = (user: any) => {
+    setRenewUser(user);
+  };
+
+  // ✅ Confirms the renewal: sends the full user payload back (so we don't
+  // wipe other fields) with expirationDate pushed out by 1 year.
+  const confirmRenew = () => {
+    if (!renewUser) return;
+    const newExpiration = computeRenewedExpiration(renewUser.expirationDate);
+    renewMutation.mutate({
+      id: renewUser.id,
+      data: {
+        fullName: renewUser.fullName,
+        contactNumber: renewUser.contactNumber,
+        balance: renewUser.balance,
+        status: renewUser.status,
+        type: renewUser.type,
+        expirationDate: newExpiration.toISOString(),
+      },
+    });
   };
 
   return (
@@ -441,6 +496,11 @@ export default function UserManagementPage() {
                       </TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Type</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-emerald-500" : "text-emerald-600"}`}>Balance</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                        <span className="flex items-center gap-1">
+                          <CalendarClock size={10} /> Valid Until
+                        </span>
+                      </TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
                     </TableRow>
@@ -449,6 +509,8 @@ export default function UserManagementPage() {
                     {paginatedList.length > 0 ? (
                       paginatedList.map((user) => {
                         const linkedEmail = normalizeEmail(user.email);
+                        const expDate = user.expirationDate ? new Date(user.expirationDate) : null;
+                        const isExpired = !!expDate && !isNaN(expDate.getTime()) && expDate < new Date();
                         return (
                           <TableRow
                             key={user.id}
@@ -522,6 +584,17 @@ export default function UserManagementPage() {
                             </TableCell>
 
                             <TableCell>
+                              <span className={`inline-flex items-center gap-1 text-xs font-mono font-medium ${
+                                isExpired
+                                  ? isDark ? "text-red-400" : "text-red-600"
+                                  : isDark ? "text-slate-300" : "text-slate-600"
+                              }`}>
+                                <CalendarClock className="w-3 h-3 flex-shrink-0" />
+                                {formatDate(user.expirationDate)}
+                              </span>
+                            </TableCell>
+
+                            <TableCell>
                               <Badge
                                 variant="outline"
                                 className={`text-[10px] font-semibold ${
@@ -544,6 +617,15 @@ export default function UserManagementPage() {
                                   title="Preview card"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => openRenew(user)}
+                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40" : "text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50"}`}
+                                  title="Renew card (extend 1 year)"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5" />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -571,7 +653,7 @@ export default function UserManagementPage() {
                     ) : (
                       <TableRow>
                         <TableCell
-                          colSpan={8}
+                          colSpan={9}
                           className={`text-center py-20 uppercase font-semibold tracking-widest text-xs ${isDark ? "text-slate-700" : "text-slate-300"}`}
                         >
                           No users found
@@ -777,7 +859,7 @@ export default function UserManagementPage() {
             );
           })()}
 
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button
               variant="ghost"
               onClick={() => setPreviewUser(null)}
@@ -785,6 +867,19 @@ export default function UserManagementPage() {
             >
               Close
             </Button>
+            {previewUser && (
+              <Button
+                onClick={() => {
+                  const user = previewUser;
+                  setPreviewUser(null);
+                  openRenew(user);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                Renew Card
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -929,6 +1024,55 @@ export default function UserManagementPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ✅ Renew Confirmation Dialog — shows current vs. new expiration date */}
+      <AlertDialog open={!!renewUser} onOpenChange={(open) => !open && setRenewUser(null)}>
+        <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+              <RefreshCw className="text-emerald-500" size={18} /> Confirm Renewal
+            </AlertDialogTitle>
+            <AlertDialogDescription className={`text-sm leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              This will extend {renewUser?.fullName ?? "this user"}'s card validity by 1 year.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {renewUser && (
+            <div className={`grid grid-cols-2 gap-3 rounded-lg border p-3 text-sm ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+              <div>
+                <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Current Expiration</span>
+                <div className={`font-mono font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                  {formatDate(renewUser.expirationDate)}
+                </div>
+              </div>
+              <div>
+                <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-emerald-500" : "text-emerald-600"}`}>New Expiration</span>
+                <div className={`font-mono font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                  {formatDate(computeRenewedExpiration(renewUser.expirationDate).toISOString())}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={renewMutation.isPending}
+              className={`text-xs font-medium cursor-pointer disabled:cursor-not-allowed border-0 shadow-none bg-transparent hover:bg-transparent ${
+                isDark ? "text-slate-400 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmRenew}
+              disabled={renewMutation.isPending}
+              className="bg-emerald-600 text-white hover:bg-emerald-700 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
+            >
+              {renewMutation.isPending ? "Renewing..." : "Confirm Renewal"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Confirm */}
       <AlertDialog open={!!deleteUser} onOpenChange={(open) => !open && setDeleteUser(null)}>
