@@ -13,9 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { supabase } from "@/lib/supabase";
 import {
-  Settings, UserPlus, Users, Mail, Lock, Shield,
+  Settings, UserPlus, Users, Lock, Shield,
   Loader2, ShieldCheck, Trash2, RefreshCw,
 } from "lucide-react";
 
@@ -25,17 +24,23 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string {
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const token = window.localStorage.getItem("termipay_auth_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 type StaffUser = {
-  id: string;
-  name: string;
-  email: string;
+  id: number;
+  username: string;
+  full_name: string;
   role: string;
+  status: string;
   created_at: string;
 };
 
 function roleBadgeClass(role: string, isDark: boolean) {
   const key = role.toLowerCase();
-  if (key === "admin" || key === "super admin") {
+  if (key === "admin") {
     return isDark
       ? "bg-blue-950/40 text-blue-400 border-blue-900"
       : "bg-blue-50 text-blue-600 border-blue-200";
@@ -48,25 +53,26 @@ function roleBadgeClass(role: string, isDark: boolean) {
 export default function SettingsPage() {
   const { isDark } = useTheme();
   const { toast } = useToast();
+  const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
 
   // ── Add staff form state ───────────────────────────────────────────────
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
-    name: "",
-    email: "",
+    fullName: "",
+    username: "",
     password: "",
     role: "staff",
   });
 
   const resetForm = () => {
-    setForm({ name: "", email: "", password: "", role: "staff" });
+    setForm({ fullName: "", username: "", password: "", role: "staff" });
   };
 
   const handleAddStaff = async () => {
-    if (!form.name.trim() || !form.email.trim() || !form.password.trim()) {
+    if (!form.fullName.trim() || !form.username.trim() || !form.password.trim()) {
       toast({
         title: "Missing Information",
-        description: "Please fill in name, email and password.",
+        description: "Please fill in full name, username and password.",
         variant: "destructive",
       });
       return;
@@ -83,19 +89,15 @@ export default function SettingsPage() {
 
     setIsSubmitting(true);
     try {
-      const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token;
-
-      const response = await fetch(`${apiBaseUrl}/api/staff/create`, {
+      const response = await fetch(`${apiBaseUrl}/api/admin/staff`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
-          name: form.name.trim(),
-          email: form.email.trim(),
+          fullName: form.fullName.trim(),
+          username: form.username.trim(),
           password: form.password.trim(),
           role: form.role,
         }),
@@ -106,7 +108,7 @@ export default function SettingsPage() {
 
       toast({
         title: "Staff Account Created",
-        description: `${form.name.trim()} has been added as ${form.role}.`,
+        description: `${form.fullName.trim()} has been added as ${form.role}.`,
       });
       resetForm();
       loadStaff();
@@ -126,24 +128,24 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const loadStaff = async () => {
-    const { data, error } = await supabase
-      .from("users")
-      .select("id, name, email, role, created_at")
-      .order("created_at", { ascending: false });
-    if (!error && data) setStaff(data as StaffUser[]);
-    setIsLoading(false);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/admin/staff`, {
+        headers: { ...getAuthHeaders() },
+      });
+      const data = await response.json();
+      if (response.ok && data.staff) setStaff(data.staff as StaffUser[]);
+    } catch (error) {
+      console.error("Failed to load staff:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
     loadStaff();
-    const channel = supabase
-      .channel("settings_staff_users")
-      .on("postgres_changes", { event: "*", schema: "public", table: "users" }, loadStaff)
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
   }, []);
 
   const roleOptions = Array.from(new Set(staff.map((s) => s.role))).sort();
@@ -153,7 +155,7 @@ export default function SettingsPage() {
       if (roleFilter !== "all" && s.role !== roleFilter) return false;
       if (search) {
         const q = search.toLowerCase();
-        if (!s.name.toLowerCase().includes(q) && !s.email.toLowerCase().includes(q)) {
+        if (!s.full_name.toLowerCase().includes(q) && !s.username.toLowerCase().includes(q)) {
           return false;
         }
       }
@@ -161,27 +163,21 @@ export default function SettingsPage() {
     });
   }, [staff, roleFilter, search]);
 
-  const handleRemoveStaff = async (userId: string, userName: string) => {
-    const confirmed = window.confirm(`Remove ${userName} from staff? This cannot be undone.`);
+  const handleRemoveStaff = async (userId: number, name: string) => {
+    const confirmed = window.confirm(`Remove ${name} from staff? This cannot be undone.`);
     if (!confirmed) return;
 
     setDeletingId(userId);
     try {
-      const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token;
-
-      const response = await fetch(`${apiBaseUrl}/api/staff/${userId}`, {
+      const response = await fetch(`${apiBaseUrl}/api/admin/staff/${userId}`, {
         method: "DELETE",
-        headers: {
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-        },
+        headers: { ...getAuthHeaders() },
       });
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Failed to remove staff account");
 
-      toast({ title: "Staff Removed", description: `${userName} has been removed.` });
+      toast({ title: "Staff Removed", description: `${name} has been removed.` });
       loadStaff();
     } catch (error: any) {
       toast({ title: "Failed to Remove Staff", description: error.message, variant: "destructive" });
@@ -224,26 +220,22 @@ export default function SettingsPage() {
               </Label>
               <Input
                 placeholder="Juan Dela Cruz"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                value={form.fullName}
+                onChange={(e) => setForm({ ...form, fullName: e.target.value })}
                 className={isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}
               />
             </div>
 
             <div className="space-y-2">
               <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                Email Address
+                Username
               </Label>
-              <div className="relative">
-                <Mail className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                <Input
-                  type="email"
-                  placeholder="staff@calbayog.gov.ph"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className={`pl-10 ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}
-                />
-              </div>
+              <Input
+                placeholder="jdelacruz"
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                className={isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}
+              />
             </div>
 
             <div className="space-y-2">
@@ -281,7 +273,7 @@ export default function SettingsPage() {
           <div className={`mt-5 p-3 rounded-lg border flex items-start gap-2 ${isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"}`}>
             <ShieldCheck size={14} className={`mt-0.5 shrink-0 ${isDark ? "text-blue-400" : "text-blue-700"}`} />
             <p className={`text-xs leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              The staff member will use this email and password to log in. Advise them to change their password after first login.
+              The staff member will use this username and password to log in on the admin console. Advise them to change their password after first login.
             </p>
           </div>
 
@@ -311,7 +303,7 @@ export default function SettingsPage() {
             </div>
             <div className="flex gap-3 w-full lg:w-auto">
               <Input
-                placeholder="Search name or email..."
+                placeholder="Search name or username..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className={`w-full lg:w-64 text-sm ${isDark ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600" : "bg-white border-slate-200 placeholder:text-slate-400"}`}
@@ -352,7 +344,7 @@ export default function SettingsPage() {
                 <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
                   <TableRow className="border-none hover:bg-transparent">
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Name</TableHead>
-                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Username</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Role</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date Added</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
@@ -375,10 +367,10 @@ export default function SettingsPage() {
                         className={isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}
                       >
                         <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                          {s.name}
+                          {s.full_name}
                         </TableCell>
                         <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          {s.email}
+                          {s.username}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${roleBadgeClass(s.role, isDark)}`}>
@@ -394,7 +386,7 @@ export default function SettingsPage() {
                             variant="ghost"
                             size="icon"
                             disabled={deletingId === s.id}
-                            onClick={() => handleRemoveStaff(s.id, s.name)}
+                            onClick={() => handleRemoveStaff(s.id, s.full_name)}
                             className={isDark ? "text-slate-500 hover:text-red-400" : "text-slate-400 hover:text-red-500"}
                           >
                             {deletingId === s.id ? (
