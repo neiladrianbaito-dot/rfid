@@ -50,6 +50,16 @@ const formatDate = (value: string | null | undefined) => {
   });
 };
 
+// 🚫➕ Single source of truth for "is this card expired?" — used to gate
+// renewal everywhere (table row button, preview dialog button, openRenew
+// guard, and confirmRenew guard) so a still-valid card can never be renewed.
+function isCardExpired(expirationDate: string | null | undefined): boolean {
+  if (!expirationDate) return false;
+  const expDate = new Date(expirationDate);
+  if (isNaN(expDate.getTime())) return false;
+  return expDate < new Date();
+}
+
 // ➕ Renewal logic: extends from the LATER of (today, current expiration).
 // This means renewing a card that's still valid adds a full year on top of
 // its remaining validity, while renewing an already-expired card starts the
@@ -321,8 +331,19 @@ export default function UserManagementPage() {
     );
   };
 
-  // ✅ Opens the renewal confirmation dialog for a given user
+  // ✅ Opens the renewal confirmation dialog for a given user.
+  // 🚫➕ GUARD: if the card hasn't expired yet, renewal is blocked here too
+  // (on top of the disabled buttons) — the dialog simply won't open, and the
+  // user gets a toast explaining why.
   const openRenew = (user: any) => {
+    if (!isCardExpired(user.expirationDate)) {
+      toast({
+        title: "Card is still valid",
+        description: `This card is valid until ${formatDate(user.expirationDate)}. It can only be renewed after it expires.`,
+        variant: "destructive",
+      });
+      return;
+    }
     setRenewUser(user);
   };
 
@@ -330,8 +351,22 @@ export default function UserManagementPage() {
   // function sa pamamagitan ng Supabase RPC, hindi na sa generated
   // useUpdateUser hook. Ang function mismo (sa DB) ang gumagawa ng +1 year
   // math at nag-eextend mula sa GREATEST(current_expiration, now()).
+  // 🚫➕ GUARD: final safety check right before the RPC call — even if
+  // something upstream let a non-expired card slip through, we refuse to
+  // fire the renewal here.
   const confirmRenew = async () => {
     if (!renewUser) return;
+
+    if (!isCardExpired(renewUser.expirationDate)) {
+      toast({
+        title: "Card is still valid",
+        description: `This card is valid until ${formatDate(renewUser.expirationDate)}. It can only be renewed after it expires.`,
+        variant: "destructive",
+      });
+      setRenewUser(null);
+      return;
+    }
+
     setIsRenewing(true);
 
     const { error } = await supabase.rpc("renew_card", {
@@ -512,8 +547,7 @@ export default function UserManagementPage() {
                     {paginatedList.length > 0 ? (
                       paginatedList.map((user) => {
                         const linkedEmail = normalizeEmail(user.email);
-                        const expDate = user.expirationDate ? new Date(user.expirationDate) : null;
-                        const isExpired = !!expDate && !isNaN(expDate.getTime()) && expDate < new Date();
+                        const expired = isCardExpired(user.expirationDate);
                         return (
                           <TableRow
                             key={user.id}
@@ -588,7 +622,7 @@ export default function UserManagementPage() {
 
                             <TableCell>
                               <span className={`inline-flex items-center gap-1 text-xs font-mono font-medium ${
-                                isExpired
+                                expired
                                   ? isDark ? "text-red-400" : "text-red-600"
                                   : isDark ? "text-slate-300" : "text-slate-600"
                               }`}>
@@ -625,8 +659,9 @@ export default function UserManagementPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => openRenew(user)}
-                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40" : "text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50"}`}
-                                  title="Renew card (extend 1 year)"
+                                  disabled={!expired}
+                                  className={`h-8 w-8 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40" : "text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50"}`}
+                                  title={expired ? "Renew card (extend 1 year)" : `Not yet expired — valid until ${formatDate(user.expirationDate)}`}
                                 >
                                   <RefreshCw className="w-3.5 h-3.5" />
                                 </Button>
@@ -877,7 +912,9 @@ export default function UserManagementPage() {
                   setPreviewUser(null);
                   openRenew(user);
                 }}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 cursor-pointer"
+                disabled={!isCardExpired(previewUser.expirationDate)}
+                title={!isCardExpired(previewUser.expirationDate) ? `Not yet expired — valid until ${formatDate(previewUser.expirationDate)}` : undefined}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-emerald-600"
               >
                 <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
                 Renew Card
@@ -1057,6 +1094,15 @@ export default function UserManagementPage() {
             </div>
           )}
 
+          {/* 🚫➕ Extra safety net: if this dialog is somehow opened for a card
+              that isn't expired, show why it can't proceed and disable the
+              confirm button below instead of silently allowing the RPC call. */}
+          {renewUser && !isCardExpired(renewUser.expirationDate) && (
+            <div className={`rounded-lg border px-3 py-2 text-xs font-medium ${isDark ? "bg-red-950/40 border-red-900 text-red-400" : "bg-red-50 border-red-200 text-red-600"}`}>
+              This card is still valid until {formatDate(renewUser.expirationDate)}. Renewal is only allowed after expiration.
+            </div>
+          )}
+
           <AlertDialogFooter>
             <AlertDialogCancel
               disabled={isRenewing}
@@ -1068,8 +1114,8 @@ export default function UserManagementPage() {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmRenew}
-              disabled={isRenewing}
-              className="bg-emerald-600 text-white hover:bg-emerald-700 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
+              disabled={isRenewing || !!(renewUser && !isCardExpired(renewUser.expirationDate))}
+              className="bg-emerald-600 text-white hover:bg-emerald-700 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-emerald-600"
             >
               {isRenewing ? "Renewing..." : "Confirm Renewal"}
             </AlertDialogAction>
