@@ -352,15 +352,12 @@ export default function SettingsPage() {
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Username</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Role</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date Added</TableHead>
-                    {isSuperAdmin && (
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
-                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredStaff.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={isSuperAdmin ? 5 : 4} className="text-center py-32">
+                      <TableCell colSpan={4} className="text-center py-32">
                         <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                           <Users size={48} className="mb-2" />
                           <p className="text-xs font-semibold uppercase tracking-widest">No accounts found</p>
@@ -388,23 +385,6 @@ export default function SettingsPage() {
                         <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                           {new Date(s.created_at).toLocaleDateString()}
                         </TableCell>
-                        {isSuperAdmin && (
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              disabled={deletingId === s.id}
-                              onClick={() => setDeleteTarget(s)}
-                              className={isDark ? "text-slate-500 hover:text-red-400" : "text-slate-400 hover:text-red-500"}
-                            >
-                              {deletingId === s.id ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="w-4 h-4" />
-                              )}
-                            </Button>
-                          </TableCell>
-                        )}
                       </TableRow>
                     ))
                   )}
