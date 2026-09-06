@@ -11,6 +11,22 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 const router: IRouter = Router();
 let linkedCardColumnAvailable: boolean | null = null;
 
+// ── Role helpers ───────────────────────────────────────────────────────────
+// Only two roles exist now: "staff" and "super_admin". Anything else falls
+// back to "staff" (safe default — least privilege).
+
+function normalizeRole(role: unknown): "staff" | "super_admin" {
+  return role === "super_admin" ? "super_admin" : "staff";
+}
+
+function roleLabel(role: string): "Staff" | "Super Admin" {
+  return role === "super_admin" ? "Super Admin" : "Staff";
+}
+
+function isSuperAdmin(role: unknown): boolean {
+  return role === "super_admin";
+}
+
 // ── Password helpers (scrypt) ─────────────────────────────────────────────────
 
 function hashPassword(password: string): string {
@@ -20,7 +36,6 @@ function hashPassword(password: string): string {
 }
 
 function verifyPassword(password: string, storedPasswordHash: string): boolean {
-  // Plain text fallback (legacy / first login)
   if (!storedPasswordHash.includes(":")) {
     return storedPasswordHash === password;
   }
@@ -79,9 +94,6 @@ async function ensureLinkedCardUidColumn(): Promise<void> {
   linkedCardColumnAvailable = true;
 }
 
-// ── password_changed_at column helper ────────────────────────────────────────
-// Ensures the column exists lazily (same pattern as linked_card_uid).
-
 async function ensurePasswordChangedAtColumn(): Promise<void> {
   await db.execute(sql`
     alter table public.auth_users
@@ -107,12 +119,6 @@ async function checkLinkedCardStatus(linkedCardUid: string | null | undefined): 
   const blocked = status === "Blocked" || status === "Inactive";
   return { blocked, status };
 }
-
-// ── NAME-ALREADY-LINKED helper ────────────────────────────────────────────────
-// Checks whether a full_name is already tied to an existing auth_users account
-// (i.e. someone already signed up / created an account using this exact name).
-// This is separate from "email already registered" — a name can only ever be
-// used to create ONE account, even if a different email is used.
 
 async function isNameAlreadyLinkedToAccount(fullName: string): Promise<boolean> {
   const result = await db.execute(sql`
@@ -145,9 +151,6 @@ router.post("/auth/signup", async (req, res): Promise<void> => {
       return;
     }
 
-    // ── CHECK 1: full name must match a pre-registered record in `users` ──
-    // This is the real enforcement point — the frontend check can be
-    // bypassed, so signup independently re-verifies the name here.
     const nameMatchRaw = await db.execute(sql`
       select full_name from users
       where lower(trim(full_name)) = lower(trim(${fullName}))
@@ -162,10 +165,6 @@ router.post("/auth/signup", async (req, res): Promise<void> => {
       return;
     }
 
-    // ── CHECK 2 (NEW): full name must NOT already be linked to an existing
-    // account. Even if the name is a valid pre-registered name, it can only
-    // ever be used to create ONE auth_users account — regardless of which
-    // email is used for the new signup attempt. ──
     const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName);
     if (nameAlreadyUsed) {
       res.status(409).json({
@@ -274,7 +273,6 @@ router.post("/auth/user-signin", async (req, res): Promise<void> => {
       );
       user = extractRows<UserRow>(syncedRaw)[0];
     } else if (user && !user.password_hash.includes(":")) {
-      // Auto-upgrade plain text to scrypt hash
       const upgradedHash = hashPassword(password);
       await db.execute(sql`
         update auth_users
@@ -379,15 +377,10 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
 
 // ── CHECK CARD UID ────────────────────────────────────────────────────────────
 
-// ─── In-memory attempt tracker (per authenticated user) ──────────────────────
-// Key: user ID (from auth token)
-// Value: { count, lockedUntil }
 const cardUidAttemptMap = new Map<string, { count: number; lockedUntil: number }>();
 
 const CARD_UID_MAX_ATTEMPTS = 3;
-const CARD_UID_LOCKOUT_MS   = 60_000; // 60 seconds
-
-// ─────────────────────────────────────────────────────────────────────────────
+const CARD_UID_LOCKOUT_MS   = 60_000;
 
 router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
   try {
@@ -399,7 +392,6 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
 
     const userId = String(currentUser.id ?? currentUser.userId ?? currentUser.sub ?? "");
 
-    // ── 1. Check lockout ────────────────────────────────────────────────────
     const tracker = cardUidAttemptMap.get(userId) ?? { count: 0, lockedUntil: 0 };
     const now = Date.now();
 
@@ -414,7 +406,6 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
       return;
     }
 
-    // ── 2. Validate query param ─────────────────────────────────────────────
     const cardUid =
       typeof req.query.cardUid === "string" ? req.query.cardUid.trim().toUpperCase() : "";
     if (!cardUid) {
@@ -424,7 +415,6 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
 
     await ensureLinkedCardUidColumn();
 
-    // ── 3. Look up the card ─────────────────────────────────────────────────
     const cardRaw = await db.execute(sql`
       select card_uid, full_name, type, status
       from users
@@ -438,7 +428,6 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
       status: string;
     }>(cardRaw);
 
-    // ── 4. Card not found → increment attempt counter ───────────────────────
     if (cardRows.length === 0) {
       tracker.count += 1;
       const attemptsLeft = CARD_UID_MAX_ATTEMPTS - tracker.count;
@@ -465,8 +454,6 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
       return;
     }
 
-    // ── 5. Check if already linked to another account (409) ─────────────────
-    // 409 does NOT count as a failed attempt
     const linkedRaw = await db.execute(sql`
       select id as uid from auth_users
       where linked_card_uid = ${cardUid}
@@ -483,7 +470,6 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
       return;
     }
 
-    // ── 6. Success — reset the attempt counter for this user ─────────────────
     cardUidAttemptMap.delete(userId);
 
     const card = cardRows[0];
@@ -498,18 +484,11 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
     });
   } catch (error) {
     console.error("Check card UID error:", error);
-    // Don't count server errors against the attempt limiter
     res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
   }
 });
 
 // ── CHECK FULL NAME ───────────────────────────────────────────────────────────
-// Used by the signup form for live/instant feedback BEFORE the user submits.
-// Two things are reported back:
-//   1. Does this name exist in the pre-registered `users` table at all?
-//   2. Is this name already linked to an existing `auth_users` account?
-// The signup route re-verifies both independently (frontend checks can be
-// bypassed), so this endpoint exists purely for UX (instant validation).
 
 router.get("/auth/check-full-name", async (req, res): Promise<void> => {
   try {
@@ -537,7 +516,6 @@ router.get("/auth/check-full-name", async (req, res): Promise<void> => {
       return;
     }
 
-    // ── NEW: also check if this name already has an account ──
     const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName);
     if (nameAlreadyUsed) {
       res.status(409).json({
@@ -635,10 +613,8 @@ router.post("/auth/user/link-card", async (req, res): Promise<void> => {
 });
 
 // ── CHANGE PASSWORD (User) ────────────────────────────────────────────────────
-// 24-hour cooldown: a user can only change their password once every 24 hours.
-// The `password_changed_at` column is created lazily if it doesn't exist yet.
 
-const PASSWORD_CHANGE_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+const PASSWORD_CHANGE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 router.post("/auth/user/change-password", async (req, res): Promise<void> => {
   try {
@@ -661,7 +637,6 @@ router.post("/auth/user/change-password", async (req, res): Promise<void> => {
       return;
     }
 
-    // Ensure the cooldown column exists (idempotent — safe to call every time)
     await ensurePasswordChangedAtColumn();
 
     const rawRecord = await db.execute(sql`
@@ -681,7 +656,6 @@ router.post("/auth/user/change-password", async (req, res): Promise<void> => {
       return;
     }
 
-    // ── 24-hour cooldown check ────────────────────────────────────────────────
     if (user.password_changed_at) {
       const lastChanged = new Date(user.password_changed_at).getTime();
       const elapsed = Date.now() - lastChanged;
@@ -691,7 +665,6 @@ router.post("/auth/user/change-password", async (req, res): Promise<void> => {
         const remainingHours = Math.floor(remainingMs / (60 * 60 * 1000));
         const remainingMinutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
 
-        // Build a human-readable remaining time string
         const timeLeft =
           remainingHours > 0
             ? `${remainingHours} hour${remainingHours !== 1 ? "s" : ""} and ${remainingMinutes} minute${remainingMinutes !== 1 ? "s" : ""}`
@@ -705,7 +678,6 @@ router.post("/auth/user/change-password", async (req, res): Promise<void> => {
         return;
       }
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
     if (!verifyPassword(currentPassword, user.password_hash)) {
       res.status(401).json({ success: false, message: "Current password is incorrect." });
@@ -785,7 +757,6 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       return;
     }
 
-    // Auto-upgrade plain text password to scrypt hash on first login
     if (admin && !admin.password_hash.includes(":")) {
       const upgradedHash = hashPassword(password);
       await db
@@ -802,10 +773,14 @@ router.post("/auth/login", async (req, res): Promise<void> => {
         : null) ||
       normalizedUsername;
 
+    // Supabase-only logins (no local `admins` row) have no staff role — treat
+    // them as "staff" by default, least privilege.
+    const role = normalizeRole(admin?.role);
+
     await logAudit({
       user: admin?.username ?? normalizedUsername,
       action: "LOGIN",
-      entity: "Admin",
+      entity: roleLabel(role),
       details: `${admin?.username ?? normalizedUsername} logged in`,
     });
 
@@ -814,9 +789,11 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       message: "Login successful",
       username: admin?.username ?? normalizedUsername,
       name: displayName,
+      role,
       token: createAdminToken({
         username: admin?.username ?? normalizedUsername,
         name: displayName,
+        role,
       }),
     });
   } catch (error) {
@@ -874,6 +851,7 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
 
     const nextFullName = name || admin.full_name;
     const nextPasswordHash = newPassword ? hashPassword(newPassword) : admin.password_hash;
+    const role = normalizeRole(admin.role);
 
     await db
       .update(adminsTable)
@@ -883,7 +861,7 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
     await logAudit({
       user: admin.username,
       action: "UPDATE",
-      entity: "Admin",
+      entity: roleLabel(role),
       details: newPassword
         ? `${admin.username} updated their profile and changed their password`
         : `${admin.username} updated their profile`,
@@ -894,7 +872,8 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
       message: "Profile updated successfully",
       username: admin.username,
       name: nextFullName,
-      token: createAdminToken({ username: admin.username, name: nextFullName }),
+      role,
+      token: createAdminToken({ username: admin.username, name: nextFullName, role }),
     });
   } catch (error) {
     console.error("Update profile error:", error);
@@ -911,7 +890,7 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
     await logAudit({
       user: adminUser.username,
       action: "LOGOUT",
-      entity: "Admin",
+      entity: roleLabel(normalizeRole((adminUser as any).role)),
       details: `${adminUser.username} logged out`,
     });
   }
@@ -937,6 +916,7 @@ router.get("/auth/me", async (req, res): Promise<void> => {
     const validatedUser = GetMeResponse.parse({
       username: adminUser.username,
       name: adminUser.name,
+      role: normalizeRole((adminUser as any).role),
     });
     res.json(validatedUser);
   } catch (e) {
@@ -946,7 +926,7 @@ router.get("/auth/me", async (req, res): Promise<void> => {
 });
 
 // ── LIST STAFF (ADMIN) ────────────────────────────────────────────────────────
-// Returns all staff/admin accounts, excluding password_hash.
+// Any authenticated staff or super admin can view the list.
 
 router.get("/admin/staff", async (req, res): Promise<void> => {
   try {
@@ -971,7 +951,7 @@ router.get("/admin/staff", async (req, res): Promise<void> => {
 });
 
 // ── CREATE STAFF (ADMIN) ───────────────────────────────────────────────────────
-// Only an authenticated admin can create another staff/admin account.
+// Only a Super Admin can create staff or other super admin accounts.
 
 router.post("/admin/staff", async (req, res): Promise<void> => {
   try {
@@ -982,11 +962,16 @@ router.post("/admin/staff", async (req, res): Promise<void> => {
       return;
     }
 
+    if (!isSuperAdmin((adminUser as any).role)) {
+      res.status(403).json({ error: "Only a Super Admin can create staff accounts." });
+      return;
+    }
+
     const body = req.body as { username?: string; password?: string; fullName?: string; role?: string };
     const username = typeof body?.username === "string" ? body.username.trim() : "";
     const password = typeof body?.password === "string" ? body.password : "";
     const fullName = typeof body?.fullName === "string" ? body.fullName.trim() : "";
-    const role = body?.role === "admin" ? "admin" : "staff";
+    const role = normalizeRole(body?.role);
 
     if (!username || !password || !fullName) {
       res.status(400).json({ error: "Username, password, and full name are required" });
@@ -1016,8 +1001,8 @@ router.post("/admin/staff", async (req, res): Promise<void> => {
     await logAudit({
       user: adminUser.username,
       action: "CREATE",
-      entity: "Admin",
-      details: `${adminUser.username} created staff account "${username}" (${role})`,
+      entity: roleLabel(role),
+      details: `${adminUser.username} created ${roleLabel(role).toLowerCase()} account "${username}"`,
     });
 
     res.status(201).json({ success: true, staff: inserted });
@@ -1028,7 +1013,8 @@ router.post("/admin/staff", async (req, res): Promise<void> => {
 });
 
 // ── DELETE STAFF (ADMIN) ───────────────────────────────────────────────────────
-// Prevents an admin from deleting their own account through this route.
+// Only a Super Admin can remove staff accounts. Prevents removing your own
+// account through this route.
 
 router.delete("/admin/staff/:id", async (req, res): Promise<void> => {
   try {
@@ -1036,6 +1022,11 @@ router.delete("/admin/staff/:id", async (req, res): Promise<void> => {
     const adminUser = token ? verifyAdminToken(token) : null;
     if (!adminUser) {
       res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    if (!isSuperAdmin((adminUser as any).role)) {
+      res.status(403).json({ error: "Only a Super Admin can remove staff accounts." });
       return;
     }
 
@@ -1057,9 +1048,9 @@ router.delete("/admin/staff/:id", async (req, res): Promise<void> => {
     }
 
     const targetRaw = await db.execute(sql`
-      select username from admins where id = ${targetId} limit 1
+      select username, role from admins where id = ${targetId} limit 1
     `);
-    const target = extractRows<{ username: string }>(targetRaw)[0];
+    const target = extractRows<{ username: string; role: string }>(targetRaw)[0];
     if (!target) {
       res.status(404).json({ error: "Staff account not found" });
       return;
@@ -1070,8 +1061,8 @@ router.delete("/admin/staff/:id", async (req, res): Promise<void> => {
     await logAudit({
       user: adminUser.username,
       action: "DELETE",
-      entity: "Admin",
-      details: `${adminUser.username} removed staff account "${target.username}"`,
+      entity: roleLabel(normalizeRole(target.role)),
+      details: `${adminUser.username} removed ${roleLabel(normalizeRole(target.role)).toLowerCase()} account "${target.username}"`,
     });
 
     res.json({ success: true, message: "Staff account removed" });
