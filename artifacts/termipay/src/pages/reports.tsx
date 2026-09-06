@@ -676,4 +676,179 @@ export default function ReportsPage() {
             {isFilterActive && (
               <div className={`ml-auto flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-semibold ${
                 isDark ? "bg-blue-950/40 border-blue-900 text-blue-300" : "bg-blue-50 border-blue-100 text-blue-700"
-              }`}></div>
+              }`}>
+                Showing: {filterLabel} — {formatPeso(filteredRevenueTotal)} ({filteredBreakdown.length} day{filteredBreakdown.length === 1 ? "" : "s"})
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ══ SUMMARY CARDS ══ */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-total-revenue",      flash: false },
+          { label: "Today's Revenue",         value: formatPeso(todayRevenue),      icon: PhilippinePeso, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-today-revenue",      flash: revenueFlash },
+          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: User, color: isDark ? "text-indigo-400" : "text-indigo-600",  bg: isDark ? "bg-indigo-950/40" : "bg-indigo-50",  border: isDark ? "border-indigo-900" : "border-indigo-100",  testId: "text-total-taps",         flash: false },
+          { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: isDark ? "text-sky-400" : "text-sky-600",     bg: isDark ? "bg-sky-950/40" : "bg-sky-50",     border: isDark ? "border-sky-900" : "border-sky-100",     testId: "text-total-linked-cards", flash: false },
+        ].map((stat, idx) => (
+          <Card
+            key={idx}
+            className={`shadow-sm transition-all duration-200 hover:shadow-md ${
+              isDark ? "bg-slate-900 border-slate-800 hover:border-slate-700" : "bg-white border-slate-200 hover:border-slate-300"
+            } ${stat.flash ? "card-pulse" : ""}`}
+          >
+            <CardContent className="p-6 relative overflow-hidden">
+              <div className={`absolute top-0 right-0 w-16 h-16 ${isDark ? "opacity-10" : "opacity-5"}`}>
+                <stat.icon className="w-full h-full" />
+              </div>
+              {isLoading ? (
+                <Skeleton className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+              ) : (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
+                    <p className={`text-2xl font-bold mt-1 tracking-tight ${stat.color}`} data-testid={stat.testId}>
+                      {stat.value}
+                    </p>
+                  </div>
+                  <div className={`w-10 h-10 rounded border ${stat.bg} ${stat.border} flex items-center justify-center ${stat.color}`}>
+                    <stat.icon size={20} />
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* ══ BAR CHART ══ */}
+      <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
+        <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+          <div className="flex items-center justify-between">
+            <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <PieChart size={14} className="text-blue-500" />
+              Daily Revenue Breakdown
+              {isFilterActive && (
+                <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  — {filterLabel}
+                </span>
+              )}
+            </CardTitle>
+            <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Performance Matrix</div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-8">
+          {isLoading ? (
+            <Skeleton className={`h-72 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+          ) : filteredBreakdown.length === 0 ? (
+            <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              No records match the selected filter.
+            </div>
+          ) : (
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={filteredBreakdown}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={(d: string) => {
+                      const date = new Date(d + "T00:00:00");
+                      return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                    }}
+                    stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
+                  />
+                  <YAxis
+                    stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
+                    tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false}
+                  />
+                  <Tooltip
+                    cursor={{ fill: isDark ? "rgba(96,165,250,0.08)" : "rgba(37,99,235,0.05)" }}
+                    contentStyle={{
+                      backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                      border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                      borderRadius: "8px",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                    }}
+                    labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
+                    itemStyle={{ color: isDark ? "#60a5fa" : "#2563eb" }}
+                    formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
+                  />
+                  <Bar dataKey="revenue" radius={[4, 4, 0, 0]} className="cursor-pointer">
+                    {filteredBreakdown.map((_entry: any, index: number) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={index === filteredBreakdown.length - 1 ? "#3b82f6" : isDark ? "#334155" : "#cbd5e1"}
+                        className="cursor-pointer"
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ══ DATA TABLE ══ */}
+      <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
+          <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            <FileText size={14} className="text-blue-500" />
+            Detailed Revenue Log
+            {isFilterActive && (
+              <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                — {filterLabel}
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
+          {isLoading ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />)}
+            </div>
+          ) : filteredBreakdown.length === 0 ? (
+            <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              No records match the selected filter.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
+                <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Log Date</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Standard Day</TableHead>
+                  <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Revenue Credited</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredBreakdown.map((day: any, i: number) => {
+                  const date = new Date(day.date + "T00:00:00");
+                  return (
+                    <TableRow
+                      key={i}
+                      className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
+                    >
+                      <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                        {date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                      </TableCell>
+                      <TableCell className={`text-[11px] font-semibold uppercase ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                        {date.toLocaleDateString("en-US", { weekday: "long" })}
+                      </TableCell>
+                      <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                        {formatPeso(day.revenue)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
