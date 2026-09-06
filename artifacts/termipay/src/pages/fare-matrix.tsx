@@ -943,9 +943,11 @@ export default function FareMatrixPage() {
           </div>
           <DialogFooter>
             <Button
-              variant="secondary"
+              variant="ghost"
               onClick={() => setShowAdd(false)}
-              className={`cursor-pointer ${isDark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+              className={`cursor-pointer border-0 shadow-none bg-transparent hover:bg-transparent ${
+                isDark ? "text-slate-400 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
+              }`}
             >
               Cancel
             </Button>
@@ -1014,7 +1016,7 @@ export default function FareMatrixPage() {
             <Button
               variant="ghost"
               onClick={() => setEditRoute(null)}
-              className={`text-xs font-medium cursor-pointer ${isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500"}`}
+              className={`text-xs font-medium cursor-pointer border-0 shadow-none bg-transparent hover:bg-transparent ${isDark ? "text-slate-400 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"}`}
             >
               Cancel
             </Button>
@@ -1043,7 +1045,7 @@ export default function FareMatrixPage() {
       >
         <DialogContent className={`[&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
           <DialogHeader>
-            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-emerald-500">
+            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
               <Power size={18} /> Activate Route
             </DialogTitle>
           </DialogHeader>
@@ -1055,7 +1057,7 @@ export default function FareMatrixPage() {
                   <MapPin className="w-3.5 h-3.5 text-blue-500" />
                   {activateRoute.origin} → {activateRoute.destination}
                 </p>
-                <p className={`mt-1 ${isDark ? "text-emerald-400" : "text-emerald-600"} font-bold`}>
+                <p className={`mt-1 ${isDark ? "text-blue-400" : "text-blue-600"} font-bold`}>
                   ₱{activateRoute.fareAmount?.toFixed(2)} per tap
                 </p>
               </div>
@@ -1082,7 +1084,7 @@ export default function FareMatrixPage() {
                   {devices.map((d) => (
                     <SelectItem key={d.device_id} value={d.device_id} data-testid={`device-option-${d.device_id}`}>
                       <div className="flex items-center gap-2">
-                        <Wifi className="w-3.5 h-3.5 text-emerald-500" />
+                        <Wifi className="w-3.5 h-3.5 text-blue-500" />
                         <span>
                           {d.name}
                           {d.location ? ` · ${d.location}` : ""}
@@ -1111,7 +1113,7 @@ export default function FareMatrixPage() {
                 setSelectedDeviceId("");
               }}
               className={`cursor-pointer border-0 shadow-none bg-transparent hover:bg-transparent ${
-                isDark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700"
+                isDark ? "text-slate-400 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
               }`}
             >
               Cancel
@@ -1120,7 +1122,7 @@ export default function FareMatrixPage() {
               onClick={confirmActivate}
               disabled={!selectedDeviceId || isTogglePending}
               data-testid="button-confirm-activate"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer disabled:cursor-not-allowed"
+              className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed"
             >
               {isTogglePending ? "Activating..." : "Activate"}
             </Button>
@@ -1144,8 +1146,8 @@ export default function FareMatrixPage() {
           <AlertDialogFooter>
             <AlertDialogCancel
               disabled={deleteMutation.isPending}
-              className={`text-xs font-medium cursor-pointer disabled:cursor-not-allowed ${
-                isDark ? "bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              className={`text-xs font-medium cursor-pointer disabled:cursor-not-allowed border-0 shadow-none bg-transparent hover:bg-transparent ${
+                isDark ? "text-slate-400 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
               }`}
             >
               Cancel
