@@ -701,9 +701,9 @@ export default function UserManagementPage() {
                             {theme.label}
                           </div>
                           <div className="text-right">
-                            <div className="text-white/50 text-[9px] sm:text-[10px] uppercase tracking-wide font-semibold">
+                            <div className="text-white text-[9px] sm:text-[10px] uppercase tracking-wide font-semibold">
                               Valid Until
-                            </div>
+                          </div>
                             <div className="text-white font-mono font-bold text-xs sm:text-sm">
                               {formatDate(previewUser.expirationDate)}
                             </div>
