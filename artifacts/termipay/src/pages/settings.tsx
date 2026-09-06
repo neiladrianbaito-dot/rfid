@@ -11,11 +11,21 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
 import {
   Settings, UserPlus, Users, Lock, Shield,
-  Loader2, ShieldCheck, Trash2, RefreshCw, Crown,
+  Loader2, ShieldCheck, Trash2, RefreshCw, Crown, ShieldAlert,
 } from "lucide-react";
 
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
@@ -167,6 +177,11 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
+
+  // ── FIX: replaced window.confirm() with a proper modal — same pattern
+  // used for delete confirmation on the User Management page. `deleteTarget`
+  // holds the staff record pending deletion (null = dialog closed). ──
+  const [deleteTarget, setDeleteTarget] = useState<StaffUser | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const loadStaff = async () => {
@@ -205,9 +220,11 @@ export default function SettingsPage() {
     });
   }, [staff, roleFilter, search]);
 
-  const handleRemoveStaff = async (userId: number, name: string) => {
-    const confirmed = window.confirm(`Remove ${name} from staff? This cannot be undone.`);
-    if (!confirmed) return;
+  // ── FIX: actual deletion now runs from the modal's "Confirm Delete"
+  // button instead of from window.confirm's callback. ──
+  const confirmRemoveStaff = async () => {
+    if (!deleteTarget) return;
+    const { id: userId, full_name: name } = deleteTarget;
 
     setDeletingId(userId);
     try {
@@ -225,6 +242,7 @@ export default function SettingsPage() {
       toast({ title: "Failed to Remove Staff", description: error.message, variant: "destructive" });
     } finally {
       setDeletingId(null);
+      setDeleteTarget(null);
     }
   };
 
@@ -448,7 +466,7 @@ export default function SettingsPage() {
                               variant="ghost"
                               size="icon"
                               disabled={deletingId === s.id}
-                              onClick={() => handleRemoveStaff(s.id, s.full_name)}
+                              onClick={() => setDeleteTarget(s)}
                               className={isDark ? "text-slate-500 hover:text-red-400" : "text-slate-400 hover:text-red-500"}
                             >
                               {deletingId === s.id ? (
@@ -468,6 +486,40 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── Delete Confirm Modal — same AlertDialog pattern as User Management ── */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+              <ShieldAlert className="text-red-500" size={18} /> Confirm Removal
+            </AlertDialogTitle>
+            <AlertDialogDescription className={`text-sm leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              This will permanently remove{" "}
+              <strong>{deleteTarget?.full_name}</strong> (
+              {deleteTarget ? roleLabel(deleteTarget.role) : ""}) from staff access.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={deletingId !== null}
+              className={`text-xs font-medium cursor-pointer disabled:cursor-not-allowed ${
+                isDark ? "bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmRemoveStaff}
+              disabled={deletingId !== null}
+              className="bg-red-600 text-white hover:bg-red-700 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
+            >
+              {deletingId !== null ? "Removing..." : "Confirm Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
