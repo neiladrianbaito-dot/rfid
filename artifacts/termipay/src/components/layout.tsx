@@ -261,7 +261,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
       }`}
     >
-      {/* Sidebar — themed blue to match the app's accent color */}
+      {/* Sidebar — themed dark green to match the app's accent color */}
       <aside
         className={`
           fixed inset-y-0 left-0 z-50 w-72 border-r print:hidden
@@ -269,14 +269,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           lg:relative lg:translate-x-0
           ${sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}
           ${isDark
-            ? "bg-gradient-to-b from-blue-950 via-slate-950 to-slate-950 border-blue-950"
-            : "bg-gradient-to-b from-blue-950 to-slate-900 border-blue-950"
+            ? "bg-gradient-to-b from-green-950 via-slate-950 to-slate-950 border-green-950"
+            : "bg-gradient-to-b from-green-950 to-slate-900 border-green-950"
           }
         `}
       >
         <div className="flex flex-col h-full">
           {/* Logo Section */}
-          <div className={`p-6 border-b transition-colors ${isDark ? "border-blue-900/50" : "border-blue-900/50"}`}>
+          <div className={`p-6 border-b transition-colors ${isDark ? "border-green-900/50" : "border-green-900/50"}`}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0 ring-2 ring-white/20">
                 <img
@@ -287,9 +287,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </div>
               <div>
                 <h1 className="text-sm font-bold tracking-tight text-white">
-                  Fare Collection<span className="text-blue-300"> System</span>
+                  Fare Collection<span className="text-green-300"> System</span>
                 </h1>
-                <p className={`text-[10px] font-semibold uppercase tracking-widest leading-tight ${isDark ? "text-blue-400/70" : "text-blue-200"}`}>
+                <p className={`text-[10px] font-semibold uppercase tracking-widest leading-tight ${isDark ? "text-green-400/70" : "text-green-200"}`}>
                   Admin Console
                 </p>
               </div>
@@ -302,7 +302,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <div key={group.label}>
                 <p
                   className={`px-4 mb-1.5 text-[10px] font-semibold uppercase tracking-widest ${
-                    isDark ? "text-blue-500/50" : "text-blue-300/80"
+                    isDark ? "text-green-500/50" : "text-green-300/80"
                   }`}
                 >
                   {group.label}
@@ -320,11 +320,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                             transition-all duration-150
                             ${isActive
                               ? isDark
-                                ? "bg-blue-600/30 text-white"
-                                : "bg-blue-600/30 text-white"
+                                ? "bg-green-600/30 text-white"
+                                : "bg-green-600/30 text-white"
                               : isDark
-                                ? "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
-                                : "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
+                                ? "text-green-200/70 hover:text-white hover:bg-green-900/40"
+                                : "text-green-200/70 hover:text-white hover:bg-green-900/40"
                             }
                           `}
                         >
@@ -332,15 +332,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                             size={17}
                             className={
                               isActive
-                                ? isDark ? "text-blue-300" : "text-white"
+                                ? isDark ? "text-green-300" : "text-white"
                                 : isDark
-                                  ? "text-blue-400/60 group-hover:text-blue-200"
-                                  : "text-blue-300 group-hover:text-blue-100"
+                                  ? "text-green-400/60 group-hover:text-green-200"
+                                  : "text-green-300 group-hover:text-green-100"
                             }
                           />
                           {item.label}
                           {isActive && (
-                            <motion.div layoutId="activeNav" className={`ml-auto w-1.5 h-1.5 rounded-full ${isDark ? "bg-blue-400" : "bg-white"}`} />
+                            <motion.div layoutId="activeNav" className={`ml-auto w-1.5 h-1.5 rounded-full ${isDark ? "bg-green-400" : "bg-white"}`} />
                           )}
                         </div>
                       </Link>
@@ -352,15 +352,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </nav>
 
           {/* User Section at bottom of Sidebar */}
-          <div className={`p-4 border-t transition-colors ${isDark ? "border-blue-900/50" : "border-blue-600/60"}`}>
+          <div className={`p-4 border-t transition-colors ${isDark ? "border-green-900/50" : "border-green-600/60"}`}>
             <Button
               variant="ghost"
               onClick={logout}
               disabled={isLoggingOut}
               className={`w-full justify-start gap-3 rounded-lg text-sm font-medium ${
                 isDark
-                  ? "text-blue-200/70 hover:text-red-300 hover:bg-red-950/40"
-                  : "text-blue-100 hover:text-white hover:bg-red-500/20"
+                  ? "text-green-200/70 hover:text-red-300 hover:bg-red-950/40"
+                  : "text-green-100 hover:text-white hover:bg-red-500/20"
               }`}
             >
               <LogOut size={17} />
