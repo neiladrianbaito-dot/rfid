@@ -29,6 +29,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
+import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() RPC call
 
 const PAGE_SIZE = 10;
 
@@ -53,6 +54,9 @@ const formatDate = (value: string | null | undefined) => {
 // This means renewing a card that's still valid adds a full year on top of
 // its remaining validity, while renewing an already-expired card starts the
 // new 1-year period from today instead of stacking onto a past date.
+// NOTE: this is now only used to render the "New Expiration" PREVIEW in the
+// confirmation dialog. The actual DB write is done server-side by the
+// renew_card() Postgres function, which is the source of truth.
 function computeRenewedExpiration(currentExpiration: string | null | undefined): Date {
   const now = new Date();
   const current = currentExpiration ? new Date(currentExpiration) : null;
@@ -182,6 +186,8 @@ export default function UserManagementPage() {
 
   // ✅ Renew confirmation modal state — holds the user pending renewal
   const [renewUser, setRenewUser] = useState<any>(null);
+  // 👈 BAGO: loading state para sa direct RPC call (kapalit ng renewMutation.isPending)
+  const [isRenewing, setIsRenewing] = useState(false);
 
   const [editForm, setEditForm] = useState({
     fullName: "",
@@ -257,20 +263,10 @@ export default function UserManagementPage() {
     },
   });
 
-  // ✅ Separate mutation instance for renewals so we can show a distinct
-  // success toast ("Card Renewed") without touching the Edit dialog's state.
-  const renewMutation = useUpdateUser({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
-        setRenewUser(null);
-        toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
-      },
-      onError: () => {
-        toast({ title: "Failed to renew card", variant: "destructive" });
-      },
-    },
-  });
+  // ❌ TINANGGAL: yung dating "renewMutation" (useUpdateUser instance para sa
+  // renewal) — hindi na kailangan dahil direct Supabase RPC call na ang
+  // ginagamit ng confirmRenew() sa baba, hindi na dumadaan sa generated
+  // API client na siyang dahilan kung bakit hindi umaabot sa DB ang renewal.
 
   const deleteMutation = useDeleteUser({
     mutation: {
@@ -330,22 +326,29 @@ export default function UserManagementPage() {
     setRenewUser(user);
   };
 
-  // ✅ Confirms the renewal: sends the full user payload back (so we don't
-  // wipe other fields) with expirationDate pushed out by 1 year.
-  const confirmRenew = () => {
+  // ✅ BAGONG confirmRenew — direktang tumatawag sa renew_card() Postgres
+  // function sa pamamagitan ng Supabase RPC, hindi na sa generated
+  // useUpdateUser hook. Ang function mismo (sa DB) ang gumagawa ng +1 year
+  // math at nag-eextend mula sa GREATEST(current_expiration, now()).
+  const confirmRenew = async () => {
     if (!renewUser) return;
-    const newExpiration = computeRenewedExpiration(renewUser.expirationDate);
-    renewMutation.mutate({
-      id: renewUser.id,
-      data: {
-        fullName: renewUser.fullName,
-        contactNumber: renewUser.contactNumber,
-        balance: renewUser.balance,
-        status: renewUser.status,
-        type: renewUser.type,
-        expirationDate: newExpiration.toISOString(),
-      },
+    setIsRenewing(true);
+
+    const { error } = await supabase.rpc("renew_card", {
+      p_card_id: renewUser.id,
     });
+
+    setIsRenewing(false);
+
+    if (error) {
+      console.error("Renew card error:", error);
+      toast({ title: "Failed to renew card", variant: "destructive" });
+      return;
+    }
+
+    queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+    setRenewUser(null);
+    toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
   };
 
   return (
@@ -1056,7 +1059,7 @@ export default function UserManagementPage() {
 
           <AlertDialogFooter>
             <AlertDialogCancel
-              disabled={renewMutation.isPending}
+              disabled={isRenewing}
               className={`text-xs font-medium cursor-pointer disabled:cursor-not-allowed border-0 shadow-none bg-transparent hover:bg-transparent ${
                 isDark ? "text-slate-400 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
               }`}
@@ -1065,10 +1068,10 @@ export default function UserManagementPage() {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmRenew}
-              disabled={renewMutation.isPending}
+              disabled={isRenewing}
               className="bg-emerald-600 text-white hover:bg-emerald-700 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
             >
-              {renewMutation.isPending ? "Renewing..." : "Confirm Renewal"}
+              {isRenewing ? "Renewing..." : "Confirm Renewal"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
