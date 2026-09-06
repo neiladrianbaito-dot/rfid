@@ -46,6 +46,30 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string {
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
 }
 
+// Maps whatever role value your backend/auth returns into a display label.
+// Adjust the string comparisons below (e.g. "super_admin", "admin", "staff")
+// to match the actual values coming from your user object / Supabase metadata.
+function getRoleLabel(user: any): string {
+  const rawRole =
+    user?.role ||
+    user?.userRole ||
+    user?.user_metadata?.role ||
+    user?.app_metadata?.role ||
+    "";
+
+  const role = String(rawRole).toLowerCase().trim();
+
+  if (role === "super_admin" || role === "superadmin" || role === "super admin") {
+    return "Super Admin";
+  }
+  if (role === "staff" || role === "admin") {
+    return "Staff";
+  }
+
+  // Fallback: show whatever role string exists, or a generic label
+  return rawRole ? String(rawRole) : "User";
+}
+
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/card-registration", label: "Card Registration", icon: CreditCard },
@@ -95,6 +119,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     currentPassword: "",
     newPassword: "",
   });
+
+  const roleLabel = getRoleLabel(user);
 
   useEffect(() => {
     if (profileModalOpen) {
@@ -355,7 +381,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
             <div className="text-right hidden sm:block">
               <p className={`text-[10px] font-semibold uppercase tracking-widest transition-colors ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Super Admin
+                {roleLabel}
               </p>
               <p className={`text-sm font-semibold transition-colors ${isDark ? "text-slate-100" : "text-slate-800"}`}>
                 {user?.name || "Admin_User"}
