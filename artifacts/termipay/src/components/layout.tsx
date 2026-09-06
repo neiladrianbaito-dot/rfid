@@ -70,16 +70,43 @@ function getRoleLabel(user: any): string {
   return rawRole ? String(rawRole) : "User";
 }
 
-const navItems = [
-  { path: "/", label: "Dashboard", icon: LayoutDashboard },
-  { path: "/card-registration", label: "Card Registration", icon: CreditCard },
-  { path: "/transactions", label: "Transaction Logs", icon: ArrowLeftRight },
-  { path: "/users", label: "User Management", icon: Users },
-  { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
-  { path: "/device-reader", label: "Device Reader", icon: ScanLine },
-  { path: "/audit-logs", label: "Audit Logs", icon: ScrollText },
-  { path: "/reports", label: "Reports", icon: FileBarChart },
-  { path: "/settings", label: "Settings", icon: Settings },
+// Nav items are grouped under a section label so the sidebar reads as
+// organized categories instead of one long flat list.
+const navGroups = [
+  {
+    label: "Main",
+    items: [
+      { path: "/", label: "Dashboard", icon: LayoutDashboard },
+      { path: "/card-registration", label: "Card Registration", icon: CreditCard },
+    ],
+  },
+  {
+    label: "Transactions & Fares",
+    items: [
+      { path: "/transactions", label: "Transaction Logs", icon: ArrowLeftRight },
+      { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
+    ],
+  },
+  {
+    label: "Management",
+    items: [
+      { path: "/users", label: "User Management", icon: Users },
+    ],
+  },
+  {
+    label: "Devices & System",
+    items: [
+      { path: "/device-reader", label: "Device Reader", icon: ScanLine },
+      { path: "/audit-logs", label: "Audit Logs", icon: ScrollText },
+    ],
+  },
+  {
+    label: "Reports & Settings",
+    items: [
+      { path: "/reports", label: "Reports", icon: FileBarChart },
+      { path: "/settings", label: "Settings", icon: Settings },
+    ],
+  },
 ];
 
 function CurrentDateTime({ isDark }: { isDark: boolean }) {
@@ -269,46 +296,59 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
 
-          {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-            {navItems.map((item) => {
-              const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
-              const Icon = item.icon;
-              return (
-                <Link key={item.path} href={item.path}>
-                  <div
-                    onClick={() => setSidebarOpen(false)}
-                    className={`
-                      group flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer
-                      transition-all duration-150
-                      ${isActive
-                        ? isDark
-                          ? "bg-blue-600/30 text-white"
-                          : "bg-blue-600/30 text-white"
-                        : isDark
-                          ? "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
-                          : "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
-                      }
-                    `}
-                  >
-                    <Icon
-                      size={17}
-                      className={
-                        isActive
-                          ? isDark ? "text-blue-300" : "text-white"
-                          : isDark
-                            ? "text-blue-400/60 group-hover:text-blue-200"
-                            : "text-blue-300 group-hover:text-blue-100"
-                      }
-                    />
-                    {item.label}
-                    {isActive && (
-                      <motion.div layoutId="activeNav" className={`ml-auto w-1.5 h-1.5 rounded-full ${isDark ? "bg-blue-400" : "bg-white"}`} />
-                    )}
-                  </div>
-                </Link>
-              );
-            })}
+          {/* Navigation — grouped into labeled categories */}
+          <nav className="flex-1 p-4 space-y-5 overflow-y-auto">
+            {navGroups.map((group) => (
+              <div key={group.label}>
+                <p
+                  className={`px-4 mb-1.5 text-[10px] font-semibold uppercase tracking-widest ${
+                    isDark ? "text-blue-500/50" : "text-blue-300/80"
+                  }`}
+                >
+                  {group.label}
+                </p>
+                <div className="space-y-1">
+                  {group.items.map((item) => {
+                    const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
+                    const Icon = item.icon;
+                    return (
+                      <Link key={item.path} href={item.path}>
+                        <div
+                          onClick={() => setSidebarOpen(false)}
+                          className={`
+                            group flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer
+                            transition-all duration-150
+                            ${isActive
+                              ? isDark
+                                ? "bg-blue-600/30 text-white"
+                                : "bg-blue-600/30 text-white"
+                              : isDark
+                                ? "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
+                                : "text-blue-200/70 hover:text-white hover:bg-blue-900/40"
+                            }
+                          `}
+                        >
+                          <Icon
+                            size={17}
+                            className={
+                              isActive
+                                ? isDark ? "text-blue-300" : "text-white"
+                                : isDark
+                                  ? "text-blue-400/60 group-hover:text-blue-200"
+                                  : "text-blue-300 group-hover:text-blue-100"
+                            }
+                          />
+                          {item.label}
+                          {isActive && (
+                            <motion.div layoutId="activeNav" className={`ml-auto w-1.5 h-1.5 rounded-full ${isDark ? "bg-blue-400" : "bg-white"}`} />
+                          )}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
 
           {/* User Section at bottom of Sidebar */}
