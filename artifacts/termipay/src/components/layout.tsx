@@ -94,7 +94,7 @@ const navGroups = [
     ],
   },
   {
-    label: "Devices & System",
+    label: "Devices & System Audit",
     items: [
       { path: "/device-reader", label: "Device Reader", icon: ScanLine },
       { path: "/audit-logs", label: "Audit Logs", icon: ScrollText },
