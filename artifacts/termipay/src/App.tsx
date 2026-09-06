@@ -22,6 +22,7 @@ import ReportsPage from "@/pages/reports";
 import ReportPreviewPage from "@/pages/report-preview";
 import Layout from "@/components/layout";
 import { useAuth } from "@/hooks/use-auth";
+import SettingsPage from "@/pages/settings";
 
 const USER_AUTH_TOKEN_KEY = "termipay_user_auth_token";
 
@@ -133,7 +134,9 @@ function AppRouter() {
       <Route path="/reports">
         <ProtectedRoute component={ReportsPage} />
       </Route>
-
+      <Route path="/settings">
+        <ProtectedRoute component={SettingsPage} />
+      </Route>
       {/* NOT FOUND */}
       <Route component={NotFound} />
     </Switch>
@@ -145,7 +148,7 @@ const queryClient = new QueryClient({
     queries: {
       retry: false,
       refetchOnWindowFocus: false,
-      staleTime: 1000 * 60 * 5,
+      staleTime: 1000 * 60 * 5,     
     },
   },
 });
