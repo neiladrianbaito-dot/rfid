@@ -20,6 +20,8 @@ import {
   FileSpreadsheet,
   LinkIcon,
   PhilippinePeso,
+  Filter,
+  RotateCcw,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -64,6 +66,49 @@ async function logExportAudit(params: { entity: string; format: string; details:
   }
 }
 
+// ── NEW: date-filter helpers ──
+const MONTH_OPTIONS = [
+  { value: "01", label: "January" },
+  { value: "02", label: "February" },
+  { value: "03", label: "March" },
+  { value: "04", label: "April" },
+  { value: "05", label: "May" },
+  { value: "06", label: "June" },
+  { value: "07", label: "July" },
+  { value: "08", label: "August" },
+  { value: "09", label: "September" },
+  { value: "10", label: "October" },
+  { value: "11", label: "November" },
+  { value: "12", label: "December" },
+];
+
+const DAY_OPTIONS = Array.from({ length: 31 }, (_, i) => {
+  const val = String(i + 1).padStart(2, "0");
+  return { value: val, label: String(i + 1) };
+});
+
+// Splits a "YYYY-MM-DD" (or ISO) date string into { year, month, day } parts.
+function splitDateString(dateStr: string): { year: string; month: string; day: string } | null {
+  if (!dateStr) return null;
+  const datePart = dateStr.split("T")[0];
+  const [y, m, d] = datePart.split("-");
+  if (!y || !m || !d) return null;
+  return { year: y, month: m, day: d };
+}
+
+// Extracts { year, month, day } from a transaction's timestamp field.
+function getTxDateParts(tx: any): { year: string; month: string; day: string } | null {
+  const ts = tx.timestamp || tx.created_at;
+  if (!ts) return null;
+  const dt = new Date(ts);
+  if (isNaN(dt.getTime())) return null;
+  return {
+    year: String(dt.getFullYear()),
+    month: String(dt.getMonth() + 1).padStart(2, "0"),
+    day: String(dt.getDate()).padStart(2, "0"),
+  };
+}
+
 export default function ReportsPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
@@ -72,6 +117,11 @@ export default function ReportsPage() {
 
   const prevRevenueRef = useRef<number | null>(null);
   const [revenueFlash, setRevenueFlash] = useState(false);
+
+  // ── NEW: filter state ──
+  const [filterYear, setFilterYear] = useState<string>("all");
+  const [filterMonth, setFilterMonth] = useState<string>("all");
+  const [filterDay, setFilterDay] = useState<string>("all");
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
@@ -101,18 +151,19 @@ export default function ReportsPage() {
     prevRevenueRef.current = current;
   }, [report]);
 
+  const txList = React.useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
+  const userList = React.useMemo(() => (Array.isArray(users) ? users : []), [users]);
+
   const totalUniqueTaps = React.useMemo(() => {
-    const txList = Array.isArray(transactions) ? transactions : [];
     const uids = new Set(
       txList.map((tx: any) => tx.card_uid || tx.cardUid).filter(Boolean)
     );
     return uids.size;
-  }, [transactions]);
+  }, [txList]);
 
   const totalLinkedCards = React.useMemo(() => {
-    const userList = Array.isArray(users) ? users : [];
     return userList.filter((u: any) => normalizeEmail(u.email) !== null).length;
-  }, [users]);
+  }, [userList]);
 
   const todayRevenue = (() => {
     const breakdown = report?.dailyBreakdown || [];
@@ -125,10 +176,96 @@ export default function ReportsPage() {
 
   const totalRevenue7Days = Math.abs(Number(report?.totalRevenue7Days ?? 0));
 
-  const sanitizedBreakdown = (report?.dailyBreakdown || []).map((d: any) => ({
-    ...d,
-    revenue: Math.abs(Number(d.revenue) || 0),
-  }));
+  const sanitizedBreakdown = React.useMemo(
+    () =>
+      (report?.dailyBreakdown || []).map((d: any) => ({
+        ...d,
+        revenue: Math.abs(Number(d.revenue) || 0),
+      })),
+    [report]
+  );
+
+  // ── NEW: derive available years from the data so the Year dropdown
+  // only ever shows years that actually have records ──
+  const availableYears = React.useMemo(() => {
+    const years = new Set<string>();
+    sanitizedBreakdown.forEach((d: any) => {
+      const parts = splitDateString(d.date);
+      if (parts) years.add(parts.year);
+    });
+    txList.forEach((tx: any) => {
+      const parts = getTxDateParts(tx);
+      if (parts) years.add(parts.year);
+    });
+    return Array.from(years).sort((a, b) => b.localeCompare(a));
+  }, [sanitizedBreakdown, txList]);
+
+  const isFilterActive = filterYear !== "all" || filterMonth !== "all" || filterDay !== "all";
+
+  const resetFilters = () => {
+    setFilterYear("all");
+    setFilterMonth("all");
+    setFilterDay("all");
+  };
+
+  // If a "Day" is selected without a "Month", it's ambiguous — auto-clear
+  // day when month is reset back to "all".
+  const handleMonthChange = (value: string) => {
+    setFilterMonth(value);
+    if (value === "all") setFilterDay("all");
+  };
+
+  const handleYearChange = (value: string) => {
+    setFilterYear(value);
+    if (value === "all") {
+      setFilterMonth("all");
+      setFilterDay("all");
+    }
+  };
+
+  // ── NEW: filtered breakdown (drives chart + table) ──
+  const filteredBreakdown = React.useMemo(() => {
+    if (!isFilterActive) return sanitizedBreakdown;
+    return sanitizedBreakdown.filter((d: any) => {
+      const parts = splitDateString(d.date);
+      if (!parts) return false;
+      if (filterYear !== "all" && parts.year !== filterYear) return false;
+      if (filterMonth !== "all" && parts.month !== filterMonth) return false;
+      if (filterDay !== "all" && parts.day !== filterDay) return false;
+      return true;
+    });
+  }, [sanitizedBreakdown, filterYear, filterMonth, filterDay, isFilterActive]);
+
+  // ── NEW: filtered transactions (drives Excel export) ──
+  const filteredTxList = React.useMemo(() => {
+    if (!isFilterActive) return txList;
+    return txList.filter((tx: any) => {
+      const parts = getTxDateParts(tx);
+      if (!parts) return false;
+      if (filterYear !== "all" && parts.year !== filterYear) return false;
+      if (filterMonth !== "all" && parts.month !== filterMonth) return false;
+      if (filterDay !== "all" && parts.day !== filterDay) return false;
+      return true;
+    });
+  }, [txList, filterYear, filterMonth, filterDay, isFilterActive]);
+
+  const filteredRevenueTotal = React.useMemo(
+    () => filteredBreakdown.reduce((sum: number, d: any) => sum + (Number(d.revenue) || 0), 0),
+    [filteredBreakdown]
+  );
+
+  // Human-readable label for the currently active filter, e.g. "September 2026"
+  const filterLabel = React.useMemo(() => {
+    if (!isFilterActive) return "";
+    const parts: string[] = [];
+    if (filterDay !== "all") parts.push(filterDay);
+    if (filterMonth !== "all") {
+      const m = MONTH_OPTIONS.find((mo) => mo.value === filterMonth);
+      parts.push(m ? m.label : filterMonth);
+    }
+    if (filterYear !== "all") parts.push(filterYear);
+    return parts.join(" ");
+  }, [isFilterActive, filterYear, filterMonth, filterDay]);
 
   const handleOpenPreview = () => {
     navigate("/reports/preview");
@@ -138,13 +275,19 @@ export default function ReportsPage() {
     const XLSXStyle = await import("xlsx-js-style" as any);
     const { utils, writeFile } = XLSXStyle;
 
-    const txList = Array.isArray(transactions) ? transactions : [];
-    const userList = Array.isArray(users) ? users : [];
+    const exportTxList = filteredTxList;
     const stamp = getLocalDateString();
     const generatedAt = new Date().toLocaleString("en-PH", {
       year: "numeric", month: "long", day: "numeric",
       hour: "2-digit", minute: "2-digit", second: "2-digit",
     });
+
+    // ── NEW: filter suffix for the filename, e.g. -2026-09, -2026-09-06 ──
+    const filenameSuffix = isFilterActive
+      ? `-${[filterYear !== "all" ? filterYear : null, filterMonth !== "all" ? filterMonth : null, filterDay !== "all" ? filterDay : null]
+          .filter(Boolean)
+          .join("-")}`
+      : "";
 
     // ── NEW: fire the audit log call. Fire-and-forget — we don't await
     // this before continuing the export, so a slow/failed request never
@@ -152,24 +295,31 @@ export default function ReportsPage() {
     logExportAudit({
       entity: "Transaction Logs",
       format: "Excel",
-      details: `${adminName} exported transaction logs as Excel (transaction-logs-${stamp}.xlsx)`,
+      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx)${
+        isFilterActive ? ` [Filtered: ${filterLabel}]` : ""
+      }`,
     });
 
-    // ✅ FIX: Summary rows now match the 4 stat cards on the UI exactly:
-    //    Row 5 → Today's Revenue  |  Total Registered Users
-    //    Row 6 → 7-Day Revenue    |  Total Linked Cards
+    // ✅ Summary rows adapt depending on whether a filter is active:
+    //    No filter → Today's Revenue | 7-Day Revenue | Total Registered Users | Total Linked Cards
+    //    Filtered  → Filtered Revenue | Filtered Records | Total Registered Users | Total Linked Cards
+    const summaryRow1Label = isFilterActive ? `Filtered Revenue (${filterLabel})` : "Today's Revenue";
+    const summaryRow1Value = isFilterActive ? formatPeso(filteredRevenueTotal) : formatPeso(todayRevenue);
+    const summaryRow2Label = isFilterActive ? "Filtered Records" : "7-Day Revenue";
+    const summaryRow2Value = isFilterActive ? exportTxList.length : formatPeso(totalRevenue7Days);
+
     const aoa: any[][] = [
       ["Fare Collection System", "", "", "", "", "", ""],
       ["Transaction Logs Export", "", "", "", "", "", ""],
       [`Generated: ${generatedAt}`, "", "", `Prepared by: ${adminName}`, "", "", ""],
       [],
-      ["Today's Revenue", formatPeso(todayRevenue), "", "Total Registered Users", totalUniqueTaps, "", ""],
-      ["7-Day Revenue", formatPeso(totalRevenue7Days), "", "Total Linked Cards", totalLinkedCards, "", ""],
+      [summaryRow1Label, summaryRow1Value, "", "Total Registered Users", totalUniqueTaps, "", ""],
+      [summaryRow2Label, summaryRow2Value, "", "Total Linked Cards", totalLinkedCards, "", ""],
       [],
       ["Timestamp", "Card UID", "Full Name", "Type", "Amount (PHP)", "Signed Amount", "Status"],
     ];
 
-    txList.forEach((tx: any) => {
+    exportTxList.forEach((tx: any) => {
       const ts = tx.timestamp || tx.created_at;
       const amount = Math.abs(Number(tx.amount) || 0);
       aoa.push([
@@ -249,7 +399,7 @@ export default function ReportsPage() {
     setStyle("A3", metaBase);
     setStyle("D3", { ...metaBase, font: { ...metaBase.font, italic: false, bold: true } });
 
-    // ✅ Summary row styles — Row 5: Today's Revenue (emerald) | Total Registered Users (indigo)
+    // ✅ Summary row styles — Row 5: (Today's / Filtered) Revenue (emerald) | Total Registered Users (indigo)
     const summaryLabel = {
       font: { bold: true, sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
       fill: { fgColor: { rgb: "E2E8F0" }, patternType: "solid" },
@@ -281,13 +431,13 @@ export default function ReportsPage() {
       border: thinBorder,
     };
 
-    // Row 5: Today's Revenue | Total Registered Users
+    // Row 5: (Today's / Filtered) Revenue | Total Registered Users
     setStyle("A5", summaryLabel);
     setStyle("B5", summaryEmerald);
     setStyle("D5", summaryLabel);
     setStyle("E5", summaryIndigo);
 
-    // Row 6: 7-Day Revenue | Total Linked Cards
+    // Row 6: (7-Day Revenue / Filtered Records) | Total Linked Cards
     setStyle("A6", summaryLabel);
     setStyle("B6", summaryBlue);
     setStyle("D6", summaryLabel);
@@ -301,7 +451,7 @@ export default function ReportsPage() {
     };
     ["A", "B", "C", "D", "E", "F", "G"].forEach((col) => setStyle(`${col}8`, headerStyle));
 
-    txList.forEach((tx: any, i: number) => {
+    exportTxList.forEach((tx: any, i: number) => {
       const rowNum = 9 + i;
       const isEven = i % 2 === 0;
       const amount = Math.abs(Number(tx.amount) || 0);
@@ -371,7 +521,7 @@ export default function ReportsPage() {
       Author: adminName,
       CreatedDate: new Date(),
     };
-    writeFile(workbook, `transaction-logs-${stamp}.xlsx`);
+    writeFile(workbook, `transaction-logs${filenameSuffix}-${stamp}.xlsx`);
   };
 
   return (
@@ -431,6 +581,97 @@ export default function ReportsPage() {
         </div>
       </div>
 
+      {/* ══ NEW: DATE FILTER BAR ══ */}
+      <Card className={`shadow-sm ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <div className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <Filter size={14} className="text-blue-500" />
+              Filter by Date
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                Year
+              </label>
+              <select
+                value={filterYear}
+                onChange={(e) => handleYearChange(e.target.value)}
+                data-testid="select-filter-year"
+                className={`h-9 rounded-md border px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+                }`}
+              >
+                <option value="all">All Years</option>
+                {availableYears.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                Month
+              </label>
+              <select
+                value={filterMonth}
+                onChange={(e) => handleMonthChange(e.target.value)}
+                disabled={filterYear === "all"}
+                data-testid="select-filter-month"
+                className={`h-9 rounded-md border px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-40 disabled:cursor-not-allowed ${
+                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+                }`}
+              >
+                <option value="all">All Months</option>
+                {MONTH_OPTIONS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                Day
+              </label>
+              <select
+                value={filterDay}
+                onChange={(e) => setFilterDay(e.target.value)}
+                disabled={filterMonth === "all"}
+                data-testid="select-filter-day"
+                className={`h-9 rounded-md border px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-40 disabled:cursor-not-allowed ${
+                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+                }`}
+              >
+                <option value="all">All Days</option>
+                {DAY_OPTIONS.map((d) => (
+                  <option key={d.value} value={d.value}>{d.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {isFilterActive && (
+              <Button
+                variant="ghost"
+                onClick={resetFilters}
+                data-testid="button-reset-filters"
+                className={`h-9 gap-2 text-xs font-semibold ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}
+              >
+                <RotateCcw size={13} />
+                Reset Filters
+              </Button>
+            )}
+
+            {isFilterActive && (
+              <div className={`ml-auto flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-semibold ${
+                isDark ? "bg-blue-950/40 border-blue-900 text-blue-300" : "bg-blue-50 border-blue-100 text-blue-700"
+              }`}>
+                Showing: {filterLabel} — {formatPeso(filteredRevenueTotal)} ({filteredBreakdown.length} day{filteredBreakdown.length === 1 ? "" : "s"})
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* ══ SUMMARY CARDS ══ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -477,6 +718,11 @@ export default function ReportsPage() {
             <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               <PieChart size={14} className="text-blue-500" />
               Daily Revenue Breakdown
+              {isFilterActive && (
+                <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  — {filterLabel}
+                </span>
+              )}
             </CardTitle>
             <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Performance Matrix</div>
           </div>
@@ -484,10 +730,14 @@ export default function ReportsPage() {
         <CardContent className="pt-8">
           {isLoading ? (
             <Skeleton className={`h-72 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+          ) : filteredBreakdown.length === 0 ? (
+            <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              No records match the selected filter.
+            </div>
           ) : (
             <div className="h-[300px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={sanitizedBreakdown}>
+                <BarChart data={filteredBreakdown}>
                   <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
                   <XAxis
                     dataKey="date"
@@ -516,10 +766,10 @@ export default function ReportsPage() {
                     formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
                   />
                   <Bar dataKey="revenue" radius={[4, 4, 0, 0]} className="cursor-pointer">
-                    {sanitizedBreakdown.map((_entry: any, index: number) => (
+                    {filteredBreakdown.map((_entry: any, index: number) => (
                       <Cell
                         key={`cell-${index}`}
-                        fill={index === sanitizedBreakdown.length - 1 ? "#3b82f6" : isDark ? "#334155" : "#cbd5e1"}
+                        fill={index === filteredBreakdown.length - 1 ? "#3b82f6" : isDark ? "#334155" : "#cbd5e1"}
                         className="cursor-pointer"
                       />
                     ))}
@@ -537,12 +787,21 @@ export default function ReportsPage() {
           <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
             <FileText size={14} className="text-blue-500" />
             Detailed Revenue Log
+            {isFilterActive && (
+              <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                — {filterLabel}
+              </span>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
           {isLoading ? (
             <div className="space-y-4">
               {[1, 2, 3].map((i) => <Skeleton key={i} className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />)}
+            </div>
+          ) : filteredBreakdown.length === 0 ? (
+            <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              No records match the selected filter.
             </div>
           ) : (
             <Table>
@@ -554,7 +813,7 @@ export default function ReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sanitizedBreakdown.map((day: any, i: number) => {
+                {filteredBreakdown.map((day: any, i: number) => {
                   const date = new Date(day.date + "T00:00:00");
                   return (
                     <TableRow
