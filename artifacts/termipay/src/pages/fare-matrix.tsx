@@ -1105,12 +1105,14 @@ export default function FareMatrixPage() {
 
           <DialogFooter>
             <Button
-              variant="secondary"
+              variant="ghost"
               onClick={() => {
                 setActivateRoute(null);
                 setSelectedDeviceId("");
               }}
-              className={`cursor-pointer ${isDark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+              className={`cursor-pointer border-0 shadow-none bg-transparent hover:bg-transparent ${
+                isDark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700"
+              }`}
             >
               Cancel
             </Button>
