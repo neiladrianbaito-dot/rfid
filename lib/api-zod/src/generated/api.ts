@@ -24,6 +24,7 @@ export const LoginResponse = zod.object({
 export const GetMeResponse = zod.object({
   username: zod.string(),
   name: zod.string(),
+  role: zod.string(),
 });
 
 export const ListUsersQueryParams = zod.object({

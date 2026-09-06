@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
 import {
   Settings, UserPlus, Users, Lock, Shield,
-  Loader2, ShieldCheck, Trash2, RefreshCw,
+  Loader2, ShieldCheck, Trash2, RefreshCw, Crown,
 } from "lucide-react";
 
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
@@ -29,11 +29,6 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// ── NEW: safe JSON parsing helper ───────────────────────────────────────────
-// Reads the response as text first, then tries to parse it as JSON. If the
-// server (or a proxy, or a SPA fallback) returned HTML/plaintext instead of
-// JSON, this throws a readable error instead of a cryptic
-// "Unexpected token '<'" crash.
 async function parseJsonSafe(response: Response): Promise<any> {
   const text = await response.text();
   if (!text) return {};
@@ -42,9 +37,7 @@ async function parseJsonSafe(response: Response): Promise<any> {
   } catch {
     throw new Error(
       `Server returned a non-JSON response (status ${response.status}). ` +
-      `This usually means the request didn't reach the API (check VITE_API_URL, ` +
-      `routing, or that the backend is running). Response started with: ` +
-      `"${text.slice(0, 120).replace(/\s+/g, " ")}"`
+      `Response started with: "${text.slice(0, 120).replace(/\s+/g, " ")}"`
     );
   }
 }
@@ -53,14 +46,18 @@ type StaffUser = {
   id: number;
   username: string;
   full_name: string;
-  role: string;
+  role: string; // "staff" | "super_admin"
   status: string;
   created_at: string;
 };
 
+// ── Role label helpers ───────────────────────────────────────────────────────
+function roleLabel(role: string): string {
+  return role === "super_admin" ? "Super Admin" : "Staff";
+}
+
 function roleBadgeClass(role: string, isDark: boolean) {
-  const key = role.toLowerCase();
-  if (key === "admin") {
+  if (role === "super_admin") {
     return isDark
       ? "bg-blue-950/40 text-blue-400 border-blue-900"
       : "bg-blue-50 text-blue-600 border-blue-200";
@@ -75,16 +72,27 @@ export default function SettingsPage() {
   const { toast } = useToast();
   const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
 
-  // Dev-time sanity check: warn loudly if VITE_API_URL isn't set, since that's
-  // the #1 cause of "request hits the frontend origin and gets HTML back".
+  // ── Who am I? (needed to know if the Add Staff form should even show) ──────
+  const [myRole, setMyRole] = useState<string | null>(null);
+  const [myRoleLoaded, setMyRoleLoaded] = useState(false);
+
   useEffect(() => {
-    if (!apiBaseUrl) {
-      console.warn(
-        "[SettingsPage] VITE_API_URL is not set — API requests will be sent " +
-        "to relative paths on this app's own origin, which will likely fail."
-      );
-    }
-  }, [apiBaseUrl]);
+    (async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/auth/me`, {
+          headers: { ...getAuthHeaders() },
+        });
+        const data = await parseJsonSafe(response);
+        if (response.ok && data.role) setMyRole(data.role);
+      } catch (error) {
+        console.error("Failed to load current admin role:", error);
+      } finally {
+        setMyRoleLoaded(true);
+      }
+    })();
+  }, []);
+
+  const isSuperAdmin = myRole === "super_admin";
 
   // ── Add staff form state ───────────────────────────────────────────────
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -138,8 +146,8 @@ export default function SettingsPage() {
       if (!response.ok) throw new Error(data.error || "Failed to create staff account");
 
       toast({
-        title: "Staff Account Created",
-        description: `${form.fullName.trim()} has been added as ${form.role}.`,
+        title: "Account Created",
+        description: `${form.fullName.trim()} has been added as ${roleLabel(form.role)}.`,
       });
       resetForm();
       loadStaff();
@@ -233,96 +241,113 @@ export default function SettingsPage() {
             Manage staff accounts and system access
           </p>
         </div>
+        {myRoleLoaded && myRole && (
+          <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${roleBadgeClass(myRole, isDark)}`}>
+            {myRole === "super_admin" ? <Crown className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
+            You are logged in as {roleLabel(myRole)}
+          </Badge>
+        )}
       </div>
 
-      {/* Add New Staff User */}
-      <Card className={`shadow-sm relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
-        <CardHeader className={`pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-          <div className="flex items-center gap-2">
-            <UserPlus className="text-blue-500" size={18} />
-            <h3 className={`text-sm font-bold uppercase tracking-wide ${isDark ? "text-slate-200" : "text-slate-700"}`}>
-              Add New Staff User
-            </h3>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-6">
-          <div className="grid gap-5 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                Full Name
-              </Label>
-              <Input
-                placeholder="Juan Dela Cruz"
-                value={form.fullName}
-                onChange={(e) => setForm({ ...form, fullName: e.target.value })}
-                className={isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}
-              />
+      {/* Add New Staff User — Super Admin only */}
+      {myRoleLoaded && isSuperAdmin && (
+        <Card className={`shadow-sm relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
+          <CardHeader className={`pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
+            <div className="flex items-center gap-2">
+              <UserPlus className="text-blue-500" size={18} />
+              <h3 className={`text-sm font-bold uppercase tracking-wide ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                Add New Account
+              </h3>
             </div>
-
-            <div className="space-y-2">
-              <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                Username
-              </Label>
-              <Input
-                placeholder="jdelacruz"
-                value={form.username}
-                onChange={(e) => setForm({ ...form, username: e.target.value })}
-                className={isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                Temporary Password
-              </Label>
-              <div className="relative">
-                <Lock className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Full Name
+                </Label>
                 <Input
-                  type="password"
-                  placeholder="Minimum 6 characters"
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  className={`pl-10 ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}
+                  placeholder="Juan Dela Cruz"
+                  value={form.fullName}
+                  onChange={(e) => setForm({ ...form, fullName: e.target.value })}
+                  className={isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Username
+                </Label>
+                <Input
+                  placeholder="jdelacruz"
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  className={isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Temporary Password
+                </Label>
+                <div className="relative">
+                  <Lock className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+                  <Input
+                    type="password"
+                    placeholder="Minimum 6 characters"
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    className={`pl-10 ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Role
+                </Label>
+                <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
+                  <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                    <SelectItem value="staff">Staff</SelectItem>
+                    <SelectItem value="super_admin">Super Admin</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                Role
-              </Label>
-              <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
-                <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                  <SelectValue placeholder="Select role" />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                  <SelectItem value="staff">Staff</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className={`mt-5 p-3 rounded-lg border flex items-start gap-2 ${isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"}`}>
+              <ShieldCheck size={14} className={`mt-0.5 shrink-0 ${isDark ? "text-blue-400" : "text-blue-700"}`} />
+              <p className={`text-xs leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                The staff member will use this username and password to log in on the admin console. Advise them to change their password after first login.
+              </p>
             </div>
-          </div>
 
-          <div className={`mt-5 p-3 rounded-lg border flex items-start gap-2 ${isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"}`}>
-            <ShieldCheck size={14} className={`mt-0.5 shrink-0 ${isDark ? "text-blue-400" : "text-blue-700"}`} />
-            <p className={`text-xs leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              The staff member will use this username and password to log in on the admin console. Advise them to change their password after first login.
-            </p>
-          </div>
+            <div className="flex justify-end mt-6">
+              <Button
+                onClick={handleAddStaff}
+                disabled={isSubmitting}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 gap-2"
+              >
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                {isSubmitting ? "Creating..." : "Create Account"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-          <div className="flex justify-end mt-6">
-            <Button
-              onClick={handleAddStaff}
-              disabled={isSubmitting}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 gap-2"
-            >
-              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-              {isSubmitting ? "Creating..." : "Create Staff Account"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {myRoleLoaded && !isSuperAdmin && (
+        <div className={`p-4 rounded-lg border flex items-start gap-3 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+          <Shield className={`mt-0.5 shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`} size={18} />
+          <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            Only a <strong>Super Admin</strong> can create or remove staff accounts. You can still view the list below.
+          </p>
+        </div>
+      )}
 
       {/* Staff List */}
       <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden relative min-h-0 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
@@ -332,7 +357,7 @@ export default function SettingsPage() {
             <div className="flex items-center gap-2">
               <Users className="text-blue-500" size={18} />
               <h3 className={`text-sm font-bold uppercase tracking-wide ${isDark ? "text-slate-200" : "text-slate-700"}`}>
-                Staff Accounts
+                Staff &amp; Super Admin Accounts
               </h3>
             </div>
             <div className="flex gap-3 w-full lg:w-auto">
@@ -343,13 +368,13 @@ export default function SettingsPage() {
                 className={`w-full lg:w-64 text-sm ${isDark ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600" : "bg-white border-slate-200 placeholder:text-slate-400"}`}
               />
               <Select value={roleFilter} onValueChange={setRoleFilter}>
-                <SelectTrigger className={`w-[130px] text-xs cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
+                <SelectTrigger className={`w-[150px] text-xs cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
                   <SelectValue placeholder="Role" />
                 </SelectTrigger>
                 <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
                   <SelectItem value="all">All Roles</SelectItem>
                   {roleOptions.map((r) => (
-                    <SelectItem key={r} value={r}>{r}</SelectItem>
+                    <SelectItem key={r} value={r}>{roleLabel(r)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -381,16 +406,18 @@ export default function SettingsPage() {
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Username</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Role</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date Added</TableHead>
-                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
+                    {isSuperAdmin && (
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
+                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredStaff.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-32">
+                      <TableCell colSpan={isSuperAdmin ? 5 : 4} className="text-center py-32">
                         <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                           <Users size={48} className="mb-2" />
-                          <p className="text-xs font-semibold uppercase tracking-widest">No staff accounts found</p>
+                          <p className="text-xs font-semibold uppercase tracking-widest">No accounts found</p>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -408,28 +435,30 @@ export default function SettingsPage() {
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${roleBadgeClass(s.role, isDark)}`}>
-                            <Shield className="w-3 h-3" />
-                            {s.role}
+                            {s.role === "super_admin" ? <Crown className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
+                            {roleLabel(s.role)}
                           </Badge>
                         </TableCell>
                         <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                           {new Date(s.created_at).toLocaleDateString()}
                         </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            disabled={deletingId === s.id}
-                            onClick={() => handleRemoveStaff(s.id, s.full_name)}
-                            className={isDark ? "text-slate-500 hover:text-red-400" : "text-slate-400 hover:text-red-500"}
-                          >
-                            {deletingId === s.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="w-4 h-4" />
-                            )}
-                          </Button>
-                        </TableCell>
+                        {isSuperAdmin && (
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={deletingId === s.id}
+                              onClick={() => handleRemoveStaff(s.id, s.full_name)}
+                              className={isDark ? "text-slate-500 hover:text-red-400" : "text-slate-400 hover:text-red-500"}
+                            >
+                              {deletingId === s.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                            </Button>
+                          </TableCell>
+                        )}
                       </TableRow>
                     ))
                   )}
