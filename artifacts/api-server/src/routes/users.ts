@@ -29,6 +29,7 @@ type UserRow = {
   balance: string | number;
   status: string;
   createdAt: Date | string;
+  expirationDate: Date | string | null;
   email: string | null;
 };
 
@@ -91,6 +92,7 @@ function formatUser(u: UserRow) {
     balance: Number(u.balance),
     status: u.status,
     createdAt: new Date(u.createdAt),
+    expirationDate: u.expirationDate ? new Date(u.expirationDate) : null,
     email,
   };
 }
@@ -131,6 +133,7 @@ router.get("/users/recent", async (_req, res): Promise<void> => {
         u.balance,
         u.status,
         u.created_at     as "createdAt",
+        u.expiration_date as "expirationDate",
         a.email          as "email"
       from users u
       ${EMAIL_JOIN}
@@ -164,6 +167,7 @@ router.get("/users", async (req, res): Promise<void> => {
         u.balance,
         u.status,
         u.created_at     as "createdAt",
+        u.expiration_date as "expirationDate",
         a.email          as "email"
       from users u
       ${EMAIL_JOIN}
@@ -216,14 +220,14 @@ router.post("/users", async (req, res): Promise<void> => {
         insert into users (card_uid, full_name, contact_number, type, balance, status)
         values (${cardUid.trim()}, ${fullName.trim()}, ${contactNumber.trim()}, ${normalizedType}, ${String(initialBalance)}, 'Active')
         returning id, card_uid as "cardUid", full_name as "fullName", contact_number as "contactNumber",
-          type, balance, status, created_at as "createdAt"
+          type, balance, status, created_at as "createdAt", expiration_date as "expirationDate"
       `);
     } else {
       insertResult = await db.execute(sql`
         insert into users (card_uid, full_name, contact_number, balance, status)
         values (${cardUid.trim()}, ${fullName.trim()}, ${contactNumber.trim()}, ${String(initialBalance)}, 'Active')
         returning id, card_uid as "cardUid", full_name as "fullName", contact_number as "contactNumber",
-          'Regular'::text as type, balance, status, created_at as "createdAt"
+          'Regular'::text as type, balance, status, created_at as "createdAt", expiration_date as "expirationDate"
       `);
     }
 
@@ -268,6 +272,7 @@ router.get("/users/:id", async (req, res): Promise<void> => {
         u.balance,
         u.status,
         u.created_at     as "createdAt",
+        u.expiration_date as "expirationDate",
         a.email          as "email"
       from users u
       ${EMAIL_JOIN}
@@ -338,7 +343,8 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
         ${hasType ? sql`type` : sql`'Regular'::text as type`},
         balance,
         status,
-        created_at       as "createdAt"
+        created_at       as "createdAt",
+        expiration_date  as "expirationDate"
     `);
     const userRow = extractRows<UserRow>(result)[0];
 
