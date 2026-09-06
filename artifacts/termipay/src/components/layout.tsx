@@ -20,6 +20,7 @@ import {
   Sun,
   Moon,
   ScanLine,
+  Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
@@ -54,6 +55,7 @@ const navItems = [
   { path: "/device-reader", label: "Device Reader", icon: ScanLine },
   { path: "/audit-logs", label: "Audit Logs", icon: ScrollText },
   { path: "/reports", label: "Reports", icon: FileBarChart },
+  { path: "/settings", label: "Settings", icon: Settings },
 ];
 
 function CurrentDateTime({ isDark }: { isDark: boolean }) {
