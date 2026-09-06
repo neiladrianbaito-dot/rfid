@@ -29,6 +29,26 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// ── NEW: safe JSON parsing helper ───────────────────────────────────────────
+// Reads the response as text first, then tries to parse it as JSON. If the
+// server (or a proxy, or a SPA fallback) returned HTML/plaintext instead of
+// JSON, this throws a readable error instead of a cryptic
+// "Unexpected token '<'" crash.
+async function parseJsonSafe(response: Response): Promise<any> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Server returned a non-JSON response (status ${response.status}). ` +
+      `This usually means the request didn't reach the API (check VITE_API_URL, ` +
+      `routing, or that the backend is running). Response started with: ` +
+      `"${text.slice(0, 120).replace(/\s+/g, " ")}"`
+    );
+  }
+}
+
 type StaffUser = {
   id: number;
   username: string;
@@ -54,6 +74,17 @@ export default function SettingsPage() {
   const { isDark } = useTheme();
   const { toast } = useToast();
   const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
+
+  // Dev-time sanity check: warn loudly if VITE_API_URL isn't set, since that's
+  // the #1 cause of "request hits the frontend origin and gets HTML back".
+  useEffect(() => {
+    if (!apiBaseUrl) {
+      console.warn(
+        "[SettingsPage] VITE_API_URL is not set — API requests will be sent " +
+        "to relative paths on this app's own origin, which will likely fail."
+      );
+    }
+  }, [apiBaseUrl]);
 
   // ── Add staff form state ───────────────────────────────────────────────
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -103,7 +134,7 @@ export default function SettingsPage() {
         }),
       });
 
-      const data = await response.json();
+      const data = await parseJsonSafe(response);
       if (!response.ok) throw new Error(data.error || "Failed to create staff account");
 
       toast({
@@ -135,8 +166,11 @@ export default function SettingsPage() {
       const response = await fetch(`${apiBaseUrl}/api/admin/staff`, {
         headers: { ...getAuthHeaders() },
       });
-      const data = await response.json();
+      const data = await parseJsonSafe(response);
       if (response.ok && data.staff) setStaff(data.staff as StaffUser[]);
+      else if (!response.ok) {
+        console.error("Failed to load staff:", data.error || data);
+      }
     } catch (error) {
       console.error("Failed to load staff:", error);
     } finally {
@@ -174,7 +208,7 @@ export default function SettingsPage() {
         headers: { ...getAuthHeaders() },
       });
 
-      const data = await response.json().catch(() => ({}));
+      const data = await parseJsonSafe(response);
       if (!response.ok) throw new Error(data.error || "Failed to remove staff account");
 
       toast({ title: "Staff Removed", description: `${name} has been removed.` });

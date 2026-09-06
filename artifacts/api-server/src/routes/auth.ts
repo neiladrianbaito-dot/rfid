@@ -945,4 +945,140 @@ router.get("/auth/me", async (req, res): Promise<void> => {
   }
 });
 
+// ── LIST STAFF (ADMIN) ────────────────────────────────────────────────────────
+// Returns all staff/admin accounts, excluding password_hash.
+
+router.get("/admin/staff", async (req, res): Promise<void> => {
+  try {
+    const token = getBearerToken(req.headers.authorization);
+    const adminUser = token ? verifyAdminToken(token) : null;
+    if (!adminUser) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    const rows = await db.execute(sql`
+      select id, username, full_name, role, status, created_at
+      from admins
+      order by created_at desc
+    `);
+
+    res.json({ success: true, staff: extractRows(rows) });
+  } catch (error) {
+    console.error("List staff error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── CREATE STAFF (ADMIN) ───────────────────────────────────────────────────────
+// Only an authenticated admin can create another staff/admin account.
+
+router.post("/admin/staff", async (req, res): Promise<void> => {
+  try {
+    const token = getBearerToken(req.headers.authorization);
+    const adminUser = token ? verifyAdminToken(token) : null;
+    if (!adminUser) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    const body = req.body as { username?: string; password?: string; fullName?: string; role?: string };
+    const username = typeof body?.username === "string" ? body.username.trim() : "";
+    const password = typeof body?.password === "string" ? body.password : "";
+    const fullName = typeof body?.fullName === "string" ? body.fullName.trim() : "";
+    const role = body?.role === "admin" ? "admin" : "staff";
+
+    if (!username || !password || !fullName) {
+      res.status(400).json({ error: "Username, password, and full name are required" });
+      return;
+    }
+    if (password.length < 6) {
+      res.status(400).json({ error: "Password must be at least 6 characters" });
+      return;
+    }
+
+    const existingRaw = await db.execute(sql`
+      select id from admins where lower(username) = lower(${username}) limit 1
+    `);
+    if (extractRows(existingRaw).length > 0) {
+      res.status(409).json({ error: "Username is already taken" });
+      return;
+    }
+
+    const passwordHash = hashPassword(password);
+    const insertedRaw = await db.execute(sql`
+      insert into admins (username, password_hash, full_name, role, status)
+      values (${username}, ${passwordHash}, ${fullName}, ${role}, 'Active')
+      returning id, username, full_name, role, status, created_at
+    `);
+    const inserted = extractRows(insertedRaw)[0];
+
+    await logAudit({
+      user: adminUser.username,
+      action: "CREATE",
+      entity: "Admin",
+      details: `${adminUser.username} created staff account "${username}" (${role})`,
+    });
+
+    res.status(201).json({ success: true, staff: inserted });
+  } catch (error) {
+    console.error("Create staff error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── DELETE STAFF (ADMIN) ───────────────────────────────────────────────────────
+// Prevents an admin from deleting their own account through this route.
+
+router.delete("/admin/staff/:id", async (req, res): Promise<void> => {
+  try {
+    const token = getBearerToken(req.headers.authorization);
+    const adminUser = token ? verifyAdminToken(token) : null;
+    if (!adminUser) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    const targetId = Number(req.params.id);
+    if (!Number.isInteger(targetId)) {
+      res.status(400).json({ error: "Invalid staff id" });
+      return;
+    }
+
+    const [selfAdmin] = await db
+      .select()
+      .from(adminsTable)
+      .where(eq(adminsTable.username, adminUser.username))
+      .limit(1);
+
+    if (selfAdmin && selfAdmin.id === targetId) {
+      res.status(400).json({ error: "You cannot remove your own account" });
+      return;
+    }
+
+    const targetRaw = await db.execute(sql`
+      select username from admins where id = ${targetId} limit 1
+    `);
+    const target = extractRows<{ username: string }>(targetRaw)[0];
+    if (!target) {
+      res.status(404).json({ error: "Staff account not found" });
+      return;
+    }
+
+    await db.execute(sql`delete from admins where id = ${targetId}`);
+
+    await logAudit({
+      user: adminUser.username,
+      action: "DELETE",
+      entity: "Admin",
+      details: `${adminUser.username} removed staff account "${target.username}"`,
+    });
+
+    res.json({ success: true, message: "Staff account removed" });
+  } catch (error) {
+    console.error("Delete staff error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
