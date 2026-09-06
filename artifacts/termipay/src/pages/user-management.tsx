@@ -37,6 +37,18 @@ const TYPE_FILTERS = ["All", "Regular", "Student", "Senior", "PWD"] as const;
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// 📅 Formats a date string into "Mon Day, Year" (e.g. Jan 15, 2026)
+const formatDate = (value: string | null | undefined) => {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  if (isNaN(date.getTime())) return "N/A";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
 function normalizeEmail(email: string | null | undefined): string | null {
   if (!email) return null;
   const trimmed = email.trim();
@@ -680,12 +692,22 @@ export default function UserManagementPage() {
                           </div>
                         </div>
 
-                        {/* Footer label */}
-                        <div
-                          className="font-extrabold text-lg sm:text-xl tracking-wide"
-                          style={{ color: theme.accent }}
-                        >
-                          {theme.label}
+                        {/* Footer row: type label (left) + valid until (right) */}
+                        <div className="flex items-end justify-between">
+                          <div
+                            className="font-extrabold text-lg sm:text-xl tracking-wide"
+                            style={{ color: theme.accent }}
+                          >
+                            {theme.label}
+                          </div>
+                          <div className="text-right">
+                            <div className="text-white/50 text-[9px] sm:text-[10px] uppercase tracking-wide font-semibold">
+                              Valid Until
+                            </div>
+                            <div className="text-white font-mono font-bold text-xs sm:text-sm">
+                              {formatDate(previewUser.expirationDate)}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -736,7 +758,13 @@ export default function UserManagementPage() {
                       {previewUser.status}
                     </div>
                   </div>
-                  <div className={`rounded-lg border px-3 py-2 col-span-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                  <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                    <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card Valid Until</span>
+                    <div className={`text-sm font-semibold font-mono ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                      {formatDate(previewUser.expirationDate)}
+                    </div>
+                  </div>
+                  <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
                     <span className={`text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                       <LinkIcon size={10} /> Linked Account
                     </span>
