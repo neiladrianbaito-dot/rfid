@@ -105,60 +105,31 @@ function SuccessTitle({ text }: { text: string }) {
 }
 
 // ✅ News-style scrolling ticker (like a TV news crawler / chyron).
-// Measures the actual rendered widths of the container and the text, then
-// animates the text from fully OFF-SCREEN RIGHT to fully OFF-SCREEN LEFT.
-// Because both start and end positions are outside the visible box, the
-// loop resets while the text is invisible — no "pop", no visible cut, no
-// guessing at 50% widths. It disappears on the left and re-enters on the
-// right, forever, exactly like a real news ticker.
+// Renders TWO back-to-back copies of the exact same text (same node, same
+// font, same padding) inside one flex track, then scrolls that track left
+// by exactly -50% of its own total width. Because both copies are
+// byte-for-byte identical, the browser lays them out at IDENTICAL pixel
+// widths — guaranteed by CSS layout itself, not by JS measurement — so
+// -50% always lands exactly on the seam between copy 1 ending and copy 2
+// beginning. Result: the window is filled with text at all times, nothing
+// waits for the whole string to fully exit before the next one appears —
+// it disappears on the left and the next copy is *already* sliding in from
+// the right, continuously, forever.
 function NewsTickerText({ text, isDark }: { text: string; isDark: boolean }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const textRef = useRef<HTMLSpanElement>(null);
-  const [metrics, setMetrics] = useState<{
-    containerWidth: number;
-    distance: number;
-    duration: number;
-  } | null>(null);
-
-  useEffect(() => {
-    const measure = () => {
-      const containerWidth = containerRef.current?.offsetWidth ?? 0;
-      const textWidth = textRef.current?.offsetWidth ?? 0;
-      // Total distance to travel = one full container width (to clear the
-      // right edge) + the text's own width (to clear the left edge).
-      const distance = containerWidth + textWidth;
-      // ~55px per second reads like a real news ticker — not too fast to
-      // read, not so slow it looks broken.
-      const duration = Math.max(8, distance / 55);
-      setMetrics({ containerWidth, distance, duration });
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [text]);
-
   return (
-    <div ref={containerRef} className="absolute inset-0 overflow-hidden">
-      <span
-        ref={textRef}
-        className={`absolute whitespace-nowrap font-bold tracking-tight text-sm ${
-          isDark ? "text-white" : "text-slate-900"
-        }`}
-        style={
-          metrics
-            ? {
-                top: "50%",
-                // Start position: text sits just past the right edge of the
-                // container, i.e. fully hidden, about to enter from the right.
-                left: metrics.containerWidth,
-                animation: `news-ticker-run ${metrics.duration}s linear infinite`,
-                ["--ticker-distance" as any]: `${metrics.distance}px`,
-              }
-            : { top: "50%", left: "100%", visibility: "hidden" }
-        }
-      >
-        {text}
-      </span>
+    <div className="absolute inset-0 overflow-hidden flex items-center">
+      <div className="news-ticker-track flex w-max">
+        {[0, 1].map((copy) => (
+          <span
+            key={copy}
+            className={`whitespace-nowrap font-bold tracking-tight text-sm pr-12 ${
+              isDark ? "text-white" : "text-slate-900"
+            }`}
+          >
+            {text}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -655,14 +626,19 @@ export default function FareMatrixPage() {
           animation: route-run-icon 2.2s linear infinite;
         }
 
-        /* ✅ News-style ticker — driven by NewsTickerText, which measures the
-           real pixel width of the container + text and animates exactly
-           that distance. Starts fully off-screen right, ends fully
-           off-screen left, so the loop restart happens while invisible —
-           no pop, no visible cut, disappears left / enters right forever. */
-        @keyframes news-ticker-run {
-          from { transform: translateY(-50%) translateX(0); }
-          to { transform: translateY(-50%) translateX(calc(-1 * var(--ticker-distance))); }
+        /* ✅ News-style ticker — two identical copies of the text sit
+           side-by-side in a flex track; the track scrolls left by exactly
+           -50% of its own total width, which (since both copies are
+           pixel-identical by construction) is exactly the width of ONE
+           copy. The instant copy 1 finishes sliding off the left, copy 2
+           is already filling that exact spot — no blank gap, no waiting
+           for the string to fully empty out, loops forever. */
+        .news-ticker-track {
+          animation: news-ticker-scroll 20s linear infinite;
+        }
+        @keyframes news-ticker-scroll {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
         }
       `}</style>
 
