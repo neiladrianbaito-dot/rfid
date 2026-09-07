@@ -195,6 +195,26 @@ export default function FareMatrixPage() {
         ) ?? null
       : null;
 
+  // ✅ FIX: activating a route also activates its vice-versa counterpart on
+  // the SAME device, which means both directions show up in `activeRoutes`
+  // as two separate rows. Rendering a ticker per row duplicated the same
+  // info twice (a visible "double card" glitch). This groups each route
+  // with its reverse counterpart so a vice-versa pair renders as exactly
+  // ONE card with ONE clean, uninterrupted ticker.
+  const activeRoutePairs = useMemo(() => {
+    const seen = new Set<string | number>();
+    const pairs: { primary: any; reverse: any | null }[] = [];
+    activeRoutes.forEach((route) => {
+      if (seen.has(route.id)) return;
+      const reverse = findReverseRoute(route);
+      seen.add(route.id);
+      if (reverse) seen.add(reverse.id);
+      pairs.push({ primary: route, reverse });
+    });
+    return pairs;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Array.isArray(routes) ? routes.filter((r) => r.isActive).map((r) => r.id).join(",") : ""]);
+
   // ✅ Fetches device info for ALL currently active routes in one go (instead
   // of a single activeDeviceInfo), keyed by route id. We still go straight to
   // the fare_routes table for device_id since the generated API client's
@@ -620,18 +640,18 @@ export default function FareMatrixPage() {
 
       <div
         className={`rounded-xl border p-4 sm:p-5 flex flex-col gap-4 ${
-          activeRoutes.length > 0
+          activeRoutePairs.length > 0
             ? isDark ? "border-emerald-900 bg-emerald-950/30" : "border-emerald-200 bg-emerald-50"
             : isDark ? "border-amber-900 bg-amber-950/30" : "border-amber-200 bg-amber-50"
         }`}
       >
         <div className="flex items-center gap-3">
           <div className={`p-2 rounded-full ${
-            activeRoutes.length > 0
+            activeRoutePairs.length > 0
               ? isDark ? "bg-emerald-900/50" : "bg-emerald-100"
               : isDark ? "bg-amber-900/50" : "bg-amber-100"
           }`}>
-            {activeRoutes.length > 0 ? (
+            {activeRoutePairs.length > 0 ? (
               <CheckCircle2 className={`w-6 h-6 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
             ) : (
               <AlertCircle className={`w-6 h-6 ${isDark ? "text-amber-400" : "text-amber-600"}`} />
@@ -639,15 +659,15 @@ export default function FareMatrixPage() {
           </div>
           <div>
             <p className={`font-semibold text-sm ${
-              activeRoutes.length > 0
+              activeRoutePairs.length > 0
                 ? isDark ? "text-emerald-400" : "text-emerald-700"
                 : isDark ? "text-amber-400" : "text-amber-700"
             }`}>
-              {activeRoutes.length > 0
-                ? `${activeRoutes.length} Active Route${activeRoutes.length > 1 ? "s" : ""} — RFID Ready`
+              {activeRoutePairs.length > 0
+                ? `${activeRoutePairs.length} Active Route${activeRoutePairs.length > 1 ? "s" : ""} — RFID Ready`
                 : "No Active Route"}
             </p>
-            {activeRoutes.length === 0 && (
+            {activeRoutePairs.length === 0 && (
               <p className={`text-sm ${isDark ? "text-amber-400" : "text-amber-700"}`}>
                 Activate a route below so an ESP32 RFID reader can process fare deductions.
               </p>
@@ -655,36 +675,41 @@ export default function FareMatrixPage() {
           </div>
         </div>
 
-        {/* ✅ One row per active route, each with its own reader badge AND a
-            running-text ticker that scrolls the fare in BOTH directions
-            (origin→destination, then the vice-versa destination→origin),
-            since one reader taps riders going either way. "Active" is scoped
-            per-device (not global), so with 5 online readers you can have up
-            to 5 routes active at once. Each route's device_id comes from
-            fare_routes and is resolved to a device row via activeDeviceMap
-            (fetched in fetchActiveRoutesDevices). */}
-        {activeRoutes.length > 0 && (
+        {/* ✅ One row per DEVICE (i.e. per forward/reverse pair), each with
+            its own reader badge AND a running-text ticker that scrolls the
+            fare in BOTH directions (origin→destination, then the vice-versa
+            destination→origin) in one continuous, uninterrupted loop. We
+            group by pair (activeRoutePairs) instead of mapping activeRoutes
+            directly — otherwise a vice-versa activation (which flips BOTH
+            directions to isActive) rendered two near-identical rows, which
+            looked like a glitch/duplicate. "Active" is scoped per-device
+            (not global), so with 5 online readers you can have up to 5 pairs
+            active at once. */}
+        {activeRoutePairs.length > 0 && (
           <div className="flex flex-col gap-2">
-            {activeRoutes.map((route) => {
-              const device = activeDeviceMap[String(route.id)];
-              const reverse = findReverseRoute(route);
+            {activeRoutePairs.map(({ primary, reverse }) => {
+              const device =
+                activeDeviceMap[String(primary.id)] ??
+                (reverse ? activeDeviceMap[String(reverse.id)] : null) ??
+                null;
 
               // Build the two directions shown in the ticker. If a reverse
               // route doesn't exist yet, we still show the same fare mirrored
               // so the reader UI communicates "works both ways" even before
               // a reverse row has been created.
-              const forwardLabel = `${route.origin} → ${route.destination}  ·  ₱${route.fareAmount.toFixed(2)} per tap`;
-              const backwardLabel = `${route.destination} → ${route.origin}  ·  ₱${(reverse?.fareAmount ?? route.fareAmount).toFixed(2)} per tap`;
+              const forwardLabel = `${primary.origin} → ${primary.destination}  ·  ₱${primary.fareAmount.toFixed(2)} per tap`;
+              const backwardLabel = `${primary.destination} → ${primary.origin}  ·  ₱${(reverse?.fareAmount ?? primary.fareAmount).toFixed(2)} per tap`;
 
               return (
                 <div
-                  key={route.id}
+                  key={primary.id}
                   className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border p-3 ${
                     isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
                   }`}
                 >
                   {/* Running screen / marquee: forward direction, a bullet
-                      separator, the vice-versa direction, then loops. */}
+                      separator, the vice-versa direction, then loops — one
+                      straight, seamless scroll, no jump. */}
                   <div
                     className="route-ticker-viewport overflow-hidden min-w-0 flex-1"
                     role="marquee"
@@ -692,7 +717,7 @@ export default function FareMatrixPage() {
                   >
                     <div className="route-ticker-track">
                       {[0, 1].map((copy) => (
-                        <span key={copy} className="flex items-center shrink-0">
+                        <span key={copy} className="flex items-center shrink-0" aria-hidden={copy === 1}>
                           <span className={`font-bold tracking-tight whitespace-nowrap ${isDark ? "text-white" : "text-slate-900"}`}>
                             {forwardLabel}
                           </span>
