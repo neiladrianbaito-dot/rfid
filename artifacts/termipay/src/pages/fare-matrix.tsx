@@ -597,21 +597,23 @@ export default function FareMatrixPage() {
         }
 
         /* ✅ News-style ticker — scrolling text banner for the active-route
-           summary (like a TV news crawler). Two copies of the same text sit
-           side by side in a flex track twice as wide as the viewport; the
-           track scrolls left by exactly 50% and loops seamlessly forever. */
+           summary (like a TV news crawler / chyron). Two IDENTICAL copies of
+           the same text sit side by side in a flex track that is exactly
+           twice as wide as one copy; the track scrolls left by precisely
+           50% of its own width — which is exactly the width of ONE copy —
+           so the moment it resets to 0%, copy #2 is sitting exactly where
+           copy #1 started. Zero gap, zero visible cut, loops forever. */
         @keyframes ticker-scroll {
-          from { transform: translateX(0); }
-          to { transform: translateX(-50%); }
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
         }
         .news-ticker-track {
           display: flex;
+          flex-wrap: nowrap;
           width: max-content;
-          animation: ticker-scroll linear infinite;
-          animation-duration: var(--ticker-duration, 14s);
-        }
-        .news-ticker-track:hover {
-          animation-play-state: paused;
+          animation-name: ticker-scroll;
+          animation-timing-function: linear;
+          animation-iteration-count: infinite;
         }
       `}</style>
 
@@ -728,13 +730,16 @@ export default function FareMatrixPage() {
                   >
                     <div
                       className="news-ticker-track"
-                      style={{ ["--ticker-duration" as any]: "14s" }}
+                      style={{ animationDuration: `${Math.max(8, tickerText.length * 0.18)}s` }}
                     >
-                      {/* Duplicated twice so the loop is seamless (-50% translate) */}
+                      {/* Duplicated exactly twice, identical text + spacing,
+                          so the -50% scroll lands perfectly on the seam —
+                          this is what makes the loop look uncut, like a real
+                          news chyron. */}
                       {[0, 1].map((copy) => (
                         <span
                           key={copy}
-                          className={`whitespace-nowrap font-bold tracking-tight text-sm pr-8 ${
+                          className={`whitespace-nowrap font-bold tracking-tight text-sm pr-10 ${
                             isDark ? "text-white" : "text-slate-900"
                           }`}
                         >
