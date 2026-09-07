@@ -104,6 +104,65 @@ function SuccessTitle({ text }: { text: string }) {
   );
 }
 
+// ✅ News-style scrolling ticker (like a TV news crawler / chyron).
+// Measures the actual rendered widths of the container and the text, then
+// animates the text from fully OFF-SCREEN RIGHT to fully OFF-SCREEN LEFT.
+// Because both start and end positions are outside the visible box, the
+// loop resets while the text is invisible — no "pop", no visible cut, no
+// guessing at 50% widths. It disappears on the left and re-enters on the
+// right, forever, exactly like a real news ticker.
+function NewsTickerText({ text, isDark }: { text: string; isDark: boolean }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [metrics, setMetrics] = useState<{
+    containerWidth: number;
+    distance: number;
+    duration: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const measure = () => {
+      const containerWidth = containerRef.current?.offsetWidth ?? 0;
+      const textWidth = textRef.current?.offsetWidth ?? 0;
+      // Total distance to travel = one full container width (to clear the
+      // right edge) + the text's own width (to clear the left edge).
+      const distance = containerWidth + textWidth;
+      // ~55px per second reads like a real news ticker — not too fast to
+      // read, not so slow it looks broken.
+      const duration = Math.max(8, distance / 55);
+      setMetrics({ containerWidth, distance, duration });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [text]);
+
+  return (
+    <div ref={containerRef} className="absolute inset-0 overflow-hidden">
+      <span
+        ref={textRef}
+        className={`absolute whitespace-nowrap font-bold tracking-tight text-sm ${
+          isDark ? "text-white" : "text-slate-900"
+        }`}
+        style={
+          metrics
+            ? {
+                top: "50%",
+                // Start position: text sits just past the right edge of the
+                // container, i.e. fully hidden, about to enter from the right.
+                left: metrics.containerWidth,
+                animation: `news-ticker-run ${metrics.duration}s linear infinite`,
+                ["--ticker-distance" as any]: `${metrics.distance}px`,
+              }
+            : { top: "50%", left: "100%", visibility: "hidden" }
+        }
+      >
+        {text}
+      </span>
+    </div>
+  );
+}
+
 // ✅ Device type coming from Supabase `devices` table
 type Device = {
   device_id: string;
@@ -596,24 +655,14 @@ export default function FareMatrixPage() {
           animation: route-run-icon 2.2s linear infinite;
         }
 
-        /* ✅ News-style ticker — scrolling text banner for the active-route
-           summary (like a TV news crawler / chyron). Two IDENTICAL copies of
-           the same text sit side by side in a flex track that is exactly
-           twice as wide as one copy; the track scrolls left by precisely
-           50% of its own width — which is exactly the width of ONE copy —
-           so the moment it resets to 0%, copy #2 is sitting exactly where
-           copy #1 started. Zero gap, zero visible cut, loops forever. */
-        @keyframes ticker-scroll {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        .news-ticker-track {
-          display: flex;
-          flex-wrap: nowrap;
-          width: max-content;
-          animation-name: ticker-scroll;
-          animation-timing-function: linear;
-          animation-iteration-count: infinite;
+        /* ✅ News-style ticker — driven by NewsTickerText, which measures the
+           real pixel width of the container + text and animates exactly
+           that distance. Starts fully off-screen right, ends fully
+           off-screen left, so the loop restart happens while invisible —
+           no pop, no visible cut, disappears left / enters right forever. */
+        @keyframes news-ticker-run {
+          from { transform: translateY(-50%) translateX(0); }
+          to { transform: translateY(-50%) translateX(calc(-1 * var(--ticker-distance))); }
         }
       `}</style>
 
@@ -722,30 +771,17 @@ export default function FareMatrixPage() {
                     </span>
                   </div>
 
-                  {/* Scrolling ticker text */}
+                  {/* Scrolling ticker text — disappears on the left, enters
+                      fresh from the right, on an endless loop. Needs a fixed
+                      height + relative positioning as the measuring frame
+                      for NewsTickerText. */}
                   <div
-                    className={`relative flex-1 min-w-0 overflow-hidden py-2 px-1 ${
+                    className={`relative flex-1 min-w-0 py-2 px-1 ${
                       isDark ? "bg-slate-950/60" : "bg-emerald-50"
                     }`}
                   >
-                    <div
-                      className="news-ticker-track"
-                      style={{ animationDuration: `${Math.max(8, tickerText.length * 0.18)}s` }}
-                    >
-                      {/* Duplicated exactly twice, identical text + spacing,
-                          so the -50% scroll lands perfectly on the seam —
-                          this is what makes the loop look uncut, like a real
-                          news chyron. */}
-                      {[0, 1].map((copy) => (
-                        <span
-                          key={copy}
-                          className={`whitespace-nowrap font-bold tracking-tight text-sm pr-10 ${
-                            isDark ? "text-white" : "text-slate-900"
-                          }`}
-                        >
-                          {tickerText}
-                        </span>
-                      ))}
+                    <div className="relative h-5">
+                      <NewsTickerText text={tickerText} isDark={isDark} />
                     </div>
                   </div>
 
