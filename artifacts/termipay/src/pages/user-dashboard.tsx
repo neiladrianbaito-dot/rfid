@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import {
   User, Phone, Tag, ShieldCheck,
   LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings,
-  ChevronRight, ArrowDownLeft, ArrowUpRight, List, Pencil, Check, X as XIcon,
+  ChevronRight, ArrowLeft, ArrowRight, List, Pencil, Check, X as XIcon,
   Sun, Moon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,6 +60,7 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string {
 }
 
 // ✅ Fix: memo — hindi na mag-re-render ang row kapag hindi nagbago ang tx
+// ✅ ICON CHANGE: ArrowUpRight/ArrowDownLeft -> ArrowRight/ArrowLeft
 const MobileTxRow = memo(function MobileTxRow({
   tx,
   onClick,
@@ -85,8 +86,8 @@ const MobileTxRow = memo(function MobileTxRow({
         isFare ? "bg-red-500/10 border border-red-500/20" : "bg-emerald-500/10 border border-emerald-500/20"
       }`}>
         {isFare
-          ? <ArrowUpRight className={`h-3.5 w-3.5 ${isDark ? "text-red-400" : "text-red-600"}`} />
-          : <ArrowDownLeft className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />}
+          ? <ArrowRight className={`h-3.5 w-3.5 ${isDark ? "text-red-400" : "text-red-600"}`} />
+          : <ArrowLeft className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />}
       </div>
       <div className="flex-1 min-w-0">
         <p className={`text-xs font-semibold leading-tight ${isDark ? "text-slate-100" : "text-slate-800"}`}>{tx.type}</p>
