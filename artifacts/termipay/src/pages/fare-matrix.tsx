@@ -761,7 +761,7 @@ export default function FareMatrixPage() {
               return (
                 <div
                   key={route.id}
-                  className={`flex flex-col sm:flex-row sm:items-stretch justify-between gap-2 rounded-lg border overflow-hidden ${
+                  className={`flex flex-row flex-nowrap items-stretch justify-between gap-2 rounded-lg border overflow-hidden ${
                     isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
                   }`}
                 >
@@ -792,17 +792,24 @@ export default function FareMatrixPage() {
                   </div>
 
                   <div
-                    className={`flex items-center gap-2 px-3 py-1.5 shrink-0 border-t sm:border-t-0 sm:border-l ${
+                    className={`flex items-center gap-2 px-3 py-1.5 shrink-0 border-l ${
                       isDark ? "bg-slate-950/60 border-emerald-900" : "bg-emerald-50 border-emerald-200"
                     }`}
                   >
                     <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
-                    <span className={`text-xs font-semibold whitespace-nowrap ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
+                    <span className={`text-xs font-semibold whitespace-nowrap hidden sm:inline ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
                       {loadingActiveDevices
                         ? "Reader: Loading..."
                         : device?.device_id
                           ? `Reader: ${device.device_id}`
                           : "Reader: Unassigned"}
+                    </span>
+                    <span className={`text-xs font-semibold whitespace-nowrap sm:hidden ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
+                      {loadingActiveDevices
+                        ? "..."
+                        : device?.device_id
+                          ? device.device_id
+                          : "—"}
                     </span>
                   </div>
                 </div>
