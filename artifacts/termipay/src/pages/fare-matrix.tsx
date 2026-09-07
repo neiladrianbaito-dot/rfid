@@ -748,9 +748,15 @@ export default function FareMatrixPage() {
               const reverseRoute = findReverseRoute(route);
               const isViceVersa = !!reverseRoute?.isActive;
 
-              const tickerText = `${route.origin} → ${route.destination}  •  ₱${route.fareAmount.toFixed(2)} PER TAP${
+              const tickerLine = `${route.origin} → ${route.destination}  •  ₱${route.fareAmount.toFixed(2)} PER TAP${
                 isViceVersa ? "  •  VICE VERSA (BOTH DIRECTIONS ACTIVE)" : ""
-              }  •  VISE VERSA  `;
+              }  •  VISE VERSA`;
+
+              // ✅ Repeated 3x back-to-back (no gap between repeats) so the
+              // ticker is ALWAYS full of text while it scrolls — no empty
+              // stretch of background ever shows, even during the brief
+              // moment the measured entrance/exit distance is traveled.
+              const tickerText = `${tickerLine}   •••   ${tickerLine}   •••   ${tickerLine}   •••   `;
 
               return (
                 <div
