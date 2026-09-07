@@ -81,16 +81,16 @@ const navGroups = [
     ],
   },
   {
+    label: "Management",
+    items: [
+      { path: "/users", label: "User Management", icon: Users },
+    ],
+  },
+  {
     label: "Transactions & Fares",
     items: [
       { path: "/transactions", label: "Transaction Logs", icon: ArrowLeftRight },
       { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
-    ],
-  },
-  {
-    label: "Management",
-    items: [
-      { path: "/users", label: "User Management", icon: Users },
     ],
   },
   {
