@@ -16,7 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTheme } from "@/hooks/use-theme";
 import {
   Search, Zap, History, ChevronLeft, ChevronRight,
-  Eye, CheckCircle2, XCircle, Clock, Route, CreditCard,
+  Eye, CheckCircle2, XCircle, Clock, Route, CreditCard, ArrowLeftRight,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
@@ -172,9 +172,15 @@ function ReceiptModal({
                   <Route className="w-3.5 h-3.5" />
                   Route
                 </span>
-                <span className={`text-xs font-medium text-right truncate max-w-[60%] ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                <span className={`text-xs font-medium text-right max-w-[60%] flex items-center justify-end gap-1 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
                   {matchedRoute
-                    ? `${matchedRoute.origin} ↔ ${matchedRoute.destination}`
+                    ? (
+                      <>
+                        <span className="truncate">{matchedRoute.origin}</span>
+                        <ArrowLeftRight className="w-3 h-3 shrink-0 opacity-60" />
+                        <span className="truncate">{matchedRoute.destination}</span>
+                      </>
+                    )
                     : <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>
                   }
                 </span>
