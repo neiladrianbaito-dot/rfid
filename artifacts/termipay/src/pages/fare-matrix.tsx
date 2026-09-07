@@ -711,7 +711,7 @@ export default function FareMatrixPage() {
                       separator, the vice-versa direction, then loops — one
                       straight, seamless scroll, no jump. */}
                   <div
-                    className="route-ticker-viewport overflow-hidden min-w-0 flex-1"
+                    className="route-ticker-viewport overflow-hidden w-full min-w-0 flex-1"
                     role="marquee"
                     aria-label={`${forwardLabel} and ${backwardLabel}`}
                   >
