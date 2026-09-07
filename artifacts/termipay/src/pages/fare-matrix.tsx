@@ -104,6 +104,36 @@ function SuccessTitle({ text }: { text: string }) {
   );
 }
 
+// ✅ News-style scrolling ticker (like a TV news crawler / chyron).
+// Renders TWO back-to-back copies of the exact same text (same node, same
+// font, same padding) inside one flex track, then scrolls that track left
+// by exactly -50% of its own total width. Because both copies are
+// byte-for-byte identical, the browser lays them out at IDENTICAL pixel
+// widths — guaranteed by CSS layout itself, not by JS measurement — so
+// -50% always lands exactly on the seam between copy 1 ending and copy 2
+// beginning. Result: the window is filled with text at all times, nothing
+// waits for the whole string to fully exit before the next one appears —
+// it disappears on the left and the next copy is *already* sliding in from
+// the right, continuously, forever.
+function NewsTickerText({ text, isDark }: { text: string; isDark: boolean }) {
+  return (
+    <div className="absolute inset-0 overflow-hidden flex items-center">
+      <div className="news-ticker-track flex w-max">
+        {[0, 1].map((copy) => (
+          <span
+            key={copy}
+            className={`whitespace-nowrap font-bold tracking-tight text-sm pr-12 ${
+              isDark ? "text-white" : "text-slate-900"
+            }`}
+          >
+            {text}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ✅ Device type coming from Supabase `devices` table
 type Device = {
   device_id: string;
@@ -565,6 +595,71 @@ export default function FareMatrixPage() {
           50% { opacity: 0.2; }
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+
+        /* ✅ Running route animation — scrolling dashed line + traveling
+           icons, used in the Configured Routes table to visually represent
+           RFID taps moving between origin and destination (loops forever).
+           Now BIDIRECTIONAL by default whenever a route is active: one icon
+           travels left → right (forward), another travels right → left
+           (reverse), passing each other on the same dashed line — since one
+           physical reader taps riders going both ways, the animation always
+           shows both directions instead of a single one-way arrow. */
+        @keyframes route-dash {
+          to { background-position: -32px 0; }
+        }
+        .route-running-line {
+          background-image: repeating-linear-gradient(
+            90deg,
+            rgb(16, 185, 129) 0px,
+            rgb(16, 185, 129) 6px,
+            transparent 6px,
+            transparent 14px
+          );
+          background-size: 32px 2px;
+          background-repeat: repeat-x;
+          background-position: 0 center;
+          animation: route-dash 0.8s linear infinite;
+        }
+
+        @keyframes route-run-icon {
+          0% { left: 0%; opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { left: 100%; opacity: 0; }
+        }
+        .route-run-icon {
+          animation: route-run-icon 2.2s linear infinite;
+        }
+
+        /* ✅ Vice-versa: a second icon traveling the OPPOSITE direction
+           (right → left), always rendered alongside the forward one on any
+           active route — two icons passing each other, literally showing
+           taps happening both ways at once. */
+        @keyframes route-run-icon-reverse {
+          0% { left: 100%; opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { left: 0%; opacity: 0; }
+        }
+        .route-run-icon-reverse {
+          animation: route-run-icon-reverse 2.2s linear infinite;
+          animation-delay: 1.1s;
+        }
+
+        /* ✅ News-style ticker — two identical copies of the text sit
+           side-by-side in a flex track; the track scrolls left by exactly
+           -50% of its own total width, which (since both copies are
+           pixel-identical by construction) is exactly the width of ONE
+           copy. The instant copy 1 finishes sliding off the left, copy 2
+           is already filling that exact spot — no blank gap, no waiting
+           for the string to fully empty out, loops forever. */
+        .news-ticker-track {
+          animation: news-ticker-scroll 20s linear infinite;
+        }
+        @keyframes news-ticker-scroll {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
       `}</style>
 
       <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-6 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
@@ -637,34 +732,80 @@ export default function FareMatrixPage() {
             "Active" is now scoped per-device (not global), so with 5 online
             readers you can have up to 5 routes active at once. Each route's
             device_id comes from fare_routes and is resolved to a device row
-            via activeDeviceMap (fetched in fetchActiveRoutesDevices). */}
+            via activeDeviceMap (fetched in fetchActiveRoutesDevices).
+            ✅ Origin ↔ Destination is now a news-style scrolling ticker
+            (like a TV news crawler) that loops forever, and calls out
+            "VICE VERSA" when the reverse-direction route is also active on
+            the same reader. */}
         {activeRoutes.length > 0 && (
           <div className="flex flex-col gap-2">
             {activeRoutes.map((route) => {
               const device = activeDeviceMap[String(route.id)];
+              const reverseRoute = findReverseRoute(route);
+              const isViceVersa = !!reverseRoute?.isActive;
+
+              const tickerLine = `${route.origin} ↔ ${route.destination}  •  ₱${route.fareAmount.toFixed(2)} PER TAP${
+                isViceVersa ? "  •  VICE VERSA (BOTH DIRECTIONS ACTIVE)" : ""
+              }`;
+
+              // ✅ Repeated 3x back-to-back (no gap between repeats) so the
+              // ticker is ALWAYS full of text while it scrolls — no empty
+              // stretch of background ever shows, even during the brief
+              // moment the measured entrance/exit distance is traveled.
+              const tickerText = `${tickerLine}   •••   ${tickerLine}   •••   ${tickerLine}   •••   `;
+
               return (
                 <div
                   key={route.id}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border p-3 ${
+                  className={`flex flex-row flex-nowrap items-stretch justify-between gap-2 rounded-lg border overflow-hidden ${
                     isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
                   }`}
                 >
-                  <p className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
-                    {route.origin} → {route.destination} &nbsp;·&nbsp; ₱
-                    {route.fareAmount.toFixed(2)} per tap
-                  </p>
+                  {/* News-ticker "ON AIR"-style label, like a channel bug on a news crawler */}
                   <div
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
+                    className={`flex items-center gap-1.5 px-3 py-2 shrink-0 ${
+                      isDark ? "bg-emerald-900/50 text-emerald-300" : "bg-emerald-600 text-white"
+                    }`}
+                  >
+                    <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-current inline-block" />
+                    <span className="text-[10px] font-extrabold uppercase tracking-widest whitespace-nowrap">
+                      Live
+                    </span>
+                  </div>
+
+                  {/* Scrolling ticker text — disappears on the left, enters
+                      fresh from the right, on an endless loop. Needs a fixed
+                      height + relative positioning as the measuring frame
+                      for NewsTickerText. */}
+                  <div
+                    className={`relative flex-1 min-w-0 py-2 px-1 ${
+                      isDark ? "bg-slate-950/60" : "bg-emerald-50"
+                    }`}
+                  >
+                    <div className="relative h-5">
+                      <NewsTickerText text={tickerText} isDark={isDark} />
+                    </div>
+                  </div>
+
+                  <div
+                    className={`flex items-center gap-2 px-3 py-1.5 shrink-0 border-l ${
                       isDark ? "bg-slate-950/60 border-emerald-900" : "bg-emerald-50 border-emerald-200"
                     }`}
                   >
                     <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
-                    <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
+                    <span className={`text-xs font-semibold whitespace-nowrap hidden sm:inline ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
                       {loadingActiveDevices
                         ? "Reader: Loading..."
                         : device?.device_id
                           ? `Reader: ${device.device_id}`
                           : "Reader: Unassigned"}
+                    </span>
+                    <span className={`text-xs font-semibold whitespace-nowrap sm:hidden ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
+                      {loadingActiveDevices
+                        ? "..."
+                        : device?.device_id
+                          ? device.device_id
+                          : "—"}
                     </span>
                   </div>
                 </div>
@@ -764,7 +905,29 @@ export default function FareMatrixPage() {
                             {route.origin}
                           </div>
                         </TableCell>
-                        <TableCell className={`text-xs px-1 ${isDark ? "text-slate-600" : "text-slate-300"}`}>→</TableCell>
+                        <TableCell className={`text-xs px-1 ${isDark ? "text-slate-600" : "text-slate-300"}`}>
+                          {route.isActive ? (
+                            // ✅ BIDIRECTIONAL: two icons on the dashed line —
+                            // one traveling origin → destination, another
+                            // traveling destination → origin (staggered so
+                            // they don't overlap mid-flight) — since a
+                            // vice-versa route taps riders both ways, the
+                            // indicator no longer shows just one direction.
+                            <span className="relative w-6 h-4 flex items-center" aria-hidden="true">
+                              <span className="route-running-line absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2px] rounded-full" />
+                              <Zap
+                                className="route-run-icon absolute w-3 h-3 text-emerald-500"
+                                style={{ top: "50%", transform: "translate(-50%, -50%)" }}
+                              />
+                              <Zap
+                                className="route-run-icon-reverse absolute w-3 h-3 text-emerald-500"
+                                style={{ top: "50%", transform: "translate(-50%, -50%) scaleX(-1)" }}
+                              />
+                            </span>
+                          ) : (
+                            <ArrowLeftRight className="w-3.5 h-3.5" aria-hidden="true" />
+                          )}
+                        </TableCell>
                         <TableCell className={`font-medium ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                           <div className="flex items-center gap-2">
                             <MapPin className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
@@ -934,9 +1097,13 @@ export default function FareMatrixPage() {
             {addForm.origin && addForm.destination && (
               <div className={`text-sm border rounded-lg p-3 space-y-1 ${isDark ? "text-slate-300 bg-blue-950/30 border-blue-900" : "text-slate-700 bg-blue-50 border-blue-100"}`}>
                 <p className={`font-medium ${isDark ? "text-blue-400" : "text-blue-700"}`}>Routes to be created:</p>
-                <p>• {addForm.origin} → {addForm.destination} @ ₱{addForm.fareAmount || "0.00"}</p>
+                <p className="flex items-center gap-1">
+                  • {addForm.origin} <ArrowLeftRight className="w-3 h-3 inline shrink-0" /> {addForm.destination} @ ₱{addForm.fareAmount || "0.00"}
+                </p>
                 {addForm.viceVersa && addForm.origin !== addForm.destination && (
-                  <p>• {addForm.destination} → {addForm.origin} @ ₱{addForm.fareAmount || "0.00"}</p>
+                  <p className="flex items-center gap-1">
+                    • {addForm.destination} <ArrowLeftRight className="w-3 h-3 inline shrink-0" /> {addForm.origin} @ ₱{addForm.fareAmount || "0.00"}
+                  </p>
                 )}
               </div>
             )}
@@ -1055,7 +1222,9 @@ export default function FareMatrixPage() {
               <div className={`text-sm border rounded-lg p-3 ${isDark ? "text-slate-300 bg-slate-950/60 border-slate-800" : "text-slate-700 bg-slate-50 border-slate-200"}`}>
                 <p className="font-semibold flex items-center gap-2">
                   <MapPin className="w-3.5 h-3.5 text-blue-500" />
-                  {activateRoute.origin} → {activateRoute.destination}
+                  {activateRoute.origin}
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-blue-400" />
+                  {activateRoute.destination}
                 </p>
                 <p className={`mt-1 ${isDark ? "text-blue-400" : "text-blue-600"} font-bold`}>
                   ₱{activateRoute.fareAmount?.toFixed(2)} per tap
