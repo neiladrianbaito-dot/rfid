@@ -567,8 +567,8 @@ export default function FareMatrixPage() {
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
 
         /* ✅ Running route animation — scrolling dashed line + traveling icon,
-           used on active route rows to visually represent RFID taps moving
-           between origin and destination (loops forever while active). */
+           used in the Configured Routes table to visually represent RFID
+           taps moving between origin and destination (loops forever). */
         @keyframes route-dash {
           to { background-position: -32px 0; }
         }
@@ -594,6 +594,24 @@ export default function FareMatrixPage() {
         }
         .route-run-icon {
           animation: route-run-icon 2.2s linear infinite;
+        }
+
+        /* ✅ News-style ticker — scrolling text banner for the active-route
+           summary (like a TV news crawler). Two copies of the same text sit
+           side by side in a flex track twice as wide as the viewport; the
+           track scrolls left by exactly 50% and loops seamlessly forever. */
+        @keyframes ticker-scroll {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+        .news-ticker-track {
+          display: flex;
+          width: max-content;
+          animation: ticker-scroll linear infinite;
+          animation-duration: var(--ticker-duration, 14s);
+        }
+        .news-ticker-track:hover {
+          animation-play-state: paused;
         }
       `}</style>
 
@@ -668,39 +686,71 @@ export default function FareMatrixPage() {
             readers you can have up to 5 routes active at once. Each route's
             device_id comes from fare_routes and is resolved to a device row
             via activeDeviceMap (fetched in fetchActiveRoutesDevices).
-            ✅ Origin → Destination now shows a looping "running" animation
-            (scrolling dashed line + traveling zap icon) to indicate the
-            route is live and processing taps. */}
+            ✅ Origin → Destination is now a news-style scrolling ticker
+            (like a TV news crawler) that loops forever, and calls out
+            "VICE VERSA" when the reverse-direction route is also active on
+            the same reader. */}
         {activeRoutes.length > 0 && (
           <div className="flex flex-col gap-2">
             {activeRoutes.map((route) => {
               const device = activeDeviceMap[String(route.id)];
+              const reverseRoute = findReverseRoute(route);
+              const isViceVersa = !!reverseRoute?.isActive;
+
+              const tickerText = `${route.origin} → ${route.destination}  •  ₱${route.fareAmount.toFixed(2)} PER TAP${
+                isViceVersa ? "  •  VICE VERSA (BOTH DIRECTIONS ACTIVE)" : ""
+              }  •  RFID READER LIVE  `;
+
               return (
                 <div
                   key={route.id}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border p-3 ${
+                  className={`flex flex-col sm:flex-row sm:items-stretch justify-between gap-2 rounded-lg border overflow-hidden ${
                     isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
                   }`}
                 >
-                  <p className={`font-bold tracking-tight flex items-center gap-2 flex-wrap ${isDark ? "text-white" : "text-slate-900"}`}>
-                    <span>{route.origin}</span>
-                    <span className="relative w-10 h-4 flex items-center shrink-0" aria-hidden="true">
-                      <span className="route-running-line absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2px] rounded-full" />
-                      <Zap
-                        className="route-run-icon absolute w-3 h-3 text-emerald-500"
-                        style={{ top: "50%", transform: "translate(-50%, -50%)" }}
-                      />
-                    </span>
-                    <span>{route.destination}</span>
-                    <span>&nbsp;·&nbsp; ₱{route.fareAmount.toFixed(2)} per tap</span>
-                  </p>
+                  {/* News-ticker "ON AIR"-style label, like a channel bug on a news crawler */}
                   <div
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
+                    className={`flex items-center gap-1.5 px-3 py-2 shrink-0 ${
+                      isDark ? "bg-emerald-900/50 text-emerald-300" : "bg-emerald-600 text-white"
+                    }`}
+                  >
+                    <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-current inline-block" />
+                    <span className="text-[10px] font-extrabold uppercase tracking-widest whitespace-nowrap">
+                      Live
+                    </span>
+                  </div>
+
+                  {/* Scrolling ticker text */}
+                  <div
+                    className={`relative flex-1 min-w-0 overflow-hidden py-2 px-1 ${
+                      isDark ? "bg-slate-950/60" : "bg-emerald-50"
+                    }`}
+                  >
+                    <div
+                      className="news-ticker-track"
+                      style={{ ["--ticker-duration" as any]: "14s" }}
+                    >
+                      {/* Duplicated twice so the loop is seamless (-50% translate) */}
+                      {[0, 1].map((copy) => (
+                        <span
+                          key={copy}
+                          className={`whitespace-nowrap font-bold tracking-tight text-sm pr-8 ${
+                            isDark ? "text-white" : "text-slate-900"
+                          }`}
+                        >
+                          {tickerText}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div
+                    className={`flex items-center gap-2 px-3 py-1.5 shrink-0 border-t sm:border-t-0 sm:border-l ${
                       isDark ? "bg-slate-950/60 border-emerald-900" : "bg-emerald-50 border-emerald-200"
                     }`}
                   >
                     <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
-                    <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
+                    <span className={`text-xs font-semibold whitespace-nowrap ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
                       {loadingActiveDevices
                         ? "Reader: Loading..."
                         : device?.device_id
