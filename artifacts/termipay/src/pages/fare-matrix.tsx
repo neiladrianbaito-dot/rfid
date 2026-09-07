@@ -47,7 +47,6 @@ import {
   Power,
   PowerOff,
   ArrowLeftRight,
-  ArrowRight,
   CheckCircle2,
   AlertCircle,
   Search,
@@ -1099,11 +1098,11 @@ export default function FareMatrixPage() {
               <div className={`text-sm border rounded-lg p-3 space-y-1 ${isDark ? "text-slate-300 bg-blue-950/30 border-blue-900" : "text-slate-700 bg-blue-50 border-blue-100"}`}>
                 <p className={`font-medium ${isDark ? "text-blue-400" : "text-blue-700"}`}>Routes to be created:</p>
                 <p className="flex items-center gap-1">
-                  • {addForm.origin} <ArrowRight className="w-3 h-3 inline shrink-0" /> {addForm.destination} @ ₱{addForm.fareAmount || "0.00"}
+                  • {addForm.origin} <ArrowLeftRight className="w-3 h-3 inline shrink-0" /> {addForm.destination} @ ₱{addForm.fareAmount || "0.00"}
                 </p>
                 {addForm.viceVersa && addForm.origin !== addForm.destination && (
                   <p className="flex items-center gap-1">
-                    • {addForm.destination} <ArrowRight className="w-3 h-3 inline shrink-0" /> {addForm.origin} @ ₱{addForm.fareAmount || "0.00"}
+                    • {addForm.destination} <ArrowLeftRight className="w-3 h-3 inline shrink-0" /> {addForm.origin} @ ₱{addForm.fareAmount || "0.00"}
                   </p>
                 )}
               </div>
