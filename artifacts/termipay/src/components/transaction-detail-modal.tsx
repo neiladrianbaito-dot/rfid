@@ -8,7 +8,6 @@ import {
   Route,
   Wallet,
   X,
-  ArrowLeftRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/use-theme"; // ✅ added
@@ -283,15 +282,11 @@ export function TransactionDetailModal({
                   <Route className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
                   Route
                 </span>
-                <span className={`flex items-center gap-1 sm:gap-1.5 justify-end text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${
+                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${
                   isDark ? "text-slate-200" : "text-slate-700"
                 }`}>
                   {matchedRoute ? (
-                    <>
-                      <span className="truncate">{matchedRoute.origin}</span>
-                      <ArrowLeftRight className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
-                      <span className="truncate">{matchedRoute.destination}</span>
-                    </>
+                    `${matchedRoute.origin} → ${matchedRoute.destination}`
                   ) : (
                     <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>
                   )}
