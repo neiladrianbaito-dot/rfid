@@ -35,6 +35,11 @@ const PAGE_SIZE = 10;
 
 const TYPE_FILTERS = ["All", "Regular", "Student", "Senior", "PWD"] as const;
 
+// ➕ Status filter options. "Expired" is NOT a raw DB status — it's derived
+// from the card's expirationDate via isCardExpired(), so it can catch cards
+// that are technically still "Active" in the status column but past their date.
+const STATUS_FILTERS = ["All", "Active", "Inactive", "Blocked", "Expired"] as const;
+
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -123,6 +128,22 @@ function getTypeDotColor(type: string | null | undefined) {
   }
 }
 
+// 🎨 Status filter -> dot color mapping (Active/Inactive/Blocked/Expired)
+function getStatusDotColor(status: string) {
+  switch (status) {
+    case "Active":
+      return "bg-emerald-500";
+    case "Inactive":
+      return "bg-slate-400";
+    case "Blocked":
+      return "bg-red-500";
+    case "Expired":
+      return "bg-orange-500";
+    default:
+      return "bg-slate-400";
+  }
+}
+
 // 🪪 Card preview theming — accent color + label color per type, matching the physical card design
 function getCardTheme(type: string | null | undefined) {
   const t = (type || "Regular").toLowerCase();
@@ -189,6 +210,8 @@ export default function UserManagementPage() {
   const { isDark } = useTheme();
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>("All");
+  // ➕ Status filter state (Active / Inactive / Blocked / Expired)
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>("All");
   const [editUser, setEditUser] = useState<any>(null);
   const [deleteUser, setDeleteUser] = useState<any>(null);
   const [previewUser, setPreviewUser] = useState<any>(null);
@@ -220,7 +243,7 @@ export default function UserManagementPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, typeFilter]);
+  }, [search, typeFilter, statusFilter]);
 
   const { data: users, isLoading, refetch: refetchUsers } = useListUsers(
     search ? { search } : undefined,
@@ -238,12 +261,22 @@ export default function UserManagementPage() {
   const userList = Array.isArray(users) ? users : [];
 
   // Apply the type filter on top of whatever the search endpoint returned
-  const filteredList =
+  const typeFilteredList =
     typeFilter === "All"
       ? userList
       : userList.filter(
           (u: any) => (u.type || "Regular").toLowerCase() === typeFilter.toLowerCase()
         );
+
+  // ➕ Apply the status filter on top of the type filter.
+  // "Expired" is derived from expirationDate rather than the raw status field,
+  // so it's checked separately from the Active/Inactive/Blocked DB values.
+  const filteredList =
+    statusFilter === "All"
+      ? typeFilteredList
+      : statusFilter === "Expired"
+      ? typeFilteredList.filter((u: any) => isCardExpired(u.expirationDate))
+      : typeFilteredList.filter((u: any) => u.status === statusFilter);
 
   const totalPages = Math.max(1, Math.ceil(filteredList.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -486,6 +519,34 @@ export default function UserManagementPage() {
                           <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(t)}`} />
                         )}
                         {t}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* ➕ Status filter — Active / Inactive / Blocked / Expired */}
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as (typeof STATUS_FILTERS)[number])}>
+                <SelectTrigger
+                  className={`h-10 w-full sm:w-40 text-sm font-medium cursor-pointer ${
+                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    {statusFilter !== "All" && (
+                      <span className={`w-2 h-2 rounded-full inline-block ${getStatusDotColor(statusFilter)}`} />
+                    )}
+                    <SelectValue />
+                  </span>
+                </SelectTrigger>
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+                  {STATUS_FILTERS.map((s) => (
+                    <SelectItem key={s} value={s} className="cursor-pointer">
+                      <span className="flex items-center gap-2">
+                        {s !== "All" && (
+                          <span className={`w-2 h-2 rounded-full inline-block ${getStatusDotColor(s)}`} />
+                        )}
+                        {s}
                       </span>
                     </SelectItem>
                   ))}
