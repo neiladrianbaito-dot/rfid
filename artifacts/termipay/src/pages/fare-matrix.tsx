@@ -653,7 +653,7 @@ export default function FareMatrixPage() {
   {route.origin}
   <ArrowLeftRight className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
   {route.destination} &nbsp;·&nbsp; ₱
-  {route.fareAmount.toFixed(2)} per tap
+  {route.fareAmount.toFixed(2)} per tap VISE-VERSA
 </p>
                   <div
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
