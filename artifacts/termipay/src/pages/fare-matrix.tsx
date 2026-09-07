@@ -649,10 +649,12 @@ export default function FareMatrixPage() {
                     isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
                   }`}
                 >
-                  <p className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
-                    {route.origin} → {route.destination} &nbsp;·&nbsp; ₱
-                    {route.fareAmount.toFixed(2)} per tap
-                  </p>
+                 <p className={`font-bold tracking-tight flex items-center gap-1.5 flex-wrap ${isDark ? "text-white" : "text-slate-900"}`}>
+  {route.origin}
+  <ArrowLeftRight className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+  {route.destination} &nbsp;·&nbsp; ₱
+  {route.fareAmount.toFixed(2)} per tap
+</p>
                   <div
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
                       isDark ? "bg-slate-950/60 border-emerald-900" : "bg-emerald-50 border-emerald-200"
