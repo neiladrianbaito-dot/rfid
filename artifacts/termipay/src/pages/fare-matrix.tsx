@@ -597,9 +597,14 @@ export default function FareMatrixPage() {
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
 
-        /* ✅ Running route animation — scrolling dashed line + traveling icon,
-           used in the Configured Routes table to visually represent RFID
-           taps moving between origin and destination (loops forever). */
+        /* ✅ Running route animation — scrolling dashed line + traveling
+           icons, used in the Configured Routes table to visually represent
+           RFID taps moving between origin and destination (loops forever).
+           Now BIDIRECTIONAL by default whenever a route is active: one icon
+           travels left → right (forward), another travels right → left
+           (reverse), passing each other on the same dashed line — since one
+           physical reader taps riders going both ways, the animation always
+           shows both directions instead of a single one-way arrow. */
         @keyframes route-dash {
           to { background-position: -32px 0; }
         }
@@ -627,11 +632,10 @@ export default function FareMatrixPage() {
           animation: route-run-icon 2.2s linear infinite;
         }
 
-        /* ✅ Vice-versa: a second arrow traveling the OPPOSITE direction
-           (right → left), shown alongside the forward one whenever the
-           reverse-direction route is also active on the same reader — two
-           arrows passing each other, literally showing taps happening both
-           ways at once. */
+        /* ✅ Vice-versa: a second icon traveling the OPPOSITE direction
+           (right → left), always rendered alongside the forward one on any
+           active route — two icons passing each other, literally showing
+           taps happening both ways at once. */
         @keyframes route-run-icon-reverse {
           0% { left: 100%; opacity: 0; }
           10% { opacity: 1; }
@@ -640,6 +644,7 @@ export default function FareMatrixPage() {
         }
         .route-run-icon-reverse {
           animation: route-run-icon-reverse 2.2s linear infinite;
+          animation-delay: 1.1s;
         }
 
         /* ✅ News-style ticker — two identical copies of the text sit
@@ -903,11 +908,21 @@ export default function FareMatrixPage() {
                         </TableCell>
                         <TableCell className={`text-xs px-1 ${isDark ? "text-slate-600" : "text-slate-300"}`}>
                           {route.isActive ? (
+                            // ✅ BIDIRECTIONAL: two icons on the dashed line —
+                            // one traveling origin → destination, another
+                            // traveling destination → origin (staggered so
+                            // they don't overlap mid-flight) — since a
+                            // vice-versa route taps riders both ways, the
+                            // indicator no longer shows just one direction.
                             <span className="relative w-6 h-4 flex items-center" aria-hidden="true">
                               <span className="route-running-line absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2px] rounded-full" />
                               <Zap
                                 className="route-run-icon absolute w-3 h-3 text-emerald-500"
                                 style={{ top: "50%", transform: "translate(-50%, -50%)" }}
+                              />
+                              <Zap
+                                className="route-run-icon-reverse absolute w-3 h-3 text-emerald-500"
+                                style={{ top: "50%", transform: "translate(-50%, -50%) scaleX(-1)" }}
                               />
                             </span>
                           ) : (
