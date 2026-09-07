@@ -497,6 +497,20 @@ export default function UserManagementPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto items-stretch sm:items-center">
+              <div className="relative w-full sm:w-80">
+                <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+                <Input
+                  placeholder="Search UID or name..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className={`pl-10 font-medium text-sm h-10 focus-visible:ring-blue-500 ${
+                    isDark
+                      ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
+                      : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
+                  }`}
+                />
+              </div>
+
               {/* Type filter */}
               <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as (typeof TYPE_FILTERS)[number])}>
                 <SelectTrigger
@@ -552,20 +566,6 @@ export default function UserManagementPage() {
                   ))}
                 </SelectContent>
               </Select>
-
-              <div className="relative w-full sm:w-80">
-                <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                <Input
-                  placeholder="Search UID or name..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className={`pl-10 font-medium text-sm h-10 focus-visible:ring-blue-500 ${
-                    isDark
-                      ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
-                      : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
-                  }`}
-                />
-              </div>
             </div>
           </div>
         </CardHeader>
