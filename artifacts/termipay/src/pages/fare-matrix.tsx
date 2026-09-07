@@ -47,6 +47,7 @@ import {
   Power,
   PowerOff,
   ArrowLeftRight,
+  ArrowRight,
   CheckCircle2,
   AlertCircle,
   Search,
@@ -624,6 +625,21 @@ export default function FareMatrixPage() {
         }
         .route-run-icon {
           animation: route-run-icon 2.2s linear infinite;
+        }
+
+        /* ✅ Vice-versa: a second arrow traveling the OPPOSITE direction
+           (right → left), shown alongside the forward one whenever the
+           reverse-direction route is also active on the same reader — two
+           arrows passing each other, literally showing taps happening both
+           ways at once. */
+        @keyframes route-run-icon-reverse {
+          0% { left: 100%; opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { left: 0%; opacity: 0; }
+        }
+        .route-run-icon-reverse {
+          animation: route-run-icon-reverse 2.2s linear infinite;
         }
 
         /* ✅ News-style ticker — two identical copies of the text sit
