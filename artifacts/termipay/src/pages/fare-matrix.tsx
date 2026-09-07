@@ -750,7 +750,7 @@ export default function FareMatrixPage() {
 
               const tickerText = `${route.origin} → ${route.destination}  •  ₱${route.fareAmount.toFixed(2)} PER TAP${
                 isViceVersa ? "  •  VICE VERSA (BOTH DIRECTIONS ACTIVE)" : ""
-              }  •  RFID READER LIVE  `;
+              }  •  VISE VERSA  `;
 
               return (
                 <div
