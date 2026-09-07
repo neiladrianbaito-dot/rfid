@@ -181,6 +181,20 @@ export default function FareMatrixPage() {
   // device_id (enforced by the activate_route RPC).
   const activeRoutes = Array.isArray(routes) ? routes.filter((r) => r.isActive) : [];
 
+  // ✅ Finds the reverse-direction counterpart of a route (A→B / B→A pair),
+  // used both for the vice-versa activate/deactivate logic below AND for the
+  // running-text ticker so it can show both directions even though a route
+  // row on its own only knows one direction.
+  const findReverseRoute = (route: any) =>
+    Array.isArray(routes)
+      ? routes.find(
+          (r) =>
+            r.id !== route.id &&
+            r.origin === route.destination &&
+            r.destination === route.origin
+        ) ?? null
+      : null;
+
   // ✅ Fetches device info for ALL currently active routes in one go (instead
   // of a single activeDeviceInfo), keyed by route id. We still go straight to
   // the fare_routes table for device_id since the generated API client's
@@ -381,16 +395,6 @@ export default function FareMatrixPage() {
   // BOTH directions (e.g. Barangay A → Calbayog and Calbayog → Barangay A).
   // So activating one direction also activates its reverse-direction
   // counterpart route on the SAME device, if that reverse route exists.
-  const findReverseRoute = (route: any) =>
-    Array.isArray(routes)
-      ? routes.find(
-          (r) =>
-            r.id !== route.id &&
-            r.origin === route.destination &&
-            r.destination === route.origin
-        ) ?? null
-      : null;
-
   const confirmActivate = async () => {
     if (!activateRoute || !selectedDeviceId) return;
 
@@ -565,6 +569,24 @@ export default function FareMatrixPage() {
           50% { opacity: 0.2; }
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+
+        /* ✅ Running-text ticker for the active-route card. The track holds
+           the content TWICE back to back; animating it from 0% to -50%
+           moves exactly one copy's width off-screen, so the loop point is
+           invisible and it scrolls forever without a visible seam. */
+        @keyframes route-ticker-scroll {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .route-ticker-track {
+          display: inline-flex;
+          align-items: center;
+          width: max-content;
+          animation: route-ticker-scroll 14s linear infinite;
+        }
+        .route-ticker-viewport:hover .route-ticker-track {
+          animation-play-state: paused;
+        }
       `}</style>
 
       <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-6 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
@@ -633,15 +655,27 @@ export default function FareMatrixPage() {
           </div>
         </div>
 
-        {/* ✅ One row per active route, each with its own reader badge.
-            "Active" is now scoped per-device (not global), so with 5 online
-            readers you can have up to 5 routes active at once. Each route's
-            device_id comes from fare_routes and is resolved to a device row
-            via activeDeviceMap (fetched in fetchActiveRoutesDevices). */}
+        {/* ✅ One row per active route, each with its own reader badge AND a
+            running-text ticker that scrolls the fare in BOTH directions
+            (origin→destination, then the vice-versa destination→origin),
+            since one reader taps riders going either way. "Active" is scoped
+            per-device (not global), so with 5 online readers you can have up
+            to 5 routes active at once. Each route's device_id comes from
+            fare_routes and is resolved to a device row via activeDeviceMap
+            (fetched in fetchActiveRoutesDevices). */}
         {activeRoutes.length > 0 && (
           <div className="flex flex-col gap-2">
             {activeRoutes.map((route) => {
               const device = activeDeviceMap[String(route.id)];
+              const reverse = findReverseRoute(route);
+
+              // Build the two directions shown in the ticker. If a reverse
+              // route doesn't exist yet, we still show the same fare mirrored
+              // so the reader UI communicates "works both ways" even before
+              // a reverse row has been created.
+              const forwardLabel = `${route.origin} → ${route.destination}  ·  ₱${route.fareAmount.toFixed(2)} per tap`;
+              const backwardLabel = `${route.destination} → ${route.origin}  ·  ₱${(reverse?.fareAmount ?? route.fareAmount).toFixed(2)} per tap`;
+
               return (
                 <div
                   key={route.id}
@@ -649,17 +683,36 @@ export default function FareMatrixPage() {
                     isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
                   }`}
                 >
-                  <p className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
-                    {route.origin} → {route.destination} &nbsp;·&nbsp; ₱
-                    {route.fareAmount.toFixed(2)} per tap
-                  </p>
+                  {/* Running screen / marquee: forward direction, a bullet
+                      separator, the vice-versa direction, then loops. */}
+                  <div
+                    className="route-ticker-viewport overflow-hidden min-w-0 flex-1"
+                    role="marquee"
+                    aria-label={`${forwardLabel} and ${backwardLabel}`}
+                  >
+                    <div className="route-ticker-track">
+                      {[0, 1].map((copy) => (
+                        <span key={copy} className="flex items-center shrink-0">
+                          <span className={`font-bold tracking-tight whitespace-nowrap ${isDark ? "text-white" : "text-slate-900"}`}>
+                            {forwardLabel}
+                          </span>
+                          <span className={`mx-4 text-lg leading-none ${isDark ? "text-emerald-700" : "text-emerald-300"}`}>•</span>
+                          <span className={`font-bold tracking-tight whitespace-nowrap ${isDark ? "text-white" : "text-slate-900"}`}>
+                            {backwardLabel}
+                          </span>
+                          <span className={`mx-4 text-lg leading-none ${isDark ? "text-emerald-700" : "text-emerald-300"}`}>•</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
                   <div
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
                       isDark ? "bg-slate-950/60 border-emerald-900" : "bg-emerald-50 border-emerald-200"
                     }`}
                   >
                     <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
-                    <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
+                    <span className={`text-xs font-semibold whitespace-nowrap ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
                       {loadingActiveDevices
                         ? "Reader: Loading..."
                         : device?.device_id
