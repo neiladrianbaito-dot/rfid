@@ -734,7 +734,7 @@ export default function FareMatrixPage() {
             readers you can have up to 5 routes active at once. Each route's
             device_id comes from fare_routes and is resolved to a device row
             via activeDeviceMap (fetched in fetchActiveRoutesDevices).
-            ✅ Origin → Destination is now a news-style scrolling ticker
+            ✅ Origin ↔ Destination is now a news-style scrolling ticker
             (like a TV news crawler) that loops forever, and calls out
             "VICE VERSA" when the reverse-direction route is also active on
             the same reader. */}
@@ -745,9 +745,9 @@ export default function FareMatrixPage() {
               const reverseRoute = findReverseRoute(route);
               const isViceVersa = !!reverseRoute?.isActive;
 
-              const tickerLine = `${route.origin} → ${route.destination}  •  ₱${route.fareAmount.toFixed(2)} PER TAP${
+              const tickerLine = `${route.origin} ↔ ${route.destination}  •  ₱${route.fareAmount.toFixed(2)} PER TAP${
                 isViceVersa ? "  •  VICE VERSA (BOTH DIRECTIONS ACTIVE)" : ""
-              }  •  VISE VERSA`;
+              }`;
 
               // ✅ Repeated 3x back-to-back (no gap between repeats) so the
               // ticker is ALWAYS full of text while it scrolls — no empty
@@ -926,7 +926,7 @@ export default function FareMatrixPage() {
                               />
                             </span>
                           ) : (
-                            "→"
+                            <ArrowLeftRight className="w-3.5 h-3.5" aria-hidden="true" />
                           )}
                         </TableCell>
                         <TableCell className={`font-medium ${isDark ? "text-slate-400" : "text-slate-600"}`}>
@@ -1098,9 +1098,13 @@ export default function FareMatrixPage() {
             {addForm.origin && addForm.destination && (
               <div className={`text-sm border rounded-lg p-3 space-y-1 ${isDark ? "text-slate-300 bg-blue-950/30 border-blue-900" : "text-slate-700 bg-blue-50 border-blue-100"}`}>
                 <p className={`font-medium ${isDark ? "text-blue-400" : "text-blue-700"}`}>Routes to be created:</p>
-                <p>• {addForm.origin} → {addForm.destination} @ ₱{addForm.fareAmount || "0.00"}</p>
+                <p className="flex items-center gap-1">
+                  • {addForm.origin} <ArrowRight className="w-3 h-3 inline shrink-0" /> {addForm.destination} @ ₱{addForm.fareAmount || "0.00"}
+                </p>
                 {addForm.viceVersa && addForm.origin !== addForm.destination && (
-                  <p>• {addForm.destination} → {addForm.origin} @ ₱{addForm.fareAmount || "0.00"}</p>
+                  <p className="flex items-center gap-1">
+                    • {addForm.destination} <ArrowRight className="w-3 h-3 inline shrink-0" /> {addForm.origin} @ ₱{addForm.fareAmount || "0.00"}
+                  </p>
                 )}
               </div>
             )}
@@ -1219,7 +1223,9 @@ export default function FareMatrixPage() {
               <div className={`text-sm border rounded-lg p-3 ${isDark ? "text-slate-300 bg-slate-950/60 border-slate-800" : "text-slate-700 bg-slate-50 border-slate-200"}`}>
                 <p className="font-semibold flex items-center gap-2">
                   <MapPin className="w-3.5 h-3.5 text-blue-500" />
-                  {activateRoute.origin} → {activateRoute.destination}
+                  {activateRoute.origin}
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-blue-400" />
+                  {activateRoute.destination}
                 </p>
                 <p className={`mt-1 ${isDark ? "text-blue-400" : "text-blue-600"} font-bold`}>
                   ₱{activateRoute.fareAmount?.toFixed(2)} per tap
