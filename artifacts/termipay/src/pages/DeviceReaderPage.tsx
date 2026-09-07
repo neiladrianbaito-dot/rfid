@@ -26,7 +26,6 @@ type DeviceReader = {
   id: number;
   device_id: string;      // e.g. "RDR-001"
   name: string;            // e.g. "Terminal 1 - Gate A"
-  location: string;        // e.g. "Calbayog Terminal"
   status: string;          // ONLINE, OFFLINE, MAINTENANCE
   ip_address: string;
   last_ping: string;       // ISO timestamp
@@ -53,7 +52,6 @@ export default function DeviceReaderPage() {
   const { isDark } = useTheme();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [locationFilter, setLocationFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
 
   const [devices, setDevices] = useState<DeviceReader[]>([]);
@@ -66,7 +64,7 @@ export default function DeviceReaderPage() {
   const loadDevices = async () => {
     const { data, error } = await supabase
       .from("devices")
-      .select("id, device_id, name, location, status, ip_address, last_ping, firmware_version")
+      .select("id, device_id, name, status, ip_address, last_ping, firmware_version")
       .order("last_ping", { ascending: false });
     if (!error && data) setDevices(data as DeviceReader[]);
     setIsLoading(false);
@@ -85,19 +83,16 @@ export default function DeviceReaderPage() {
 
   // ── Derive filter option lists from the data itself ────────────────────────
   const statusOptions = Array.from(new Set(devices.map((d) => d.status))).sort();
-  const locationOptions = Array.from(new Set(devices.map((d) => d.location))).sort();
 
   // ── Filtering ────────────────────────────────────────────────────────────
   const filteredList = useMemo(() => {
     return devices.filter((device) => {
       if (statusFilter !== "all" && device.status !== statusFilter) return false;
-      if (locationFilter !== "all" && device.location !== locationFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         if (
           !device.name.toLowerCase().includes(q) &&
           !device.device_id.toLowerCase().includes(q) &&
-          !device.location.toLowerCase().includes(q) &&
           !device.ip_address.toLowerCase().includes(q)
         ) {
           return false;
@@ -105,9 +100,9 @@ export default function DeviceReaderPage() {
       }
       return true;
     });
-  }, [devices, statusFilter, locationFilter, search]);
+  }, [devices, statusFilter, search]);
 
-  useEffect(() => { setPage(1); }, [search, statusFilter, locationFilter]);
+  useEffect(() => { setPage(1); }, [search, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredList.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -191,7 +186,7 @@ export default function DeviceReaderPage() {
             <div className="relative flex-1 w-full">
               <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
               <Input
-                placeholder="Search device ID, name, location or IP..."
+                placeholder="Search device ID, name or IP..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className={`pl-10 font-medium text-sm focus-visible:ring-blue-500 ${
@@ -210,17 +205,6 @@ export default function DeviceReaderPage() {
                   <SelectItem value="all" className="cursor-pointer">All Status</SelectItem>
                   {statusOptions.map((s) => (
                     <SelectItem key={s} value={s} className="cursor-pointer">{s}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={locationFilter} onValueChange={setLocationFilter}>
-                <SelectTrigger className={`w-full lg:w-[170px] font-medium text-xs cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
-                  <SelectValue placeholder="Location" />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                  <SelectItem value="all" className="cursor-pointer">All Locations</SelectItem>
-                  {locationOptions.map((l) => (
-                    <SelectItem key={l} value={l} className="cursor-pointer">{l}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -243,17 +227,16 @@ export default function DeviceReaderPage() {
                     <TableRow className="border-none hover:bg-transparent">
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Device ID</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Name</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Assign Location</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>IP Address</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Last Ping</TableHead>
-                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Microcontroller</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Microcontroller</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {paginatedList.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-32">
+                        <TableCell colSpan={6} className="text-center py-32">
                           <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                             <ScanLine size={48} className="mb-2" />
                             <p className="text-xs font-semibold uppercase tracking-widest">No devices found</p>
@@ -275,9 +258,6 @@ export default function DeviceReaderPage() {
                             </TableCell>
                             <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                               {device.name}
-                            </TableCell>
-                            <TableCell className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                              {device.location}
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${className}`}>
