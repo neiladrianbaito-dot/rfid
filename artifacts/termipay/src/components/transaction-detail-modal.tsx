@@ -296,7 +296,6 @@ export function TransactionDetailModal({
     <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>
   )}
 </span>
-                 
               </div>
             )}
           </div>
