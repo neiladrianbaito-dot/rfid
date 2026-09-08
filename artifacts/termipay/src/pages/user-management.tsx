@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, Download } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() RPC call
+import html2canvas from "html2canvas"; // 🖨️ BAGO: para sa "Download PNG" ng card preview — existing na dependency sa project
 
 const PAGE_SIZE = 10;
 
@@ -260,6 +261,12 @@ export default function UserManagementPage() {
   // 👈 BAGO: loading state para sa direct RPC call (kapalit ng renewMutation.isPending)
   const [isRenewing, setIsRenewing] = useState(false);
 
+  // 🖨️ BAGO: loading state habang ginagawang PNG yung card (para sa disabled state ng button)
+  const [isExportingCard, setIsExportingCard] = useState(false);
+  // 🖨️ BAGO: ref sa currently-visible card face (front o back, depende sa previewFlipped) na i-eexport
+  const cardFrontRef = useRef<HTMLDivElement>(null);
+  const cardBackRef = useRef<HTMLDivElement>(null);
+
   const [editForm, setEditForm] = useState({
     fullName: "",
     contactNumber: "",
@@ -455,6 +462,35 @@ export default function UserManagementPage() {
     queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
     setRenewUser(null);
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
+  };
+
+  // 🖨️ BAGO: Exports whichever card face is currently visible (front or back,
+  // based on previewFlipped) as a downloadable PNG using html2canvas.
+  // Filename includes the card UID and which side was exported.
+  const handleDownloadCardPng = async () => {
+    const targetRef = previewFlipped ? cardBackRef : cardFrontRef;
+    if (!targetRef.current || !previewUser) return;
+
+    setIsExportingCard(true);
+    try {
+      const canvas = await html2canvas(targetRef.current, {
+        scale: 3, // mas mataas resolution para malinaw pag pinrint
+        useCORS: true,
+        backgroundColor: null,
+      });
+      const dataUrl = canvas.toDataURL("image/png");
+      const side = previewFlipped ? "back" : "front";
+      const link = document.createElement("a");
+      link.download = `${previewUser.cardUid || "card"}-${side}.png`;
+      link.href = dataUrl;
+      link.click();
+      toast({ title: <SuccessTitle text="Card Image Downloaded" /> });
+    } catch (err) {
+      console.error("Failed to export card as PNG:", err);
+      toast({ title: "Failed to export card", variant: "destructive" });
+    } finally {
+      setIsExportingCard(false);
+    }
   };
 
   return (
@@ -882,6 +918,7 @@ export default function UserManagementPage() {
                   <div className={`card-flip-inner ${previewFlipped ? "is-flipped" : ""}`}>
                     {/* ---- FRONT FACE ---- */}
                     <div
+                      ref={cardFrontRef}
                       className={`card-face rounded-2xl overflow-hidden border ${
                         theme.isLight ? "border-slate-300" : "border-transparent"
                       }`}
@@ -902,7 +939,7 @@ export default function UserManagementPage() {
                               theme.isLight ? "bg-slate-100 border-slate-300" : "bg-white/10 border-white/30"
                             }`}
                           >
-                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" crossOrigin="anonymous" />
                           </div>
                           <span
                             className="font-bold tracking-wide text-sm sm:text-base uppercase"
@@ -956,6 +993,7 @@ export default function UserManagementPage() {
 
                     {/* ---- BACK FACE ---- */}
                     <div
+                      ref={cardBackRef}
                       className="card-face card-face-back rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300"
                       style={{ boxShadow: "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)" }}
                     >
@@ -975,7 +1013,7 @@ export default function UserManagementPage() {
                         </ul>
                         <div className={`flex items-center gap-2 border-t pt-1.5 sm:pt-2 mt-1 ${isDark ? "border-slate-400/40" : "border-slate-300"}`}>
                           <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden">
-                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" crossOrigin="anonymous" />
                           </div>
                           <span className="text-[9px] sm:text-[11px] font-extrabold tracking-wide text-slate-900 uppercase">
                             Fare Collection System
@@ -1022,13 +1060,23 @@ export default function UserManagementPage() {
             );
           })()}
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 flex-wrap">
             <Button
               variant="ghost"
               onClick={() => setPreviewUser(null)}
               className={`text-xs font-medium cursor-pointer ${isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500"}`}
             >
               Close
+            </Button>
+            {/* 🖨️ BAGO: Download PNG button — exports whichever side is currently showing (front/back) */}
+            <Button
+              variant="outline"
+              onClick={handleDownloadCardPng}
+              disabled={isExportingCard}
+              className={`text-xs font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 ${isDark ? "border-slate-700 text-slate-300 hover:bg-slate-800" : "border-slate-300 text-slate-700 hover:bg-slate-50"}`}
+            >
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              {isExportingCard ? "Exporting..." : `Download ${previewFlipped ? "Back" : "Front"} PNG`}
             </Button>
             {previewUser && (
               <Button
