@@ -482,21 +482,36 @@ export default function UserManagementPage() {
     const colorFnPattern = /\b(oklch|oklab|lch|lab|color-mix)\(/;
     const colorFnGlobal = /\b(oklch|oklab|lch|lab|color-mix)\(/g;
 
-    const toRgb = (fnCall: string): string => {
-      if (cache.has(fnCall)) return cache.get(fnCall)!;
-      let converted = fnCall;
-      if (ctx) {
-        try {
-          ctx.fillStyle = "#000000";
-          ctx.fillStyle = fnCall;
-          converted = ctx.fillStyle;
-        } catch {
-          // leave unconverted if canvas can't parse it either
-        }
-      }
-      cache.set(fnCall, converted);
-      return converted;
-    };
+  const toRgb = (fnCall: string): string => {
+  if (cache.has(fnCall)) return cache.get(fnCall)!;
+  let converted = fnCall;
+  if (ctx) {
+    try {
+      // ⚠️ We do NOT rely on reading `ctx.fillStyle` back as a string.
+      // In current Chrome, setting fillStyle to a wide-gamut color
+      // (oklch/oklab/color-mix) and reading it back can itself return
+      // "oklab(...)" instead of resolving to rgb()/hex — the exact
+      // string html2canvas can't parse — so that round-trip is no
+      // longer a safe conversion.
+      // Instead, actually paint 1 pixel with the color and read the
+      // raw bytes back via getImageData, which always returns plain
+      // 0–255 sRGB values no matter what color syntax set fillStyle.
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = "#000000";
+      ctx.fillStyle = fnCall;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+      converted =
+        a === 255
+          ? `rgb(${r}, ${g}, ${b})`
+          : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+    } catch {
+      // leave unconverted if canvas can't parse it either
+    }
+  }
+  cache.set(fnCall, converted);
+  return converted;
+};
 
     const convertValue = (value: string): string => {
       if (!colorFnPattern.test(value)) return value;
@@ -1444,4 +1459,3 @@ export default function UserManagementPage() {
       </AlertDialog>
     </div>
   );
-}
