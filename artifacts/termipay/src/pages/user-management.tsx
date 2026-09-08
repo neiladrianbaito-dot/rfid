@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() RPC call
-import html2canvas from "html2canvas"; // 👈 BAGO: para sa pag-export ng card bilang PNG
+import html2canvas from "html2canvas-pro"; // 👈 FIX: html2canvas-pro para sa pag-export ng card bilang PNG — may native support ito sa oklch/oklab/color-mix na ginagamit ng Tailwind v4, kaya hindi na natin kailangan ng manual color-conversion workaround
 
 const PAGE_SIZE = 10;
 
@@ -465,60 +465,18 @@ export default function UserManagementPage() {
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
   };
 
-  // 👈 BAGO: I-export bilang PNG ang currently-visible face (front o back)
-  // ng card preview gamit ang html2canvas. Dahil direkta nating tina-target
+  // 👈 FIX: I-export bilang PNG ang currently-visible face (front o back) ng
+  // card preview gamit ang html2canvas-pro. Dahil direkta nating tina-target
   // ang front/back div mismo (hindi ang parent flip-container), hindi na
   // apektado ng 3D `rotateY` transform ang capture — laging tama ang
   // lalabas kahit naka-flip man o hindi.
-  // 👈 BAGO: Ginagamit ng Tailwind v4 ang `oklch()` sa default color palette
-  // niya (hal. `border-slate-300`), pero hindi ito naiintindihan ng color
-  // parser ng html2canvas ("unsupported color function oklch" error).
-  // Ang fix: sa loob ng `onclone`, i-normalize natin ang lahat ng
-  // computed colors (color/background/border/outline) papuntang rgb()
-  // gamit ang Canvas 2D context ng browser mismo bilang converter —
-  // itinatakda mo ang `ctx.fillStyle` sa oklch string, at kapag binasa mo
-  // ulit ito, awtomatikong nano-normalize na ng browser papuntang rgb().
-  const normalizeOklchColors = (clonedElement: HTMLElement, clonedWindow: Window) => {
-    const converterCtx = document.createElement("canvas").getContext("2d");
-    const toRgb = (value: string) => {
-      if (!converterCtx) return value;
-      try {
-        converterCtx.fillStyle = "#000"; // reset para hindi maka-carry ng dating value
-        converterCtx.fillStyle = value;
-        return converterCtx.fillStyle;
-      } catch {
-        return value;
-      }
-    };
-
-    const colorProps = [
-      "color",
-      "backgroundColor",
-      "borderTopColor",
-      "borderRightColor",
-      "borderBottomColor",
-      "borderLeftColor",
-      "outlineColor",
-      "textDecorationColor",
-    ] as const;
-
-    const allNodes = [clonedElement, ...Array.from(clonedElement.querySelectorAll<HTMLElement>("*"))];
-    allNodes.forEach((el) => {
-      const computed = clonedWindow.getComputedStyle(el);
-      colorProps.forEach((prop) => {
-        const val = computed[prop as any];
-        if (typeof val === "string" && val.includes("oklch")) {
-          (el.style as any)[prop] = toRgb(val);
-        }
-      });
-      // background-image / gradients can also embed oklch color stops
-      const bgImage = computed.backgroundImage;
-      if (bgImage && bgImage.includes("oklch")) {
-        el.style.backgroundImage = "none";
-      }
-    });
-  };
-
+  // 👈 FIX: Ginagamit ng Tailwind v4 ang `oklch()` sa default color palette
+  // niya (hal. `border-slate-300`), na dating hindi naiintindihan ng color
+  // parser ng plain `html2canvas` ("unsupported color function oklch"
+  // error). Ang `html2canvas-pro` ay may built-in na parser para sa
+  // oklch/oklab/lab/lch/color-mix, kaya hindi na natin kailangan ng manual
+  // canvas-based color normalization dati (tinanggal na ang
+  // normalizeOklchColors helper).
   const handleDownloadCard = async () => {
     const node = previewFlipped ? cardBackRef.current : cardFrontRef.current;
     if (!node || !previewUser) return;
@@ -529,10 +487,6 @@ export default function UserManagementPage() {
         scale: 3, // mas mataas na resolution para malinaw ang exported PNG
         useCORS: true, // para makapag-load ang /calbayog.png na larawan sa canvas
         backgroundColor: null,
-        onclone: (clonedDoc, clonedElement) => {
-          const win = clonedDoc.defaultView;
-          if (win) normalizeOklchColors(clonedElement as HTMLElement, win);
-        },
       });
       const dataUrl = canvas.toDataURL("image/png");
 
@@ -1125,7 +1079,7 @@ export default function UserManagementPage() {
             >
               Close
             </Button>
-            {/* 👈 BAGO: Download PNG button — nagde-download ng currently
+            {/* 👈 Download PNG button — nagde-download ng currently
                 visible face (front kung hindi naka-flip, back kung naka-flip) */}
             {previewUser && (
               <Button
