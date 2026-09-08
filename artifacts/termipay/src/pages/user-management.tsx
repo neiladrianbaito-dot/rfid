@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, Download } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +30,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() RPC call
+
+// 📄➕ BAGO: para sa PDF export ng front/back ng card
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 const PAGE_SIZE = 10;
 
@@ -260,6 +264,16 @@ export default function UserManagementPage() {
   // 👈 BAGO: loading state para sa direct RPC call (kapalit ng renewMutation.isPending)
   const [isRenewing, setIsRenewing] = useState(false);
 
+  // 📄➕ BAGO: loading state habang ginagawa yung PDF (front + back)
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  // 📄➕ BAGO: refs papunta sa mga hidden, "hindi naka-flip" na bersyon ng
+  // front/back ng card — ito ang ipapasa sa html2canvas. Ginagawa itong
+  // hiwalay (di yung nasa flip preview) dahil yung flip preview gumagamit ng
+  // 3D transform + backface-visibility:hidden, na hindi maayos ma-capture ng
+  // html2canvas (lumalabas na blangko o baligtad minsan).
+  const exportFrontRef = useRef<HTMLDivElement>(null);
+  const exportBackRef = useRef<HTMLDivElement>(null);
+
   const [editForm, setEditForm] = useState({
     fullName: "",
     contactNumber: "",
@@ -455,6 +469,74 @@ export default function UserManagementPage() {
     queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
     setRenewUser(null);
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
+  };
+
+  // 📄➕ BAGO: Kinukuha yung hidden (unflipped) front/back divs bilang images
+  // gamit ang html2canvas, tapos pinagsasama sa isang PDF gamit ang jsPDF —
+  // front sa page 1, back sa page 2. Naka-size ito sa standard ID-1 card
+  // dimensions (85.6mm x 53.98mm) kaya kapag na-print ito, actual size na
+  // ng card ang lalabas.
+  const handleDownloadPdf = async () => {
+    if (!previewUser) return;
+    if (!exportFrontRef.current || !exportBackRef.current) {
+      toast({ title: "Card not ready for export yet, try again.", variant: "destructive" });
+      return;
+    }
+
+    setIsDownloadingPdf(true);
+    try {
+      const [frontCanvas, backCanvas] = await Promise.all([
+        html2canvas(exportFrontRef.current, {
+          scale: 3,
+          backgroundColor: null,
+          useCORS: true,
+        }),
+        html2canvas(exportBackRef.current, {
+          scale: 3,
+          backgroundColor: null,
+          useCORS: true,
+        }),
+      ]);
+
+      const frontImg = frontCanvas.toDataURL("image/png");
+      const backImg = backCanvas.toDataURL("image/png");
+
+      // Standard ID-1 / CR80 card size in millimeters
+      const cardWidthMm = 85.6;
+      const cardHeightMm = 53.98;
+      const marginMm = 10;
+      const pageWidth = cardWidthMm + marginMm * 2;
+      const pageHeight = cardHeightMm + marginMm * 2 + 6; // extra space for the label on top
+
+      const pdf = new jsPDF({
+        orientation: "landscape",
+        unit: "mm",
+        format: [pageWidth, pageHeight],
+      });
+
+      // ---- Page 1: FRONT ----
+      pdf.setFontSize(9);
+      pdf.setTextColor(90, 90, 90);
+      pdf.text(`${previewUser.fullName} — ${previewUser.cardUid} — Front`, marginMm, 7);
+      pdf.addImage(frontImg, "PNG", marginMm, marginMm + 3, cardWidthMm, cardHeightMm);
+
+      // ---- Page 2: BACK ----
+      pdf.addPage([pageWidth, pageHeight], "landscape");
+      pdf.setFontSize(9);
+      pdf.setTextColor(90, 90, 90);
+      pdf.text(`${previewUser.fullName} — ${previewUser.cardUid} — Back`, marginMm, 7);
+      pdf.addImage(backImg, "PNG", marginMm, marginMm + 3, cardWidthMm, cardHeightMm);
+
+      const safeUid = (previewUser.cardUid || "card").toString().replace(/[^a-zA-Z0-9-_]/g, "_");
+      pdf.save(`${safeUid}-front-back.pdf`);
+
+      toast({ title: <SuccessTitle text="Card PDF Downloaded" /> });
+    } catch (err) {
+      console.error("PDF export error:", err);
+      toast({ title: "Failed to generate PDF", variant: "destructive" });
+    } finally {
+      setIsDownloadingPdf(false);
+    }
   };
 
   return (
@@ -1032,6 +1114,19 @@ export default function UserManagementPage() {
             </Button>
             {previewUser && (
               <Button
+                variant="outline"
+                onClick={handleDownloadPdf}
+                disabled={isDownloadingPdf}
+                className={`text-xs font-semibold px-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
+                  isDark ? "border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white" : "border-slate-300 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                {isDownloadingPdf ? "Generating PDF..." : "Download PDF"}
+              </Button>
+            )}
+            {previewUser && (
+              <Button
                 onClick={() => {
                   const user = previewUser;
                   setPreviewUser(null);
@@ -1048,6 +1143,124 @@ export default function UserManagementPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 📄➕ BAGO: Hidden, UNFLIPPED na bersyon ng front/back — ito lang ang
+          binabasa ng html2canvas para sa PDF export. Naka-off-screen ito
+          (di makikita ng user) pero laging naka-render habang bukas yung
+          preview dialog, kaya laging updated ang laman kapag pinindot ang
+          "Download PDF" button. */}
+      {previewUser && (() => {
+        const theme = getCardTheme(previewUser.type);
+        return (
+          <div
+            aria-hidden="true"
+            style={{ position: "fixed", top: 0, left: "-99999px", zIndex: -1, pointerEvents: "none" }}
+          >
+            {/* FRONT (export) */}
+            <div
+              ref={exportFrontRef}
+              style={{
+                width: "1376px",
+                height: "774px",
+                position: "relative",
+                backgroundColor: theme.cardBg,
+                overflow: "hidden",
+              }}
+            >
+              <ChevronStaircase color={theme.pattern} />
+              <div className="relative h-full w-full flex flex-col justify-between" style={{ padding: "56px" }}>
+                <div className="flex items-center" style={{ gap: "16px" }}>
+                  <div
+                    className="rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden"
+                    style={{
+                      width: "64px",
+                      height: "64px",
+                      border: `4px solid ${theme.isLight ? "#cbd5e1" : "rgba(255,255,255,0.3)"}`,
+                      backgroundColor: theme.isLight ? "#f1f5f9" : "rgba(255,255,255,0.1)",
+                    }}
+                  >
+                    <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                  </div>
+                  <span
+                    className="font-bold uppercase"
+                    style={{ color: theme.textColor, fontSize: "26px", letterSpacing: "0.05em" }}
+                  >
+                    Fare Collection System
+                  </span>
+                </div>
+
+                <div>
+                  <div
+                    className="font-mono font-extrabold"
+                    style={{ color: theme.uidColor, fontSize: "52px", letterSpacing: "0.05em" }}
+                  >
+                    {previewUser.cardUid}
+                  </div>
+                  <div className="font-semibold" style={{ color: theme.textColor, fontSize: "30px" }}>
+                    {previewUser.fullName}
+                  </div>
+                </div>
+
+                <div className="flex items-end justify-between">
+                  <div className="font-extrabold" style={{ color: theme.accent, fontSize: "38px", letterSpacing: "0.05em" }}>
+                    {theme.label}
+                  </div>
+                  <div className="text-right">
+                    <div
+                      className="uppercase font-semibold"
+                      style={{ color: theme.subTextColor, fontSize: "16px", letterSpacing: "0.05em" }}
+                    >
+                      Valid Until
+                    </div>
+                    <div className="font-mono font-bold" style={{ color: theme.textColor, fontSize: "24px" }}>
+                      {formatDate(previewUser.expirationDate)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* BACK (export) */}
+            <div
+              ref={exportBackRef}
+              style={{
+                width: "1376px",
+                height: "774px",
+                position: "relative",
+                backgroundColor: "#eceae4",
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+                border: "1px solid #cbd5e1",
+              }}
+            >
+              <div style={{ height: "18%", backgroundColor: "#221f20", flexShrink: 0 }} />
+              <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "48px 56px" }}>
+                <div style={{ backgroundColor: "#ffffff", borderTop: "1px solid #cbd5e1", borderBottom: "1px solid #cbd5e1", padding: "14px 24px", marginBottom: "24px" }}>
+                  <span style={{ fontSize: "30px", fontWeight: 800, color: "#0f172a" }}>Terms and Condition</span>
+                </div>
+                <ul style={{ fontSize: "20px", lineHeight: 1.5, color: "#1e293b", flex: 1, minHeight: 0, listStyle: "none", padding: 0, margin: 0 }}>
+                  <li>• Property of the Fare Collection System Operator.</li>
+                  <li>• Non-transferable and subject to transit system rules.</li>
+                  <li>• Positive balance required to pass through.</li>
+                  <li>• Non-refundable card issuance fee applies.</li>
+                  <li>• Operator is not responsible for lost or stolen cards.</li>
+                  <li>• Unused balances on unregistered cards are non-refundable.</li>
+                  <li>• Tampering or unauthorized duplication is strictly prohibited.</li>
+                </ul>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", borderTop: "1px solid #cbd5e1", paddingTop: "16px", marginTop: "8px" }}>
+                  <div style={{ width: "48px", height: "48px", borderRadius: "9999px", backgroundColor: "#1b1f5c", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+                    <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                  </div>
+                  <span style={{ fontSize: "20px", fontWeight: 800, letterSpacing: "0.05em", color: "#0f172a", textTransform: "uppercase" }}>
+                    Fare Collection System
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Edit Dialog */}
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
