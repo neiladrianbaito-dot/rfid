@@ -145,18 +145,56 @@ function getStatusDotColor(status: string) {
 }
 
 // 🪪 Card preview theming — accent color + label color per type, matching the physical card design
+// 🔵 Regular = default navy/blue card (white text)
+// ⚪ Discounted types (Student/Senior/PWD) = concessionary-style WHITE card (dark text)
 function getCardTheme(type: string | null | undefined) {
   const t = (type || "Regular").toLowerCase();
   switch (t) {
     case "student":
-      return { accent: "#60a5fa", pattern: "#3b82f6", label: "STUDENT" };
+      return {
+        accent: "#2563eb",
+        pattern: "#3b82f6",
+        label: "STUDENT",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
     case "senior":
-      return { accent: "#facc15", pattern: "#eab308", label: "SENIOR" };
+      return {
+        accent: "#ca8a04",
+        pattern: "#eab308",
+        label: "SENIOR",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
     case "pwd":
-      return { accent: "#34d399", pattern: "#10b981", label: "PWD" };
+      return {
+        accent: "#059669",
+        pattern: "#10b981",
+        label: "PWD",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
     case "regular":
     default:
-      return { accent: "#f87171", pattern: "#f97316", label: "REGULAR" };
+      return {
+        accent: "#f87171",
+        pattern: "#f97316",
+        label: "REGULAR",
+        cardBg: "#1b1f5c",
+        textColor: "#ffffff",
+        subTextColor: "rgba(255,255,255,0.7)",
+        uidColor: "#5eead4",
+        isLight: false,
+      };
   }
 }
 
@@ -845,17 +883,24 @@ export default function UserManagementPage() {
                     {/* ---- FRONT FACE ---- */}
                     <div
                       className="card-face rounded-2xl overflow-hidden shadow-lg"
-                      style={{ backgroundColor: "#1b1f5c" }}
+                      style={{ backgroundColor: theme.cardBg }}
                     >
                       <ChevronStaircase color={theme.pattern} />
 
                       <div className="relative h-full w-full flex flex-col justify-between p-5 sm:p-7">
                         {/* Header / logo badge */}
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-white/10 border-2 border-white/30 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                          <div
+                            className={`w-9 h-9 rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden ${
+                              theme.isLight ? "bg-slate-100 border-slate-300" : "bg-white/10 border-white/30"
+                            }`}
+                          >
                             <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
                           </div>
-                          <span className="text-white font-bold tracking-wide text-sm sm:text-base uppercase">
+                          <span
+                            className="font-bold tracking-wide text-sm sm:text-base uppercase"
+                            style={{ color: theme.textColor }}
+                          >
                             Fare Collection System
                           </span>
                         </div>
@@ -864,11 +909,14 @@ export default function UserManagementPage() {
                         <div className="space-y-1">
                           <div
                             className="font-mono font-extrabold text-2xl sm:text-3xl tracking-wide"
-                            style={{ color: "#5eead4" }}
+                            style={{ color: theme.uidColor }}
                           >
                             {previewUser.cardUid}
                           </div>
-                          <div className="text-white font-semibold text-base sm:text-lg">
+                          <div
+                            className="font-semibold text-base sm:text-lg"
+                            style={{ color: theme.textColor }}
+                          >
                             {previewUser.fullName}
                           </div>
                         </div>
@@ -882,10 +930,16 @@ export default function UserManagementPage() {
                             {theme.label}
                           </div>
                           <div className="text-right">
-                            <div className="text-white text-[9px] sm:text-[10px] uppercase tracking-wide font-semibold">
+                            <div
+                              className="text-[9px] sm:text-[10px] uppercase tracking-wide font-semibold"
+                              style={{ color: theme.subTextColor }}
+                            >
                               Valid Until
-                          </div>
-                            <div className="text-white font-mono font-bold text-xs sm:text-sm">
+                            </div>
+                            <div
+                              className="font-mono font-bold text-xs sm:text-sm"
+                              style={{ color: theme.textColor }}
+                            >
                               {formatDate(previewUser.expirationDate)}
                             </div>
                           </div>
