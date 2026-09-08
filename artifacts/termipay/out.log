@@ -1,0 +1,3 @@
+../..                                    | Progress: resolved 0, reused 1, downloaded 0, added 0
+? Verifying lockfile at ../../pnpm-lock.yaml against supply-chain policies (826 entries)...
+✓ Lockfile at ../../pnpm-lock.yaml passes supply-chain policies (826 entries in 0ms)
