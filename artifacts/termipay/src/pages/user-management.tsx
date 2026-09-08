@@ -470,6 +470,55 @@ export default function UserManagementPage() {
   // ang front/back div mismo (hindi ang parent flip-container), hindi na
   // apektado ng 3D `rotateY` transform ang capture — laging tama ang
   // lalabas kahit naka-flip man o hindi.
+  // 👈 BAGO: Ginagamit ng Tailwind v4 ang `oklch()` sa default color palette
+  // niya (hal. `border-slate-300`), pero hindi ito naiintindihan ng color
+  // parser ng html2canvas ("unsupported color function oklch" error).
+  // Ang fix: sa loob ng `onclone`, i-normalize natin ang lahat ng
+  // computed colors (color/background/border/outline) papuntang rgb()
+  // gamit ang Canvas 2D context ng browser mismo bilang converter —
+  // itinatakda mo ang `ctx.fillStyle` sa oklch string, at kapag binasa mo
+  // ulit ito, awtomatikong nano-normalize na ng browser papuntang rgb().
+  const normalizeOklchColors = (clonedElement: HTMLElement, clonedWindow: Window) => {
+    const converterCtx = document.createElement("canvas").getContext("2d");
+    const toRgb = (value: string) => {
+      if (!converterCtx) return value;
+      try {
+        converterCtx.fillStyle = "#000"; // reset para hindi maka-carry ng dating value
+        converterCtx.fillStyle = value;
+        return converterCtx.fillStyle;
+      } catch {
+        return value;
+      }
+    };
+
+    const colorProps = [
+      "color",
+      "backgroundColor",
+      "borderTopColor",
+      "borderRightColor",
+      "borderBottomColor",
+      "borderLeftColor",
+      "outlineColor",
+      "textDecorationColor",
+    ] as const;
+
+    const allNodes = [clonedElement, ...Array.from(clonedElement.querySelectorAll<HTMLElement>("*"))];
+    allNodes.forEach((el) => {
+      const computed = clonedWindow.getComputedStyle(el);
+      colorProps.forEach((prop) => {
+        const val = computed[prop as any];
+        if (typeof val === "string" && val.includes("oklch")) {
+          (el.style as any)[prop] = toRgb(val);
+        }
+      });
+      // background-image / gradients can also embed oklch color stops
+      const bgImage = computed.backgroundImage;
+      if (bgImage && bgImage.includes("oklch")) {
+        el.style.backgroundImage = "none";
+      }
+    });
+  };
+
   const handleDownloadCard = async () => {
     const node = previewFlipped ? cardBackRef.current : cardFrontRef.current;
     if (!node || !previewUser) return;
@@ -480,6 +529,10 @@ export default function UserManagementPage() {
         scale: 3, // mas mataas na resolution para malinaw ang exported PNG
         useCORS: true, // para makapag-load ang /calbayog.png na larawan sa canvas
         backgroundColor: null,
+        onclone: (clonedDoc, clonedElement) => {
+          const win = clonedDoc.defaultView;
+          if (win) normalizeOklchColors(clonedElement as HTMLElement, win);
+        },
       });
       const dataUrl = canvas.toDataURL("image/png");
 
