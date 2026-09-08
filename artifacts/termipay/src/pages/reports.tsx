@@ -117,6 +117,45 @@ function getTxDateKey(tx: any): string | null {
   return dt.toLocaleDateString("en-CA"); // YYYY-MM-DD, local time
 }
 
+// ── builds the FULL list of "YYYY-MM-DD" date keys implied by the active
+// filter combo, so the chart/table always render a complete calendar
+// range (e.g. Year=2026 -> Jan 1 through Dec 31, 2026) instead of only the
+// days that happen to have a transaction. Missing days get filled with
+// ₱0 revenue by the caller. Returns null when there isn't a year selected,
+// since a complete range can't be anchored without one. ──
+function generateDateRange(filterYear: string, filterMonth: string, filterDay: string): string[] | null {
+  if (filterYear === "all") return null;
+  const year = parseInt(filterYear, 10);
+  if (isNaN(year)) return null;
+
+  // Year only -> Jan 1 to Dec 31 of that year
+  if (filterMonth === "all") {
+    const dates: string[] = [];
+    for (let m = 1; m <= 12; m++) {
+      const daysInMonth = new Date(year, m, 0).getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        dates.push(`${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+      }
+    }
+    return dates;
+  }
+
+  const month = parseInt(filterMonth, 10);
+
+  // Year + Month -> every day in that month
+  if (filterDay === "all") {
+    const dates: string[] = [];
+    const daysInMonth = new Date(year, month, 0).getDate();
+    for (let d = 1; d <= daysInMonth; d++) {
+      dates.push(`${year}-${filterMonth}-${String(d).padStart(2, "0")}`);
+    }
+    return dates;
+  }
+
+  // Year + Month + Day -> the single day
+  return [`${year}-${filterMonth}-${filterDay}`];
+}
+
 export default function ReportsPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
@@ -211,6 +250,11 @@ export default function ReportsPage() {
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [txList]);
 
+  // Quick lookup used when filling in the complete calendar range below.
+  const revenueByDate = React.useMemo(() => {
+    return new Map(aggregatedBreakdown.map((d: any) => [d.date, d.revenue]));
+  }, [aggregatedBreakdown]);
+
   // ── derive available years straight from transactions (the full
   // dataset), so the Year dropdown reflects everything that actually
   // has records, not just the last 7 days ──
@@ -243,19 +287,38 @@ export default function ReportsPage() {
   // when a filter is active, report's short window when it isn't ──
   const baseBreakdown = isFilterActive ? aggregatedBreakdown : sanitizedBreakdown;
 
+  // ── FIXED: whenever a Year is selected, always render the COMPLETE
+  // calendar range implied by the filter (Year alone -> Jan 1–Dec 31;
+  // Year+Month -> every day of that month), filling in ₱0 for days that
+  // have no transactions, instead of only showing days that happen to
+  // have data. Falls back to the old "filter existing rows" behavior
+  // when no Year is picked (e.g. Month-only or Day-only filters), since
+  // there's no year to anchor a full range to. ──
   const filteredBreakdown = React.useMemo(() => {
     if (!isFilterActive) return baseBreakdown;
+
+    const fullRange = generateDateRange(filterYear, filterMonth, filterDay);
+    if (fullRange) {
+      return fullRange.map((date) => ({
+        date,
+        revenue: revenueByDate.get(date) || 0,
+      }));
+    }
+
+    // No year selected (Month and/or Day only, across all years) — keep
+    // the previous "only show days that exist" behavior.
     return baseBreakdown.filter((d: any) => {
       const parts = splitDateString(d.date);
       if (!parts) return false;
-      if (filterYear !== "all" && parts.year !== filterYear) return false;
       if (filterMonth !== "all" && parts.month !== filterMonth) return false;
       if (filterDay !== "all" && parts.day !== filterDay) return false;
       return true;
     });
-  }, [baseBreakdown, filterYear, filterMonth, filterDay, isFilterActive]);
+  }, [baseBreakdown, filterYear, filterMonth, filterDay, isFilterActive, revenueByDate]);
 
-  // ── filtered transactions (drives Excel export) ──
+  // ── filtered transactions (drives Excel export) — unaffected by the
+  // calendar fill-in above, since exports should only ever list actual
+  // transaction records, not empty calendar days. ──
   const filteredTxList = React.useMemo(() => {
     if (!isFilterActive) return txList;
     return txList.filter((tx: any) => {
