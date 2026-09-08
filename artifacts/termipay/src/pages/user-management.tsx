@@ -882,8 +882,15 @@ export default function UserManagementPage() {
                   <div className={`card-flip-inner ${previewFlipped ? "is-flipped" : ""}`}>
                     {/* ---- FRONT FACE ---- */}
                     <div
-                      className="card-face rounded-2xl overflow-hidden shadow-lg"
-                      style={{ backgroundColor: theme.cardBg }}
+                      className={`card-face rounded-2xl overflow-hidden border ${
+                        theme.isLight ? "border-slate-300" : "border-transparent"
+                      }`}
+                      style={{
+                        backgroundColor: theme.cardBg,
+                        boxShadow: theme.isLight
+                          ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
+                          : "0 10px 25px -5px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.2)",
+                      }}
                     >
                       <ChevronStaircase color={theme.pattern} />
 
@@ -948,7 +955,10 @@ export default function UserManagementPage() {
                     </div>
 
                     {/* ---- BACK FACE ---- */}
-                    <div className="card-face card-face-back rounded-2xl overflow-hidden shadow-lg bg-[#eceae4] flex flex-col">
+                    <div
+                      className="card-face card-face-back rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300"
+                      style={{ boxShadow: "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)" }}
+                    >
                       <div className="h-[18%] bg-[#221f20] flex-shrink-0" />
                       <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-6 py-2 sm:py-3">
                         <div className="bg-white border-y border-slate-300 py-1.5 px-3 mb-2 sm:mb-3">
