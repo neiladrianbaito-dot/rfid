@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, Download } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,7 +30,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() RPC call
-import html2canvas from "html2canvas"; // 🖨️ BAGO: para sa "Download PNG" ng card preview — existing na dependency sa project
 
 const PAGE_SIZE = 10;
 
@@ -146,56 +145,18 @@ function getStatusDotColor(status: string) {
 }
 
 // 🪪 Card preview theming — accent color + label color per type, matching the physical card design
-// 🔵 Regular = default navy/blue card (white text)
-// ⚪ Discounted types (Student/Senior/PWD) = concessionary-style WHITE card (dark text)
 function getCardTheme(type: string | null | undefined) {
   const t = (type || "Regular").toLowerCase();
   switch (t) {
     case "student":
-      return {
-        accent: "#2563eb",
-        pattern: "#3b82f6",
-        label: "STUDENT",
-        cardBg: "#ffffff",
-        textColor: "#0f172a",
-        subTextColor: "#475569",
-        uidColor: "#1b1f5c",
-        isLight: true,
-      };
+      return { accent: "#60a5fa", pattern: "#3b82f6", label: "STUDENT" };
     case "senior":
-      return {
-        accent: "#ca8a04",
-        pattern: "#eab308",
-        label: "SENIOR",
-        cardBg: "#ffffff",
-        textColor: "#0f172a",
-        subTextColor: "#475569",
-        uidColor: "#1b1f5c",
-        isLight: true,
-      };
+      return { accent: "#facc15", pattern: "#eab308", label: "SENIOR" };
     case "pwd":
-      return {
-        accent: "#059669",
-        pattern: "#10b981",
-        label: "PWD",
-        cardBg: "#ffffff",
-        textColor: "#0f172a",
-        subTextColor: "#475569",
-        uidColor: "#1b1f5c",
-        isLight: true,
-      };
+      return { accent: "#34d399", pattern: "#10b981", label: "PWD" };
     case "regular":
     default:
-      return {
-        accent: "#f87171",
-        pattern: "#f97316",
-        label: "REGULAR",
-        cardBg: "#1b1f5c",
-        textColor: "#ffffff",
-        subTextColor: "rgba(255,255,255,0.7)",
-        uidColor: "#5eead4",
-        isLight: false,
-      };
+      return { accent: "#f87171", pattern: "#f97316", label: "REGULAR" };
   }
 }
 
@@ -260,12 +221,6 @@ export default function UserManagementPage() {
   const [renewUser, setRenewUser] = useState<any>(null);
   // 👈 BAGO: loading state para sa direct RPC call (kapalit ng renewMutation.isPending)
   const [isRenewing, setIsRenewing] = useState(false);
-
-  // 🖨️ BAGO: loading state habang ginagawang PNG yung card (para sa disabled state ng button)
-  const [isExportingCard, setIsExportingCard] = useState(false);
-  // 🖨️ BAGO: ref sa currently-visible card face (front o back, depende sa previewFlipped) na i-eexport
-  const cardFrontRef = useRef<HTMLDivElement>(null);
-  const cardBackRef = useRef<HTMLDivElement>(null);
 
   const [editForm, setEditForm] = useState({
     fullName: "",
@@ -462,35 +417,6 @@ export default function UserManagementPage() {
     queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
     setRenewUser(null);
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
-  };
-
-  // 🖨️ BAGO: Exports whichever card face is currently visible (front or back,
-  // based on previewFlipped) as a downloadable PNG using html2canvas.
-  // Filename includes the card UID and which side was exported.
-  const handleDownloadCardPng = async () => {
-    const targetRef = previewFlipped ? cardBackRef : cardFrontRef;
-    if (!targetRef.current || !previewUser) return;
-
-    setIsExportingCard(true);
-    try {
-      const canvas = await html2canvas(targetRef.current, {
-        scale: 3, // mas mataas resolution para malinaw pag pinrint
-        useCORS: true,
-        backgroundColor: null,
-      });
-      const dataUrl = canvas.toDataURL("image/png");
-      const side = previewFlipped ? "back" : "front";
-      const link = document.createElement("a");
-      link.download = `${previewUser.cardUid || "card"}-${side}.png`;
-      link.href = dataUrl;
-      link.click();
-      toast({ title: <SuccessTitle text="Card Image Downloaded" /> });
-    } catch (err) {
-      console.error("Failed to export card as PNG:", err);
-      toast({ title: "Failed to export card", variant: "destructive" });
-    } finally {
-      setIsExportingCard(false);
-    }
   };
 
   return (
@@ -918,33 +844,18 @@ export default function UserManagementPage() {
                   <div className={`card-flip-inner ${previewFlipped ? "is-flipped" : ""}`}>
                     {/* ---- FRONT FACE ---- */}
                     <div
-                      ref={cardFrontRef}
-                      className={`card-face rounded-2xl overflow-hidden border ${
-                        theme.isLight ? "border-slate-300" : "border-transparent"
-                      }`}
-                      style={{
-                        backgroundColor: theme.cardBg,
-                        boxShadow: theme.isLight
-                          ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
-                          : "0 10px 25px -5px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.2)",
-                      }}
+                      className="card-face rounded-2xl overflow-hidden shadow-lg"
+                      style={{ backgroundColor: "#1b1f5c" }}
                     >
                       <ChevronStaircase color={theme.pattern} />
 
                       <div className="relative h-full w-full flex flex-col justify-between p-5 sm:p-7">
                         {/* Header / logo badge */}
                         <div className="flex items-center gap-3">
-                          <div
-                            className={`w-9 h-9 rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden ${
-                              theme.isLight ? "bg-slate-100 border-slate-300" : "bg-white/10 border-white/30"
-                            }`}
-                          >
-                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" crossOrigin="anonymous" />
+                          <div className="w-9 h-9 rounded-full bg-white/10 border-2 border-white/30 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
                           </div>
-                          <span
-                            className="font-bold tracking-wide text-sm sm:text-base uppercase"
-                            style={{ color: theme.textColor }}
-                          >
+                          <span className="text-white font-bold tracking-wide text-sm sm:text-base uppercase">
                             Fare Collection System
                           </span>
                         </div>
@@ -953,14 +864,11 @@ export default function UserManagementPage() {
                         <div className="space-y-1">
                           <div
                             className="font-mono font-extrabold text-2xl sm:text-3xl tracking-wide"
-                            style={{ color: theme.uidColor }}
+                            style={{ color: "#5eead4" }}
                           >
                             {previewUser.cardUid}
                           </div>
-                          <div
-                            className="font-semibold text-base sm:text-lg"
-                            style={{ color: theme.textColor }}
-                          >
+                          <div className="text-white font-semibold text-base sm:text-lg">
                             {previewUser.fullName}
                           </div>
                         </div>
@@ -974,16 +882,10 @@ export default function UserManagementPage() {
                             {theme.label}
                           </div>
                           <div className="text-right">
-                            <div
-                              className="text-[9px] sm:text-[10px] uppercase tracking-wide font-semibold"
-                              style={{ color: theme.subTextColor }}
-                            >
+                            <div className="text-white text-[9px] sm:text-[10px] uppercase tracking-wide font-semibold">
                               Valid Until
-                            </div>
-                            <div
-                              className="font-mono font-bold text-xs sm:text-sm"
-                              style={{ color: theme.textColor }}
-                            >
+                          </div>
+                            <div className="text-white font-mono font-bold text-xs sm:text-sm">
                               {formatDate(previewUser.expirationDate)}
                             </div>
                           </div>
@@ -992,11 +894,7 @@ export default function UserManagementPage() {
                     </div>
 
                     {/* ---- BACK FACE ---- */}
-                    <div
-                      ref={cardBackRef}
-                      className="card-face card-face-back rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300"
-                      style={{ boxShadow: "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)" }}
-                    >
+                    <div className="card-face card-face-back rounded-2xl overflow-hidden shadow-lg bg-[#eceae4] flex flex-col">
                       <div className="h-[18%] bg-[#221f20] flex-shrink-0" />
                       <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-6 py-2 sm:py-3">
                         <div className="bg-white border-y border-slate-300 py-1.5 px-3 mb-2 sm:mb-3">
@@ -1013,7 +911,7 @@ export default function UserManagementPage() {
                         </ul>
                         <div className={`flex items-center gap-2 border-t pt-1.5 sm:pt-2 mt-1 ${isDark ? "border-slate-400/40" : "border-slate-300"}`}>
                           <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden">
-                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" crossOrigin="anonymous" />
+                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
                           </div>
                           <span className="text-[9px] sm:text-[11px] font-extrabold tracking-wide text-slate-900 uppercase">
                             Fare Collection System
@@ -1060,23 +958,13 @@ export default function UserManagementPage() {
             );
           })()}
 
-          <DialogFooter className="gap-2 flex-wrap">
+          <DialogFooter className="gap-2">
             <Button
               variant="ghost"
               onClick={() => setPreviewUser(null)}
               className={`text-xs font-medium cursor-pointer ${isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500"}`}
             >
               Close
-            </Button>
-            {/* 🖨️ BAGO: Download PNG button — exports whichever side is currently showing (front/back) */}
-            <Button
-              variant="outline"
-              onClick={handleDownloadCardPng}
-              disabled={isExportingCard}
-              className={`text-xs font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 ${isDark ? "border-slate-700 text-slate-300 hover:bg-slate-800" : "border-slate-300 text-slate-700 hover:bg-slate-50"}`}
-            >
-              <Download className="w-3.5 h-3.5 mr-1.5" />
-              {isExportingCard ? "Exporting..." : `Download ${previewFlipped ? "Back" : "Front"} PNG`}
             </Button>
             {previewUser && (
               <Button
