@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() RPC call
-import html2canvas from "html2canvas-pro"; // 🖨️ FIXED: html2canvas-pro supports modern CSS color functions (oklch) used by newer Tailwind
+import html2canvas from "html2canvas"; // 🖨️ BAGO: para sa "Download PNG" ng card preview — existing na dependency sa project
 
 const PAGE_SIZE = 10;
 
@@ -464,51 +464,19 @@ export default function UserManagementPage() {
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
   };
 
-  // 🖨️ FIXED: Exports whichever card face is currently visible (front or back,
-  // based on previewFlipped) as a downloadable PNG using html2canvas-pro.
-  // Fixes applied vs. the old version:
-  //  1. Switched to html2canvas-pro — supports modern CSS color functions
-  //     (oklch/lab) used by newer Tailwind, which crashed the original html2canvas.
-  //  2. Temporarily flattens the 3D flip transform (rotateY) on the card before
-  //     capture — html2canvas-family libraries can't reliably read elements
-  //     inside a transform-style: preserve-3d stack, causing blank/broken exports
-  //     (especially for the back face). Restored immediately after capture.
-  //  3. Strips crossorigin from cloned <img> tags during capture so a missing
-  //     CORS header on /calbayog.png can't taint or kill the canvas export.
+  // 🖨️ BAGO: Exports whichever card face is currently visible (front or back,
+  // based on previewFlipped) as a downloadable PNG using html2canvas.
+  // Filename includes the card UID and which side was exported.
   const handleDownloadCardPng = async () => {
     const targetRef = previewFlipped ? cardBackRef : cardFrontRef;
     if (!targetRef.current || !previewUser) return;
 
-    const sceneEl = targetRef.current.closest(".card-flip-scene") as HTMLElement | null;
-    const innerEl = sceneEl?.querySelector(".card-flip-inner") as HTMLElement | null;
-
     setIsExportingCard(true);
-
-    // --- Neutralize the 3D flip transform before capture ---
-    const prevInnerTransform = innerEl?.style.transform;
-    const prevFaceTransform = targetRef.current.style.transform;
-    const prevBackfaceVisibility = targetRef.current.style.backfaceVisibility;
-    const prevPosition = targetRef.current.style.position;
-
-    if (innerEl) innerEl.style.transform = "none";
-    targetRef.current.style.transform = "none";
-    targetRef.current.style.backfaceVisibility = "visible";
-    targetRef.current.style.position = "relative";
-
     try {
-      // Let the flattened layout actually paint before we capture it
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-
       const canvas = await html2canvas(targetRef.current, {
         scale: 3, // mas mataas resolution para malinaw pag pinrint
         useCORS: true,
         backgroundColor: null,
-        imageTimeout: 5000,
-        onclone: (clonedDoc) => {
-          clonedDoc.querySelectorAll("img").forEach((img) => {
-            img.removeAttribute("crossorigin");
-          });
-        },
       });
       const dataUrl = canvas.toDataURL("image/png");
       const side = previewFlipped ? "back" : "front";
@@ -519,17 +487,8 @@ export default function UserManagementPage() {
       toast({ title: <SuccessTitle text="Card Image Downloaded" /> });
     } catch (err) {
       console.error("Failed to export card as PNG:", err);
-      toast({
-        title: "Failed to export card",
-        description: err instanceof Error ? err.message : undefined,
-        variant: "destructive",
-      });
+      toast({ title: "Failed to export card", variant: "destructive" });
     } finally {
-      // --- Restore the flip transform / positioning ---
-      if (innerEl) innerEl.style.transform = prevInnerTransform ?? "";
-      targetRef.current.style.transform = prevFaceTransform ?? "";
-      targetRef.current.style.backfaceVisibility = prevBackfaceVisibility ?? "";
-      targetRef.current.style.position = prevPosition ?? "";
       setIsExportingCard(false);
     }
   };
@@ -980,7 +939,7 @@ export default function UserManagementPage() {
                               theme.isLight ? "bg-slate-100 border-slate-300" : "bg-white/10 border-white/30"
                             }`}
                           >
-                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" crossOrigin="anonymous" />
                           </div>
                           <span
                             className="font-bold tracking-wide text-sm sm:text-base uppercase"
@@ -1054,7 +1013,7 @@ export default function UserManagementPage() {
                         </ul>
                         <div className={`flex items-center gap-2 border-t pt-1.5 sm:pt-2 mt-1 ${isDark ? "border-slate-400/40" : "border-slate-300"}`}>
                           <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden">
-                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" crossOrigin="anonymous" />
                           </div>
                           <span className="text-[9px] sm:text-[11px] font-extrabold tracking-wide text-slate-900 uppercase">
                             Fare Collection System
@@ -1109,7 +1068,7 @@ export default function UserManagementPage() {
             >
               Close
             </Button>
-            {/* 🖨️ Download PNG button — exports whichever side is currently showing (front/back) */}
+            {/* 🖨️ BAGO: Download PNG button — exports whichever side is currently showing (front/back) */}
             <Button
               variant="outline"
               onClick={handleDownloadCardPng}
