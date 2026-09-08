@@ -464,7 +464,90 @@ export default function UserManagementPage() {
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
   };
 
-    const handleDownloadCardPng = async () => {
+  // 🖨️ FIXED: Tailwind v4's opacity-modifier classes (bg-blue-950/40, etc.)
+  // compile to color-mix(in oklab, oklch(...) X%, transparent). Chrome's
+  // getComputedStyle() returns that expression as-is instead of resolving it
+  // to rgb(), and html2canvas's color parser can't read oklch/oklab/color-mix.
+  // Fix: run every such color expression through a real <canvas> 2D context —
+  // setting ctx.fillStyle to any valid CSS color and reading it back always
+  // normalizes to rgb()/hex, which html2canvas CAN parse. We scan every
+  // computed style property on every element in the clone, find any
+  // oklch/oklab/lch/lab/color-mix function calls (using balanced-paren
+  // matching so nested calls like color-mix(...oklch(...)...) work), convert
+  // them, and re-apply as an !important inline style.
+  const sanitizeColorsForExport = (root: HTMLElement) => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const cache = new Map<string, string>();
+    const colorFnPattern = /\b(oklch|oklab|lch|lab|color-mix)\(/;
+    const colorFnGlobal = /\b(oklch|oklab|lch|lab|color-mix)\(/g;
+
+    const toRgb = (fnCall: string): string => {
+      if (cache.has(fnCall)) return cache.get(fnCall)!;
+      let converted = fnCall;
+      if (ctx) {
+        try {
+          ctx.fillStyle = "#000000";
+          ctx.fillStyle = fnCall;
+          converted = ctx.fillStyle;
+        } catch {
+          // leave unconverted if canvas can't parse it either
+        }
+      }
+      cache.set(fnCall, converted);
+      return converted;
+    };
+
+    const convertValue = (value: string): string => {
+      if (!colorFnPattern.test(value)) return value;
+      let result = "";
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+      colorFnGlobal.lastIndex = 0;
+      while ((match = colorFnGlobal.exec(value))) {
+        const start = match.index;
+        const parenStart = start + match[0].length - 1;
+        let depth = 1;
+        let i = parenStart + 1;
+        for (; i < value.length && depth > 0; i++) {
+          if (value[i] === "(") depth++;
+          else if (value[i] === ")") depth--;
+        }
+        const end = i;
+        const fullMatch = value.slice(start, end);
+        result += value.slice(lastIndex, start) + toRgb(fullMatch);
+        lastIndex = end;
+        colorFnGlobal.lastIndex = end;
+      }
+      result += value.slice(lastIndex);
+      return result;
+    };
+
+    const all = [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))];
+    all.forEach((el) => {
+      const computed = window.getComputedStyle(el);
+      for (let i = 0; i < computed.length; i++) {
+        const prop = computed[i];
+        const value = computed.getPropertyValue(prop);
+        if (value && colorFnPattern.test(value)) {
+          const converted = convertValue(value);
+          try {
+            el.style.setProperty(prop, converted, "important");
+          } catch {
+            // some computed properties are read-only / shorthand-only — skip
+          }
+        }
+      }
+    });
+  };
+
+  // 🖨️ FIXED: html2canvas cannot reliably capture elements sitting inside a
+  // 3D-transformed ancestor (.card-flip-inner uses perspective / preserve-3d /
+  // rotateY / backface-visibility for the flip animation). That was causing
+  // the export to come out blank or throw. Fix: clone the target face into a
+  // flat, off-screen, untransformed wrapper, strip any oklch/oklab colors via
+  // sanitizeColorsForExport, and capture THAT instead.
+  const handleDownloadCardPng = async () => {
     const sourceRef = previewFlipped ? cardBackRef : cardFrontRef;
     if (!sourceRef.current || !previewUser) return;
 
@@ -476,6 +559,7 @@ export default function UserManagementPage() {
       const original = sourceRef.current;
       const rect = original.getBoundingClientRect();
 
+      // Build an off-screen, non-transformed container
       wrapper = document.createElement("div");
       wrapper.style.position = "fixed";
       wrapper.style.top = "-99999px";
@@ -484,6 +568,7 @@ export default function UserManagementPage() {
       wrapper.style.height = `${rect.height}px`;
       wrapper.style.overflow = "hidden";
 
+      // Clone the card face and strip any transform/backface styling
       const clone = original.cloneNode(true) as HTMLElement;
       clone.style.position = "static";
       clone.style.transform = "none";
@@ -500,7 +585,7 @@ export default function UserManagementPage() {
       await new Promise((resolve) => requestAnimationFrame(resolve));
 
       const canvas = await html2canvas(clone, {
-        scale: 3,
+        scale: 3, // mas mataas resolution para malinaw pag pinrint
         useCORS: true,
         backgroundColor: null,
       });
