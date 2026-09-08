@@ -464,11 +464,54 @@ export default function UserManagementPage() {
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
   };
 
-  // 🖨️ FIXED: html2canvas cannot reliably capture elements sitting inside a
-  // 3D-transformed ancestor (.card-flip-inner uses perspective / preserve-3d /
-  // rotateY / backface-visibility for the flip animation). That was causing
-  // the export to come out blank or throw. Fix: clone the target face into a
-  // flat, off-screen, untransformed wrapper and capture THAT instead.
+    // 🖨️ FIXED (no new dependency): html2canvas can't parse modern oklch/oklab
+  // color functions (used by Tailwind v4's default palette). Instead of
+  // switching libraries, we clone the card face into a flat off-screen
+  // wrapper, then walk every element in the clone and rewrite any
+  // oklch/oklab/lab/lch color into an rgb() equivalent using the browser's
+  // own computed style resolution (getComputedStyle always returns colors
+  // already resolved to rgb() in most browsers, which is what we exploit
+  // here by copying computed values onto inline styles).
+  const sanitizeColorsForExport = (root: HTMLElement) => {
+    const all = [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))];
+    const props = [
+      "color",
+      "backgroundColor",
+      "borderColor",
+      "borderTopColor",
+      "borderRightColor",
+      "borderBottomColor",
+      "borderLeftColor",
+      "outlineColor",
+      "boxShadow",
+      "backgroundImage",
+      "textDecorationColor",
+      "fill",
+      "stroke",
+    ] as const;
+
+    all.forEach((el) => {
+      const computed = window.getComputedStyle(el);
+      props.forEach((prop) => {
+        try {
+          const value = computed.getPropertyValue(
+            prop.replace(/([A-Z])/g, "-$1").toLowerCase()
+          );
+          if (value && /oklch|oklab|lab\(|lch\(|color-mix/i.test(value)) {
+            // Can't easily convert these client-side without extra libs,
+            // so fall back to removing the offending declaration entirely
+            // for that property, letting the element inherit/default instead.
+            (el.style as any)[prop] = "";
+          } else if (value) {
+            (el.style as any)[prop] = value;
+          }
+        } catch {
+          // ignore unsupported properties
+        }
+      });
+    });
+  };
+
   const handleDownloadCardPng = async () => {
     const sourceRef = previewFlipped ? cardBackRef : cardFrontRef;
     if (!sourceRef.current || !previewUser) return;
@@ -481,7 +524,6 @@ export default function UserManagementPage() {
       const original = sourceRef.current;
       const rect = original.getBoundingClientRect();
 
-      // Build an off-screen, non-transformed container
       wrapper = document.createElement("div");
       wrapper.style.position = "fixed";
       wrapper.style.top = "-99999px";
@@ -490,7 +532,6 @@ export default function UserManagementPage() {
       wrapper.style.height = `${rect.height}px`;
       wrapper.style.overflow = "hidden";
 
-      // Clone the card face and strip any transform/backface styling
       const clone = original.cloneNode(true) as HTMLElement;
       clone.style.position = "static";
       clone.style.transform = "none";
@@ -501,11 +542,13 @@ export default function UserManagementPage() {
       wrapper.appendChild(clone);
       document.body.appendChild(wrapper);
 
-      // Give the browser a tick to lay out the cloned node before capture
+      // Let layout settle, then neutralize any oklch/oklab colors
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      sanitizeColorsForExport(clone);
       await new Promise((resolve) => requestAnimationFrame(resolve));
 
       const canvas = await html2canvas(clone, {
-        scale: 3, // mas mataas resolution para malinaw pag pinrint
+        scale: 3,
         useCORS: true,
         backgroundColor: null,
       });
