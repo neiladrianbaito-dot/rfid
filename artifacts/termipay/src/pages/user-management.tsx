@@ -464,52 +464,20 @@ export default function UserManagementPage() {
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
   };
 
-  // 🖨️ FIXED: html2canvas cannot reliably capture elements sitting inside a
-  // 3D-transformed ancestor (.card-flip-inner uses perspective / preserve-3d /
-  // rotateY / backface-visibility for the flip animation). That was causing
-  // the export to come out blank or throw. Fix: clone the target face into a
-  // flat, off-screen, untransformed wrapper and capture THAT instead.
+  // 🖨️ BAGO: Exports whichever card face is currently visible (front or back,
+  // based on previewFlipped) as a downloadable PNG using html2canvas.
+  // Filename includes the card UID and which side was exported.
   const handleDownloadCardPng = async () => {
-    const sourceRef = previewFlipped ? cardBackRef : cardFrontRef;
-    if (!sourceRef.current || !previewUser) return;
+    const targetRef = previewFlipped ? cardBackRef : cardFrontRef;
+    if (!targetRef.current || !previewUser) return;
 
     setIsExportingCard(true);
-
-    let wrapper: HTMLDivElement | null = null;
-
     try {
-      const original = sourceRef.current;
-      const rect = original.getBoundingClientRect();
-
-      // Build an off-screen, non-transformed container
-      wrapper = document.createElement("div");
-      wrapper.style.position = "fixed";
-      wrapper.style.top = "-99999px";
-      wrapper.style.left = "-99999px";
-      wrapper.style.width = `${rect.width}px`;
-      wrapper.style.height = `${rect.height}px`;
-      wrapper.style.overflow = "hidden";
-
-      // Clone the card face and strip any transform/backface styling
-      const clone = original.cloneNode(true) as HTMLElement;
-      clone.style.position = "static";
-      clone.style.transform = "none";
-      clone.style.backfaceVisibility = "visible";
-      clone.style.width = `${rect.width}px`;
-      clone.style.height = `${rect.height}px`;
-
-      wrapper.appendChild(clone);
-      document.body.appendChild(wrapper);
-
-      // Give the browser a tick to lay out the cloned node before capture
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-
-      const canvas = await html2canvas(clone, {
+      const canvas = await html2canvas(targetRef.current, {
         scale: 3, // mas mataas resolution para malinaw pag pinrint
         useCORS: true,
         backgroundColor: null,
       });
-
       const dataUrl = canvas.toDataURL("image/png");
       const side = previewFlipped ? "back" : "front";
       const link = document.createElement("a");
@@ -521,9 +489,6 @@ export default function UserManagementPage() {
       console.error("Failed to export card as PNG:", err);
       toast({ title: "Failed to export card", variant: "destructive" });
     } finally {
-      if (wrapper && wrapper.parentNode) {
-        wrapper.parentNode.removeChild(wrapper);
-      }
       setIsExportingCard(false);
     }
   };
