@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, Download } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() RPC call
+import html2canvas from "html2canvas"; // 👈 BAGO: para sa pag-export ng card bilang PNG
 
 const PAGE_SIZE = 10;
 
@@ -260,6 +261,13 @@ export default function UserManagementPage() {
   // 👈 BAGO: loading state para sa direct RPC call (kapalit ng renewMutation.isPending)
   const [isRenewing, setIsRenewing] = useState(false);
 
+  // 👈 BAGO: refs sa front/back card faces (ginagamit ng html2canvas para
+  // i-capture ang tamang face nang hindi naaapektuhan ng 3D flip transform),
+  // at loading state habang ginagawa ang PNG export.
+  const cardFrontRef = useRef<HTMLDivElement>(null);
+  const cardBackRef = useRef<HTMLDivElement>(null);
+  const [isDownloadingCard, setIsDownloadingCard] = useState(false);
+
   const [editForm, setEditForm] = useState({
     fullName: "",
     contactNumber: "",
@@ -455,6 +463,38 @@ export default function UserManagementPage() {
     queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
     setRenewUser(null);
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
+  };
+
+  // 👈 BAGO: I-export bilang PNG ang currently-visible face (front o back)
+  // ng card preview gamit ang html2canvas. Dahil direkta nating tina-target
+  // ang front/back div mismo (hindi ang parent flip-container), hindi na
+  // apektado ng 3D `rotateY` transform ang capture — laging tama ang
+  // lalabas kahit naka-flip man o hindi.
+  const handleDownloadCard = async () => {
+    const node = previewFlipped ? cardBackRef.current : cardFrontRef.current;
+    if (!node || !previewUser) return;
+
+    setIsDownloadingCard(true);
+    try {
+      const canvas = await html2canvas(node, {
+        scale: 3, // mas mataas na resolution para malinaw ang exported PNG
+        useCORS: true, // para makapag-load ang /calbayog.png na larawan sa canvas
+        backgroundColor: null,
+      });
+      const dataUrl = canvas.toDataURL("image/png");
+
+      const link = document.createElement("a");
+      link.download = `${previewUser.cardUid || "card"}-${previewFlipped ? "back" : "front"}.png`;
+      link.href = dataUrl;
+      link.click();
+
+      toast({ title: <SuccessTitle text="Card downloaded" /> });
+    } catch (err) {
+      console.error("Failed to export card as PNG:", err);
+      toast({ title: "Failed to download card", variant: "destructive" });
+    } finally {
+      setIsDownloadingCard(false);
+    }
   };
 
   return (
@@ -882,6 +922,7 @@ export default function UserManagementPage() {
                   <div className={`card-flip-inner ${previewFlipped ? "is-flipped" : ""}`}>
                     {/* ---- FRONT FACE ---- */}
                     <div
+                      ref={cardFrontRef}
                       className={`card-face rounded-2xl overflow-hidden border ${
                         theme.isLight ? "border-slate-300" : "border-transparent"
                       }`}
@@ -956,6 +997,7 @@ export default function UserManagementPage() {
 
                     {/* ---- BACK FACE ---- */}
                     <div
+                      ref={cardBackRef}
                       className="card-face card-face-back rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300"
                       style={{ boxShadow: "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)" }}
                     >
@@ -1030,6 +1072,19 @@ export default function UserManagementPage() {
             >
               Close
             </Button>
+            {/* 👈 BAGO: Download PNG button — nagde-download ng currently
+                visible face (front kung hindi naka-flip, back kung naka-flip) */}
+            {previewUser && (
+              <Button
+                variant="outline"
+                onClick={handleDownloadCard}
+                disabled={isDownloadingCard}
+                className={`text-xs font-semibold px-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${isDark ? "border-slate-700 text-slate-200 hover:bg-slate-800" : ""}`}
+              >
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                {isDownloadingCard ? "Downloading..." : "Download PNG"}
+              </Button>
+            )}
             {previewUser && (
               <Button
                 onClick={() => {
