@@ -487,26 +487,23 @@ export default function UserManagementPage() {
   let converted = fnCall;
   if (ctx) {
     try {
-      // ⚠️ We do NOT rely on reading `ctx.fillStyle` back as a string.
-      // In current Chrome, setting fillStyle to a wide-gamut color
-      // (oklch/oklab/color-mix) and reading it back can itself return
-      // "oklab(...)" instead of resolving to rgb()/hex — the exact
-      // string html2canvas can't parse — so that round-trip is no
-      // longer a safe conversion.
-      // Instead, actually paint 1 pixel with the color and read the
-      // raw bytes back via getImageData, which always returns plain
-      // 0–255 sRGB values no matter what color syntax set fillStyle.
+      const sentinel = "rgb(1, 2, 3)";
       ctx.clearRect(0, 0, 1, 1);
-      ctx.fillStyle = "#000000";
-      ctx.fillStyle = fnCall;
+      ctx.fillStyle = sentinel;
+      ctx.fillStyle = fnCall; // if unsupported, browsers ignore this and keep sentinel
       ctx.fillRect(0, 0, 1, 1);
       const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
-      converted =
-        a === 255
+      if (r === 1 && g === 2 && b === 3) {
+        // fillStyle didn't actually accept fnCall — canvas silently kept
+        // the sentinel. Bail out rather than emit a wrong color.
+        converted = "rgb(128, 128, 128)"; // safe neutral fallback
+      } else {
+        converted = a === 255
           ? `rgb(${r}, ${g}, ${b})`
           : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+      }
     } catch {
-      // leave unconverted if canvas can't parse it either
+      converted = "rgb(128, 128, 128)";
     }
   }
   cache.set(fnCall, converted);
@@ -599,11 +596,17 @@ export default function UserManagementPage() {
       sanitizeColorsForExport(clone);
       await new Promise((resolve) => requestAnimationFrame(resolve));
 
-      const canvas = await html2canvas(clone, {
-        scale: 3, // mas mataas resolution para malinaw pag pinrint
-        useCORS: true,
-        backgroundColor: null,
-      });
+     const canvas = await html2canvas(clone, {
+  scale: 3,
+  useCORS: true,
+  backgroundColor: null,
+  onclone: (_doc, el) => {
+    // Runs on html2canvas's own internal clone, right before it parses
+    // styles — this is the tree that actually needs to be oklch/oklab/
+    // color-mix free, not our earlier wrapper clone.
+    sanitizeColorsForExport(el);
+  },
+});
 
       const dataUrl = canvas.toDataURL("image/png");
       const side = previewFlipped ? "back" : "front";
