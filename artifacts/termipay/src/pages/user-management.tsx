@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,7 +29,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
-import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() RPC call
+import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() / balance transfer RPC calls
 
 const PAGE_SIZE = 10;
 
@@ -39,6 +39,9 @@ const TYPE_FILTERS = ["All", "Regular", "Student", "Senior", "PWD"] as const;
 // from the card's expirationDate via isCardExpired(), so it can catch cards
 // that are technically still "Active" in the status column but past their date.
 const STATUS_FILTERS = ["All", "Active", "Inactive", "Blocked", "Expired"] as const;
+
+// ➕ Reasons a card would need a balance transfer (lost/stolen/damaged replacement)
+const TRANSFER_REASONS = ["Lost Card", "Stolen Card", "Damaged Card", "Other"] as const;
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -260,6 +263,13 @@ export default function UserManagementPage() {
   // 👈 BAGO: loading state para sa direct RPC call (kapalit ng renewMutation.isPending)
   const [isRenewing, setIsRenewing] = useState(false);
 
+  // ✅ Transfer-balance state — lost/stolen card: move full balance to a replacement card
+  const [transferUser, setTransferUser] = useState<any>(null); // source (lost/stolen) card
+  const [transferQuery, setTransferQuery] = useState("");
+  const [transferTarget, setTransferTarget] = useState<any>(null); // replacement card
+  const [transferReason, setTransferReason] = useState<(typeof TRANSFER_REASONS)[number]>("Lost Card");
+  const [isTransferring, setIsTransferring] = useState(false);
+
   const [editForm, setEditForm] = useState({
     fullName: "",
     contactNumber: "",
@@ -455,6 +465,79 @@ export default function UserManagementPage() {
     queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
     setRenewUser(null);
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
+  };
+
+  // ✅ Opens the transfer-balance dialog for a given user (the lost/stolen card).
+  // 🚫➕ GUARD: a card with zero balance has nothing to transfer.
+  const openTransfer = (user: any) => {
+    if ((user.balance || 0) <= 0) {
+      toast({
+        title: "Nothing to transfer",
+        description: "This card has a zero balance.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setTransferUser(user);
+    setTransferQuery("");
+    setTransferTarget(null);
+    setTransferReason("Lost Card");
+  };
+
+  // ➕ Live search suggestions for the replacement card — Active cards only,
+  // excludes the source card itself, matches on UID or full name.
+  const transferCandidates = transferUser
+    ? userList
+        .filter((u: any) => u.id !== transferUser.id && u.status === "Active")
+        .filter((u: any) => {
+          if (!transferQuery.trim()) return true;
+          const q = transferQuery.trim().toLowerCase();
+          return (
+            u.cardUid?.toLowerCase().includes(q) ||
+            u.fullName?.toLowerCase().includes(q)
+          );
+        })
+        .slice(0, 8)
+    : [];
+
+  // ✅ Inserting a row into card_balance_transfers is enough — the
+  // trg_process_balance_transfer BEFORE INSERT trigger (Postgres, source of
+  // truth) locks both card rows, moves the full source balance onto the
+  // target card, and marks the source card as Blocked. We just read back
+  // the completed row for the confirmation toast.
+  const confirmTransfer = async () => {
+    if (!transferUser || !transferTarget) return;
+
+    setIsTransferring(true);
+
+    const { data, error } = await supabase
+      .from("card_balance_transfers")
+      .insert({
+        source_card_id: transferUser.id,
+        target_card_id: transferTarget.id,
+        reason: transferReason,
+      })
+      .select()
+      .single();
+
+    setIsTransferring(false);
+
+    if (error) {
+      console.error("Transfer balance error:", error);
+      toast({
+        title: "Failed to transfer balance",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+    setTransferUser(null);
+    toast({
+      title: <SuccessTitle text="Balance Transferred Successfully" />,
+      description: `${formatPeso(data?.amount ?? transferUser.balance ?? 0)} moved to ${transferTarget.cardUid}. Old card is now blocked.`,
+    });
   };
 
   return (
@@ -763,6 +846,16 @@ export default function UserManagementPage() {
                                   title={expired ? "Renew card (extend 1 year)" : `Not yet expired — valid until ${formatDate(user.expirationDate)}`}
                                 >
                                   <RefreshCw className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => openTransfer(user)}
+                                  disabled={(user.balance || 0) <= 0}
+                                  className={`h-8 w-8 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "text-orange-400 hover:text-orange-300 hover:bg-orange-950/40" : "text-orange-500 hover:text-orange-700 hover:bg-orange-50"}`}
+                                  title={(user.balance || 0) > 0 ? "Transfer balance (lost/stolen card)" : "No balance to transfer"}
+                                >
+                                  <ArrowRightLeft className="w-3.5 h-3.5" />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -1247,6 +1340,113 @@ export default function UserManagementPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ✅ Transfer Balance Dialog — lost/stolen card: move balance to a replacement card */}
+      <Dialog open={!!transferUser} onOpenChange={(open) => !open && setTransferUser(null)}>
+        <DialogContent className={`sm:max-w-lg [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-orange-500">
+              <ArrowRightLeft size={18} /> Transfer Balance
+            </DialogTitle>
+          </DialogHeader>
+
+          {transferUser && (
+            <div className="space-y-4 py-2">
+              {/* Source card summary */}
+              <div className={`rounded-lg border p-3 text-sm ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  From (will be blocked)
+                </span>
+                <div className="flex items-center justify-between mt-1">
+                  <div>
+                    <div className="font-mono text-xs text-blue-500 font-semibold">{transferUser.cardUid}</div>
+                    <div className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>{transferUser.fullName}</div>
+                  </div>
+                  <div className={`font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                    {formatPeso(transferUser.balance || 0)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Reason */}
+              <div className="space-y-2">
+                <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Reason</Label>
+                <Select value={transferReason} onValueChange={(v) => setTransferReason(v as (typeof TRANSFER_REASONS)[number])}>
+                  <SelectTrigger className={`text-sm font-medium cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+                    {TRANSFER_REASONS.map((r) => (
+                      <SelectItem key={r} value={r} className="cursor-pointer">{r}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Replacement card search */}
+              <div className="space-y-2">
+                <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Replacement Card</Label>
+                <div className="relative">
+                  <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+                  <Input
+                    placeholder="Search by UID or name..."
+                    value={transferTarget ? `${transferTarget.cardUid} — ${transferTarget.fullName}` : transferQuery}
+                    onChange={(e) => { setTransferTarget(null); setTransferQuery(e.target.value); }}
+                    className={`pl-10 text-sm ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}
+                  />
+                </div>
+
+                {!transferTarget && transferQuery.trim() && (
+                  <div className={`max-h-40 overflow-auto rounded-lg border divide-y ${isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-100"}`}>
+                    {transferCandidates.length > 0 ? (
+                      transferCandidates.map((u: any) => (
+                        <button
+                          key={u.id}
+                          type="button"
+                          onClick={() => { setTransferTarget(u); setTransferQuery(""); }}
+                          className={`w-full text-left px-3 py-2 text-sm cursor-pointer ${isDark ? "hover:bg-slate-800" : "hover:bg-slate-50"}`}
+                        >
+                          <span className="font-mono text-xs text-blue-500 font-semibold mr-2">{u.cardUid}</span>
+                          <span className={isDark ? "text-slate-300" : "text-slate-700"}>{u.fullName}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className={`px-3 py-2 text-xs italic ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                        No matching active cards
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {transferTarget && (
+                <div className={`rounded-lg border px-3 py-2 text-xs font-medium ${isDark ? "bg-emerald-950/40 border-emerald-900 text-emerald-400" : "bg-emerald-50 border-emerald-200 text-emerald-600"}`}>
+                  {formatPeso(transferUser.balance || 0)} will move to {transferTarget.cardUid} ({transferTarget.fullName}). {transferUser.cardUid} will be marked Blocked.
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => setTransferUser(null)}
+              disabled={isTransferring}
+              className={`text-xs font-medium cursor-pointer disabled:cursor-not-allowed ${isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500"}`}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmTransfer}
+              disabled={isTransferring || !transferTarget}
+              className="bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold px-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-orange-600"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5 mr-1.5" />
+              {isTransferring ? "Transferring..." : "Confirm Transfer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirm */}
       <AlertDialog open={!!deleteUser} onOpenChange={(open) => !open && setDeleteUser(null)}>
