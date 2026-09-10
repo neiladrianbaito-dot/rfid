@@ -22,6 +22,11 @@ import {
   PhilippinePeso,
   Filter,
   RotateCcw,
+  Wallet,
+  X,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -43,6 +48,17 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
   if (!trimmed) return "";
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
+}
+
+// ── normalizes the Supabase Functions base URL, e.g.
+// "https://xxxx.supabase.co" -> "https://xxxx.functions.supabase.co" ──
+function getSupabaseFunctionsUrl(): string {
+  const explicit = (import.meta.env.VITE_SUPABASE_FUNCTIONS_URL || "").trim().replace(/\/+$/, "");
+  if (explicit) return explicit;
+  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || "").trim().replace(/\/+$/, "");
+  if (!supabaseUrl) return "";
+  // https://<ref>.supabase.co -> https://<ref>.functions.supabase.co
+  return supabaseUrl.replace(".supabase.co", ".functions.supabase.co");
 }
 
 // ── fire-and-forget audit log call for exports ──
@@ -83,6 +99,18 @@ const DAY_OPTIONS = Array.from({ length: 31 }, (_, i) => {
   const val = String(i + 1).padStart(2, "0");
   return { value: val, label: String(i + 1) };
 });
+
+// bank/e-wallet channels Xendit commonly supports for disbursement in PH —
+// trim/extend this list to match what's actually enabled on your Xendit account
+const DISBURSEMENT_CHANNELS = [
+  { value: "PH_GCASH", label: "GCash" },
+  { value: "PH_PAYMAYA", label: "Maya" },
+  { value: "PH_BDO", label: "BDO" },
+  { value: "PH_BPI", label: "BPI" },
+  { value: "PH_UBP", label: "UnionBank" },
+  { value: "PH_MBTC", label: "Metrobank" },
+  { value: "PH_LANDBANK", label: "Landbank" },
+];
 
 // Splits a "YYYY-MM-DD" (or ISO) date string into { year, month, day } parts.
 function splitDateString(dateStr: string): { year: string; month: string; day: string } | null {
@@ -169,6 +197,18 @@ export default function ReportsPage() {
   const [filterYear, setFilterYear] = useState<string>("all");
   const [filterMonth, setFilterMonth] = useState<string>("all");
   const [filterDay, setFilterDay] = useState<string>("all");
+
+  // ── disbursement state ──
+  const [disburseModalOpen, setDisburseModalOpen] = useState(false);
+  const [disburseForm, setDisburseForm] = useState({
+    bank_code: "",
+    account_holder_name: "",
+    account_number: "",
+    description: "",
+  });
+  const [isDisbursing, setIsDisbursing] = useState(false);
+  const [disburseError, setDisburseError] = useState<string | null>(null);
+  const [disburseSuccess, setDisburseSuccess] = useState<string | null>(null);
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
@@ -349,8 +389,89 @@ export default function ReportsPage() {
     return parts.join(" ");
   }, [isFilterActive, filterYear, filterMonth, filterDay]);
 
+  // ── amount that will be sent to Xendit: the currently filtered total
+  // when a filter is active, otherwise today's revenue. This is exactly
+  // what's shown as "Revenue Credited" in the table below it. ──
+  const disburseAmount = isFilterActive ? filteredRevenueTotal : todayRevenue;
+  const disburseAmountLabel = isFilterActive ? `${filterLabel} Revenue` : "Today's Revenue";
+
   const handleOpenPreview = () => {
     navigate("/reports/preview");
+  };
+
+  const openDisburseModal = () => {
+    setDisburseError(null);
+    setDisburseSuccess(null);
+    setDisburseModalOpen(true);
+  };
+
+  const closeDisburseModal = () => {
+    if (isDisbursing) return; // don't let them close mid-request
+    setDisburseModalOpen(false);
+  };
+
+  const handleDisburseFieldChange = (field: keyof typeof disburseForm, value: string) => {
+    setDisburseForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSubmitDisbursement = async () => {
+    setDisburseError(null);
+
+    if (disburseAmount <= 0) {
+      setDisburseError("Wala pang revenue na pwedeng i-disburse para sa napiling range.");
+      return;
+    }
+    if (!disburseForm.bank_code) {
+      setDisburseError("Pumili ng bank o e-wallet.");
+      return;
+    }
+    if (!disburseForm.account_holder_name.trim() || !disburseForm.account_number.trim()) {
+      setDisburseError("Kailangan ang account holder name at account number.");
+      return;
+    }
+
+    setIsDisbursing(true);
+    try {
+      const functionsUrl = getSupabaseFunctionsUrl();
+      const token = window.localStorage.getItem("termipay_auth_token");
+
+      const res = await fetch(`${functionsUrl}/create-disbursement`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          amount: disburseAmount,
+          bank_code: disburseForm.bank_code,
+          account_holder_name: disburseForm.account_holder_name.trim(),
+          account_number: disburseForm.account_number.trim(),
+          description: disburseForm.description.trim() || `${disburseAmountLabel} disbursement`,
+          requested_by: adminName,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Nabigo ang disbursement request.");
+      }
+
+      setDisburseSuccess(
+        `Naipadala na ang ${formatPeso(disburseAmount)} — pending pa ang confirmation mula sa Xendit.`
+      );
+      setDisburseForm({ bank_code: "", account_holder_name: "", account_number: "", description: "" });
+
+      logExportAudit({
+        entity: "Disbursement",
+        format: "Xendit",
+        details: `${adminName} triggered a disbursement of ${formatPeso(disburseAmount)} (${disburseAmountLabel}) to ${disburseForm.account_holder_name.trim()}`,
+      });
+    } catch (err: any) {
+      setDisburseError(err?.message || "May error na nangyari, subukan ulit.");
+    } finally {
+      setIsDisbursing(false);
+    }
   };
 
   const handleExportExcelLogs = async () => {
@@ -831,15 +952,28 @@ export default function ReportsPage() {
       {/* ══ DATA TABLE ══ */}
       <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-          <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            <FileText size={14} className="text-blue-500" />
-            Detailed Revenue Log
-            {isFilterActive && (
-              <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                — {filterLabel}
-              </span>
-            )}
-          </CardTitle>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <FileText size={14} className="text-blue-500" />
+              Detailed Revenue Log
+              {isFilterActive && (
+                <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  — {filterLabel}
+                </span>
+              )}
+            </CardTitle>
+
+            {/* ── Disburse Revenue trigger — lives right beside the Revenue Credited log ── */}
+            <Button
+              onClick={openDisburseModal}
+              disabled={disburseAmount <= 0}
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs px-4 h-8 cursor-pointer transition-colors duration-150 shadow-sm"
+              data-testid="button-disburse-revenue"
+            >
+              <Wallet className="w-3.5 h-3.5 mr-2" />
+              Disburse {formatPeso(disburseAmount)}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
           {isLoading ? (
@@ -884,6 +1018,133 @@ export default function ReportsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ══ DISBURSE REVENUE MODAL ══ */}
+      {disburseModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={closeDisburseModal}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`w-full max-w-md rounded-lg border shadow-xl ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}
+          >
+            <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+              <h3 className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+                <Wallet size={16} className="text-indigo-500" />
+                Disburse Revenue
+              </h3>
+              <button onClick={closeDisburseModal} className={isDark ? "text-slate-500 hover:text-white" : "text-slate-400 hover:text-slate-900"}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="px-5 py-4 space-y-4">
+              <div className={`flex items-center justify-between px-3 py-2.5 rounded-md border text-sm ${isDark ? "bg-indigo-950/40 border-indigo-900" : "bg-indigo-50 border-indigo-100"}`}>
+                <span className={isDark ? "text-indigo-300" : "text-indigo-700"}>{disburseAmountLabel}</span>
+                <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>{formatPeso(disburseAmount)}</span>
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Bank / E-Wallet</label>
+                <select
+                  value={disburseForm.bank_code}
+                  onChange={(e) => handleDisburseFieldChange("bank_code", e.target.value)}
+                  data-testid="select-disburse-bank"
+                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                  }`}
+                >
+                  <option value="">Select channel</option>
+                  {DISBURSEMENT_CHANNELS.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Account Holder Name</label>
+                <input
+                  type="text"
+                  value={disburseForm.account_holder_name}
+                  onChange={(e) => handleDisburseFieldChange("account_holder_name", e.target.value)}
+                  data-testid="input-disburse-holder-name"
+                  placeholder="Juan Dela Cruz"
+                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Account / Mobile Number</label>
+                <input
+                  type="text"
+                  value={disburseForm.account_number}
+                  onChange={(e) => handleDisburseFieldChange("account_number", e.target.value)}
+                  data-testid="input-disburse-account-number"
+                  placeholder="09171234567"
+                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Note (optional)</label>
+                <input
+                  type="text"
+                  value={disburseForm.description}
+                  onChange={(e) => handleDisburseFieldChange("description", e.target.value)}
+                  data-testid="input-disburse-description"
+                  placeholder={`${disburseAmountLabel} disbursement`}
+                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                  }`}
+                />
+              </div>
+
+              {disburseError && (
+                <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-red-50 border border-red-100 text-red-700 text-xs">
+                  <AlertCircle size={14} className="mt-0.5 flex-none" />
+                  {disburseError}
+                </div>
+              )}
+              {disburseSuccess && (
+                <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs">
+                  <CheckCircle2 size={14} className="mt-0.5 flex-none" />
+                  {disburseSuccess}
+                </div>
+              )}
+            </div>
+
+            <div className={`flex justify-end gap-2 px-5 py-4 border-t ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+              <Button
+                onClick={closeDisburseModal}
+                disabled={isDisbursing}
+                className={`text-xs font-semibold px-4 h-9 ${isDark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-slate-100 hover:bg-slate-200 text-slate-700"}`}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSubmitDisbursement}
+                disabled={isDisbursing}
+                data-testid="button-confirm-disburse"
+                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-semibold px-4 h-9"
+              >
+                {isDisbursing ? (
+                  <>
+                    <Loader2 size={14} className="mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  "Confirm Disbursement"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
