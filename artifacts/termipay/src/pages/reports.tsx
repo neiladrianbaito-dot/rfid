@@ -104,13 +104,7 @@ const DAY_OPTIONS = Array.from({ length: 31 }, (_, i) => {
 // bank/e-wallet channels Xendit commonly supports for disbursement in PH —
 // trim/extend this list to match what's actually enabled on your Xendit account
 const DISBURSEMENT_CHANNELS = [
-  { value: "PH_GCASH", label: "GCash" },
-  { value: "PH_PAYMAYA", label: "Maya" },
   { value: "PH_BDO", label: "BDO" },
-  { value: "PH_BPI", label: "BPI" },
-  { value: "PH_UBP", label: "UnionBank" },
-  { value: "PH_MBTC", label: "Metrobank" },
-  { value: "PH_LANDBANK", label: "Landbank" },
 ];
 
 // Splits a "YYYY-MM-DD" (or ISO) date string into { year, month, day } parts.
@@ -1109,7 +1103,7 @@ export default function ReportsPage() {
                           {c.value === "PH_BDO" ? (
                             <>
                               <span>{c.label}</span>
-                              <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none" />
+                              <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none ml-auto" />
                             </>
                           ) : (
                             <span>{c.label}</span>
