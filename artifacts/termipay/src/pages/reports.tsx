@@ -27,6 +27,7 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  ChevronDown,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -200,6 +201,7 @@ export default function ReportsPage() {
 
   // ── disbursement state ──
   const [disburseModalOpen, setDisburseModalOpen] = useState(false);
+  const [disburseChannelOpen, setDisburseChannelOpen] = useState(false);
   const [disburseForm, setDisburseForm] = useState({
     bank_code: "",
     account_holder_name: "",
@@ -400,6 +402,7 @@ export default function ReportsPage() {
   };
 
   const openDisburseModal = () => {
+    setDisburseChannelOpen(false);
     setDisburseError(null);
     setDisburseSuccess(null);
     setDisburseModalOpen(true);
@@ -407,6 +410,7 @@ export default function ReportsPage() {
 
   const closeDisburseModal = () => {
     if (isDisbursing) return; // don't let them close mid-request
+    setDisburseChannelOpen(false);
     setDisburseModalOpen(false);
   };
 
@@ -1033,11 +1037,6 @@ export default function ReportsPage() {
               <h3 className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
                 <Wallet size={16} className="text-indigo-500" />
                 Disburse Revenue
-                <img
-                  src="/bdo.png"
-                  alt="BDO"
-                  className="h-6 w-auto object-contain ml-1"
-                />
               </h3>
               <button onClick={closeDisburseModal} className={isDark ? "text-slate-500 hover:text-white" : "text-slate-400 hover:text-slate-900"}>
                 <X size={18} />
@@ -1052,19 +1051,72 @@ export default function ReportsPage() {
 
               <div>
                 <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Bank / E-Wallet</label>
-                <select
-                  value={disburseForm.bank_code}
-                  onChange={(e) => handleDisburseFieldChange("bank_code", e.target.value)}
-                  data-testid="select-disburse-bank"
-                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-                  }`}
-                >
-                  <option value="">Select channel</option>
-                  {DISBURSEMENT_CHANNELS.map((c) => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <button
+                    type="button"
+                    data-testid="select-disburse-bank"
+                    onClick={() => setDisburseChannelOpen((prev) => !prev)}
+                    className={`w-full h-9 rounded-md border px-2.5 text-sm flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                      isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      {disburseForm.bank_code === "PH_BDO" ? (
+                        <>
+                          <img src="/bdo.png" alt="BDO" className="h-5 w-auto object-contain flex-none" />
+                          <span>BDO</span>
+                        </>
+                      ) : (
+                        <span>
+                          {DISBURSEMENT_CHANNELS.find((c) => c.value === disburseForm.bank_code)?.label || "Select channel"}
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown size={15} className={`flex-none transition-transform ${disburseChannelOpen ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {disburseChannelOpen && (
+                    <div
+                      className={`absolute z-50 mt-1 w-full rounded-md border shadow-lg overflow-hidden ${
+                        isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDisburseFieldChange("bank_code", "");
+                          setDisburseChannelOpen(false);
+                        }}
+                        className={`w-full h-9 px-2.5 text-left text-sm ${
+                          isDark ? "text-slate-400 hover:bg-slate-900" : "text-slate-500 hover:bg-slate-50"
+                        }`}
+                      >
+                        Select channel
+                      </button>
+
+                      {DISBURSEMENT_CHANNELS.map((c) => (
+                        <button
+                          key={c.value}
+                          type="button"
+                          onClick={() => {
+                            handleDisburseFieldChange("bank_code", c.value);
+                            setDisburseChannelOpen(false);
+                          }}
+                          className={`w-full h-10 px-2.5 text-left text-sm flex items-center gap-2 ${
+                            isDark ? "text-slate-200 hover:bg-slate-900" : "text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {c.value === "PH_BDO" ? (
+                            <img src="/bdo.png" alt="BDO" className="h-6 w-auto object-contain flex-none" />
+                          ) : (
+                            <span className="w-6" />
+                          )}
+                          <span>{c.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div>
