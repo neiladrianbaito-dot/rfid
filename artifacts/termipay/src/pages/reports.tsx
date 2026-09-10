@@ -1033,6 +1033,11 @@ export default function ReportsPage() {
               <h3 className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
                 <Wallet size={16} className="text-indigo-500" />
                 Disburse Revenue
+                <img
+                  src="/bdo.png"
+                  alt="BDO"
+                  className="h-6 w-auto object-contain ml-1"
+                />
               </h3>
               <button onClick={closeDisburseModal} className={isDark ? "text-slate-500 hover:text-white" : "text-slate-400 hover:text-slate-900"}>
                 <X size={18} />
