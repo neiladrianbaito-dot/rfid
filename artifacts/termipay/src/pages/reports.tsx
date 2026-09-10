@@ -1063,7 +1063,7 @@ export default function ReportsPage() {
                     <span className="flex items-center gap-2 min-w-0">
                       {disburseForm.bank_code === "PH_BDO" ? (
                         <>
-                          <img src="/bdo.png" alt="BDO" className="h-5 w-auto object-contain flex-none" />
+                          <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none" />
                           <span>BDO</span>
                         </>
                       ) : (
@@ -1107,7 +1107,7 @@ export default function ReportsPage() {
                           }`}
                         >
                           {c.value === "PH_BDO" ? (
-                            <img src="/bdo.png" alt="BDO" className="h-6 w-auto object-contain flex-none" />
+                            <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none" />
                           ) : (
                             <span className="w-6" />
                           )}
