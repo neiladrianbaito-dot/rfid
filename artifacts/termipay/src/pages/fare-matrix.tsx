@@ -105,10 +105,10 @@ function SuccessTitle({ text }: { text: string }) {
 }
 
 // ✅ Device type coming from Supabase `devices` table
+// NOTE: `location` column removed — it does not exist on this table.
 type Device = {
   device_id: string;
   name: string;
-  location: string | null;
   status: string;
   ip_address: string | null;
   firmware_version: string | null;
@@ -221,7 +221,7 @@ export default function FareMatrixPage() {
       const { data: devs } = await supabase
         .from("devices")
         .select(
-          "device_id, name, location, status, ip_address, firmware_version, last_ping, created_at"
+          "device_id, name, status, ip_address, firmware_version, last_ping, created_at"
         )
         .in("device_id", deviceIds);
       devicesData = (devs as Device[]) ?? [];
@@ -344,7 +344,7 @@ export default function FareMatrixPage() {
     let query = supabase
       .from("devices")
       .select(
-        "device_id, name, location, status, ip_address, firmware_version, last_ping, created_at"
+        "device_id, name, status, ip_address, firmware_version, last_ping, created_at"
       )
       .eq("status", "ONLINE") // 👈 matches the actual enum value in the devices table
       .order("name", { ascending: true });
@@ -1091,7 +1091,6 @@ export default function FareMatrixPage() {
                         <Wifi className="w-3.5 h-3.5 text-blue-500" />
                         <span>
                           {d.name}
-                          {d.location ? ` · ${d.location}` : ""}
                           {d.ip_address ? ` · ${d.ip_address}` : ""}
                         </span>
                       </div>
