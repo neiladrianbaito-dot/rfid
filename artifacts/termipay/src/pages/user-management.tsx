@@ -386,9 +386,7 @@ export default function UserManagementPage() {
   // contributes a "change" — comparing it would falsely enable Save.
   const hasChanges =
     editForm.fullName !== originalForm.fullName ||
-    editForm.contactNumber !== originalForm.contactNumber ||
-    editForm.status !== originalForm.status ||
-    editForm.type !== originalForm.type;
+    editForm.contactNumber !== originalForm.contactNumber;
 
   const handleUpdate = () => {
     if (!editUser || !hasChanges) return;
@@ -397,9 +395,6 @@ export default function UserManagementPage() {
       data: {
         fullName: editForm.fullName,
         contactNumber: editForm.contactNumber,
-        balance: parseFloat(editForm.balance),
-        status: editForm.status,
-        type: editForm.type,
       },
     });
   };
@@ -1152,8 +1147,17 @@ export default function UserManagementPage() {
           </DialogHeader>
 
           <div className="grid grid-cols-2 gap-4 py-4">
+            {/* Full Name */}
+            <div className="space-y-2 col-span-2">
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Full Name</Label>
+              <Input
+                value={editForm.fullName}
+                onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
+                className={`text-sm font-medium ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
+              />
+            </div>
 
-            {/* Contact Number — placed first */}
+            {/* Contact Number — directly below Full Name */}
             <div className="space-y-2 col-span-2">
               <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 <Phone size={10} /> Contact Number
@@ -1165,52 +1169,33 @@ export default function UserManagementPage() {
               />
             </div>
 
-            {/* Full Name — editable */}
-            <div className="space-y-2 col-span-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Full Name</Label>
-              <Input
-                value={editForm.fullName}
-                onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
-                className={`text-sm font-medium ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
-              />
-            </div>
-
-            {/* Class Type — read-only */}
+            {/* Card Type — fetched from the selected user's record and read-only */}
             <div className="space-y-2">
-              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                Class Type <span className="text-[9px] uppercase tracking-wide text-slate-500">(read-only)</span>
-              </Label>
-              <Select value={editForm.type} disabled>
-                <SelectTrigger
-                  className={`text-sm font-medium cursor-not-allowed opacity-80 ${
-                    isDark ? "bg-slate-950/60 border-slate-800 text-slate-400" : "bg-slate-50 border-slate-200 text-slate-500"
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(editForm.type)}`} />
-                    <SelectValue />
-                  </span>
-                </SelectTrigger>
-              </Select>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Card Type (read-only)</Label>
+              <div
+                className={`h-10 w-full rounded-md border px-3 flex items-center text-sm font-medium cursor-not-allowed ${
+                  isDark ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full inline-block mr-2 ${getTypeDotColor(editUser?.type)}`} />
+                {editUser?.type || "Regular"}
+              </div>
             </div>
 
-            {/* Account Status — read-only */}
+            {/* Account Status — fetched from the selected user's record and read-only */}
             <div className="space-y-2">
-              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                Account Status <span className="text-[9px] uppercase tracking-wide text-slate-500">(read-only)</span>
-              </Label>
-              <Select value={editForm.status} disabled>
-                <SelectTrigger
-                  className={`text-sm font-medium cursor-not-allowed opacity-80 ${
-                    isDark ? "bg-slate-950/60 border-slate-800 text-slate-400" : "bg-slate-50 border-slate-200 text-slate-500"
-                  }`}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-              </Select>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Account Status (read-only)</Label>
+              <div
+                className={`h-10 w-full rounded-md border px-3 flex items-center text-sm font-medium cursor-not-allowed ${
+                  isDark ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full inline-block mr-2 ${getStatusDotColor(editUser?.status || "")}`} />
+                {editUser?.status || "Unknown"}
+              </div>
             </div>
 
-            {/* Linked Account — read-only */}
+            {/* Linked Account — fetched from the selected user's record and read-only */}
             <div className="space-y-2 col-span-2">
               <Label
                 className="text-xs font-semibold flex items-center gap-1"
@@ -1232,20 +1217,19 @@ export default function UserManagementPage() {
               />
             </div>
 
-            {/* Balance — read-only */}
+            {/* Balance — fetched from the selected user's record and read-only */}
             <div className="space-y-2 col-span-2">
               <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 <Wallet size={10} /> Balance (read-only)
               </Label>
               <Input
                 disabled
-                value={formatPeso(parseFloat(editForm.balance) || 0)}
+                value={formatPeso(parseFloat(editUser?.balance ?? editForm.balance) || 0)}
                 className={`font-semibold text-sm font-mono cursor-not-allowed ${
                   isDark ? "bg-slate-950/60 border-slate-800 text-emerald-400" : "bg-slate-50 border-slate-200 text-emerald-600"
                 }`}
               />
             </div>
-
           </div>
 
           <DialogFooter className="gap-2">
@@ -1258,11 +1242,10 @@ export default function UserManagementPage() {
             </Button>
             <Button
               onClick={handleUpdate}
-              disabled={updateMutation.isPending || !hasChanges}
-              title={!hasChanges ? "No changes to save" : undefined}
-              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-6 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-blue-600"
+              disabled={!hasChanges || updateMutation.isPending}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {updateMutation.isPending ? "Updating..." : "Save Changes"}
+              {updateMutation.isPending ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
