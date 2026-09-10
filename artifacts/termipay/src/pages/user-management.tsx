@@ -1150,8 +1150,22 @@ export default function UserManagementPage() {
               <Pencil size={18} /> Update User
             </DialogTitle>
           </DialogHeader>
+
           <div className="grid grid-cols-2 gap-4 py-4">
 
+            {/* Contact Number — placed first */}
+            <div className="space-y-2 col-span-2">
+              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <Phone size={10} /> Contact Number
+              </Label>
+              <Input
+                value={editForm.contactNumber}
+                onChange={(e) => setEditForm({ ...editForm, contactNumber: e.target.value })}
+                className={`text-sm font-mono ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
+              />
+            </div>
+
+            {/* Full Name — editable */}
             <div className="space-y-2 col-span-2">
               <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Full Name</Label>
               <Input
@@ -1161,6 +1175,42 @@ export default function UserManagementPage() {
               />
             </div>
 
+            {/* Class Type — read-only */}
+            <div className="space-y-2">
+              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Class Type <span className="text-[9px] uppercase tracking-wide text-slate-500">(read-only)</span>
+              </Label>
+              <Select value={editForm.type} disabled>
+                <SelectTrigger
+                  className={`text-sm font-medium cursor-not-allowed opacity-80 ${
+                    isDark ? "bg-slate-950/60 border-slate-800 text-slate-400" : "bg-slate-50 border-slate-200 text-slate-500"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(editForm.type)}`} />
+                    <SelectValue />
+                  </span>
+                </SelectTrigger>
+              </Select>
+            </div>
+
+            {/* Account Status — read-only */}
+            <div className="space-y-2">
+              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Account Status <span className="text-[9px] uppercase tracking-wide text-slate-500">(read-only)</span>
+              </Label>
+              <Select value={editForm.status} disabled>
+                <SelectTrigger
+                  className={`text-sm font-medium cursor-not-allowed opacity-80 ${
+                    isDark ? "bg-slate-950/60 border-slate-800 text-slate-400" : "bg-slate-50 border-slate-200 text-slate-500"
+                  }`}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+              </Select>
+            </div>
+
+            {/* Linked Account — read-only */}
             <div className="space-y-2 col-span-2">
               <Label
                 className="text-xs font-semibold flex items-center gap-1"
@@ -1182,73 +1232,7 @@ export default function UserManagementPage() {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Class Type</Label>
-              <Select
-                value={editForm.type}
-                onValueChange={(v) => setEditForm({ ...editForm, type: v })}
-              >
-                <SelectTrigger
-                  className={`text-sm font-medium cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}
-                >
-                  <span className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(editForm.type)}`} />
-                    <SelectValue />
-                  </span>
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                  <SelectItem value="Regular" className="cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Regular
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="Student" className="cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" /> Student
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="Senior" className="cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-yellow-500 inline-block" /> Senior
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="PWD" className="cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> PWD
-                    </span>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Account Status</Label>
-              <Select
-                value={editForm.status}
-                onValueChange={(v) => setEditForm({ ...editForm, status: v })}
-              >
-                <SelectTrigger className={`text-sm font-medium cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                  <SelectItem value="Active" className="cursor-pointer">Active</SelectItem>
-                  <SelectItem value="Inactive" className="cursor-pointer">Inactive</SelectItem>
-                  <SelectItem value="Blocked" className="cursor-pointer">Blocked</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2 col-span-2">
-              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                <Phone size={10} /> Contact Number
-              </Label>
-              <Input
-                value={editForm.contactNumber}
-                onChange={(e) => setEditForm({ ...editForm, contactNumber: e.target.value })}
-                className={`text-sm font-mono ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
-              />
-            </div>
-
+            {/* Balance — read-only */}
             <div className="space-y-2 col-span-2">
               <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 <Wallet size={10} /> Balance (read-only)
@@ -1263,6 +1247,7 @@ export default function UserManagementPage() {
             </div>
 
           </div>
+
           <DialogFooter className="gap-2">
             <Button
               variant="ghost"
