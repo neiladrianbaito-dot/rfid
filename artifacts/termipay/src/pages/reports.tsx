@@ -179,6 +179,24 @@ function generateDateRange(filterYear: string, filterMonth: string, filterDay: s
   return [`${year}-${filterMonth}-${filterDay}`];
 }
 
+// ── builds a stable identifier for WHICH revenue window a disbursement
+// covers, e.g. "2026-09-10" (a single day), "2026-09-all" (a month),
+// "2026-all" (a year), or "today" (no filter active). This is sent to the
+// backend so it can block a second disbursement for the same window —
+// see period_key in the create-disbursement function. ──
+function computePeriodKey(
+  isFilterActive: boolean,
+  filterYear: string,
+  filterMonth: string,
+  filterDay: string
+): string {
+  if (!isFilterActive) return `today-${getLocalDateString()}`;
+  const year = filterYear !== "all" ? filterYear : "any";
+  const month = filterMonth !== "all" ? filterMonth : "all";
+  const day = filterDay !== "all" ? filterDay : "all";
+  return `${year}-${month}-${day}`;
+}
+
 export default function ReportsPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
@@ -205,6 +223,16 @@ export default function ReportsPage() {
   const [isDisbursing, setIsDisbursing] = useState(false);
   const [disburseError, setDisburseError] = useState<string | null>(null);
   const [disburseSuccess, setDisburseSuccess] = useState<string | null>(null);
+
+  // ── synchronous guard against double-submit (double-click, double-tap,
+  // Enter-key + click race, etc). React state updates (isDisbursing) are
+  // asynchronous and can still let two calls slip through if they both
+  // fire before the first re-render happens — a ref updates immediately,
+  // so this closes that gap. The real, authoritative protection against
+  // duplicates still lives in the backend/DB (period_key unique index);
+  // this ref is just to avoid firing an obviously-redundant second
+  // request from the same click session. ──
+  const isSubmittingRef = useRef(false);
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
@@ -320,7 +348,7 @@ export default function ReportsPage() {
   const handleDayChange = (value: string) => setFilterDay(value);
 
   // ── the actual source used for chart + table: full aggregated data
-  // when a filter is active, report's short window when it isn't ──
+  // when a filter is active, otherwise report's short window ──
   const baseBreakdown = isFilterActive ? aggregatedBreakdown : sanitizedBreakdown;
 
   // ── FIXED: whenever a Year is selected, always render the COMPLETE
@@ -391,6 +419,15 @@ export default function ReportsPage() {
   const disburseAmount = isFilterActive ? filteredRevenueTotal : todayRevenue;
   const disburseAmountLabel = isFilterActive ? `${filterLabel} Revenue` : "Today's Revenue";
 
+  // ── identifies WHICH revenue window this disbursement covers — sent to
+  // the backend so it can reject a second disbursement for the same
+  // window (see period_key handling in create-disbursement). Recomputed
+  // whenever the active filter changes. ──
+  const periodKey = React.useMemo(
+    () => computePeriodKey(isFilterActive, filterYear, filterMonth, filterDay),
+    [isFilterActive, filterYear, filterMonth, filterDay]
+  );
+
   const handleOpenPreview = () => {
     navigate("/reports/preview");
   };
@@ -413,18 +450,27 @@ export default function ReportsPage() {
   };
 
   const handleSubmitDisbursement = async () => {
+    // ── synchronous double-submit guard — checked and set BEFORE any
+    // await, so a second click that fires before the first re-render
+    // still gets blocked here. ──
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
     setDisburseError(null);
 
     if (disburseAmount <= 0) {
       setDisburseError("Wala pang revenue na pwedeng i-disburse para sa napiling range.");
+      isSubmittingRef.current = false;
       return;
     }
     if (!disburseForm.bank_code) {
       setDisburseError("Pumili ng bank o e-wallet.");
+      isSubmittingRef.current = false;
       return;
     }
     if (!disburseForm.account_holder_name.trim() || !disburseForm.account_number.trim()) {
       setDisburseError("Kailangan ang account holder name at account number.");
+      isSubmittingRef.current = false;
       return;
     }
 
@@ -446,12 +492,20 @@ export default function ReportsPage() {
           account_number: disburseForm.account_number.trim(),
           description: disburseForm.description.trim() || `${disburseAmountLabel} disbursement`,
           requested_by: adminName,
+          period_key: periodKey,
         }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
+        // 409 = the backend's period_key unique-constraint check caught a
+        // duplicate — show a clear message instead of the generic one
+        if (res.status === 409) {
+          throw new Error(
+            data?.error || "Naka-disburse na ang revenue para sa period na ito. Hindi puwedeng ulitin."
+          );
+        }
         throw new Error(data?.error || "Nabigo ang disbursement request.");
       }
 
@@ -469,6 +523,7 @@ export default function ReportsPage() {
       setDisburseError(err?.message || "May error na nangyari, subukan ulit.");
     } finally {
       setIsDisbursing(false);
+      isSubmittingRef.current = false;
     }
   };
 
