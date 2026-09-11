@@ -4,7 +4,7 @@ import {
   User, Phone, Tag, ShieldCheck,
   LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings,
   ChevronRight, ArrowLeft, ArrowRight, List, Pencil, Check, X as XIcon,
-  Sun, Moon, RotateCw,
+  Sun, Moon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,114 +51,12 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-// 📅 Formats a date string into "Mon Day, Year" (e.g. Jan 15, 2026) — same
-// formatting used for the card's "Valid Until" field in User Management,
-// reused here so the ID card preview matches exactly.
-function formatDate(value: string | null | undefined): string {
-  if (!value) return "N/A";
-  const date = new Date(value);
-  if (isNaN(date.getTime())) return "N/A";
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-
-// ── shared helper to normalize the API base URL for direct fetch() calls
-// (same logic used in Layout.tsx / ReportsPage.tsx) ──
+// ── NEW: shared helper to normalize the API base URL for direct fetch()
+// calls (same logic used in Layout.tsx / ReportsPage.tsx) ──
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
   if (!trimmed) return "";
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
-}
-
-// 🪪 Card preview theming — accent color + label color per type, matching the
-// physical card design used in User Management (kept identical so both
-// surfaces render the same card art for a given card type).
-// 🔵 Regular = default navy/blue card (white text)
-// ⚪ Discounted types (Student/Senior/PWD) = concessionary-style WHITE card (dark text)
-function getCardTheme(type: string | null | undefined) {
-  const t = (type || "Regular").toLowerCase();
-  switch (t) {
-    case "student":
-      return {
-        accent: "#2563eb",
-        pattern: "#3b82f6",
-        label: "STUDENT",
-        cardBg: "#ffffff",
-        textColor: "#0f172a",
-        subTextColor: "#475569",
-        uidColor: "#1b1f5c",
-        isLight: true,
-      };
-    case "senior":
-      return {
-        accent: "#ca8a04",
-        pattern: "#eab308",
-        label: "SENIOR",
-        cardBg: "#ffffff",
-        textColor: "#0f172a",
-        subTextColor: "#475569",
-        uidColor: "#1b1f5c",
-        isLight: true,
-      };
-    case "pwd":
-      return {
-        accent: "#059669",
-        pattern: "#10b981",
-        label: "PWD",
-        cardBg: "#ffffff",
-        textColor: "#0f172a",
-        subTextColor: "#475569",
-        uidColor: "#1b1f5c",
-        isLight: true,
-      };
-    case "regular":
-    default:
-      return {
-        accent: "#f87171",
-        pattern: "#f97316",
-        label: "REGULAR",
-        cardBg: "#1b1f5c",
-        textColor: "#ffffff",
-        subTextColor: "rgba(255,255,255,0.7)",
-        uidColor: "#5eead4",
-        isLight: false,
-      };
-  }
-}
-
-// 🪪 Staircase chevron pattern used on the physical card face — identical to
-// the one used in User Management so the printed-card look matches 1:1.
-function ChevronStaircase({ color }: { color: string }) {
-  const rows = 6;
-  return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none">
-      {Array.from({ length: rows }).map((_, i) => {
-        const offset = (rows - 1 - i) * 11; // % pushed in from the right per row
-        return (
-          <div
-            key={i}
-            className="absolute right-0 h-[15%] w-full"
-            style={{ top: `${i * (100 / rows)}%`, transform: `translateX(${offset}%)` }}
-          >
-            {/* dashed accent rule on top of each step */}
-            <div
-              className="absolute top-0 left-0 right-0 h-[2px]"
-              style={{
-                backgroundImage: `repeating-linear-gradient(90deg, ${color} 0 10px, transparent 10px 16px)`,
-              }}
-            />
-            {/* the chevron teeth themselves */}
-            <div
-              className="absolute inset-x-0 bottom-0 h-[70%] opacity-80"
-              style={{
-                backgroundImage: `repeating-linear-gradient(135deg, ${color}55 0px, ${color}55 7px, transparent 7px, transparent 14px), repeating-linear-gradient(45deg, ${color}55 0px, ${color}55 7px, transparent 7px, transparent 14px)`,
-                backgroundSize: "28px 100%",
-              }}
-            />
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 // ✅ Fix: memo — hindi na mag-re-render ang row kapag hindi nagbago ang tx
@@ -223,8 +121,6 @@ export default function PaymongoDashboardPage() {
   const [routes, setRoutes] = useState<FareRoute[]>([]);
   // ✅ Logout confirmation dialog state
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
-  // ✅ Physical ID card preview — flip state (front/back), mobile Settings tab
-  const [previewFlipped, setPreviewFlipped] = useState(false);
 
   const { user, transactions, loading, error, lastUpdated, isPulsing } = useCardData(cardUid);
   const currentBalance = Number(user?.balance || 0);
@@ -257,7 +153,6 @@ export default function PaymongoDashboardPage() {
     setLocalEmail(null);
     setEditingContact(false);
     setEditingEmail(false);
-    setPreviewFlipped(false);
   }, [cardUid]);
 
   const startEditContact = () => {
@@ -469,34 +364,6 @@ export default function PaymongoDashboardPage() {
       <ChangePasswordModal {...changePassword} />
       <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} routes={routes} />
       <style>{DASHBOARD_STYLES}</style>
-
-      {/* ✅ Physical ID card preview styles — flip animation + fixed real-world
-          card size (CR80: 8.56cm × 5.40cm), matching User Management's card
-          preview. Width caps at 8.56cm and shrinks on very narrow screens
-          via aspect-ratio so the card never gets cropped or stretched. */}
-      <style>{`
-        .id-card-scene {
-          width: min(8.56cm, 92vw);
-          aspect-ratio: 8.56 / 5.40;
-          margin: 0 auto;
-          perspective: 1600px;
-        }
-        .card-flip-inner {
-          position: relative;
-          width: 100%;
-          height: 100%;
-          transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
-          transform-style: preserve-3d;
-        }
-        .card-flip-inner.is-flipped { transform: rotateY(180deg); }
-        .card-face {
-          position: absolute;
-          inset: 0;
-          backface-visibility: hidden;
-          -webkit-backface-visibility: hidden;
-        }
-        .card-face-back { transform: rotateY(180deg); }
-      `}</style>
 
       {/* ✅ Logout confirmation dialog — compact, Yes/No always one line, small boxes */}
       <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
@@ -895,7 +762,6 @@ export default function PaymongoDashboardPage() {
         {/* SETTINGS tab (mobile only) */}
         <div className={activeTab === "settings" ? "block md:hidden" : "hidden"}>
           <div className="space-y-3">
-
 
             {/* Profile Card */}
             <div className={`rounded-2xl overflow-hidden border ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
