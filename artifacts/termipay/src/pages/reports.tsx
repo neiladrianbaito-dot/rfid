@@ -28,6 +28,8 @@ import {
   CheckCircle2,
   AlertCircle,
   ChevronDown,
+  History,
+  RefreshCw,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -221,6 +223,13 @@ export default function ReportsPage() {
   const [disburseError, setDisburseError] = useState<string | null>(null);
   const [disburseSuccess, setDisburseSuccess] = useState<string | null>(null);
 
+  // ── REAL disbursement history — fetched straight from the DB via the
+  // list-disbursements function, not computed/estimated on the frontend.
+  // This reflects exactly what was (or wasn't) actually transferred to
+  // Xendit, including its current status. ──
+  const [disbursementHistory, setDisbursementHistory] = useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
   // ── synchronous guard against double-submit (double-click, double-tap,
   // Enter-key + click race, etc). React state updates (isDisbursing) are
   // asynchronous and can still let two calls slip through if they both
@@ -241,6 +250,35 @@ export default function ReportsPage() {
       if (autoCloseTimeoutRef.current) clearTimeout(autoCloseTimeoutRef.current);
     };
   }, []);
+
+  // ── fetches the REAL disbursement rows from the DB (via the
+  // list-disbursements function) — what actually went to Xendit, with
+  // its current status. Called on mount and after every disbursement
+  // attempt so the list always reflects reality. ──
+  const fetchDisbursementHistory = React.useCallback(async () => {
+    setIsLoadingHistory(true);
+    try {
+      const functionsUrl = getSupabaseFunctionsUrl();
+      const token = window.localStorage.getItem("termipay_auth_token");
+      const res = await fetch(`${functionsUrl}/list-disbursements?limit=20`, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (!res.ok) {
+        console.warn("Failed to fetch disbursement history:", await res.text());
+        return;
+      }
+      const data = await res.json();
+      setDisbursementHistory(Array.isArray(data?.disbursements) ? data.disbursements : []);
+    } catch (err) {
+      console.warn("Failed to fetch disbursement history:", err);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDisbursementHistory();
+  }, [fetchDisbursementHistory]);
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
@@ -576,6 +614,11 @@ export default function ReportsPage() {
         details: `${adminName} triggered a disbursement of ${formatPeso(sentAmount)} (${disburseAmountLabel}) to ${disburseForm.account_holder_name.trim()}`,
       });
 
+      // refresh the REAL history list right away so the new row (with its
+      // actual DB-generated amount/status) shows up without waiting for
+      // the modal auto-close
+      fetchDisbursementHistory();
+
       // ── auto-close the modal once the disbursement request succeeds.
       // A short delay lets the admin actually read the success message
       // before the modal disappears; isDisbursing is already false by
@@ -837,6 +880,13 @@ export default function ReportsPage() {
       CreatedDate: new Date(),
     };
     writeFile(workbook, `transaction-logs${filenameSuffix}-${stamp}.xlsx`);
+  };
+
+  const statusBadgeClasses = (status: string, isDarkMode: boolean) => {
+    const s = (status || "").toUpperCase();
+    if (s === "COMPLETED") return isDarkMode ? "bg-emerald-950/40 text-emerald-400 border-emerald-900" : "bg-emerald-50 text-emerald-700 border-emerald-100";
+    if (s === "FAILED") return isDarkMode ? "bg-red-950/40 text-red-400 border-red-900" : "bg-red-50 text-red-700 border-red-100";
+    return isDarkMode ? "bg-amber-950/40 text-amber-400 border-amber-900" : "bg-amber-50 text-amber-700 border-amber-100";
   };
 
   return (
@@ -1136,6 +1186,87 @@ export default function ReportsPage() {
                     </TableRow>
                   );
                 })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ══ DISBURSEMENT HISTORY — REAL data straight from the disbursements
+          table (via list-disbursements), i.e. what actually went to Xendit ══ */}
+      <Card className={`shadow-sm overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <History size={14} className="text-indigo-500" />
+              Disbursement History
+              <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                — actual Xendit payouts
+              </span>
+            </CardTitle>
+            <button
+              type="button"
+              onClick={fetchDisbursementHistory}
+              disabled={isLoadingHistory}
+              data-testid="button-refresh-disbursement-history"
+              className={`h-7 flex items-center gap-1.5 px-2.5 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-50 ${
+                isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+              }`}
+            >
+              <RefreshCw size={12} className={isLoadingHistory ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0 px-6 pb-6 pt-6">
+          {isLoadingHistory && disbursementHistory.length === 0 ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className={`h-10 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />)}
+            </div>
+          ) : disbursementHistory.length === 0 ? (
+            <div className={`py-10 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              Wala pang disbursement na naitala.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
+                <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Account</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Xendit ID</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
+                  <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-indigo-500">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {disbursementHistory.map((row: any) => (
+                  <TableRow
+                    key={row.id}
+                    className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
+                  >
+                    <TableCell className={`text-sm ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                      {row.created_at ? new Date(row.created_at).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                    </TableCell>
+                    <TableCell className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                      <div className="font-medium">{row.account_holder_name}</div>
+                      <div className="font-mono text-[11px] opacity-70">{row.account_number}</div>
+                    </TableCell>
+                    <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                      {row.xendit_disbursement_id || "—"}
+                    </TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded border text-[10px] font-semibold uppercase ${statusBadgeClasses(row.status, isDark)}`}>
+                        {row.status}
+                      </span>
+                      {row.status === "FAILED" && row.failure_reason && (
+                        <div className={`text-[10px] mt-0.5 ${isDark ? "text-red-400/70" : "text-red-500/80"}`}>{row.failure_reason}</div>
+                      )}
+                    </TableCell>
+                    <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                      {formatPeso(Number(row.amount) || 0)}
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           )}
