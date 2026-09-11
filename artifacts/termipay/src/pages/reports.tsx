@@ -33,6 +33,15 @@ import {
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// ── how long (ms) to show the success message inside the modal before it
+// auto-closes. Kept short but non-zero so the admin actually sees the
+// confirmation instead of the modal vanishing instantly. ──
+const DISBURSE_SUCCESS_AUTOCLOSE_MS = 1800;
+
+// ── account number is restricted to digits only, max 12 characters (covers
+// PH mobile numbers like "09171234567" as well as bank account numbers). ──
+const ACCOUNT_NUMBER_MAX_LEN = 12;
+
 function normalizeEmail(email: string | null | undefined): string | null {
   if (!email) return null;
   const trimmed = email.trim();
@@ -42,6 +51,12 @@ function normalizeEmail(email: string | null | undefined): string | null {
 
 function getLocalDateString(): string {
   return new Date().toLocaleDateString("en-CA");
+}
+
+// ── strips everything except digits and caps the length, used for the
+// account/mobile number field. ──
+function sanitizeAccountNumber(raw: string): string {
+  return raw.replace(/\D/g, "").slice(0, ACCOUNT_NUMBER_MAX_LEN);
 }
 
 // ── shared helper to normalize the API base URL for direct fetch() calls ──
@@ -215,6 +230,17 @@ export default function ReportsPage() {
   // this ref is just to avoid firing an obviously-redundant second
   // request from the same click session. ──
   const isSubmittingRef = useRef(false);
+
+  // ── holds the setTimeout id for the post-success auto-close, so it can
+  // be cancelled if the component unmounts or the modal gets closed/
+  // reopened before it fires. ──
+  const autoCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (autoCloseTimeoutRef.current) clearTimeout(autoCloseTimeoutRef.current);
+    };
+  }, []);
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
@@ -436,6 +462,10 @@ export default function ReportsPage() {
   };
 
   const openDisburseModal = () => {
+    if (autoCloseTimeoutRef.current) {
+      clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = null;
+    }
     setDisburseChannelOpen(false);
     setDisburseError(null);
     setDisburseSuccess(null);
@@ -444,12 +474,24 @@ export default function ReportsPage() {
 
   const closeDisburseModal = () => {
     if (isDisbursing) return; // don't let them close mid-request
+    if (autoCloseTimeoutRef.current) {
+      clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = null;
+    }
     setDisburseChannelOpen(false);
     setDisburseModalOpen(false);
   };
 
   const handleDisburseFieldChange = (field: keyof typeof disburseForm, value: string) => {
     setDisburseForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // ── dedicated handler for the account/mobile number field: strips any
+  // non-digit characters as the admin types/pastes, and hard-caps the
+  // length at ACCOUNT_NUMBER_MAX_LEN (12) so it's impossible to end up
+  // with letters, symbols, or an over-long value in state. ──
+  const handleAccountNumberChange = (rawValue: string) => {
+    setDisburseForm((prev) => ({ ...prev, account_number: sanitizeAccountNumber(rawValue) }));
   };
 
   const handleSubmitDisbursement = async () => {
@@ -473,6 +515,14 @@ export default function ReportsPage() {
     }
     if (!disburseForm.account_holder_name.trim() || !disburseForm.account_number.trim()) {
       setDisburseError("Kailangan ang account holder name at account number.");
+      isSubmittingRef.current = false;
+      return;
+    }
+    // ── belt-and-suspenders: account number should already be digits-only
+    // (max 12) thanks to handleAccountNumberChange, but re-validate here in
+    // case the value ever gets set another way. ──
+    if (!/^\d{1,12}$/.test(disburseForm.account_number.trim())) {
+      setDisburseError("Ang account/mobile number ay dapat mga numero lang, hanggang 12 digits.");
       isSubmittingRef.current = false;
       return;
     }
@@ -525,6 +575,19 @@ export default function ReportsPage() {
         format: "Xendit",
         details: `${adminName} triggered a disbursement of ${formatPeso(sentAmount)} (${disburseAmountLabel}) to ${disburseForm.account_holder_name.trim()}`,
       });
+
+      // ── auto-close the modal once the disbursement request succeeds.
+      // A short delay lets the admin actually read the success message
+      // before the modal disappears; isDisbursing is already false by
+      // then (set in `finally` below) so closeDisburseModal won't be
+      // blocked by the "don't close mid-request" guard. ──
+      if (autoCloseTimeoutRef.current) clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = setTimeout(() => {
+        setDisburseChannelOpen(false);
+        setDisburseModalOpen(false);
+        setDisburseSuccess(null);
+        autoCloseTimeoutRef.current = null;
+      }, DISBURSE_SUCCESS_AUTOCLOSE_MS);
     } catch (err: any) {
       setDisburseError(err?.message || "May error na nangyari, subukan ulit.");
     } finally {
@@ -1195,11 +1258,30 @@ export default function ReportsPage() {
               </div>
 
               <div>
-                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Account / Mobile Number</label>
+                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Account / Mobile Number
+                  <span className={`ml-1 font-normal normal-case ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+                    (numbers only, max 12 digits)
+                  </span>
+                </label>
                 <input
                   type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={ACCOUNT_NUMBER_MAX_LEN}
                   value={disburseForm.account_number}
-                  onChange={(e) => handleDisburseFieldChange("account_number", e.target.value)}
+                  onChange={(e) => handleAccountNumberChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Block obviously non-numeric keystrokes outright (nice-to-have;
+                    // the real enforcement is the onChange sanitizer above, which also
+                    // covers paste/autofill/IME input).
+                    const allowedKeys = [
+                      "Backspace", "Delete", "Tab", "Escape", "Enter",
+                      "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End",
+                    ];
+                    if (allowedKeys.includes(e.key) || e.ctrlKey || e.metaKey) return;
+                    if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                  }}
                   data-testid="input-disburse-account-number"
                   placeholder="09171234567"
                   className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
