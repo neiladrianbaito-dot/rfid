@@ -4,7 +4,7 @@ import {
   User, Phone, Tag, ShieldCheck,
   LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings,
   ChevronRight, ArrowLeft, ArrowRight, List, Pencil, Check, X as XIcon,
-  Sun, Moon,
+  Sun, Moon, RotateCw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,12 +51,114 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-// ── NEW: shared helper to normalize the API base URL for direct fetch()
-// calls (same logic used in Layout.tsx / ReportsPage.tsx) ──
+// 📅 Formats a date string into "Mon Day, Year" (e.g. Jan 15, 2026) — same
+// formatting used for the card's "Valid Until" field in User Management,
+// reused here so the ID card preview matches exactly.
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  if (isNaN(date.getTime())) return "N/A";
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// ── shared helper to normalize the API base URL for direct fetch() calls
+// (same logic used in Layout.tsx / ReportsPage.tsx) ──
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
   if (!trimmed) return "";
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
+}
+
+// 🪪 Card preview theming — accent color + label color per type, matching the
+// physical card design used in User Management (kept identical so both
+// surfaces render the same card art for a given card type).
+// 🔵 Regular = default navy/blue card (white text)
+// ⚪ Discounted types (Student/Senior/PWD) = concessionary-style WHITE card (dark text)
+function getCardTheme(type: string | null | undefined) {
+  const t = (type || "Regular").toLowerCase();
+  switch (t) {
+    case "student":
+      return {
+        accent: "#2563eb",
+        pattern: "#3b82f6",
+        label: "STUDENT",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
+    case "senior":
+      return {
+        accent: "#ca8a04",
+        pattern: "#eab308",
+        label: "SENIOR",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
+    case "pwd":
+      return {
+        accent: "#059669",
+        pattern: "#10b981",
+        label: "PWD",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
+    case "regular":
+    default:
+      return {
+        accent: "#f87171",
+        pattern: "#f97316",
+        label: "REGULAR",
+        cardBg: "#1b1f5c",
+        textColor: "#ffffff",
+        subTextColor: "rgba(255,255,255,0.7)",
+        uidColor: "#5eead4",
+        isLight: false,
+      };
+  }
+}
+
+// 🪪 Staircase chevron pattern used on the physical card face — identical to
+// the one used in User Management so the printed-card look matches 1:1.
+function ChevronStaircase({ color }: { color: string }) {
+  const rows = 6;
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {Array.from({ length: rows }).map((_, i) => {
+        const offset = (rows - 1 - i) * 11; // % pushed in from the right per row
+        return (
+          <div
+            key={i}
+            className="absolute right-0 h-[15%] w-full"
+            style={{ top: `${i * (100 / rows)}%`, transform: `translateX(${offset}%)` }}
+          >
+            {/* dashed accent rule on top of each step */}
+            <div
+              className="absolute top-0 left-0 right-0 h-[2px]"
+              style={{
+                backgroundImage: `repeating-linear-gradient(90deg, ${color} 0 10px, transparent 10px 16px)`,
+              }}
+            />
+            {/* the chevron teeth themselves */}
+            <div
+              className="absolute inset-x-0 bottom-0 h-[70%] opacity-80"
+              style={{
+                backgroundImage: `repeating-linear-gradient(135deg, ${color}55 0px, ${color}55 7px, transparent 7px, transparent 14px), repeating-linear-gradient(45deg, ${color}55 0px, ${color}55 7px, transparent 7px, transparent 14px)`,
+                backgroundSize: "28px 100%",
+              }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // ✅ Fix: memo — hindi na mag-re-render ang row kapag hindi nagbago ang tx
@@ -121,6 +223,8 @@ export default function PaymongoDashboardPage() {
   const [routes, setRoutes] = useState<FareRoute[]>([]);
   // ✅ Logout confirmation dialog state
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  // ✅ Physical ID card preview — flip state (front/back), mobile Settings tab
+  const [previewFlipped, setPreviewFlipped] = useState(false);
 
   const { user, transactions, loading, error, lastUpdated, isPulsing } = useCardData(cardUid);
   const currentBalance = Number(user?.balance || 0);
@@ -153,6 +257,7 @@ export default function PaymongoDashboardPage() {
     setLocalEmail(null);
     setEditingContact(false);
     setEditingEmail(false);
+    setPreviewFlipped(false);
   }, [cardUid]);
 
   const startEditContact = () => {
@@ -364,6 +469,34 @@ export default function PaymongoDashboardPage() {
       <ChangePasswordModal {...changePassword} />
       <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} routes={routes} />
       <style>{DASHBOARD_STYLES}</style>
+
+      {/* ✅ Physical ID card preview styles — flip animation + fixed real-world
+          card size (CR80: 8.56cm × 5.40cm), matching User Management's card
+          preview. Width caps at 8.56cm and shrinks on very narrow screens
+          via aspect-ratio so the card never gets cropped or stretched. */}
+      <style>{`
+        .id-card-scene {
+          width: min(8.56cm, 92vw);
+          aspect-ratio: 8.56 / 5.40;
+          margin: 0 auto;
+          perspective: 1600px;
+        }
+        .card-flip-inner {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+          transform-style: preserve-3d;
+        }
+        .card-flip-inner.is-flipped { transform: rotateY(180deg); }
+        .card-face {
+          position: absolute;
+          inset: 0;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+        }
+        .card-face-back { transform: rotateY(180deg); }
+      `}</style>
 
       {/* ✅ Logout confirmation dialog — compact, Yes/No always one line, small boxes */}
       <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
@@ -762,6 +895,140 @@ export default function PaymongoDashboardPage() {
         {/* SETTINGS tab (mobile only) */}
         <div className={activeTab === "settings" ? "block md:hidden" : "hidden"}>
           <div className="space-y-3">
+
+            {/* ✅ Physical ID Card Preview — mirrors the flippable card design
+                from User Management (same theme colors, chevron pattern, and
+                front/back layout), sized to true CR80 ID dimensions
+                (8.56cm × 5.40cm). Tap the card (or the button below it) to flip. */}
+            <div className={`rounded-2xl overflow-hidden border px-4 py-5 ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
+              {(() => {
+                const theme = getCardTheme(user?.type);
+                return (
+                  <div className="flex flex-col items-center">
+                    <div
+                      className="id-card-scene relative cursor-pointer"
+                      onClick={() => setPreviewFlipped((f) => !f)}
+                    >
+                      <div className={`card-flip-inner ${previewFlipped ? "is-flipped" : ""}`}>
+                        {/* ---- FRONT FACE ---- */}
+                        <div
+                          className={`card-face rounded-2xl overflow-hidden border ${
+                            theme.isLight ? "border-slate-300" : "border-transparent"
+                          }`}
+                          style={{
+                            backgroundColor: theme.cardBg,
+                            boxShadow: theme.isLight
+                              ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
+                              : "0 10px 25px -5px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.2)",
+                          }}
+                        >
+                          <ChevronStaircase color={theme.pattern} />
+
+                          <div className="relative h-full w-full flex flex-col justify-between p-4">
+                            {/* Header / logo badge */}
+                            <div className="flex items-center gap-2.5">
+                              <div
+                                className={`w-7 h-7 rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden ${
+                                  theme.isLight ? "bg-slate-100 border-slate-300" : "bg-white/10 border-white/30"
+                                }`}
+                              >
+                                <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                              </div>
+                              <span
+                                className="font-bold tracking-wide text-[11px] uppercase"
+                                style={{ color: theme.textColor }}
+                              >
+                                Fare Collection System
+                              </span>
+                            </div>
+
+                            {/* Body */}
+                            <div className="space-y-0.5">
+                              <div
+                                className="font-mono font-extrabold text-lg tracking-wide"
+                                style={{ color: theme.uidColor }}
+                              >
+                                {user?.cardUid || "----"}
+                              </div>
+                              <div
+                                className="font-semibold text-sm"
+                                style={{ color: theme.textColor }}
+                              >
+                                {user?.fullName || "Not Linked"}
+                              </div>
+                            </div>
+
+                            {/* Footer row: type label (left) + valid until (right) */}
+                            <div className="flex items-end justify-between">
+                              <div
+                                className="font-extrabold text-sm tracking-wide"
+                                style={{ color: theme.accent }}
+                              >
+                                {theme.label}
+                              </div>
+                              <div className="text-right">
+                                <div
+                                  className="text-[7px] uppercase tracking-wide font-semibold"
+                                  style={{ color: theme.subTextColor }}
+                                >
+                                  Valid Until
+                                </div>
+                                <div
+                                  className="font-mono font-bold text-[10px]"
+                                  style={{ color: theme.textColor }}
+                                >
+                                  {formatDate((user as any)?.expirationDate)}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ---- BACK FACE ---- */}
+                        <div
+                          className="card-face card-face-back rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300"
+                          style={{ boxShadow: "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)" }}
+                        >
+                          <div className="h-[18%] bg-[#221f20] flex-shrink-0" />
+                          <div className="flex-1 min-h-0 flex flex-col px-3 py-2">
+                            <div className="bg-white border-y border-slate-300 py-1 px-2 mb-1.5">
+                              <span className="text-[10px] font-extrabold text-slate-900">Terms and Condition</span>
+                            </div>
+                            <ul className="space-y-0.5 text-[7px] leading-tight text-slate-800 flex-1 min-h-0 overflow-hidden">
+                              <li>• Property of the Fare Collection System Operator.</li>
+                              <li>• Non-transferable and subject to transit system rules.</li>
+                              <li>• Positive balance required to pass through.</li>
+                              <li>• Non-refundable card issuance fee applies.</li>
+                              <li>• Operator is not responsible for lost or stolen cards.</li>
+                              <li>• Unused balances on unregistered cards are non-refundable.</li>
+                              <li>• Tampering or unauthorized duplication is strictly prohibited.</li>
+                            </ul>
+                            <div className="flex items-center gap-1.5 border-t border-slate-300 pt-1 mt-1">
+                              <div className="w-4 h-4 rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden">
+                                <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                              </div>
+                              <span className="text-[7px] font-extrabold tracking-wide text-slate-900 uppercase">
+                                Fare Collection System
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => setPreviewFlipped((f) => !f)}
+                      className={`mt-3 flex items-center gap-1.5 text-[10px] font-semibold cursor-pointer ${
+                        isDark ? "text-slate-400 active:text-slate-200" : "text-slate-500 active:text-slate-700"
+                      }`}
+                    >
+                      <RotateCw className="w-3 h-3" />
+                      Tap card to flip to {previewFlipped ? "front" : "back"}
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
 
             {/* Profile Card */}
             <div className={`rounded-2xl overflow-hidden border ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
