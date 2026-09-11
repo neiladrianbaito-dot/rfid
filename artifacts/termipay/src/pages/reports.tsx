@@ -44,6 +44,10 @@ const DISBURSE_SUCCESS_AUTOCLOSE_MS = 1800;
 // PH mobile numbers like "09171234567" as well as bank account numbers). ──
 const ACCOUNT_NUMBER_MAX_LEN = 12;
 
+// ── Disbursement History table is paginated client-side at this many rows
+// per page, with Previous/Next controls beneath the table. ──
+const DISBURSEMENTS_PER_PAGE = 10;
+
 function normalizeEmail(email: string | null | undefined): string | null {
   if (!email) return null;
   const trimmed = email.trim();
@@ -230,6 +234,11 @@ export default function ReportsPage() {
   const [disbursementHistory, setDisbursementHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
+  // ── current page (1-indexed) for the Disbursement History table.
+  // Reset to page 1 whenever the history is freshly refetched, so the
+  // admin doesn't get stranded on an out-of-range page. ──
+  const [disbursementPage, setDisbursementPage] = useState(1);
+
   // ── synchronous guard against double-submit (double-click, double-tap,
   // Enter-key + click race, etc). React state updates (isDisbursing) are
   // asynchronous and can still let two calls slip through if they both
@@ -260,7 +269,10 @@ export default function ReportsPage() {
     try {
       const functionsUrl = getSupabaseFunctionsUrl();
       const token = window.localStorage.getItem("termipay_auth_token");
-      const res = await fetch(`${functionsUrl}/list-disbursements?limit=20`, {
+      // ── fetch a larger window (100 most recent) so pagination has more
+      // than one page's worth of data to work with; the table itself
+      // still only ever shows DISBURSEMENTS_PER_PAGE rows at a time. ──
+      const res = await fetch(`${functionsUrl}/list-disbursements?limit=100`, {
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) {
@@ -269,6 +281,7 @@ export default function ReportsPage() {
       }
       const data = await res.json();
       setDisbursementHistory(Array.isArray(data?.disbursements) ? data.disbursements : []);
+      setDisbursementPage(1);
     } catch (err) {
       console.warn("Failed to fetch disbursement history:", err);
     } finally {
@@ -882,6 +895,26 @@ export default function ReportsPage() {
     writeFile(workbook, `transaction-logs${filenameSuffix}-${stamp}.xlsx`);
   };
 
+  // ── pagination derived values for the Disbursement History table ──
+  const disbursementTotalPages = Math.max(1, Math.ceil(disbursementHistory.length / DISBURSEMENTS_PER_PAGE));
+
+  // Clamp the current page in case the underlying list shrank (e.g. after
+  // a refetch returned fewer rows than before).
+  const disbursementPageClamped = Math.min(disbursementPage, disbursementTotalPages);
+
+  const paginatedDisbursements = React.useMemo(() => {
+    const start = (disbursementPageClamped - 1) * DISBURSEMENTS_PER_PAGE;
+    return disbursementHistory.slice(start, start + DISBURSEMENTS_PER_PAGE);
+  }, [disbursementHistory, disbursementPageClamped]);
+
+  const goToPrevDisbursementPage = () => {
+    setDisbursementPage((p) => Math.max(1, p - 1));
+  };
+
+  const goToNextDisbursementPage = () => {
+    setDisbursementPage((p) => Math.min(disbursementTotalPages, p + 1));
+  };
+
   const statusBadgeClasses = (status: string, isDarkMode: boolean) => {
     const s = (status || "").toUpperCase();
     if (s === "COMPLETED") return isDarkMode ? "bg-emerald-950/40 text-emerald-400 border-emerald-900" : "bg-emerald-50 text-emerald-700 border-emerald-100";
@@ -1243,7 +1276,7 @@ export default function ReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {disbursementHistory.map((row: any) => (
+                {paginatedDisbursements.map((row: any) => (
                   <TableRow
                     key={row.id}
                     className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
@@ -1273,6 +1306,40 @@ export default function ReportsPage() {
                 ))}
               </TableBody>
             </Table>
+          )}
+
+          {/* ── Previous / Next pagination controls — only shown once there's
+              more than one page's worth of disbursement rows. ── */}
+          {disbursementHistory.length > DISBURSEMENTS_PER_PAGE && (
+            <div className={`flex items-center justify-between pt-4 mt-2 border-t ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+              <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                Page {disbursementPageClamped} of {disbursementTotalPages} · {disbursementHistory.length} total
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={goToPrevDisbursementPage}
+                  disabled={disbursementPageClamped <= 1}
+                  data-testid="button-disbursement-prev-page"
+                  className={`h-8 flex items-center gap-1 px-3 rounded-md text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    isDark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                  }`}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  onClick={goToNextDisbursementPage}
+                  disabled={disbursementPageClamped >= disbursementTotalPages}
+                  data-testid="button-disbursement-next-page"
+                  className={`h-8 flex items-center gap-1 px-3 rounded-md text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    isDark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                  }`}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
