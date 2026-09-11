@@ -274,11 +274,13 @@ export default function PaymongoDashboardPage() {
     if (activeTab !== "Transactions") setSelectedTx(null);
   }, [activeTab]);
 
-  // ── NEW: login only checks the token and fetches the profile. It NEVER
-  // blocks the dashboard from rendering. If there's no linked card yet, we
-  // just leave cardUid empty (dashboard renders in its dulled/blank state)
-  // and pop the LinkCardModal as a convenience — the user can still see and
-  // navigate the dashboard behind it. ──
+  // ── Login only checks the token and fetches the profile. It NEVER blocks
+  // the dashboard from rendering, and it NEVER auto-opens the LinkCardModal.
+  // After login the user always lands on the Home tab of the dashboard —
+  // if there's no linked card yet, cardUid just stays empty and the UI
+  // renders in its dulled/blank state (see isLinked below). Linking is
+  // opt-in: the user opens the modal themselves via the reminder banner
+  // or the "Link Card" buttons. ──
   useEffect(() => {
     const token = window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
     if (!token) { setLocation("/signin"); return; }
@@ -288,10 +290,9 @@ export default function PaymongoDashboardPage() {
         const linkedUid = cleanCardUid(profile?.user?.linkedCardUid || "");
         if (linkedUid) {
           setCardUid(linkedUid);
-        } else {
-          // No card linked yet — dashboard is still reachable, just dulled.
-          linkCard.setIsOpen(true);
         }
+        // No `else` branch here on purpose — do NOT auto-open the modal.
+        // The dashboard (Home tab) is always what the user sees first.
       } catch {
         window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
         setLocation("/signin");
