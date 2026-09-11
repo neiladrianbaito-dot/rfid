@@ -283,7 +283,7 @@ export default function PaymongoDashboardPage() {
   // or the "Link Card" buttons. ──
   useEffect(() => {
     const token = window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
-    if (!token) { setLocation("/user-dashboard"); return; }
+    if (!token) { setLocation("/signin"); return; }
     void (async () => {
       try {
         const profile = await getSignedInUser();
@@ -295,7 +295,7 @@ export default function PaymongoDashboardPage() {
         // The dashboard (Home tab) is always what the user sees first.
       } catch {
         window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
-        setLocation("/user-dashboard");
+        setLocation("/signin");
       }
     })();
   }, []);
@@ -320,7 +320,7 @@ export default function PaymongoDashboardPage() {
     }
 
     window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
-    setLocation("/user-dashboard");
+    setLocation("/signin");
   };
 
   const requestLogout = () => {
