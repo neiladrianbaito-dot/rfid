@@ -148,8 +148,18 @@ export default function PaymongoDashboardPage() {
   const [localContact, setLocalContact] = useState<string | null>(null);
   const [localEmail, setLocalEmail] = useState<string | null>(null);
 
+  // ── NEW: temporary account-level profile, fetched once at login from
+  // auth_users (name + email tied to the logged-in Supabase account).
+  // Used ONLY as a fallback for display before a card is linked. Once
+  // isLinked flips true, the real source of truth becomes the card-linked
+  // `user` record from useCardData — this temp profile is ignored. ──
+  const [authProfile, setAuthProfile] = useState<{ fullName: string; email: string } | null>(null);
+
+  const displayName = (isLinked ? user?.fullName : authProfile?.fullName) || "";
+  // Contact number has no home in auth_users — it only ever exists once a
+  // card is linked, so it stays blank until then.
   const displayContact = isLinked ? (localContact ?? user?.contactNumber ?? "") : "";
-  const displayEmail = isLinked ? (localEmail ?? user?.email ?? "") : "";
+  const displayEmail = localEmail ?? (isLinked ? user?.email : authProfile?.email) ?? "";
 
   // Reset local overrides + editing state whenever a different card is loaded
   useEffect(() => {
@@ -287,6 +297,12 @@ export default function PaymongoDashboardPage() {
     void (async () => {
       try {
         const profile = await getSignedInUser();
+        // ✅ Temporary display values straight from auth_users — these show
+        // on the dashboard immediately, whether or not a card is linked yet.
+        setAuthProfile({
+          fullName: profile?.user?.fullName || "",
+          email: profile?.user?.email || "",
+        });
         const linkedUid = cleanCardUid(profile?.user?.linkedCardUid || "");
         if (linkedUid) {
           setCardUid(linkedUid);
@@ -514,7 +530,7 @@ export default function PaymongoDashboardPage() {
               <p className={`text-xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
                 Welcome back,{" "}
                 <span className={isDark ? "text-emerald-400" : "text-emerald-600"}>
-                  {isLinked ? (user?.fullName?.split(" ")[0] || "User") : "User"}
+                  {displayName?.split(" ")[0] || "User"}
                 </span> 👋
               </p>
               <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
