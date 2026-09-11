@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useLocation } from "wouter";
 import ReCAPTCHA from "react-google-recaptcha";
 import { LinkIcon, Lock, CheckCircle2, XCircle, Loader2, Ban, ShieldAlert, Clock, ArrowLeft } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,13 @@ export function LinkCardModal(props: Props) {
 
   // ✅ Same theme source as the dashboard — the modal now follows the toggle.
   const { isDark } = useTheme();
+
+  // ── NEW: direct router access so "Go back" always lands on the user's
+  // dashboard, instead of relying on window.history.back() (which could
+  // send the user anywhere — a previous unrelated page, or nowhere at all
+  // if this modal was opened as the first screen in the tab). ──
+  const [, setLocation] = useLocation();
+  const goBackToDashboard = () => setLocation("/dashboard");
 
   const isChecking = validation.status === "checking";
   const isBlocked  = validation.status === "blocked";
@@ -137,7 +145,7 @@ export function LinkCardModal(props: Props) {
                 </div>
 
                 <Button
-                  onClick={onCancel}
+                  onClick={goBackToDashboard}
                   variant="outline"
                   className={`w-full h-11 sm:h-12 text-sm cursor-pointer ${
                     isDark
@@ -145,7 +153,7 @@ export function LinkCardModal(props: Props) {
                       : "border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900"
                   }`}
                 >
-                  Cancel and return to sign-in
+                  Cancel and return to dashboard
                 </Button>
               </div>
             )}
@@ -242,8 +250,11 @@ export function LinkCardModal(props: Props) {
                 )}
 
                 <div className="flex flex-col sm:flex-row gap-2">
+                  {/* ✅ FIX: was window.history.back() — unreliable, could send the
+                      user to a random previous page or nowhere. Now it navigates
+                      straight to the dashboard, guaranteed. */}
                   <button
-                    onClick={() => window.history.back()}
+                    onClick={goBackToDashboard}
                     className={`flex-1 inline-flex items-center justify-center gap-2 rounded-md border text-sm px-4 py-2.5 h-11 sm:h-12 transition-colors cursor-pointer ${
                       isDark
                         ? "border-[#1f2622] text-[#d7ded9] hover:border-[#4ea878] hover:text-[#7CFFB2]"
@@ -338,13 +349,13 @@ export function LinkCardModal(props: Props) {
                 </div>
 
                 <button
-                  onClick={onCancel}
+                  onClick={goBackToDashboard}
                   disabled={loading}
                   className={`w-full text-center text-[11px] transition-colors underline underline-offset-2 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
                     isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-700"
                   }`}
                 >
-                  Cancel and return to sign-in
+                  Cancel and return to dashboard
                 </button>
 
                 <p className={`text-center text-[9px] sm:text-[10px] leading-relaxed ${isDark ? "text-slate-600" : "text-slate-400"}`}>
