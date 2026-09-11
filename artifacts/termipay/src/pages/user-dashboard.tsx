@@ -4,7 +4,7 @@ import {
   User, Phone, Tag, ShieldCheck,
   LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings,
   ChevronRight, ArrowLeft, ArrowRight, List, Pencil, Check, X as XIcon,
-  Sun, Moon,
+  Sun, Moon, Link2, AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,7 +51,7 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-// ── NEW: shared helper to normalize the API base URL for direct fetch()
+// ── shared helper to normalize the API base URL for direct fetch()
 // calls (same logic used in Layout.tsx / ReportsPage.tsx) ──
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
@@ -60,7 +60,6 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string {
 }
 
 // ✅ Fix: memo — hindi na mag-re-render ang row kapag hindi nagbago ang tx
-// ✅ ICON CHANGE: ArrowUpRight/ArrowDownLeft -> ArrowRight/ArrowLeft
 const MobileTxRow = memo(function MobileTxRow({
   tx,
   onClick,
@@ -107,7 +106,6 @@ const MobileTxRow = memo(function MobileTxRow({
       </div>
     </button>
   );
-// ✅ Fix: custom comparator — re-render lang kapag talgang nagbago ang tx
 }, (prev, next) => prev.tx.id === next.tx.id && prev.tx.amount === next.tx.amount && prev.isDark === next.isDark);
 
 type Tab = "home" | "Transactions" | "settings";
@@ -125,6 +123,12 @@ export default function PaymongoDashboardPage() {
   const { user, transactions, loading, error, lastUpdated, isPulsing } = useCardData(cardUid);
   const currentBalance = Number(user?.balance || 0);
 
+  // ── NEW: single source of truth for "does this account have a linked card yet".
+  // Dashboard is ALWAYS reachable once logged in — this flag only controls
+  // whether the real data/actions are shown, or a dulled/blank placeholder state. ──
+  const isLinked = Boolean(cardUid);
+  const dullClass = !isLinked ? "opacity-40 grayscale pointer-events-none select-none" : "";
+
   const linkCard = useLinkCard((uid) => setCardUid(uid));
   const topup = useTopup(cardUid, currentBalance);
   const changePassword = useChangePassword();
@@ -133,7 +137,7 @@ export default function PaymongoDashboardPage() {
   const remainingTopup = Math.max(0, 20000 - currentBalance);
   const isAtMaxBalance = remainingTopup <= 0;
 
-  // ✅ NEW: editable Contact + Email state
+  // ✅ editable Contact + Email state
   const [editingContact, setEditingContact] = useState(false);
   const [editingEmail, setEditingEmail] = useState(false);
   const [contactValue, setContactValue] = useState("");
@@ -144,8 +148,8 @@ export default function PaymongoDashboardPage() {
   const [localContact, setLocalContact] = useState<string | null>(null);
   const [localEmail, setLocalEmail] = useState<string | null>(null);
 
-  const displayContact = localContact ?? user?.contactNumber ?? "";
-  const displayEmail = localEmail ?? user?.email ?? "";
+  const displayContact = isLinked ? (localContact ?? user?.contactNumber ?? "") : "";
+  const displayEmail = isLinked ? (localEmail ?? user?.email ?? "") : "";
 
   // Reset local overrides + editing state whenever a different card is loaded
   useEffect(() => {
@@ -156,6 +160,11 @@ export default function PaymongoDashboardPage() {
   }, [cardUid]);
 
   const startEditContact = () => {
+    // ── Guard: can't edit contact info for an account with no linked card yet ──
+    if (!isLinked) {
+      toast({ title: "Link a card first", description: "You need to link a card before editing your contact number.", variant: "destructive" });
+      return;
+    }
     setContactValue(displayContact);
     setEditingContact(true);
   };
@@ -164,6 +173,7 @@ export default function PaymongoDashboardPage() {
     setContactValue(displayContact);
   };
   const handleSaveContact = async () => {
+    if (!isLinked) return;
     const trimmed = contactValue.trim();
     if (!trimmed) {
       toast({ title: "Contact number cannot be empty", variant: "destructive" });
@@ -193,6 +203,11 @@ export default function PaymongoDashboardPage() {
   };
 
   const startEditEmail = () => {
+    // ── Guard: can't edit email for an account with no linked card yet ──
+    if (!isLinked) {
+      toast({ title: "Link a card first", description: "You need to link a card before editing your email address.", variant: "destructive" });
+      return;
+    }
     setEmailValue(displayEmail);
     setEditingEmail(true);
   };
@@ -201,6 +216,7 @@ export default function PaymongoDashboardPage() {
     setEmailValue(displayEmail);
   };
   const handleSaveEmail = async () => {
+    if (!isLinked) return;
     const trimmed = emailValue.trim();
     if (!trimmed || !isValidEmail(trimmed)) {
       toast({ title: "Please enter a valid email address", variant: "destructive" });
@@ -258,6 +274,11 @@ export default function PaymongoDashboardPage() {
     if (activeTab !== "Transactions") setSelectedTx(null);
   }, [activeTab]);
 
+  // ── NEW: login only checks the token and fetches the profile. It NEVER
+  // blocks the dashboard from rendering. If there's no linked card yet, we
+  // just leave cardUid empty (dashboard renders in its dulled/blank state)
+  // and pop the LinkCardModal as a convenience — the user can still see and
+  // navigate the dashboard behind it. ──
   useEffect(() => {
     const token = window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
     if (!token) { setLocation("/signin"); return; }
@@ -265,7 +286,12 @@ export default function PaymongoDashboardPage() {
       try {
         const profile = await getSignedInUser();
         const linkedUid = cleanCardUid(profile?.user?.linkedCardUid || "");
-        if (linkedUid) { setCardUid(linkedUid); } else { linkCard.setIsOpen(true); }
+        if (linkedUid) {
+          setCardUid(linkedUid);
+        } else {
+          // No card linked yet — dashboard is still reachable, just dulled.
+          linkCard.setIsOpen(true);
+        }
       } catch {
         window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
         setLocation("/signin");
@@ -277,10 +303,6 @@ export default function PaymongoDashboardPage() {
   const handleLogout = async () => {
     const token = window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
 
-    // ── Call the backend logout endpoint WHILE the token is still valid,
-    // so the server can resolve currentUser and write the audit_logs row.
-    // We wait briefly for it, but never let a slow/failed request block
-    // the actual logout from completing. ──
     if (token) {
       try {
         const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
@@ -300,12 +322,10 @@ export default function PaymongoDashboardPage() {
     setLocation("/signin");
   };
 
-  // ✅ Opens the confirmation dialog instead of logging out immediately
   const requestLogout = () => {
     setLogoutConfirmOpen(true);
   };
 
-  // ✅ Called when user taps "Yes" in the dialog
   const confirmLogout = () => {
     setLogoutConfirmOpen(false);
     void handleLogout();
@@ -320,15 +340,10 @@ export default function PaymongoDashboardPage() {
     setSelectedTx(null);
   };
 
-  // ✅ Fix: useCallback — stable reference, hindi mag-re-render ang rows dahil dito
   const handleTxClick = useCallback((tx: Transaction) => {
     setSelectedTx(tx);
   }, []);
 
-  // ✅ Fix: measure the ACTUAL rendered header/nav heights instead of guessing
-  // fixed pixel values (57px / 64px). This guarantees the mobile Transactions
-  // panel sits pixel-perfect flush against the bottom nav with zero gap,
-  // regardless of device, font scaling, or safe-area insets.
   const headerRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
   const [headerHeight, setHeaderHeight] = useState(57);
@@ -356,6 +371,27 @@ export default function PaymongoDashboardPage() {
     { tab: "Transactions", icon: <List className="h-5 w-5" />, label: "Transactions" },
     { tab: "settings", icon: <Settings className="h-5 w-5" />, label: "Settings" },
   ];
+
+  // ── NEW: reusable "link your card" reminder banner, shown whenever the
+  // account has no linked card yet, regardless of which tab is active. ──
+  const LinkReminderBanner = () => (
+    <button
+      onClick={() => linkCard.setIsOpen(true)}
+      className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-left cursor-pointer transition-colors ${
+        isDark
+          ? "bg-amber-500/10 border-amber-500/20 hover:bg-amber-500/15"
+          : "bg-amber-50 border-amber-200 hover:bg-amber-100"
+      }`}
+    >
+      <AlertTriangle className={`h-4 w-4 shrink-0 ${isDark ? "text-amber-400" : "text-amber-600"}`} />
+      <span className={`flex-1 text-[11px] font-semibold ${isDark ? "text-amber-300" : "text-amber-800"}`}>
+        No card linked yet. Your balance, profile, and transactions will stay blank until you link one.
+      </span>
+      <span className={`flex items-center gap-1 text-[10px] font-bold uppercase shrink-0 ${isDark ? "text-amber-300" : "text-amber-700"}`}>
+        <Link2 className="h-3 w-3" /> Link Card
+      </span>
+    </button>
+  );
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#020617] text-slate-100" : "bg-slate-50 text-slate-800"}`}>
@@ -398,7 +434,6 @@ export default function PaymongoDashboardPage() {
       <div ref={headerRef} className={`sticky top-0 z-40 w-full backdrop-blur-md border-b ${isDark ? "bg-[#020617]/95 border-slate-800" : "bg-white/95 border-slate-200"}`}>
         <div className="mx-auto w-full max-w-6xl px-4 sm:px-8 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            {/* ✅ Calbayog logo — served from /public, same as login page */}
             <img
               src="/calbayog.png"
               alt="Calbayog logo"
@@ -409,7 +444,16 @@ export default function PaymongoDashboardPage() {
             </h1>
           </div>
           <div className="hidden md:flex items-center gap-2">
-            {/* ✅ Theme toggle */}
+            {!isLinked && (
+              <Button
+                variant="ghost"
+                onClick={() => linkCard.setIsOpen(true)}
+                className={`gap-2 text-sm cursor-pointer ${
+                  isDark ? "text-amber-400 hover:text-amber-300 hover:bg-amber-400/10" : "text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                }`}>
+                <Link2 className="h-4 w-4" /><span>Link Card</span>
+              </Button>
+            )}
             <Button
               variant="ghost"
               onClick={toggleTheme}
@@ -441,11 +485,14 @@ export default function PaymongoDashboardPage() {
       <div className={`mx-auto w-full max-w-6xl px-3 sm:px-8 pb-20 md:pb-8 pt-4 space-y-4 dashboard-content ${
         linkCard.isOpen ? "is-obscured" : ""
       }`}>
-        {error && (
+        {error && isLinked && (
           <div className={`p-3 rounded-lg text-xs border ${isDark ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-red-50 border-red-200 text-red-600"}`}>
             Warning: {error}
           </div>
         )}
+
+        {/* ── NEW: persistent reminder banner while no card is linked yet ── */}
+        {!isLinked && <LinkReminderBanner />}
 
         {/* HOME tab */}
         <div className={activeTab === "home" ? "block" : "hidden md:block"}>
@@ -453,20 +500,24 @@ export default function PaymongoDashboardPage() {
             <div className="col-span-1 md:col-span-3">
               <p className={`text-xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
                 Welcome back,{" "}
-                <span className={isDark ? "text-emerald-400" : "text-emerald-600"}>{user?.fullName?.split(" ")[0] || "User"}</span> 👋
+                <span className={isDark ? "text-emerald-400" : "text-emerald-600"}>
+                  {isLinked ? (user?.fullName?.split(" ")[0] || "User") : "User"}
+                </span> 👋
               </p>
-              <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>Here's your account overview.</p>
+              <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                {isLinked ? "Here's your account overview." : "Link a card to see your account overview."}
+              </p>
             </div>
 
-            {/* Balance Card */}
+            {/* Balance Card — dulled/blank until a card is linked */}
             <Card className={`md:col-span-1 backdrop-blur-md border-t-emerald-500/50 border-t-2 ${
               isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"
             }`}>
-              <CardContent className="pt-4 pb-4 px-4">
+              <CardContent className={`pt-4 pb-4 px-4 ${dullClass}`}>
                 <div className="flex justify-between items-start mb-1.5">
                   <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>Available Balance</p>
-                  <Button size="sm" variant="outline" onClick={() => topup.setIsOpen(true)}
-                    className={`h-6 text-[10px] px-2 cursor-pointer ${
+                  <Button size="sm" variant="outline" disabled={!isLinked} onClick={() => isLinked && topup.setIsOpen(true)}
+                    className={`h-6 text-[10px] px-2 cursor-pointer disabled:cursor-not-allowed ${
                       isDark
                         ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white"
                         : "bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-600 hover:text-white"
@@ -475,19 +526,22 @@ export default function PaymongoDashboardPage() {
                   </Button>
                 </div>
                 <h2 className={`text-4xl font-black tracking-tighter ${isDark ? "text-white" : "text-slate-900"} ${isPulsing ? "balance-pulse" : ""}`}>
-                  {balanceText}
+                  {isLinked ? balanceText : "\u20B1— .—"}
                 </h2>
                 <div className="mt-2 space-y-1">
                   <div className={`w-full rounded-full h-1 overflow-hidden ${isDark ? "bg-slate-800" : "bg-slate-200"}`}>
                     <div
                       className={`h-1 rounded-full transition-all ${
-                        isAtMaxBalance ? "bg-red-500" : currentBalance / 20000 >= 0.8 ? "bg-amber-400" : "bg-emerald-500"
+                        !isLinked ? (isDark ? "bg-slate-700" : "bg-slate-300")
+                          : isAtMaxBalance ? "bg-red-500" : currentBalance / 20000 >= 0.8 ? "bg-amber-400" : "bg-emerald-500"
                       }`}
-                      style={{ width: `${Math.min((currentBalance / 20000) * 100, 100)}%` }}
+                      style={{ width: isLinked ? `${Math.min((currentBalance / 20000) * 100, 100)}%` : "0%" }}
                     />
                   </div>
                   <p className={`text-[9px] font-mono ${isDark ? "text-slate-600" : "text-slate-400"}`}>
-                    {isAtMaxBalance ? (
+                    {!isLinked ? (
+                      <span>— remaining</span>
+                    ) : isAtMaxBalance ? (
                       <span className={isDark ? "text-red-400/70" : "text-red-500/80"}>Max balance reached</span>
                     ) : (
                       <>₱{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })} remaining</>
@@ -496,7 +550,7 @@ export default function PaymongoDashboardPage() {
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Badge className={
-                    user?.status === "Active"
+                    isLinked && user?.status === "Active"
                       ? isDark
                         ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-2 py-0.5 text-[10px]"
                         : "bg-emerald-50 text-emerald-700 border-emerald-200 px-2 py-0.5 text-[10px]"
@@ -504,24 +558,24 @@ export default function PaymongoDashboardPage() {
                         ? "bg-red-500/10 text-red-400 border-red-500/20 px-2 py-0.5 text-[10px]"
                         : "bg-red-50 text-red-700 border-red-200 px-2 py-0.5 text-[10px]"
                   }>
-                    <ShieldCheck className="h-3 w-3 mr-1" />{user?.status || "Inactive"}
+                    <ShieldCheck className="h-3 w-3 mr-1" />{isLinked ? (user?.status || "Inactive") : "—"}
                   </Badge>
                   <Badge variant="outline" className={`px-2 py-0.5 text-[10px] ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
-                    {user?.type || "Standard User"}
+                    {isLinked ? (user?.type || "Standard User") : "—"}
                   </Badge>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Profile Card — desktop only */}
+            {/* Profile Card — desktop only, dulled/blank until a card is linked */}
             <Card className={`hidden md:block md:col-span-2 backdrop-blur-md ${isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"}`}>
               <CardContent className="pt-6 grid grid-cols-1 sm:grid-cols-2 gap-y-6 gap-x-4">
                 {[
-                  { icon: <User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />, bg: "bg-blue-500/10 border-blue-500/20", label: "Name", value: user?.fullName || "Not Linked" },
-                  { icon: <CreditCard className={`h-4 w-4 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID", value: user?.cardUid || "----", mono: true },
-                  { icon: <Tag className={`h-4 w-4 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: user?.type || "General" },
+                  { icon: <User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />, bg: "bg-blue-500/10 border-blue-500/20", label: "Name", value: isLinked ? (user?.fullName || "Not Linked") : "—" },
+                  { icon: <CreditCard className={`h-4 w-4 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
+                  { icon: <Tag className={`h-4 w-4 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: isLinked ? (user?.type || "General") : "—" },
                 ].map(({ icon, bg, label, value, mono }) => (
-                  <div key={label} className="flex items-center gap-3">
+                  <div key={label} className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                     <div className={`h-9 w-9 rounded-full flex items-center justify-center border ${bg}`}>{icon}</div>
                     <div>
                       <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
@@ -530,8 +584,8 @@ export default function PaymongoDashboardPage() {
                   </div>
                 ))}
 
-                {/* ✅ Contact — editable */}
-                <div className="flex items-center gap-3">
+                {/* ✅ Contact — editable, disabled until a card is linked */}
+                <div className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                   <div className="h-9 w-9 rounded-full flex items-center justify-center border bg-orange-500/10 border-orange-500/20 shrink-0">
                     <Phone className={`h-4 w-4 ${isDark ? "text-orange-400" : "text-orange-600"}`} />
                   </div>
@@ -576,10 +630,11 @@ export default function PaymongoDashboardPage() {
                       </div>
                     ) : (
                       <div className="flex items-center gap-1.5 group">
-                        <p className={`text-sm font-semibold truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{displayContact || "None"}</p>
+                        <p className={`text-sm font-semibold truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{isLinked ? (displayContact || "None") : "—"}</p>
                         <button
                           onClick={startEditContact}
-                          className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer ${
+                          disabled={!isLinked}
+                          className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer disabled:cursor-not-allowed ${
                             isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
                           }`}
                           title="Edit contact number"
@@ -591,8 +646,8 @@ export default function PaymongoDashboardPage() {
                   </div>
                 </div>
 
-                {/* ✅ Email — editable (auth_users, matched by linked_card_uid) */}
-                <div className="flex items-center gap-3 sm:col-span-2">
+                {/* ✅ Email — editable, disabled until a card is linked */}
+                <div className={`flex items-center gap-3 sm:col-span-2 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                   <div className="h-9 w-9 rounded-full bg-sky-500/10 flex items-center justify-center border border-sky-500/20 shrink-0">
                     <Mail className={`h-4 w-4 ${isDark ? "text-sky-400" : "text-sky-600"}`} />
                   </div>
@@ -637,10 +692,11 @@ export default function PaymongoDashboardPage() {
                       </div>
                     ) : (
                       <div className="flex items-center gap-1.5 group">
-                        <p className={`text-sm truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{displayEmail || "Not linked"}</p>
+                        <p className={`text-sm truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{isLinked ? (displayEmail || "Not linked") : "—"}</p>
                         <button
                           onClick={startEditEmail}
-                          className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer ${
+                          disabled={!isLinked}
+                          className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer disabled:cursor-not-allowed ${
                             isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
                           }`}
                           title="Edit email"
@@ -665,67 +721,75 @@ export default function PaymongoDashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <p className={`px-4 pt-2 pb-1 text-[10px] italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>Tap a row to view transaction details.</p>
-              <div className="max-h-[400px] overflow-y-auto">
-                <table className="w-full text-left table-fixed">
-                  <colgroup>
-                    <col style={{ width: "30%" }} /><col style={{ width: "18%" }} />
-                    <col style={{ width: "30%" }} /><col style={{ width: "22%" }} />
-                  </colgroup>
-                  <thead className={isDark ? "bg-slate-950/50" : "bg-slate-50"}>
-                    <tr>
-                      {(["Timestamp", "Service", "Amount", "Result"] as const).map((h, i) => (
-                        <th key={h} className={`px-3 py-2.5 text-[9px] font-black uppercase whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"} ${
-                          i === 2 ? "text-right" : i === 3 ? "text-center" : ""}`}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-100"}>
-                    {transactions.length === 0 ? (
-                      <tr><td className={`p-12 text-center text-sm italic ${isDark ? "text-slate-600" : "text-slate-400"}`} colSpan={4}>No activity recorded.</td></tr>
-                    ) : transactions.map((tx) => (
-                      // ✅ Fix: useCallback na handleTxClick — stable reference, walang blink
-                      <tr key={tx.id} onClick={() => handleTxClick(tx)}
-                        className={`transition-colors cursor-pointer ${isDark ? "hover:bg-slate-800/30 active:bg-slate-800/50" : "hover:bg-slate-50 active:bg-slate-100"}`}>
-                        <td className="px-3 py-2.5">
-                          <p className={`text-[10px] font-medium leading-tight whitespace-nowrap ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                            {new Date(tx.timestamp).toLocaleDateString()}
-                          </p>
-                          <p className={`text-[9px] font-mono leading-tight whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                            {new Date(tx.timestamp).toLocaleTimeString()}
-                          </p>
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <span className={`text-[10px] font-semibold uppercase whitespace-nowrap ${isDark ? "text-slate-200" : "text-slate-700"}`}>{tx.type}</span>
-                        </td>
-                        <td className="px-3 py-2.5 text-right">
-                          <span className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${
-                            tx.type === "Fare" ? (isDark ? "text-red-400" : "text-red-600") : (isDark ? "text-emerald-400" : "text-emerald-600")}`}>
-                            {formatAmount(tx.type, tx.amount)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <Badge variant="outline" className={`text-[9px] font-black tracking-widest uppercase py-0 whitespace-nowrap ${
-                            tx.status === "Success"
-                              ? isDark ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5" : "text-emerald-700 border-emerald-200 bg-emerald-50"
-                              : isDark ? "text-red-400 border-red-500/30 bg-red-500/5" : "text-red-700 border-red-200 bg-red-50"}`}>
-                            {tx.status}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {!isLinked ? (
+                <div className="flex flex-col items-center justify-center py-14 gap-3">
+                  <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
+                  <p className={`text-xs italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>Link a card to see your transactions.</p>
+                  <Button size="sm" onClick={() => linkCard.setIsOpen(true)}
+                    className="h-7 text-[11px] px-3 bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer">
+                    <Link2 className="h-3 w-3 mr-1" /> Link Card
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <p className={`px-4 pt-2 pb-1 text-[10px] italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>Tap a row to view transaction details.</p>
+                  <div className="max-h-[400px] overflow-y-auto">
+                    <table className="w-full text-left table-fixed">
+                      <colgroup>
+                        <col style={{ width: "30%" }} /><col style={{ width: "18%" }} />
+                        <col style={{ width: "30%" }} /><col style={{ width: "22%" }} />
+                      </colgroup>
+                      <thead className={isDark ? "bg-slate-950/50" : "bg-slate-50"}>
+                        <tr>
+                          {(["Timestamp", "Service", "Amount", "Result"] as const).map((h, i) => (
+                            <th key={h} className={`px-3 py-2.5 text-[9px] font-black uppercase whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"} ${
+                              i === 2 ? "text-right" : i === 3 ? "text-center" : ""}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-100"}>
+                        {transactions.length === 0 ? (
+                          <tr><td className={`p-12 text-center text-sm italic ${isDark ? "text-slate-600" : "text-slate-400"}`} colSpan={4}>No activity recorded.</td></tr>
+                        ) : transactions.map((tx) => (
+                          <tr key={tx.id} onClick={() => handleTxClick(tx)}
+                            className={`transition-colors cursor-pointer ${isDark ? "hover:bg-slate-800/30 active:bg-slate-800/50" : "hover:bg-slate-50 active:bg-slate-100"}`}>
+                            <td className="px-3 py-2.5">
+                              <p className={`text-[10px] font-medium leading-tight whitespace-nowrap ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                {new Date(tx.timestamp).toLocaleDateString()}
+                              </p>
+                              <p className={`text-[9px] font-mono leading-tight whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                                {new Date(tx.timestamp).toLocaleTimeString()}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className={`text-[10px] font-semibold uppercase whitespace-nowrap ${isDark ? "text-slate-200" : "text-slate-700"}`}>{tx.type}</span>
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              <span className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${
+                                tx.type === "Fare" ? (isDark ? "text-red-400" : "text-red-600") : (isDark ? "text-emerald-400" : "text-emerald-600")}`}>
+                                {formatAmount(tx.type, tx.amount)}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <Badge variant="outline" className={`text-[9px] font-black tracking-widest uppercase py-0 whitespace-nowrap ${
+                                tx.status === "Success"
+                                  ? isDark ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5" : "text-emerald-700 border-emerald-200 bg-emerald-50"
+                                  : isDark ? "text-red-400 border-red-500/30 bg-red-500/5" : "text-red-700 border-red-200 bg-red-50"}`}>
+                                {tx.status}
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
 
         {/* TRANSACTIONS — Mobile */}
-        {/* ✅ FIX: solid bg added to outer fixed wrapper (was transparent, letting the
-            page's default white background show through during iOS overscroll/bounce —
-            this was the "puting nakaharang" bar near the bottom nav). Also added
-            overscroll-contain so the bounce doesn't leak past this panel. */}
         <div
           className={
             activeTab === "Transactions"
@@ -740,10 +804,17 @@ export default function PaymongoDashboardPage() {
               Transactions History
             </p>
           </div>
-          {/* ✅ FIX: was `isDark ? "" : "bg-slate-50"` — empty string meant NO background
-              at all in dark mode. Now always has a solid bg + overscroll-contain. */}
           <div className={`flex-1 overflow-y-auto overscroll-contain ${isDark ? "bg-[#020617]" : "bg-slate-50"}`}>
-            {transactions.length === 0 ? (
+            {!isLinked ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 px-6">
+                <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
+                <p className={`text-xs italic text-center ${isDark ? "text-slate-600" : "text-slate-400"}`}>Link a card to see your transactions.</p>
+                <Button size="sm" onClick={() => linkCard.setIsOpen(true)}
+                  className="h-8 text-[11px] px-3 bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer">
+                  <Link2 className="h-3 w-3 mr-1" /> Link Card
+                </Button>
+              </div>
+            ) : transactions.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
                 <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
                 <p className={`text-xs italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>No transactions yet.</p>
@@ -751,7 +822,6 @@ export default function PaymongoDashboardPage() {
             ) : (
               <div className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-200 bg-white"}>
                 {transactions.map((tx) => (
-                  // ✅ Fix: handleTxClick stable + MobileTxRow memo = walang blink
                   <MobileTxRow key={tx.id} tx={tx} onClick={() => handleTxClick(tx)} isDark={isDark} />
                 ))}
               </div>
@@ -763,22 +833,24 @@ export default function PaymongoDashboardPage() {
         <div className={activeTab === "settings" ? "block md:hidden" : "hidden"}>
           <div className="space-y-3">
 
+            {!isLinked && <LinkReminderBanner />}
+
             {/* Profile Card */}
             <div className={`rounded-2xl overflow-hidden border ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
-              <div className={`flex items-center gap-3 px-4 py-4 border-b ${isDark ? "border-slate-800/60" : "border-slate-100"}`}>
+              <div className={`flex items-center gap-3 px-4 py-4 border-b ${isDark ? "border-slate-800/60" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                 <div className="h-11 w-11 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0">
                   <span className={`font-black text-base tracking-tight ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                    {getInitials(user?.fullName || "?")}
+                    {getInitials(isLinked ? (user?.fullName || "?") : "?")}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-bold leading-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
-                    {user?.fullName || "Not linked"}
+                    {isLinked ? (user?.fullName || "Not linked") : "—"}
                   </p>
-                  <p className={`text-[11px] mt-0.5 truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{displayEmail || "—"}</p>
+                  <p className={`text-[11px] mt-0.5 truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{isLinked ? (displayEmail || "—") : "—"}</p>
                   <div className="flex gap-1.5 mt-1.5 flex-wrap">
                     <Badge className={
-                      user?.status === "Active"
+                      isLinked && user?.status === "Active"
                         ? isDark
                           ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-1.5 py-0 text-[9px]"
                           : "bg-emerald-50 text-emerald-700 border-emerald-200 px-1.5 py-0 text-[9px]"
@@ -786,20 +858,20 @@ export default function PaymongoDashboardPage() {
                           ? "bg-red-500/10 text-red-400 border-red-500/20 px-1.5 py-0 text-[9px]"
                           : "bg-red-50 text-red-700 border-red-200 px-1.5 py-0 text-[9px]"
                     }>
-                      <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />{user?.status || "Inactive"}
+                      <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />{isLinked ? (user?.status || "Inactive") : "—"}
                     </Badge>
                     <Badge variant="outline" className={`px-1.5 py-0 text-[9px] ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
-                      {user?.type || "Standard"}
+                      {isLinked ? (user?.type || "Standard") : "—"}
                     </Badge>
                   </div>
                 </div>
               </div>
 
               {[
-                { icon: <CreditCard className={`h-3.5 w-3.5 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, label: "UID", value: user?.cardUid || "----", mono: true },
-                { icon: <Tag className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, label: "Class", value: user?.type || "General", mono: false },
+                { icon: <CreditCard className={`h-3.5 w-3.5 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
+                { icon: <Tag className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, label: "Class", value: isLinked ? (user?.type || "General") : "—", mono: false },
               ].map(({ icon, label, value, mono }) => (
-                <div key={label} className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"}`}>
+                <div key={label} className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                   <div className="shrink-0 opacity-80">{icon}</div>
                   <div className="flex-1 min-w-0">
                     <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
@@ -808,8 +880,8 @@ export default function PaymongoDashboardPage() {
                 </div>
               ))}
 
-              {/* ✅ Contact — editable (mobile) */}
-              <div className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"}`}>
+              {/* ✅ Contact — editable (mobile), disabled until a card is linked */}
+              <div className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                 <div className="shrink-0 opacity-80"><Phone className={`h-3.5 w-3.5 ${isDark ? "text-orange-400" : "text-orange-600"}`} /></div>
                 <div className="flex-1 min-w-0">
                   <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
@@ -846,10 +918,11 @@ export default function PaymongoDashboardPage() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-1.5">
-                      <p className={`text-xs font-medium truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{displayContact || "None"}</p>
+                      <p className={`text-xs font-medium truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{isLinked ? (displayContact || "None") : "—"}</p>
                       <button
                         onClick={startEditContact}
-                        className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer ${
+                        disabled={!isLinked}
+                        className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer disabled:cursor-not-allowed ${
                           isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
                         }`}
                       >
@@ -860,8 +933,8 @@ export default function PaymongoDashboardPage() {
                 </div>
               </div>
 
-              {/* ✅ Email — editable (mobile, auth_users) */}
-              <div className="flex items-center gap-3 px-4 py-3">
+              {/* ✅ Email — editable (mobile, auth_users), disabled until a card is linked */}
+              <div className={`flex items-center gap-3 px-4 py-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                 <div className="shrink-0 opacity-80"><Mail className={`h-3.5 w-3.5 ${isDark ? "text-sky-400" : "text-sky-600"}`} /></div>
                 <div className="flex-1 min-w-0">
                   <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</p>
@@ -898,10 +971,11 @@ export default function PaymongoDashboardPage() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-1.5">
-                      <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{displayEmail || "Not linked"}</p>
+                      <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{isLinked ? (displayEmail || "Not linked") : "—"}</p>
                       <button
                         onClick={startEditEmail}
-                        className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer ${
+                        disabled={!isLinked}
+                        className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer disabled:cursor-not-allowed ${
                           isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
                         }`}
                       >
@@ -913,11 +987,26 @@ export default function PaymongoDashboardPage() {
               </div>
             </div>
 
-            {/* Account actions */}
+            {/* Account actions — always usable regardless of link status */}
             <div className={`rounded-2xl overflow-hidden border ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
               <p className={`px-4 pt-3 pb-1.5 text-[9px] font-black uppercase tracking-widest ${isDark ? "text-slate-600" : "text-slate-400"}`}>Account</p>
 
-              {/* ✅ Theme toggle row (mobile) */}
+              {!isLinked && (
+                <button onClick={() => linkCard.setIsOpen(true)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 border-b transition-colors cursor-pointer ${
+                    isDark ? "border-slate-800/50 hover:bg-emerald-500/5 active:bg-emerald-500/10" : "border-slate-100 hover:bg-emerald-50 active:bg-emerald-100"
+                  }`}>
+                  <div className="h-8 w-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                    <Link2 className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>Link Card</p>
+                    <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Connect a card to activate your account</p>
+                  </div>
+                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
+                </button>
+              )}
+
               <button onClick={toggleTheme}
                 className={`w-full flex items-center gap-3 px-4 py-3 border-b transition-colors cursor-pointer ${
                   isDark ? "border-slate-800/50 hover:bg-slate-800/30 active:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50 active:bg-slate-100"
