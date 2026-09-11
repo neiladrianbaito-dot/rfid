@@ -27,6 +27,7 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  ChevronDown,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -103,13 +104,7 @@ const DAY_OPTIONS = Array.from({ length: 31 }, (_, i) => {
 // bank/e-wallet channels Xendit commonly supports for disbursement in PH —
 // trim/extend this list to match what's actually enabled on your Xendit account
 const DISBURSEMENT_CHANNELS = [
-  { value: "PH_GCASH", label: "GCash" },
-  { value: "PH_PAYMAYA", label: "Maya" },
   { value: "PH_BDO", label: "BDO" },
-  { value: "PH_BPI", label: "BPI" },
-  { value: "PH_UBP", label: "UnionBank" },
-  { value: "PH_MBTC", label: "Metrobank" },
-  { value: "PH_LANDBANK", label: "Landbank" },
 ];
 
 // Splits a "YYYY-MM-DD" (or ISO) date string into { year, month, day } parts.
@@ -184,6 +179,24 @@ function generateDateRange(filterYear: string, filterMonth: string, filterDay: s
   return [`${year}-${filterMonth}-${filterDay}`];
 }
 
+// ── builds a stable identifier for WHICH revenue window a disbursement
+// covers, e.g. "2026-09-10" (a single day), "2026-09-all" (a month),
+// "2026-all" (a year), or "today" (no filter active). This is sent to the
+// backend so it can block a second disbursement for the same window —
+// see period_key in the create-disbursement function. ──
+function computePeriodKey(
+  isFilterActive: boolean,
+  filterYear: string,
+  filterMonth: string,
+  filterDay: string
+): string {
+  if (!isFilterActive) return `today-${getLocalDateString()}`;
+  const year = filterYear !== "all" ? filterYear : "any";
+  const month = filterMonth !== "all" ? filterMonth : "all";
+  const day = filterDay !== "all" ? filterDay : "all";
+  return `${year}-${month}-${day}`;
+}
+
 export default function ReportsPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
@@ -200,6 +213,7 @@ export default function ReportsPage() {
 
   // ── disbursement state ──
   const [disburseModalOpen, setDisburseModalOpen] = useState(false);
+  const [disburseChannelOpen, setDisburseChannelOpen] = useState(false);
   const [disburseForm, setDisburseForm] = useState({
     bank_code: "",
     account_holder_name: "",
@@ -209,6 +223,16 @@ export default function ReportsPage() {
   const [isDisbursing, setIsDisbursing] = useState(false);
   const [disburseError, setDisburseError] = useState<string | null>(null);
   const [disburseSuccess, setDisburseSuccess] = useState<string | null>(null);
+
+  // ── synchronous guard against double-submit (double-click, double-tap,
+  // Enter-key + click race, etc). React state updates (isDisbursing) are
+  // asynchronous and can still let two calls slip through if they both
+  // fire before the first re-render happens — a ref updates immediately,
+  // so this closes that gap. The real, authoritative protection against
+  // duplicates still lives in the backend/DB (period_key unique index);
+  // this ref is just to avoid firing an obviously-redundant second
+  // request from the same click session. ──
+  const isSubmittingRef = useRef(false);
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
@@ -324,7 +348,7 @@ export default function ReportsPage() {
   const handleDayChange = (value: string) => setFilterDay(value);
 
   // ── the actual source used for chart + table: full aggregated data
-  // when a filter is active, report's short window when it isn't ──
+  // when a filter is active, otherwise report's short window ──
   const baseBreakdown = isFilterActive ? aggregatedBreakdown : sanitizedBreakdown;
 
   // ── FIXED: whenever a Year is selected, always render the COMPLETE
@@ -395,19 +419,21 @@ export default function ReportsPage() {
   const disburseAmount = isFilterActive ? filteredRevenueTotal : todayRevenue;
   const disburseAmountLabel = isFilterActive ? `${filterLabel} Revenue` : "Today's Revenue";
 
-  // ── identifies WHICH PERIOD is being disbursed, so the backend can
-  // block a second disbursement for the same period (see the unique
-  // index on disbursements.idempotency_key). Must stay stable for the
-  // same period regardless of when/how many times the button is clicked. ──
-  const disburseIdempotencyKey = isFilterActive
-    ? `filtered-${filterYear}-${filterMonth}-${filterDay}`
-    : `today-${getLocalDateString()}`;
+  // ── identifies WHICH revenue window this disbursement covers — sent to
+  // the backend so it can reject a second disbursement for the same
+  // window (see period_key handling in create-disbursement). Recomputed
+  // whenever the active filter changes. ──
+  const periodKey = React.useMemo(
+    () => computePeriodKey(isFilterActive, filterYear, filterMonth, filterDay),
+    [isFilterActive, filterYear, filterMonth, filterDay]
+  );
 
   const handleOpenPreview = () => {
     navigate("/reports/preview");
   };
 
   const openDisburseModal = () => {
+    setDisburseChannelOpen(false);
     setDisburseError(null);
     setDisburseSuccess(null);
     setDisburseModalOpen(true);
@@ -415,6 +441,7 @@ export default function ReportsPage() {
 
   const closeDisburseModal = () => {
     if (isDisbursing) return; // don't let them close mid-request
+    setDisburseChannelOpen(false);
     setDisburseModalOpen(false);
   };
 
@@ -423,18 +450,27 @@ export default function ReportsPage() {
   };
 
   const handleSubmitDisbursement = async () => {
+    // ── synchronous double-submit guard — checked and set BEFORE any
+    // await, so a second click that fires before the first re-render
+    // still gets blocked here. ──
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
     setDisburseError(null);
 
     if (disburseAmount <= 0) {
       setDisburseError("Wala pang revenue na pwedeng i-disburse para sa napiling range.");
+      isSubmittingRef.current = false;
       return;
     }
     if (!disburseForm.bank_code) {
       setDisburseError("Pumili ng bank o e-wallet.");
+      isSubmittingRef.current = false;
       return;
     }
     if (!disburseForm.account_holder_name.trim() || !disburseForm.account_number.trim()) {
       setDisburseError("Kailangan ang account holder name at account number.");
+      isSubmittingRef.current = false;
       return;
     }
 
@@ -450,28 +486,31 @@ export default function ReportsPage() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          total_amount: disburseAmount,
+          amount: disburseAmount,
           bank_code: disburseForm.bank_code,
           account_holder_name: disburseForm.account_holder_name.trim(),
           account_number: disburseForm.account_number.trim(),
           description: disburseForm.description.trim() || `${disburseAmountLabel} disbursement`,
           requested_by: adminName,
-          idempotency_key: disburseIdempotencyKey,
+          period_key: periodKey,
         }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
+        // 409 = the backend's period_key unique-constraint check caught a
+        // duplicate — show a clear message instead of the generic one
         if (res.status === 409) {
-          throw new Error(data?.error || "Fully disbursed na ang period na ito.");
+          throw new Error(
+            data?.error || "Naka-disburse na ang revenue para sa period na ito. Hindi puwedeng ulitin."
+          );
         }
         throw new Error(data?.error || "Nabigo ang disbursement request.");
       }
 
-      const sentAmount = data?.disbursement?.amount ?? disburseAmount;
       setDisburseSuccess(
-        `Naipadala na ang ${formatPeso(sentAmount)} (bagong/hindi pa na-disburse na bahagi) — pending pa ang confirmation mula sa Xendit.`
+        `Naipadala na ang ${formatPeso(disburseAmount)} — pending pa ang confirmation mula sa Xendit.`
       );
       setDisburseForm({ bank_code: "", account_holder_name: "", account_number: "", description: "" });
 
@@ -484,6 +523,7 @@ export default function ReportsPage() {
       setDisburseError(err?.message || "May error na nangyari, subukan ulit.");
     } finally {
       setIsDisbursing(false);
+      isSubmittingRef.current = false;
     }
   };
 
@@ -1057,25 +1097,77 @@ export default function ReportsPage() {
                 <span className={isDark ? "text-indigo-300" : "text-indigo-700"}>{disburseAmountLabel}</span>
                 <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>{formatPeso(disburseAmount)}</span>
               </div>
-              <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Kung may bahagi nito na na-disburse na dati, awtomatikong ang bagong/hindi pa naipapadalang bahagi na lang ang ipapadala sa Xendit.
-              </p>
 
               <div>
                 <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Bank / E-Wallet</label>
-                <select
-                  value={disburseForm.bank_code}
-                  onChange={(e) => handleDisburseFieldChange("bank_code", e.target.value)}
-                  data-testid="select-disburse-bank"
-                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-                  }`}
-                >
-                  <option value="">Select channel</option>
-                  {DISBURSEMENT_CHANNELS.map((c) => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <button
+                    type="button"
+                    data-testid="select-disburse-bank"
+                    onClick={() => setDisburseChannelOpen((prev) => !prev)}
+                    className={`w-full h-9 rounded-md border px-2.5 text-sm flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                      isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      {disburseForm.bank_code === "PH_BDO" ? (
+                        <>
+                          <span>BDO</span>
+                          <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none" />
+                        </>
+                      ) : (
+                        <span>
+                          {DISBURSEMENT_CHANNELS.find((c) => c.value === disburseForm.bank_code)?.label || "Select channel"}
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown size={15} className={`flex-none transition-transform ${disburseChannelOpen ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {disburseChannelOpen && (
+                    <div
+                      className={`absolute z-50 mt-1 w-full rounded-md border shadow-lg overflow-hidden ${
+                        isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDisburseFieldChange("bank_code", "");
+                          setDisburseChannelOpen(false);
+                        }}
+                        className={`w-full h-9 px-2.5 text-left text-sm ${
+                          isDark ? "text-slate-400 hover:bg-slate-900" : "text-slate-500 hover:bg-slate-50"
+                        }`}
+                      >
+                        Select channel
+                      </button>
+
+                      {DISBURSEMENT_CHANNELS.map((c) => (
+                        <button
+                          key={c.value}
+                          type="button"
+                          onClick={() => {
+                            handleDisburseFieldChange("bank_code", c.value);
+                            setDisburseChannelOpen(false);
+                          }}
+                          className={`w-full h-10 px-2.5 text-left text-sm flex items-center gap-2 ${
+                            isDark ? "text-slate-200 hover:bg-slate-900" : "text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {c.value === "PH_BDO" ? (
+                            <>
+                              <span>{c.label}</span>
+                              <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none ml-auto" />
+                            </>
+                          ) : (
+                            <span>{c.label}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div>
