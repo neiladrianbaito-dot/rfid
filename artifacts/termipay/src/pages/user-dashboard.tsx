@@ -492,8 +492,13 @@ export default function PaymongoDashboardPage() {
           </div>
         )}
 
-        {/* ── NEW: persistent reminder banner while no card is linked yet ── */}
-        {!isLinked && <LinkReminderBanner />}
+        {/* ── Persistent reminder banner while no card is linked yet.
+            Desktop only — on mobile, Link Card lives inside the Settings tab. ── */}
+        {!isLinked && (
+          <div className="hidden md:block">
+            <LinkReminderBanner />
+          </div>
+        )}
 
         {/* HOME tab */}
         <div className={activeTab === "home" ? "block" : "hidden md:block"}>
