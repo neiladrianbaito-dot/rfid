@@ -28,11 +28,19 @@ import {
   CheckCircle2,
   AlertCircle,
   ChevronDown,
-  Clock,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// ── how long (ms) to show the success message inside the modal before it
+// auto-closes. Kept short but non-zero so the admin actually sees the
+// confirmation instead of the modal vanishing instantly. ──
+const DISBURSE_SUCCESS_AUTOCLOSE_MS = 1800;
+
+// ── account number is restricted to digits only, max 12 characters (covers
+// PH mobile numbers like "09171234567" as well as bank account numbers). ──
+const ACCOUNT_NUMBER_MAX_LEN = 12;
 
 function normalizeEmail(email: string | null | undefined): string | null {
   if (!email) return null;
@@ -43,6 +51,12 @@ function normalizeEmail(email: string | null | undefined): string | null {
 
 function getLocalDateString(): string {
   return new Date().toLocaleDateString("en-CA");
+}
+
+// ── strips everything except digits and caps the length, used for the
+// account/mobile number field. ──
+function sanitizeAccountNumber(raw: string): string {
+  return raw.replace(/\D/g, "").slice(0, ACCOUNT_NUMBER_MAX_LEN);
 }
 
 // ── shared helper to normalize the API base URL for direct fetch() calls ──
@@ -141,13 +155,6 @@ function getTxDateKey(tx: any): string | null {
   return dt.toLocaleDateString("en-CA"); // YYYY-MM-DD, local time
 }
 
-// ── Checks whether a transaction has already been attached to a
-// disbursement (disbursement_id set = already paid out to the operator's
-// bank account via Xendit). NULL/undefined = still "new"/un-disbursed. ──
-function isTxDisbursed(tx: any): boolean {
-  return tx.disbursement_id != null || tx.disbursementId != null;
-}
-
 // ── builds the FULL list of "YYYY-MM-DD" date keys implied by the active
 // filter combo, so the chart/table always render a complete calendar
 // range (e.g. Year=2026 -> Jan 1 through Dec 31, 2026) instead of only the
@@ -187,69 +194,6 @@ function generateDateRange(filterYear: string, filterMonth: string, filterDay: s
   return [`${year}-${filterMonth}-${filterDay}`];
 }
 
-// ── Status badge shown per row in the Detailed Revenue Log table.
-// "Completed"    -> the day's entire revenue has been disbursed already
-// "Partial"      -> some, but not all, of the day's revenue is disbursed
-// "New / Pending" -> nothing has been disbursed yet for that day
-function DisbursementStatusBadge({
-  revenue,
-  disbursed,
-  isDark,
-}: {
-  revenue: number;
-  disbursed: number;
-  isDark: boolean;
-}) {
-  if (revenue <= 0) {
-    return (
-      <span className={`text-[10px] font-semibold ${isDark ? "text-slate-600" : "text-slate-300"}`}>—</span>
-    );
-  }
-
-  const isCompleted = disbursed >= revenue - 0.01;
-  const isPartial = disbursed > 0 && !isCompleted;
-
-  if (isCompleted) {
-    return (
-      <span
-        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-          isDark
-            ? "bg-emerald-950/50 text-emerald-400 border border-emerald-900"
-            : "bg-emerald-50 text-emerald-700 border border-emerald-100"
-        }`}
-      >
-        <CheckCircle2 size={11} /> Completed
-      </span>
-    );
-  }
-
-  if (isPartial) {
-    return (
-      <span
-        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-          isDark
-            ? "bg-amber-950/50 text-amber-400 border border-amber-900"
-            : "bg-amber-50 text-amber-700 border border-amber-100"
-        }`}
-      >
-        <AlertCircle size={11} /> Partial
-      </span>
-    );
-  }
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-        isDark
-          ? "bg-blue-950/50 text-blue-400 border border-blue-900"
-          : "bg-blue-50 text-blue-700 border border-blue-100"
-      }`}
-    >
-      <Clock size={11} /> New / Pending
-    </span>
-  );
-}
-
 export default function ReportsPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
@@ -286,6 +230,17 @@ export default function ReportsPage() {
   // this ref is just to avoid firing an obviously-redundant second
   // request from the same click session. ──
   const isSubmittingRef = useRef(false);
+
+  // ── holds the setTimeout id for the post-success auto-close, so it can
+  // be cancelled if the component unmounts or the modal gets closed/
+  // reopened before it fires. ──
+  const autoCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (autoCloseTimeoutRef.current) clearTimeout(autoCloseTimeoutRef.current);
+    };
+  }, []);
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
@@ -353,30 +308,23 @@ export default function ReportsPage() {
 
   // ── aggregate per-day revenue directly from the FULL transaction
   // list. report.dailyBreakdown only ever covers a short recent window,
-  // so this gives the filter a complete dataset to search across.
-  // Also tracks how much of each day's revenue has already been
-  // disbursed, so the table can show a Completed / Partial / New badge. ──
+  // so this gives the filter a complete dataset to search across. ──
   const aggregatedBreakdown = React.useMemo(() => {
-    const map = new Map<string, { revenue: number; disbursed: number }>();
+    const map = new Map<string, number>();
     txList.forEach((tx: any) => {
       const dateKey = getTxDateKey(tx);
       if (!dateKey) return;
       const amount = Math.abs(Number(tx.amount) || 0);
-      const entry = map.get(dateKey) || { revenue: 0, disbursed: 0 };
-      entry.revenue += amount;
-      if (isTxDisbursed(tx)) entry.disbursed += amount;
-      map.set(dateKey, entry);
+      map.set(dateKey, (map.get(dateKey) || 0) + amount);
     });
     return Array.from(map.entries())
-      .map(([date, v]) => ({ date, revenue: v.revenue, disbursed: v.disbursed }))
+      .map(([date, revenue]) => ({ date, revenue }))
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [txList]);
 
   // Quick lookup used when filling in the complete calendar range below.
   const revenueByDate = React.useMemo(() => {
-    return new Map(
-      aggregatedBreakdown.map((d: any) => [d.date, { revenue: d.revenue, disbursed: d.disbursed }])
-    );
+    return new Map(aggregatedBreakdown.map((d: any) => [d.date, d.revenue]));
   }, [aggregatedBreakdown]);
 
   // ── derive available years straight from transactions (the full
@@ -417,47 +365,27 @@ export default function ReportsPage() {
   // have no transactions, instead of only showing days that happen to
   // have data. Falls back to the old "filter existing rows" behavior
   // when no Year is picked (e.g. Month-only or Day-only filters), since
-  // there's no year to anchor a full range to.
-  //
-  // Every branch also attaches a `disbursed` figure per day (pulled from
-  // revenueByDate) so the table can render the Completed/Partial/New
-  // status badge regardless of which filter combo is active. ──
+  // there's no year to anchor a full range to. ──
   const filteredBreakdown = React.useMemo(() => {
-    if (!isFilterActive) {
-      // default view: report's own short window doesn't carry disbursed
-      // info, so attach it from the full tx-derived map by date
-      return baseBreakdown.map((d: any) => ({
-        ...d,
-        disbursed: revenueByDate.get(d.date)?.disbursed ?? 0,
-      }));
-    }
+    if (!isFilterActive) return baseBreakdown;
 
     const fullRange = generateDateRange(filterYear, filterMonth, filterDay);
     if (fullRange) {
-      return fullRange.map((date) => {
-        const found = revenueByDate.get(date);
-        return {
-          date,
-          revenue: found?.revenue || 0,
-          disbursed: found?.disbursed || 0,
-        };
-      });
+      return fullRange.map((date) => ({
+        date,
+        revenue: revenueByDate.get(date) || 0,
+      }));
     }
 
     // No year selected (Month and/or Day only, across all years) — keep
     // the previous "only show days that exist" behavior.
-    return baseBreakdown
-      .filter((d: any) => {
-        const parts = splitDateString(d.date);
-        if (!parts) return false;
-        if (filterMonth !== "all" && parts.month !== filterMonth) return false;
-        if (filterDay !== "all" && parts.day !== filterDay) return false;
-        return true;
-      })
-      .map((d: any) => ({
-        ...d,
-        disbursed: revenueByDate.get(d.date)?.disbursed ?? 0,
-      }));
+    return baseBreakdown.filter((d: any) => {
+      const parts = splitDateString(d.date);
+      if (!parts) return false;
+      if (filterMonth !== "all" && parts.month !== filterMonth) return false;
+      if (filterDay !== "all" && parts.day !== filterDay) return false;
+      return true;
+    });
   }, [baseBreakdown, filterYear, filterMonth, filterDay, isFilterActive, revenueByDate]);
 
   // ── filtered transactions (drives Excel export) — unaffected by the
@@ -534,6 +462,10 @@ export default function ReportsPage() {
   };
 
   const openDisburseModal = () => {
+    if (autoCloseTimeoutRef.current) {
+      clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = null;
+    }
     setDisburseChannelOpen(false);
     setDisburseError(null);
     setDisburseSuccess(null);
@@ -542,12 +474,24 @@ export default function ReportsPage() {
 
   const closeDisburseModal = () => {
     if (isDisbursing) return; // don't let them close mid-request
+    if (autoCloseTimeoutRef.current) {
+      clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = null;
+    }
     setDisburseChannelOpen(false);
     setDisburseModalOpen(false);
   };
 
   const handleDisburseFieldChange = (field: keyof typeof disburseForm, value: string) => {
     setDisburseForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // ── dedicated handler for the account/mobile number field: strips any
+  // non-digit characters as the admin types/pastes, and hard-caps the
+  // length at ACCOUNT_NUMBER_MAX_LEN (12) so it's impossible to end up
+  // with letters, symbols, or an over-long value in state. ──
+  const handleAccountNumberChange = (rawValue: string) => {
+    setDisburseForm((prev) => ({ ...prev, account_number: sanitizeAccountNumber(rawValue) }));
   };
 
   const handleSubmitDisbursement = async () => {
@@ -571,6 +515,14 @@ export default function ReportsPage() {
     }
     if (!disburseForm.account_holder_name.trim() || !disburseForm.account_number.trim()) {
       setDisburseError("Kailangan ang account holder name at account number.");
+      isSubmittingRef.current = false;
+      return;
+    }
+    // ── belt-and-suspenders: account number should already be digits-only
+    // (max 12) thanks to handleAccountNumberChange, but re-validate here in
+    // case the value ever gets set another way. ──
+    if (!/^\d{1,12}$/.test(disburseForm.account_number.trim())) {
+      setDisburseError("Ang account/mobile number ay dapat mga numero lang, hanggang 12 digits.");
       isSubmittingRef.current = false;
       return;
     }
@@ -624,10 +576,18 @@ export default function ReportsPage() {
         details: `${adminName} triggered a disbursement of ${formatPeso(sentAmount)} (${disburseAmountLabel}) to ${disburseForm.account_holder_name.trim()}`,
       });
 
-      // Disbursement changes which transactions are "disbursed" — refetch
-      // so the Completed / Partial / New badges reflect the new state
-      // immediately instead of waiting for the next realtime tick.
-      refetchTransactions();
+      // ── auto-close the modal once the disbursement request succeeds.
+      // A short delay lets the admin actually read the success message
+      // before the modal disappears; isDisbursing is already false by
+      // then (set in `finally` below) so closeDisburseModal won't be
+      // blocked by the "don't close mid-request" guard. ──
+      if (autoCloseTimeoutRef.current) clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = setTimeout(() => {
+        setDisburseChannelOpen(false);
+        setDisburseModalOpen(false);
+        setDisburseSuccess(null);
+        autoCloseTimeoutRef.current = null;
+      }, DISBURSE_SUCCESS_AUTOCLOSE_MS);
     } catch (err: any) {
       setDisburseError(err?.message || "May error na nangyari, subukan ulit.");
     } finally {
@@ -667,14 +627,14 @@ export default function ReportsPage() {
     const summaryRow2Value = isFilterActive ? exportTxList.length : formatPeso(totalRevenue7Days);
 
     const aoa: any[][] = [
-      ["Fare Collection System", "", "", "", "", "", "", ""],
-      ["Transaction Logs Export", "", "", "", "", "", "", ""],
-      [`Generated: ${generatedAt}`, "", "", `Prepared by: ${adminName}`, "", "", "", ""],
+      ["Fare Collection System", "", "", "", "", "", ""],
+      ["Transaction Logs Export", "", "", "", "", "", ""],
+      [`Generated: ${generatedAt}`, "", "", `Prepared by: ${adminName}`, "", "", ""],
       [],
-      [summaryRow1Label, summaryRow1Value, "", "Total Registered Users", totalUniqueTaps, "", "", ""],
-      [summaryRow2Label, summaryRow2Value, "", "Total Linked Cards", totalLinkedCards, "", "", ""],
+      [summaryRow1Label, summaryRow1Value, "", "Total Registered Users", totalUniqueTaps, "", ""],
+      [summaryRow2Label, summaryRow2Value, "", "Total Linked Cards", totalLinkedCards, "", ""],
       [],
-      ["Timestamp", "Card UID", "Full Name", "Type", "Amount (PHP)", "Signed Amount", "Status", "Disbursement Status"],
+      ["Timestamp", "Card UID", "Full Name", "Type", "Amount (PHP)", "Signed Amount", "Status"],
     ];
 
     exportTxList.forEach((tx: any) => {
@@ -688,7 +648,6 @@ export default function ReportsPage() {
         amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
         `+${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
         tx.status || "",
-        isTxDisbursed(tx) ? "Disbursed" : "Pending",
       ]);
     });
 
@@ -702,14 +661,13 @@ export default function ReportsPage() {
       { wch: 20 },
       { wch: 16 },
       { wch: 14 },
-      { wch: 18 },
     ];
 
     worksheet["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
       { s: { r: 2, c: 0 }, e: { r: 2, c: 2 } },
-      { s: { r: 2, c: 3 }, e: { r: 2, c: 7 } },
+      { s: { r: 2, c: 3 }, e: { r: 2, c: 6 } },
       { s: { r: 4, c: 0 }, e: { r: 4, c: 0 } },
       { s: { r: 5, c: 0 }, e: { r: 5, c: 0 } },
       { s: { r: 4, c: 3 }, e: { r: 4, c: 3 } },
@@ -806,14 +764,13 @@ export default function ReportsPage() {
       alignment: { horizontal: "center", vertical: "center" },
       border: mediumBorder,
     };
-    ["A", "B", "C", "D", "E", "F", "G", "H"].forEach((col) => setStyle(`${col}8`, headerStyle));
+    ["A", "B", "C", "D", "E", "F", "G"].forEach((col) => setStyle(`${col}8`, headerStyle));
 
     exportTxList.forEach((tx: any, i: number) => {
       const rowNum = 9 + i;
       const isEven = i % 2 === 0;
       const amount = Math.abs(Number(tx.amount) || 0);
       const status = (tx.status || "").toLowerCase();
-      const disbursed = isTxDisbursed(tx);
       const baseFill = isEven ? "FFFFFF" : "F8FAFC";
 
       const base = {
@@ -856,16 +813,6 @@ export default function ReportsPage() {
         ...base,
         font: { ...base.font, bold: true, color: { rgb: sc.font } },
         fill: { fgColor: { rgb: sc.fill }, patternType: "solid" },
-        alignment: { horizontal: "center", vertical: "center" },
-      });
-
-      const disbColors = disbursed
-        ? { font: "166534", fill: "DCFCE7" }
-        : { font: "1D4ED8", fill: "EFF6FF" };
-      setStyle(`H${rowNum}`, {
-        ...base,
-        font: { ...base.font, bold: true, color: { rgb: disbColors.font } },
-        fill: { fgColor: { rgb: disbColors.fill }, patternType: "solid" },
         alignment: { horizontal: "center", vertical: "center" },
       });
     });
@@ -1106,13 +1053,7 @@ export default function ReportsPage() {
                     }}
                     labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
                     itemStyle={{ color: isDark ? "#60a5fa" : "#2563eb" }}
-                    formatter={(value: number, name: string, props: any) => {
-                      const disbursed = props?.payload?.disbursed ?? 0;
-                      return [
-                        `${formatPeso(Math.abs(value))}  (Disbursed: ${formatPeso(disbursed)})`,
-                        "Revenue",
-                      ];
-                    }}
+                    formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
                   />
                   <Bar dataKey="revenue" radius={[4, 4, 0, 0]} className="cursor-pointer">
                     {filteredBreakdown.map((_entry: any, index: number) => (
@@ -1172,7 +1113,6 @@ export default function ReportsPage() {
                 <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Log Date</TableHead>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Standard Day</TableHead>
-                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
                   <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Revenue Credited</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1189,13 +1129,6 @@ export default function ReportsPage() {
                       </TableCell>
                       <TableCell className={`text-[11px] font-semibold uppercase ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                         {date.toLocaleDateString("en-US", { weekday: "long" })}
-                      </TableCell>
-                      <TableCell>
-                        <DisbursementStatusBadge
-                          revenue={day.revenue}
-                          disbursed={day.disbursed ?? 0}
-                          isDark={isDark}
-                        />
                       </TableCell>
                       <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
                         {formatPeso(day.revenue)}
@@ -1325,11 +1258,30 @@ export default function ReportsPage() {
               </div>
 
               <div>
-                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Account / Mobile Number</label>
+                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Account / Mobile Number
+                  <span className={`ml-1 font-normal normal-case ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+                    (numbers only, max 12 digits)
+                  </span>
+                </label>
                 <input
                   type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={ACCOUNT_NUMBER_MAX_LEN}
                   value={disburseForm.account_number}
-                  onChange={(e) => handleDisburseFieldChange("account_number", e.target.value)}
+                  onChange={(e) => handleAccountNumberChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Block obviously non-numeric keystrokes outright (nice-to-have;
+                    // the real enforcement is the onChange sanitizer above, which also
+                    // covers paste/autofill/IME input).
+                    const allowedKeys = [
+                      "Backspace", "Delete", "Tab", "Escape", "Enter",
+                      "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End",
+                    ];
+                    if (allowedKeys.includes(e.key) || e.ctrlKey || e.metaKey) return;
+                    if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                  }}
                   data-testid="input-disburse-account-number"
                   placeholder="09171234567"
                   className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
