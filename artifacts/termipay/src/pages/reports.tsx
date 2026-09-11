@@ -459,7 +459,7 @@ export default function ReportsPage() {
     return parts.join(" ");
   }, [isFilterActive, filterYear, filterMonth, filterDay]);
 
-  // ── amount shown in the button/modal — this is just an ESTIMATE from
+  // ── amount shown in the modal — this is just an ESTIMATE from
   // the currently displayed revenue breakdown. The actual amount that
   // gets disbursed is computed server-side from un-disbursed transactions
   // only, so this figure may differ slightly if some of it was already
@@ -1134,18 +1134,6 @@ export default function ReportsPage() {
                 </span>
               )}
             </CardTitle>
-
-            {/* ── Disburse Revenue trigger — lives right beside the Revenue Credited log ── */}
-            <Button
-              onClick={openDisburseModal}
-              disabled={!disburseDateRange}
-              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs px-4 h-8 cursor-pointer transition-colors duration-150 shadow-sm"
-              data-testid="button-disburse-revenue"
-              title={!disburseDateRange ? "Pumili ng Year sa filter para makapag-disburse" : undefined}
-            >
-              <Wallet className="w-3.5 h-3.5 mr-2" />
-              Disburse {formatPeso(disburseAmount)}
-            </Button>
           </div>
         </CardHeader>
         <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
@@ -1204,18 +1192,34 @@ export default function ReportsPage() {
                 — actual Xendit payouts
               </span>
             </CardTitle>
-            <button
-              type="button"
-              onClick={fetchDisbursementHistory}
-              disabled={isLoadingHistory}
-              data-testid="button-refresh-disbursement-history"
-              className={`h-7 flex items-center gap-1.5 px-2.5 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-50 ${
-                isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-              }`}
-            >
-              <RefreshCw size={12} className={isLoadingHistory ? "animate-spin" : ""} />
-              Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              {/* ── Disburse Revenue trigger — now lives here in the
+                  Disbursement History header instead of the Revenue Log.
+                  Label no longer shows the amount; the amount is still
+                  shown inside the modal itself. ── */}
+              <Button
+                onClick={openDisburseModal}
+                disabled={!disburseDateRange}
+                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs px-4 h-8 cursor-pointer transition-colors duration-150 shadow-sm"
+                data-testid="button-disburse-revenue"
+                title={!disburseDateRange ? "Pumili ng Year sa filter para makapag-disburse" : undefined}
+              >
+                <Wallet className="w-3.5 h-3.5 mr-2" />
+                Disburse
+              </Button>
+              <button
+                type="button"
+                onClick={fetchDisbursementHistory}
+                disabled={isLoadingHistory}
+                data-testid="button-refresh-disbursement-history"
+                className={`h-8 flex items-center gap-1.5 px-2.5 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-50 ${
+                  isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <RefreshCw size={12} className={isLoadingHistory ? "animate-spin" : ""} />
+                Refresh
+              </button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0 px-6 pb-6 pt-6">
