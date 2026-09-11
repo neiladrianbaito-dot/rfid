@@ -502,6 +502,13 @@ export default function PaymongoDashboardPage() {
 
         {/* HOME tab */}
         <div className={activeTab === "home" ? "block" : "hidden md:block"}>
+          {/* ── Mobile-only reminder — desktop already shows this banner
+              above, outside the tab sections. ── */}
+          {!isLinked && (
+            <div className="md:hidden mb-4">
+              <LinkReminderBanner />
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="col-span-1 md:col-span-3">
               <p className={`text-xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
@@ -839,7 +846,6 @@ export default function PaymongoDashboardPage() {
         <div className={activeTab === "settings" ? "block md:hidden" : "hidden"}>
           <div className="space-y-3">
 
-            {!isLinked && <LinkReminderBanner />}
 
             {/* Profile Card */}
             <div className={`rounded-2xl overflow-hidden border ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
