@@ -29,7 +29,7 @@ export function LinkCardModal(props: Props) {
   // send the user anywhere — a previous unrelated page, or nowhere at all
   // if this modal was opened as the first screen in the tab). ──
   const [, setLocation] = useLocation();
-  const goBackToDashboard = () => setLocation("/dashboard");
+  const goBackToDashboard = () => setLocation("/user-dashboard");
 
   const isChecking = validation.status === "checking";
   const isBlocked  = validation.status === "blocked";
