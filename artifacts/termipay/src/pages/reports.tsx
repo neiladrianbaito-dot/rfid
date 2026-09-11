@@ -179,24 +179,6 @@ function generateDateRange(filterYear: string, filterMonth: string, filterDay: s
   return [`${year}-${filterMonth}-${filterDay}`];
 }
 
-// ── builds a stable identifier for WHICH revenue window a disbursement
-// covers, e.g. "2026-09-10" (a single day), "2026-09-all" (a month),
-// "2026-all" (a year), or "today" (no filter active). This is sent to the
-// backend so it can block a second disbursement for the same window —
-// see period_key in the create-disbursement function. ──
-function computePeriodKey(
-  isFilterActive: boolean,
-  filterYear: string,
-  filterMonth: string,
-  filterDay: string
-): string {
-  if (!isFilterActive) return `today-${getLocalDateString()}`;
-  const year = filterYear !== "all" ? filterYear : "any";
-  const month = filterMonth !== "all" ? filterMonth : "all";
-  const day = filterDay !== "all" ? filterDay : "all";
-  return `${year}-${month}-${day}`;
-}
-
 export default function ReportsPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
@@ -229,7 +211,7 @@ export default function ReportsPage() {
   // asynchronous and can still let two calls slip through if they both
   // fire before the first re-render happens — a ref updates immediately,
   // so this closes that gap. The real, authoritative protection against
-  // duplicates still lives in the backend/DB (period_key unique index);
+  // duplicates still lives in the backend/DB (transaction-based reserve);
   // this ref is just to avoid firing an obviously-redundant second
   // request from the same click session. ──
   const isSubmittingRef = useRef(false);
@@ -413,20 +395,41 @@ export default function ReportsPage() {
     return parts.join(" ");
   }, [isFilterActive, filterYear, filterMonth, filterDay]);
 
-  // ── amount that will be sent to Xendit: the currently filtered total
-  // when a filter is active, otherwise today's revenue. This is exactly
-  // what's shown as "Revenue Credited" in the table below it. ──
+  // ── amount shown in the button/modal — this is just an ESTIMATE from
+  // the currently displayed revenue breakdown. The actual amount that
+  // gets disbursed is computed server-side from un-disbursed transactions
+  // only, so this figure may differ slightly if some of it was already
+  // disbursed earlier. ──
   const disburseAmount = isFilterActive ? filteredRevenueTotal : todayRevenue;
   const disburseAmountLabel = isFilterActive ? `${filterLabel} Revenue` : "Today's Revenue";
 
-  // ── identifies WHICH revenue window this disbursement covers — sent to
-  // the backend so it can reject a second disbursement for the same
-  // window (see period_key handling in create-disbursement). Recomputed
-  // whenever the active filter changes. ──
-  const periodKey = React.useMemo(
-    () => computePeriodKey(isFilterActive, filterYear, filterMonth, filterDay),
-    [isFilterActive, filterYear, filterMonth, filterDay]
-  );
+  // ── identifies WHICH PERIOD is being disbursed, so the backend can
+  // serialize concurrent requests for the same period (advisory lock). ──
+  const disburseIdempotencyKey = isFilterActive
+    ? `filtered-${filterYear}-${filterMonth}-${filterDay}`
+    : `today-${getLocalDateString()}`;
+
+  // ── the actual [date_start, date_end] range the backend will scan for
+  // un-disbursed transactions. Requires a Year to be selected (or no
+  // filter at all, which means "today"). Month-only/Day-only filters
+  // (no Year) don't resolve to a concrete range — disburseDateRange is
+  // null in that case and the button gets disabled. ──
+  const disburseDateRange = React.useMemo((): { start: string; end: string } | null => {
+    if (!isFilterActive) {
+      const today = getLocalDateString();
+      return { start: today, end: today };
+    }
+    if (filterYear === "all") return null; // no concrete range to anchor to
+
+    if (filterMonth === "all") {
+      return { start: `${filterYear}-01-01`, end: `${filterYear}-12-31` };
+    }
+    if (filterDay === "all") {
+      const daysInMonth = new Date(parseInt(filterYear, 10), parseInt(filterMonth, 10), 0).getDate();
+      return { start: `${filterYear}-${filterMonth}-01`, end: `${filterYear}-${filterMonth}-${String(daysInMonth).padStart(2, "0")}` };
+    }
+    return { start: `${filterYear}-${filterMonth}-${filterDay}`, end: `${filterYear}-${filterMonth}-${filterDay}` };
+  }, [isFilterActive, filterYear, filterMonth, filterDay]);
 
   const handleOpenPreview = () => {
     navigate("/reports/preview");
@@ -458,8 +461,8 @@ export default function ReportsPage() {
 
     setDisburseError(null);
 
-    if (disburseAmount <= 0) {
-      setDisburseError("Wala pang revenue na pwedeng i-disburse para sa napiling range.");
+    if (!disburseDateRange) {
+      setDisburseError("Pumili muna ng Year sa filter para makapag-disburse (kailangan ng malinaw na date range).");
       isSubmittingRef.current = false;
       return;
     }
@@ -486,38 +489,41 @@ export default function ReportsPage() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          amount: disburseAmount,
+          date_start: disburseDateRange.start,
+          date_end: disburseDateRange.end,
+          channel_code: disburseForm.bank_code,
           bank_code: disburseForm.bank_code,
           account_holder_name: disburseForm.account_holder_name.trim(),
           account_number: disburseForm.account_number.trim(),
           description: disburseForm.description.trim() || `${disburseAmountLabel} disbursement`,
           requested_by: adminName,
-          period_key: periodKey,
+          idempotency_key: disburseIdempotencyKey,
         }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        // 409 = the backend's period_key unique-constraint check caught a
-        // duplicate — show a clear message instead of the generic one
+        // 409 = the backend found no un-disbursed transactions left for
+        // this period — show a clear message instead of the generic one
         if (res.status === 409) {
           throw new Error(
-            data?.error || "Naka-disburse na ang revenue para sa period na ito. Hindi puwedeng ulitin."
+            data?.error || "Wala nang bagong transaction na pwedeng i-disburse para sa period na ito."
           );
         }
         throw new Error(data?.error || "Nabigo ang disbursement request.");
       }
 
+      const sentAmount = data?.disbursement?.amount ?? disburseAmount;
       setDisburseSuccess(
-        `Naipadala na ang ${formatPeso(disburseAmount)} — pending pa ang confirmation mula sa Xendit.`
+        `Naipadala na ang ${formatPeso(sentAmount)} (mula sa bagong/hindi pa na-disburse na transactions) — pending pa ang confirmation mula sa Xendit.`
       );
       setDisburseForm({ bank_code: "", account_holder_name: "", account_number: "", description: "" });
 
       logExportAudit({
         entity: "Disbursement",
         format: "Xendit",
-        details: `${adminName} triggered a disbursement of ${formatPeso(disburseAmount)} (${disburseAmountLabel}) to ${disburseForm.account_holder_name.trim()}`,
+        details: `${adminName} triggered a disbursement of ${formatPeso(sentAmount)} (${disburseAmountLabel}) to ${disburseForm.account_holder_name.trim()}`,
       });
     } catch (err: any) {
       setDisburseError(err?.message || "May error na nangyari, subukan ulit.");
@@ -1019,9 +1025,10 @@ export default function ReportsPage() {
             {/* ── Disburse Revenue trigger — lives right beside the Revenue Credited log ── */}
             <Button
               onClick={openDisburseModal}
-              disabled={disburseAmount <= 0}
+              disabled={!disburseDateRange}
               className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs px-4 h-8 cursor-pointer transition-colors duration-150 shadow-sm"
               data-testid="button-disburse-revenue"
+              title={!disburseDateRange ? "Pumili ng Year sa filter para makapag-disburse" : undefined}
             >
               <Wallet className="w-3.5 h-3.5 mr-2" />
               Disburse {formatPeso(disburseAmount)}
@@ -1097,6 +1104,9 @@ export default function ReportsPage() {
                 <span className={isDark ? "text-indigo-300" : "text-indigo-700"}>{disburseAmountLabel}</span>
                 <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>{formatPeso(disburseAmount)}</span>
               </div>
+              <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                Kung may bahagi nito na na-disburse na dati, awtomatikong bibilangin lang ang mga bagong transaction na hindi pa naipapadala sa Xendit.
+              </p>
 
               <div>
                 <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Bank / E-Wallet</label>
