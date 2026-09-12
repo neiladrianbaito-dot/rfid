@@ -92,7 +92,7 @@ const navGroups = [
     items: [
       { path: "/transactions", label: "Transaction Logs", icon: ArrowLeftRight },
       { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
-      { path: "/disbursement-payments", label: "Disbursement Payments", icon: Banknote },
+      { path: "/disbursement", label: "Disbursement Payments", icon: Banknote },
     ],
   },
   {
