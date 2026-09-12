@@ -23,6 +23,7 @@ import ReportPreviewPage from "@/pages/report-preview";
 import Layout from "@/components/layout";
 import { useAuth } from "@/hooks/use-auth";
 import SettingsPage from "@/pages/settings";
+import DisbursementPage from "@/pages/disbursement";
 
 const USER_AUTH_TOKEN_KEY = "termipay_user_auth_token";
 
@@ -130,6 +131,9 @@ function AppRouter() {
       </Route>
       <Route path="/audit-logs">
         <ProtectedRoute component={AuditLogsPage} />
+      </Route>
+      <Route path="/disbursement">
+        <ProtectedRoute component={DisbursementPage} />
       </Route>
       <Route path="/reports">
         <ProtectedRoute component={ReportsPage} />

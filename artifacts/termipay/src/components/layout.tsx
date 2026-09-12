@@ -21,6 +21,7 @@ import {
   Moon,
   ScanLine,
   Settings,
+  Banknote,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
@@ -91,6 +92,7 @@ const navGroups = [
     items: [
       { path: "/transactions", label: "Transaction Logs", icon: ArrowLeftRight },
       { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
+      { path: "/disbursement-payments", label: "Disbursement Payments", icon: Banknote },
     ],
   },
   {
