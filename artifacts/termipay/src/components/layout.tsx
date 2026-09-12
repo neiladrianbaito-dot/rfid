@@ -92,7 +92,6 @@ const navGroups = [
     items: [
       { path: "/transactions", label: "Transaction Logs", icon: ArrowLeftRight },
       { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
-      { path: "/disbursement", label: "Disbursement Payments", icon: Banknote },
     ],
   },
   {
@@ -100,6 +99,12 @@ const navGroups = [
     items: [
       { path: "/device-reader", label: "Device Reader", icon: ScanLine },
       { path: "/audit-logs", label: "Audit Logs", icon: ScrollText },
+    ],
+  },
+  {
+    label: "Payments & Disbursement",
+    items: [
+      { path: "/disbursement", label: "Disbursement Payments", icon: Banknote },
     ],
   },
   {
