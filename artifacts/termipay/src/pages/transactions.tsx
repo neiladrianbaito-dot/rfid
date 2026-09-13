@@ -52,6 +52,16 @@ function formatPaymentMethod(method?: string | null): string {
   return map[key] ?? method.charAt(0).toUpperCase() + method.slice(1);
 }
 
+// ── Payment method logo map (same pattern as TransactionDetailModal) ──────────
+// Only GCash has a dedicated logo right now; extend this as more logos are
+// added to /public (e.g. "/paymaya.svg", "/grabpay.svg", etc).
+function getPaymentMethodLogo(method?: string | null): string | null {
+  if (!method) return null;
+  const key = method.toLowerCase().trim();
+  if (key === "gcash") return "/gcash.svg";
+  return null;
+}
+
 // ── Receipt Modal ─────────────────────────────────────────────────────────────
 
 function ReceiptModal({
@@ -81,6 +91,9 @@ function ReceiptModal({
   // Payment method is a plain string field on the transaction
   const paymentMethodLabel = !isFare
     ? formatPaymentMethod(tx.payment_method)
+    : null;
+  const paymentMethodLogo = !isFare
+    ? getPaymentMethodLogo(tx.payment_method)
     : null;
 
   const StatusIcon =
@@ -194,8 +207,15 @@ function ReceiptModal({
                   <CreditCard className="w-3.5 h-3.5" />
                   Payment method
                 </span>
-                <span className={`text-xs font-medium text-right truncate max-w-[60%] ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                  {paymentMethodLabel}
+                <span className={`flex items-center justify-end gap-1.5 text-xs font-medium text-right truncate max-w-[60%] ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                  {paymentMethodLogo && (
+                    <img
+                      src={paymentMethodLogo}
+                      alt={paymentMethodLabel ?? ""}
+                      className="h-7 sm:h-8 w-auto max-w-[44px] object-contain shrink-0"
+                    />
+                  )}
+                  <span className="truncate">{paymentMethodLabel}</span>
                 </span>
               </div>
             )}
