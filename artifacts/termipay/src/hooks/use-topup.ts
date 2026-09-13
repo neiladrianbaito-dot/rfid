@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { supabase } from "@/lib/supabase"; // adjust to your actual client import
+import { supabase } from "@/lib/supabase";
 
-export const MAX_BALANCE_TOPUP = 10000; // adjust kung iba yung wallet cap mo
+export const MAX_BALANCE_TOPUP = 20000; // ✅ tinugma sa 20000 na ginagamit sa dashboard mo
 
 export function useTopup(cardUid: string, currentBalance: number) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpenState] = useState(false);
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
@@ -13,11 +13,18 @@ export function useTopup(cardUid: string, currentBalance: number) {
   const remainingTopup = Math.max(MAX_BALANCE_TOPUP - currentBalance, 0);
   const isAtMaxBalance = currentBalance >= MAX_BALANCE_TOPUP;
 
-  const open = () => setIsOpen(true);
-  const close = () => {
-    setIsOpen(false);
-    setAmount("");
+  // ✅ THE FIX: dashboard calls `topup.setIsOpen(true)` directly (e.g. sa TOP UP
+  // button, sa Settings tab, atbp). Dati walang setIsOpen ang hook na ito —
+  // kaya walang nangyayari pag pinindot ang button. Ito ang dahilan bakit
+  // "hindi ma-open" ang modal.
+  const setIsOpen = (open: boolean) => {
+    setIsOpenState(open);
+    if (!open) setAmount("");
   };
+
+  // Panatilihin din ang open/close kung meron pang ibang code na gumagamit nito
+  const open = () => setIsOpen(true);
+  const close = () => setIsOpen(false);
 
   const showAlert = (title: string, msg: string) => {
     setAlertContent({ title, msg });
@@ -37,6 +44,11 @@ export function useTopup(cardUid: string, currentBalance: number) {
       return;
     }
 
+    if (!cardUid) {
+      showAlert("No Card Linked", "Please link a card before topping up.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -51,7 +63,6 @@ export function useTopup(cardUid: string, currentBalance: number) {
         return;
       }
 
-      // Redirect user to GCash checkout
       window.location.href = data.checkoutUrl;
     } catch (err) {
       console.error(err);
@@ -62,6 +73,7 @@ export function useTopup(cardUid: string, currentBalance: number) {
 
   return {
     isOpen,
+    setIsOpen,   // ✅ ito yung ginagamit ng dashboard mo (topup.setIsOpen(true))
     open,
     close,
     amount,
