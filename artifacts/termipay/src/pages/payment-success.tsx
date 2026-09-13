@@ -93,7 +93,7 @@ export default function GCashPaymentSuccessPage() {
               Payment Successful
             </CardTitle>
             <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              Your fare has been paid via GCash
+              Your top-up has been paid via GCash
             </p>
           </CardHeader>
 
