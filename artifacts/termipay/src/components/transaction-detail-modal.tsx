@@ -264,7 +264,7 @@ export function TransactionDetailModal({
                         <img
                           src={paymentMethodLogo}
                           alt={paymentMethodLabel}
-                          className="h-3.5 sm:h-4 w-auto max-w-[20px] object-contain shrink-0"
+                          className="h-5 sm:h-6 w-auto max-w-[32px] object-contain shrink-0"
                         />
                       )}
                       <span className="truncate">{paymentMethodLabel}</span>
