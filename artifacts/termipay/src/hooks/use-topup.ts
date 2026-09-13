@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
-import { MAX_BALANCE } from "@/lib/api";
+import { createCheckout, MAX_BALANCE } from "@/lib/api";
 
 export function useTopup(cardUid: string, currentBalance: number) {
   const [isOpen, setIsOpen] = useState(false);
@@ -37,42 +36,13 @@ export function useTopup(cardUid: string, currentBalance: number) {
       );
       return;
     }
-
     try {
       setLoading(true);
-
-      const { data, error } = await supabase.functions.invoke("create-topup", {
-        body: { cardUid, amount: parsedAmount },
-      });
-
-      if (error) {
-        // ✅ FIX: FunctionsHttpError hides the real response body by default.
-        // error.context is the raw Response object from the edge function —
-        // read its JSON to get the actual error message we sent back
-        // (e.g. "User not found", "cardUid and valid amount required", or
-        // whatever Xendit itself complained about).
-        let details = error.message || "Could not connect to the payment server.";
-        try {
-          const errBody = await error.context?.json?.();
-          if (errBody?.error) {
-            details = typeof errBody.error === "string" ? errBody.error : JSON.stringify(errBody.error);
-          }
-        } catch {
-          // context wasn't JSON, fall back to error.message
-        }
-        console.error("Topup error details:", details);
-        showAlert("Top-up Failed", details);
-        return;
-      }
-
-      if (data?.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
-      } else {
-        console.error("No checkoutUrl in response:", data);
-        showAlert("Top-up Failed", "No checkout URL was returned. Please try again.");
+      const data = await createCheckout(cardUid, amount);
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
       }
     } catch (err: unknown) {
-      console.error(err);
       showAlert("Connection Error", err instanceof Error ? err.message : "Could not connect to the payment server.");
     } finally {
       setLoading(false);
