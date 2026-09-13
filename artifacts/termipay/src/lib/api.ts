@@ -157,9 +157,16 @@ export async function changeUserPassword(currentPassword: string, newPassword: s
   return payload;
 }
 
+// ── FIX: was pointing at the old PayMongo function ("create-checkout").
+// Now points at the Xendit-based function ("create-topup"), and sends
+// snake_case "card_uid" to match what that function expects. If your
+// Xendit function is actually deployed under the name "create-checkout"
+// instead of "create-topup", change the URL below to match — the
+// function name here MUST exactly match whatever you ran
+// `supabase functions deploy <name>` with.
 export async function createCheckout(cardUid: string, amount: string) {
   const res = await fetch(
-    "https://bpznyktrerwtnpqjrvgz.supabase.co/functions/v1/create-checkout",
+    "https://bpznyktrerwtnpqjrvgz.supabase.co/functions/v1/create-topup",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
