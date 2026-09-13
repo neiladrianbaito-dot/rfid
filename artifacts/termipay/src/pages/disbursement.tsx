@@ -33,6 +33,12 @@ const ACCOUNT_NUMBER_MAX_LEN = 12;
 // Disbursement History table is paginated client-side at this many rows per page
 const DISBURSEMENTS_PER_PAGE = 10;
 
+// ── SHARED classification config — keep this in sync with whatever the
+// backend (create-disbursement function) uses to classify transactions.
+// Ideally this list lives in one shared module imported by both sides;
+// duplicating it here is a stopgap until that's wired up. ──
+const NON_FARE_MARKERS = ["topup", "top_up", "top-up", "cash_in", "cashin", "cash-in", "load", "reload"];
+
 function getLocalDateString(): string {
   return new Date().toLocaleDateString("en-CA");
 }
@@ -116,7 +122,7 @@ function getDaysInMonth(year: string, month: string): number {
 // money the passenger added to their own balance, not money collected
 // by the operator.
 //
-// IMPORTANT: adjust `nonFareMarkers` (and/or the field lookup below) to
+// IMPORTANT: adjust `NON_FARE_MARKERS` (and/or the field lookup below) to
 // match whatever field/value your backend actually uses to distinguish
 // transaction types. If no type-like field is present at all, this
 // treats the transaction as fare by default (backward-compatible with
@@ -127,8 +133,7 @@ function isFareTransaction(tx: any): boolean {
     .toLowerCase()
     .trim();
   if (!raw) return true; // no type field present — assume fare
-  const nonFareMarkers = ["topup", "top_up", "top-up", "cash_in", "cashin", "cash-in", "load", "reload"];
-  return !nonFareMarkers.some((marker) => raw.includes(marker));
+  return !NON_FARE_MARKERS.some((marker) => raw.includes(marker));
 }
 
 // Returns the transaction's local "YYYY-MM-DD" date key
@@ -315,14 +320,12 @@ export default function DisbursementPage() {
     return { start: `${filterYear}-${filterMonth}-${filterDay}`, end: `${filterYear}-${filterMonth}-${filterDay}` };
   }, [isFilterActive, filterYear, filterMonth, filterDay]);
 
-  // ── transactions that fall inside the active disburse date range —
-  // used ONLY to show an ESTIMATED preview amount. FARE transactions
-  // only — top-ups/cash-ins are excluded since they aren't operator
-  // revenue. The actual amount disbursed is always computed
-  // server-side from un-disbursed FARE transactions only, so this
-  // figure may differ slightly if some of it was already disbursed
-  // earlier, or if the backend's fare/topup classification differs
-  // from this frontend estimate. ──
+  // ── transactions that fall inside the active disburse date range AND
+  // pass the fare-only filter. This list is now used for TWO things:
+  // 1) the estimated preview amount shown in the UI, and
+  // 2) the explicit allowlist of transaction IDs sent to the backend,
+  // so the server has a concrete, fare-only set to intersect against
+  // instead of re-deriving "fare" from the date range alone. ──
   const txInRange = useMemo(() => {
     if (!disburseDateRange) return [];
     return txList.filter((tx: any) => {
@@ -332,6 +335,13 @@ export default function DisbursementPage() {
       return key >= disburseDateRange.start && key <= disburseDateRange.end;
     });
   }, [txList, disburseDateRange]);
+
+  // ── explicit fare-only transaction IDs in the active range, sent to the
+  // backend as an allowlist. Falsy/missing ids are filtered out defensively. ──
+  const fareTransactionIds = useMemo(
+    () => txInRange.map((tx: any) => tx.id).filter((id: any) => id != null),
+    [txInRange]
+  );
 
   const disburseAmount = useMemo(
     () => txInRange.reduce((sum: number, tx: any) => sum + Math.abs(Number(tx.amount) || 0), 0),
@@ -410,6 +420,13 @@ export default function DisbursementPage() {
       isSubmittingRef.current = false;
       return;
     }
+    // ── nothing fare-eligible to disburse for this period — stop before
+    // even hitting the backend, and tell the admin clearly why. ──
+    if (fareTransactionIds.length === 0) {
+      setDisburseError("Walang fare transaction (hindi top-up) na available na i-disburse para sa period na ito.");
+      isSubmittingRef.current = false;
+      return;
+    }
 
     setIsDisbursing(true);
     try {
@@ -425,6 +442,13 @@ export default function DisbursementPage() {
         body: JSON.stringify({
           date_start: disburseDateRange.start,
           date_end: disburseDateRange.end,
+          // ── NEW: explicit fare-only enforcement sent to the backend.
+          // The backend MUST use these to restrict what actually gets
+          // disbursed — it should not just trust the date range, since
+          // that range can also contain topup/cash-in/load transactions. ──
+          transaction_type: "fare",
+          exclude_transaction_types: NON_FARE_MARKERS,
+          fare_transaction_ids: fareTransactionIds,
           channel_code: disburseForm.bank_code,
           bank_code: disburseForm.bank_code,
           account_holder_name: disburseForm.account_holder_name.trim(),
@@ -438,11 +462,11 @@ export default function DisbursementPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        // 409 = the backend found no un-disbursed transactions left for
+        // 409 = the backend found no un-disbursed FARE transactions left for
         // this period — show a clear message instead of the generic one
         if (res.status === 409) {
           throw new Error(
-            data?.error || "Wala nang bagong transaction na pwedeng i-disburse para sa period na ito."
+            data?.error || "Wala nang bagong fare transaction na pwedeng i-disburse para sa period na ito."
           );
         }
         throw new Error(data?.error || "Nabigo ang disbursement request.");
@@ -450,14 +474,14 @@ export default function DisbursementPage() {
 
       const sentAmount = data?.disbursement?.amount ?? disburseAmount;
       setDisburseSuccess(
-        `Naipadala na ang ${formatPeso(sentAmount)} (mula sa bagong/hindi pa na-disburse na transactions) — pending pa ang confirmation mula sa Xendit.`
+        `Naipadala na ang ${formatPeso(sentAmount)} (mula sa bagong/hindi pa na-disburse na FARE transactions lamang) — pending pa ang confirmation mula sa Xendit.`
       );
       setDisburseForm({ bank_code: "", account_holder_name: "", account_number: "", description: "" });
 
       logAudit({
         entity: "Disbursement",
         format: "Xendit",
-        details: `${adminName} triggered a disbursement of ${formatPeso(sentAmount)} (${disburseAmountLabel}) to ${disburseForm.account_holder_name.trim()}`,
+        details: `${adminName} triggered a disbursement of ${formatPeso(sentAmount)} (${disburseAmountLabel}, fare-only) to ${disburseForm.account_holder_name.trim()}`,
       });
 
       // refresh the REAL history list right away so the new row (with its
@@ -765,7 +789,7 @@ export default function DisbursementPage() {
                 <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>{formatPeso(disburseAmount)}</span>
               </div>
               <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Kung may bahagi nito na na-disburse na dati, awtomatikong bibilangin lang ang mga bagong transaction na hindi pa naipapadala sa Xendit.
+                Fare transactions lang ang isasama dito — awtomatikong hindi kasama ang top-up/cash-in/load. Kung may bahagi nito na na-disburse na dati, awtomatikong bibilangin lang ang mga bagong fare transaction na hindi pa naipapadala sa Xendit.
               </p>
 
               <div>
