@@ -42,7 +42,7 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
           }`}
         >
           <DialogTitle className="sr-only">Top-up Wallet</DialogTitle>
-          <DialogDescription className="sr-only">Add funds to your wallet via GCash or Maya through PayMongo.</DialogDescription>
+          <DialogDescription className="sr-only">Add funds to your wallet via GCash or Maya through Xendit.</DialogDescription>
 
           {/* ✅ FIX: solid bordered card shell (same pattern as TransactionDetailModal) — the old
               rgb-container / rgb-container-light class relied on DASHBOARD_STYLES CSS that
@@ -59,7 +59,7 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
               <h2 className="text-lg sm:text-xl font-bold mb-1 flex items-center gap-2">
                 <CreditCard className={`h-5 w-5 shrink-0 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} /> Top-up Wallet
               </h2>
-              <p className={`text-[11px] mb-5 uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>Secure Payment via PayMongo</p>
+              <p className={`text-[11px] mb-5 uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>Secure Payment via Xendit</p>
 
               {/* Balance Bar */}
               <div className={`mb-5 border rounded-xl p-3 space-y-2 ${
@@ -117,7 +117,7 @@ export function TopupModal({ isOpen, close, amount, setAmount, loading, alertOpe
                   disabled={loading || isAtMaxBalance || !amount || parseFloat(amount) <= 0}
                   className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                 >
-                  {loading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via PayMongo"}
+                  {loading ? "Verifying..." : isAtMaxBalance ? "Wallet Full" : "Pay via Xendit"}
                 </Button>
               </div>
             </div>
