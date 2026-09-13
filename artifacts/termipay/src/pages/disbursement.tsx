@@ -549,8 +549,10 @@ export default function DisbursementPage() {
             <Wallet className="text-indigo-500" size={26} />
             Disbursement
           </h2>
-          <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Send collected revenue to a bank or e-wallet via Xendit, and review past payouts.
+          <p className={`text-sm mt-1 flex items-center flex-wrap gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            <span>Send collected revenue to a bank or e-wallet via</span>
+            <img src="/xendit.png" alt="Xendit" className="h-4 w-auto max-w-[70px] object-contain inline-block align-middle" />
+            <span>, and review past payouts.</span>
           </p>
         </div>
       </div>
