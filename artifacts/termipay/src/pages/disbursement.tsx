@@ -940,13 +940,16 @@ export default function DisbursementPage() {
             </div>
 
             <div className={`flex justify-end gap-2 px-5 py-4 border-t ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-              <Button
+              <button
+                type="button"
                 onClick={closeDisburseModal}
                 disabled={isDisbursing}
-                className={`text-xs font-semibold px-4 h-9 ${isDark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-slate-100 hover:bg-slate-200 text-slate-700"}`}
+                className={`text-xs font-semibold px-4 h-9 bg-transparent border-0 shadow-none disabled:opacity-60 disabled:cursor-not-allowed ${
+                  isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"
+                }`}
               >
                 Cancel
-              </Button>
+              </button>
               <Button
                 onClick={handleSubmitDisbursement}
                 disabled={isDisbursing}
