@@ -48,7 +48,7 @@ export default function GCashPaymentSuccessPage() {
 
   return (
     <div
-      className={`min-h-screen flex items-center justify-center p-4 transition-colors ${
+      className={`min-h-screen flex items-center justify-center p-3 sm:p-4 transition-colors ${
         isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
       }`}
       data-testid="gcash-success-page"
@@ -76,29 +76,30 @@ export default function GCashPaymentSuccessPage() {
           {/* Top accent bar */}
           <div className="absolute top-0 left-0 h-[3px] w-full bg-emerald-500" />
 
-          <CardHeader className="flex flex-col items-center text-center pt-10 pb-4">
+          <CardHeader className="flex flex-col items-center text-center pt-8 sm:pt-10 pb-4 px-4 sm:px-6">
             <div
-              className={`check-pop w-16 h-16 rounded-full border flex items-center justify-center mb-4 ${
+              className={`check-pop w-14 h-14 sm:w-16 sm:h-16 rounded-full border flex items-center justify-center mb-3 sm:mb-4 ${
                 isDark
                   ? "bg-emerald-950/40 border-emerald-900 text-emerald-400"
                   : "bg-emerald-50 border-emerald-100 text-emerald-600"
               }`}
             >
-              <CheckCircle2 size={32} strokeWidth={2.2} />
+              <CheckCircle2 size={28} className="sm:hidden" strokeWidth={2.2} />
+              <CheckCircle2 size={32} className="hidden sm:block" strokeWidth={2.2} />
             </div>
             <CardTitle
-              className={`text-xl font-bold tracking-tight ${
+              className={`text-lg sm:text-xl font-bold tracking-tight ${
                 isDark ? "text-white" : "text-slate-900"
               }`}
             >
               Payment Successful
             </CardTitle>
-            <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              Your top-up has been paid via GCash
+            <p className={`text-xs sm:text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Your fare has been paid via GCash
             </p>
           </CardHeader>
 
-          <CardContent className="pb-8">
+          <CardContent className="pb-6 sm:pb-8 px-4 sm:px-6">
             {/* Amount */}
             <div className="flex flex-col items-center py-6">
               <span
@@ -109,11 +110,12 @@ export default function GCashPaymentSuccessPage() {
                 Amount Paid
               </span>
               <span
-                className={`text-3xl font-bold tracking-tight flex items-center gap-1 ${
+                className={`text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-1 ${
                   isDark ? "text-white" : "text-slate-900"
                 }`}
               >
-                <PhilippinePeso size={22} className="text-emerald-500" strokeWidth={2.4} />
+                <PhilippinePeso size={20} className="text-emerald-500 sm:hidden" strokeWidth={2.4} />
+                <PhilippinePeso size={22} className="text-emerald-500 hidden sm:block" strokeWidth={2.4} />
                 {formatPeso(amount).replace("₱", "")}
               </span>
             </div>
@@ -147,20 +149,21 @@ export default function GCashPaymentSuccessPage() {
               </div>
 
               <div className="flex items-center justify-between">
-                <span className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <span className={`shrink-0 text-xs sm:text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   Reference No.
                 </span>
                 <button
                   onClick={handleCopy}
-                  className={`flex items-center gap-1.5 text-sm font-mono font-semibold rounded px-1.5 py-0.5 transition-colors ${
+                  title={referenceNo}
+                  className={`flex items-center gap-1.5 min-w-0 max-w-[65%] text-xs sm:text-sm font-mono font-semibold rounded px-1.5 py-0.5 transition-colors ${
                     isDark
                       ? "text-blue-400 hover:bg-slate-800"
                       : "text-blue-600 hover:bg-slate-100"
                   }`}
                   data-testid="button-copy-reference"
                 >
-                  {referenceNo}
-                  <Copy size={13} />
+                  <span className="truncate">{referenceNo}</span>
+                  <Copy size={13} className="shrink-0" />
                 </button>
               </div>
             </div>
