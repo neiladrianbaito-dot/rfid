@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation, useSearch } from "wouter";
+import { useSearch } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,9 +17,10 @@ import { motion } from "framer-motion";
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+const DASHBOARD_URL = "https://rfid-termipay-sigma.vercel.app/user-dashboard";
+
 export default function GCashPaymentSuccessPage() {
   const { isDark } = useTheme();
-  const [, navigate] = useLocation();
   const searchString = useSearch();
   const [copied, setCopied] = useState(false);
 
@@ -180,7 +181,7 @@ export default function GCashPaymentSuccessPage() {
             {/* Actions */}
             <div className="flex flex-col gap-2 mt-6">
               <Button
-                onClick={() => navigate("/")}
+                onClick={() => { window.location.href = DASHBOARD_URL; }}
                 className="w-full bg-emerald-500 hover:bg-emerald-600 text-white"
                 data-testid="button-back-dashboard"
               >
