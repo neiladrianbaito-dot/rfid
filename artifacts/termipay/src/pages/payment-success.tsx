@@ -7,7 +7,6 @@ import {
   PhilippinePeso,
   Copy,
   ArrowLeft,
-  Route,
   Clock,
   ShieldCheck,
   Smartphone,
@@ -24,14 +23,11 @@ export default function GCashPaymentSuccessPage() {
   const searchString = useSearch();
   const [copied, setCopied] = useState(false);
 
-  // PayMongo checkout return URL karaniwang naglalagay ng details bilang query params,
-  // e.g. /payment-success?amount=100.00&reference=PM_xxx&route=Route+1&paidAt=2026-09-13T10:00:00Z
-  // Palitan ito ng useGetTransaction(referenceNo) kung gusto mong i-verify muna sa backend
-  // imbes na direktang sumalig sa URL params (mas secure, iwas tampering sa amount).
+  // Xendit success redirect naglalagay ng details bilang query params,
+  // see create-topup edge function's successRedirectUrl.
   const params = new URLSearchParams(searchString);
   const amount = Math.abs(Number(params.get("amount")) || 0);
   const referenceNo = params.get("reference") || "N/A";
-  const routeName = params.get("route") || "—";
   const paidAtParam = params.get("paidAt");
   const paidAt = paidAtParam ? new Date(paidAtParam) : new Date();
 
@@ -137,15 +133,6 @@ export default function GCashPaymentSuccessPage() {
 
               <div className="flex items-center justify-between">
                 <span className={`flex items-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  <Route size={15} /> Route
-                </span>
-                <span className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                  {routeName}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className={`flex items-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   <Clock size={15} /> Date &amp; Time
                 </span>
                 <span className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
@@ -187,7 +174,7 @@ export default function GCashPaymentSuccessPage() {
                 isDark ? "text-slate-600" : "text-slate-400"
               }`}
             >
-              <ShieldCheck size={12} /> Verified by PayMongo
+              <ShieldCheck size={12} /> Verified by Xendit
             </div>
 
             {/* Actions */}
