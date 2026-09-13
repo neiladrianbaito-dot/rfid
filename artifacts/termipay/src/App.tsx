@@ -20,6 +20,7 @@ import DeviceReaderPage from "@/pages/DeviceReaderPage";
 import AuditLogsPage from "@/pages/audit-logs";
 import ReportsPage from "@/pages/reports";
 import ReportPreviewPage from "@/pages/report-preview";
+import GCashPaymentSuccessPage from "@/pages/PaymentSuccessPage";
 import Layout from "@/components/layout";
 import { useAuth } from "@/hooks/use-auth";
 import SettingsPage from "@/pages/settings";
@@ -45,7 +46,7 @@ function FullPageLoading() {
     <div className="flex h-screen w-full flex-col items-center justify-center bg-background">
       <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
       <p className="mt-4 text-sm font-medium text-muted-foreground animate-pulse">
-        TermiPay: Validating Session...
+          Fare Collection System: Validating Session...
       </p>
     </div>
   );
@@ -109,6 +110,7 @@ function AppRouter() {
       <Route path="/paymongo-topup" component={PaymongoTopup} />
       <Route path="/user-dashboard" component={PaymongoRoute} />
       <Route path="/reports/preview" component={ReportPreviewPage} />
+      <Route path="/payment-success" component={GCashPaymentSuccessPage} />
 
       {/* PROTECTED ROUTES */}
       <Route path="/">
