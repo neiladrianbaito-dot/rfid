@@ -60,6 +60,15 @@ function formatPaymentMethod(method?: string | null): string | null {
   return map[key] ?? method.charAt(0).toUpperCase() + method.slice(1);
 }
 
+// ✅ Returns the logo path for a payment method (only GCash has a dedicated
+// logo right now; extend this map as more logos are added to /public).
+function getPaymentMethodLogo(method?: string | null): string | null {
+  if (!method) return null;
+  const key = method.toLowerCase().trim();
+  if (key === "gcash") return "/gcash.svg";
+  return null;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface TransactionDetailModalProps {
@@ -88,6 +97,7 @@ export function TransactionDetailModal({
     : null;
 
   const paymentMethodLabel = formatPaymentMethod(tx.payment_method);
+  const paymentMethodLogo = getPaymentMethodLogo(tx.payment_method);
 
   // ✅ theme-aware amount/status colors
   const amountColor = isFare
@@ -245,10 +255,21 @@ export function TransactionDetailModal({
                   <Wallet className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
                   Payment method
                 </span>
-                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${
+                <span className={`flex items-center justify-end gap-1.5 text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${
                   isDark ? "text-slate-200" : "text-slate-700"
                 }`}>
-                  {paymentMethodLabel ?? (
+                  {paymentMethodLabel ? (
+                    <>
+                      {paymentMethodLogo && (
+                        <img
+                          src={paymentMethodLogo}
+                          alt={paymentMethodLabel}
+                          className="h-3.5 sm:h-4 w-auto max-w-[20px] object-contain shrink-0"
+                        />
+                      )}
+                      <span className="truncate">{paymentMethodLabel}</span>
+                    </>
+                  ) : (
                     <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>
                   )}
                 </span>
