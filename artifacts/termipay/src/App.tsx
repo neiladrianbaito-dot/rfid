@@ -20,7 +20,7 @@ import DeviceReaderPage from "@/pages/DeviceReaderPage";
 import AuditLogsPage from "@/pages/audit-logs";
 import ReportsPage from "@/pages/reports";
 import ReportPreviewPage from "@/pages/report-preview";
-import GCashPaymentSuccessPage from "@/pages/PaymentSuccessPage";
+import GCashPaymentSuccessPage from "@/pages/payment-success";
 import Layout from "@/components/layout";
 import { useAuth } from "@/hooks/use-auth";
 import SettingsPage from "@/pages/settings";
