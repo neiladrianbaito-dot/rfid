@@ -8,7 +8,6 @@ import {
   Copy,
   ArrowLeft,
   Clock,
-  ShieldCheck,
   Smartphone,
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
@@ -172,13 +171,18 @@ export default function GCashPaymentSuccessPage() {
               <p className="text-right text-[11px] text-emerald-500 mt-1 -mb-2">Copied!</p>
             )}
 
-            {/* Secure note */}
+            {/* Powered by note */}
             <div
               className={`flex items-center justify-center gap-1.5 mt-6 text-[10px] font-semibold uppercase tracking-widest ${
                 isDark ? "text-slate-600" : "text-slate-400"
               }`}
             >
-              <ShieldCheck size={12} /> Verified by Xendit
+              <span>Powered by</span>
+              <img
+                src="/xendit.png"
+                alt="Xendit"
+                className="h-3.5 w-auto max-w-[60px] object-contain"
+              />
             </div>
 
             {/* Actions */}
