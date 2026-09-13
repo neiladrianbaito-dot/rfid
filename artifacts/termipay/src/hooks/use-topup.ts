@@ -1,30 +1,16 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
-
-export const MAX_BALANCE_TOPUP = 20000; // ✅ tinugma sa 20000 na ginagamit sa dashboard mo
+import { MAX_BALANCE } from "@/lib/api";
 
 export function useTopup(cardUid: string, currentBalance: number) {
-  const [isOpen, setIsOpenState] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertContent, setAlertContent] = useState({ title: "", msg: "" });
 
-  const remainingTopup = Math.max(MAX_BALANCE_TOPUP - currentBalance, 0);
-  const isAtMaxBalance = currentBalance >= MAX_BALANCE_TOPUP;
-
-  // ✅ THE FIX: dashboard calls `topup.setIsOpen(true)` directly (e.g. sa TOP UP
-  // button, sa Settings tab, atbp). Dati walang setIsOpen ang hook na ito —
-  // kaya walang nangyayari pag pinindot ang button. Ito ang dahilan bakit
-  // "hindi ma-open" ang modal.
-  const setIsOpen = (open: boolean) => {
-    setIsOpenState(open);
-    if (!open) setAmount("");
-  };
-
-  // Panatilihin din ang open/close kung meron pang ibang code na gumagamit nito
-  const open = () => setIsOpen(true);
-  const close = () => setIsOpen(false);
+  const remainingTopup = Math.max(0, MAX_BALANCE - currentBalance);
+  const isAtMaxBalance = remainingTopup <= 0;
 
   const showAlert = (title: string, msg: string) => {
     setAlertContent({ title, msg });
@@ -32,58 +18,74 @@ export function useTopup(cardUid: string, currentBalance: number) {
   };
 
   const handleTopup = async () => {
-    const numAmount = parseFloat(amount);
-
-    if (!numAmount || numAmount <= 0) {
-      showAlert("Invalid Amount", "Please enter a valid top-up amount.");
+    if (!cardUid || !amount) {
+      showAlert("Missing Information", "Please enter an amount.");
       return;
     }
-
-    if (numAmount > remainingTopup) {
-      showAlert("Amount Too High", `You can only top up up to ₱${remainingTopup.toLocaleString()}.`);
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      showAlert("Invalid Amount", "Please enter a valid amount.");
       return;
     }
-
-    if (!cardUid) {
-      showAlert("No Card Linked", "Please link a card before topping up.");
+    const projected = currentBalance + parsedAmount;
+    if (projected > MAX_BALANCE) {
+      showAlert(
+        "Balance Limit Reached",
+        remainingTopup <= 0
+          ? "Your wallet is already at the maximum balance of ₱20,000.00. You cannot top up further."
+          : `You can only top up ₱${remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })} more. Your wallet has a ₱20,000.00 maximum balance limit.`
+      );
       return;
     }
-
-    setLoading(true);
 
     try {
+      setLoading(true);
+
       const { data, error } = await supabase.functions.invoke("create-topup", {
-        body: { cardUid, amount: numAmount },
+        body: { cardUid, amount: parsedAmount },
       });
 
-      if (error || !data?.checkoutUrl) {
-        console.error("Topup error:", error, data);
-        showAlert("Top-up Failed", "Something went wrong while creating your GCash payment. Please try again.");
-        setLoading(false);
+      if (error) {
+        // ✅ FIX: FunctionsHttpError hides the real response body by default.
+        // error.context is the raw Response object from the edge function —
+        // read its JSON to get the actual error message we sent back
+        // (e.g. "User not found", "cardUid and valid amount required", or
+        // whatever Xendit itself complained about).
+        let details = error.message || "Could not connect to the payment server.";
+        try {
+          const errBody = await error.context?.json?.();
+          if (errBody?.error) {
+            details = typeof errBody.error === "string" ? errBody.error : JSON.stringify(errBody.error);
+          }
+        } catch {
+          // context wasn't JSON, fall back to error.message
+        }
+        console.error("Topup error details:", details);
+        showAlert("Top-up Failed", details);
         return;
       }
 
-      window.location.href = data.checkoutUrl;
-    } catch (err) {
+      if (data?.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      } else {
+        console.error("No checkoutUrl in response:", data);
+        showAlert("Top-up Failed", "No checkout URL was returned. Please try again.");
+      }
+    } catch (err: unknown) {
       console.error(err);
-      showAlert("Error", "Unable to connect to the payment server. Please check your connection.");
+      showAlert("Connection Error", err instanceof Error ? err.message : "Could not connect to the payment server.");
+    } finally {
       setLoading(false);
     }
   };
 
+  const close = () => { setIsOpen(false); setAmount(""); };
+
   return {
-    isOpen,
-    setIsOpen,   // ✅ ito yung ginagamit ng dashboard mo (topup.setIsOpen(true))
-    open,
-    close,
-    amount,
-    setAmount,
-    loading,
-    alertOpen,
-    setAlertOpen,
-    alertContent,
-    remainingTopup,
-    isAtMaxBalance,
+    isOpen, setIsOpen, close,
+    amount, setAmount,
+    loading, alertOpen, setAlertOpen, alertContent,
+    remainingTopup, isAtMaxBalance,
     handleTopup,
   };
 }
