@@ -191,6 +191,25 @@ function getTxDateParts(tx: any): { year: string; month: string; day: string } |
   return { year: y, month: m, day: d };
 }
 
+// ── Resolves a disbursement history row's bank/e-wallet channel code
+// (whatever field the backend happens to store it in) to a display
+// label from DISBURSEMENT_CHANNELS, falling back to the raw code (or an
+// em dash) if it's missing/unrecognized. ──
+function getChannelLabel(row: any): string {
+  const code = (row.bank_code ?? row.channel_code ?? row.channel ?? "").toString().trim();
+  if (!code) return "—";
+  const match = DISBURSEMENT_CHANNELS.find((c) => c.value === code);
+  return match ? match.label : code;
+}
+
+// ── True when a disbursement history row's channel resolves to BDO, so
+// the table can show the BDO logo next to the label — same treatment as
+// the channel picker in the modal. ──
+function isBdoChannel(row: any): boolean {
+  const code = (row.bank_code ?? row.channel_code ?? row.channel ?? "").toString().trim();
+  return code === "PH_BDO";
+}
+
 export default function DisbursementPage() {
   const { user } = useAuth();
   const { isDark } = useTheme();
@@ -839,6 +858,7 @@ export default function DisbursementPage() {
                 <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date</TableHead>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Account</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Channel</TableHead>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Xendit ID</TableHead>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
                   <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-indigo-500">Amount</TableHead>
@@ -856,6 +876,14 @@ export default function DisbursementPage() {
                     <TableCell className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                       <div className="font-medium">{row.account_holder_name}</div>
                       <div className="font-mono text-[11px] opacity-70">{row.account_number}</div>
+                    </TableCell>
+                    <TableCell className={`text-xs ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                      <span className="inline-flex items-center gap-1.5">
+                        {isBdoChannel(row) && (
+                          <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none" />
+                        )}
+                        <span className="font-medium">{getChannelLabel(row)}</span>
+                      </span>
                     </TableCell>
                     <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                       {row.xendit_disbursement_id || "—"}
