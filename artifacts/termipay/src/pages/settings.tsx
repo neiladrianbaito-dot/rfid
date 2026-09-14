@@ -34,6 +34,7 @@ import { useTheme } from "@/hooks/use-theme";
 import {
   Settings, UserPlus, Users, Lock, Shield,
   Loader2, ShieldCheck, Trash2, RefreshCw, Crown, ShieldAlert,
+  Pencil, Eye, KeyRound,
 } from "lucide-react";
 
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
@@ -60,6 +61,14 @@ async function parseJsonSafe(response: Response): Promise<any> {
   }
 }
 
+// ── Permission levels ────────────────────────────────────────────────────────
+// "full_access" — can create top-ups/fares, edit, delete, etc. (default)
+// "view_only"   — read-only: can see everything in the admin console but
+//                 cannot update or delete anything.
+// Super Admins always have full access — this control only applies to
+// "staff" role accounts.
+type Permission = "full_access" | "view_only";
+
 type StaffUser = {
   id: number;
   username: string;
@@ -67,6 +76,7 @@ type StaffUser = {
   role: string; // "staff" | "super_admin"
   status: string;
   created_at: string;
+  permission?: Permission | null; // NEW — may be absent on older records
 };
 
 // ── Role label helpers ───────────────────────────────────────────────────────
@@ -83,6 +93,29 @@ function roleBadgeClass(role: string, isDark: boolean) {
   return isDark
     ? "bg-slate-800 text-slate-400 border-slate-700"
     : "bg-slate-100 text-slate-500 border-slate-200";
+}
+
+// ── Permission label helpers ─────────────────────────────────────────────────
+// Super admins are always treated as full access regardless of the stored
+// value, since the toggle only makes sense for staff.
+function effectivePermission(user: StaffUser): Permission {
+  if (user.role === "super_admin") return "full_access";
+  return user.permission === "view_only" ? "view_only" : "full_access";
+}
+
+function permissionLabel(permission: Permission): string {
+  return permission === "view_only" ? "View Only" : "Full Access";
+}
+
+function permissionBadgeClass(permission: Permission, isDark: boolean) {
+  if (permission === "view_only") {
+    return isDark
+      ? "bg-amber-950/40 text-amber-400 border-amber-900"
+      : "bg-amber-50 text-amber-600 border-amber-200";
+  }
+  return isDark
+    ? "bg-emerald-950/40 text-emerald-400 border-emerald-900"
+    : "bg-emerald-50 text-emerald-600 border-emerald-200";
 }
 
 export default function SettingsPage() {
@@ -113,8 +146,6 @@ export default function SettingsPage() {
   const isSuperAdmin = myRole === "super_admin";
 
   // ── Add staff form state ───────────────────────────────────────────────
-  // ── FIX: form now lives inside a Dialog instead of an always-visible
-  // card. `isAddOpen` controls the modal's open state. ──
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
@@ -122,10 +153,11 @@ export default function SettingsPage() {
     username: "",
     password: "",
     role: "staff",
+    permission: "full_access" as Permission,
   });
 
   const resetForm = () => {
-    setForm({ fullName: "", username: "", password: "", role: "staff" });
+    setForm({ fullName: "", username: "", password: "", role: "staff", permission: "full_access" });
   };
 
   const handleAddStaff = async () => {
@@ -160,6 +192,9 @@ export default function SettingsPage() {
           username: form.username.trim(),
           password: form.password.trim(),
           role: form.role,
+          // Only meaningful for "staff" accounts — super admins are always
+          // full access on the backend regardless of what's sent here.
+          permission: form.role === "staff" ? form.permission : "full_access",
         }),
       });
 
@@ -195,6 +230,18 @@ export default function SettingsPage() {
   // delete action is hidden entirely on super_admin rows. ──
   const [deleteTarget, setDeleteTarget] = useState<StaffUser | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // ── Edit Access modal — Super Admin sets a staff account to View Only
+  // (cannot update/delete anything in the system) or back to Full Access.
+  // Not available on super_admin rows — they're always full access. ──
+  const [editAccessTarget, setEditAccessTarget] = useState<StaffUser | null>(null);
+  const [pendingPermission, setPendingPermission] = useState<Permission>("full_access");
+  const [isUpdatingAccess, setIsUpdatingAccess] = useState(false);
+
+  const openEditAccess = (user: StaffUser) => {
+    setPendingPermission(effectivePermission(user));
+    setEditAccessTarget(user);
+  };
 
   const loadStaff = async () => {
     try {
@@ -256,6 +303,43 @@ export default function SettingsPage() {
     }
   };
 
+  // NOTE: This calls PATCH /api/admin/staff/:id/access with
+  // { permission: "view_only" | "full_access" }. Add/confirm this endpoint
+  // on the backend — it should reject the change if the target is a
+  // super_admin, and every write endpoint elsewhere in the app should check
+  // this flag server-side too (not just hide buttons in the UI), otherwise
+  // a view-only staffer could still call the API directly.
+  const confirmUpdateAccess = async () => {
+    if (!editAccessTarget) return;
+    const { id: userId, full_name: name } = editAccessTarget;
+
+    setIsUpdatingAccess(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/admin/staff/${userId}/access`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ permission: pendingPermission }),
+      });
+
+      const data = await parseJsonSafe(response);
+      if (!response.ok) throw new Error(data.error || "Failed to update access level");
+
+      toast({
+        title: "Access Updated",
+        description: `${name} is now set to ${permissionLabel(pendingPermission)}.`,
+      });
+      setEditAccessTarget(null);
+      loadStaff();
+    } catch (error: any) {
+      toast({ title: "Failed to Update Access", description: error.message, variant: "destructive" });
+    } finally {
+      setIsUpdatingAccess(false);
+    }
+  };
+
   return (
     <div className={`space-y-8 h-full min-h-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}>
       {/* Header */}
@@ -292,7 +376,7 @@ export default function SettingsPage() {
         <div className={`p-4 rounded-lg border flex items-start gap-3 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
           <Shield className={`mt-0.5 shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`} size={18} />
           <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Only a <strong>Super Admin</strong> can create or remove staff accounts. You can still view the list below.
+            Only a <strong>Super Admin</strong> can create, remove, or change access for staff accounts. You can still view the list below.
           </p>
         </div>
       )}
@@ -353,6 +437,7 @@ export default function SettingsPage() {
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Name</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Username</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Role</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Access</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date Added</TableHead>
                     {isSuperAdmin && (
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
@@ -362,7 +447,7 @@ export default function SettingsPage() {
                 <TableBody>
                   {filteredStaff.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={isSuperAdmin ? 5 : 4} className="text-center py-32">
+                      <TableCell colSpan={isSuperAdmin ? 6 : 5} className="text-center py-32">
                         <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                           <Users size={48} className="mb-2" />
                           <p className="text-xs font-semibold uppercase tracking-widest">No accounts found</p>
@@ -370,49 +455,71 @@ export default function SettingsPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredStaff.map((s) => (
-                      <TableRow
-                        key={s.id}
-                        className={isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}
-                      >
-                        <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                          {s.full_name}
-                        </TableCell>
-                        <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          {s.username}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${roleBadgeClass(s.role, isDark)}`}>
-                            {s.role === "super_admin" ? <Crown className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
-                            {roleLabel(s.role)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                          {new Date(s.created_at).toLocaleDateString()}
-                        </TableCell>
-                        {isSuperAdmin && (
-                          <TableCell className="text-right">
-                            {s.role === "staff" ? (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                disabled={deletingId === s.id}
-                                onClick={() => setDeleteTarget(s)}
-                                className={isDark ? "text-slate-500 hover:text-red-400" : "text-slate-400 hover:text-red-500"}
-                              >
-                                {deletingId === s.id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="w-4 h-4" />
-                                )}
-                              </Button>
-                            ) : (
-                              <span className={`text-[11px] ${isDark ? "text-slate-700" : "text-slate-300"}`}>—</span>
-                            )}
+                    filteredStaff.map((s) => {
+                      const perm = effectivePermission(s);
+                      return (
+                        <TableRow
+                          key={s.id}
+                          className={isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}
+                        >
+                          <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                            {s.full_name}
                           </TableCell>
-                        )}
-                      </TableRow>
-                    ))
+                          <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                            {s.username}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${roleBadgeClass(s.role, isDark)}`}>
+                              {s.role === "super_admin" ? <Crown className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
+                              {roleLabel(s.role)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${permissionBadgeClass(perm, isDark)}`}>
+                              {perm === "view_only" ? <Eye className="w-3 h-3" /> : <KeyRound className="w-3 h-3" />}
+                              {permissionLabel(perm)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                            {new Date(s.created_at).toLocaleDateString()}
+                          </TableCell>
+                          {isSuperAdmin && (
+                            <TableCell className="text-right">
+                              {s.role === "staff" ? (
+                                <div className="flex justify-end gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    disabled={deletingId === s.id}
+                                    onClick={() => openEditAccess(s)}
+                                    title="Edit access level"
+                                    className={isDark ? "text-slate-500 hover:text-blue-400" : "text-slate-400 hover:text-blue-600"}
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    disabled={deletingId === s.id}
+                                    onClick={() => setDeleteTarget(s)}
+                                    title="Remove account"
+                                    className={isDark ? "text-slate-500 hover:text-red-400" : "text-slate-400 hover:text-red-500"}
+                                  >
+                                    {deletingId === s.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="w-4 h-4" />
+                                    )}
+                                  </Button>
+                                </div>
+                              ) : (
+                                <span className={`text-[11px] ${isDark ? "text-slate-700" : "text-slate-300"}`}>—</span>
+                              )}
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
@@ -487,7 +594,10 @@ export default function SettingsPage() {
               <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 Role
               </Label>
-              <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
+              <Select
+                value={form.role}
+                onValueChange={(v) => setForm({ ...form, role: v, permission: v === "super_admin" ? "full_access" : form.permission })}
+              >
                 <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
@@ -497,6 +607,28 @@ export default function SettingsPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Access level — only meaningful for Staff. Super Admins are
+                always Full Access, so the control is hidden for that role. */}
+            {form.role === "staff" && (
+              <div className="space-y-2 sm:col-span-2">
+                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Access Level
+                </Label>
+                <Select
+                  value={form.permission}
+                  onValueChange={(v) => setForm({ ...form, permission: v as Permission })}
+                >
+                  <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                    <SelectValue placeholder="Select access level" />
+                  </SelectTrigger>
+                  <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                    <SelectItem value="full_access">Full Access — can create, edit, delete</SelectItem>
+                    <SelectItem value="view_only">View Only — cannot edit or delete</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <div className={`p-3 rounded-lg border flex items-start gap-2 ${isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"}`}>
@@ -525,6 +657,68 @@ export default function SettingsPage() {
             >
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
               {isSubmitting ? "Creating..." : "Create Account"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Access Modal — toggle a staff account between Full Access
+          and View Only. Super admin rows never reach this dialog. ────────── */}
+      <Dialog
+        open={!!editAccessTarget}
+        onOpenChange={(open) => {
+          if (!isUpdatingAccess && !open) setEditAccessTarget(null);
+        }}
+      >
+        <DialogContent className={`sm:max-w-md ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+          <DialogHeader>
+            <DialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+              <Pencil className="text-blue-500" size={18} />
+              Edit Access — {editAccessTarget?.full_name}
+            </DialogTitle>
+            <DialogDescription className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Control what this staff account is allowed to do in the admin console.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Access Level
+            </Label>
+            <Select value={pendingPermission} onValueChange={(v) => setPendingPermission(v as Permission)}>
+              <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                <SelectItem value="full_access">Full Access — can create, edit, delete</SelectItem>
+                <SelectItem value="view_only">View Only — cannot edit or delete</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className={`p-3 rounded-lg border flex items-start gap-2 ${isDark ? "bg-amber-950/20 border-amber-900" : "bg-amber-50/60 border-amber-100"}`}>
+            <Eye size={14} className={`mt-0.5 shrink-0 ${isDark ? "text-amber-400" : "text-amber-700"}`} />
+            <p className={`text-xs leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <strong>View Only</strong> lets this account see transactions, routes, and reports, but blocks any create, edit, or delete action across the system.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={isUpdatingAccess}
+              onClick={() => setEditAccessTarget(null)}
+              className={isDark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmUpdateAccess}
+              disabled={isUpdatingAccess}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 gap-2"
+            >
+              {isUpdatingAccess ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              {isUpdatingAccess ? "Saving..." : "Save Access"}
             </Button>
           </DialogFooter>
         </DialogContent>
