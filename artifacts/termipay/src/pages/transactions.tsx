@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   useListTransactions,
 } from "@workspace/api-client-react";
@@ -309,9 +309,18 @@ export default function TransactionsPage() {
   useRealtimeRefetch(["transactions"], () => { refetchTransactions(); });
 
   const rawTransactionList = Array.isArray(transactions) ? transactions : [];
-  const transactionList = typeFilter === "all"
-    ? rawTransactionList
-    : rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === typeFilter);
+
+  // IMPORTANT: memoized so this array keeps the same reference across
+  // re-renders when nothing relevant actually changed. Without this,
+  // `.filter()` returns a brand-new array every render, which retriggers
+  // the `useEffect` below (it depends on `transactionList`), which calls
+  // setLastUpdated → re-render → new filtered array → effect fires again,
+  // forever (React error #185 / "Maximum update depth exceeded").
+  const transactionList = useMemo(() => {
+    return typeFilter === "all"
+      ? rawTransactionList
+      : rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === typeFilter);
+  }, [rawTransactionList, typeFilter]);
   const totalPages = Math.max(1, Math.ceil(transactionList.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const startIndex = (safePage - 1) * PAGE_SIZE;
