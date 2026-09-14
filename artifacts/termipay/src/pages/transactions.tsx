@@ -291,9 +291,14 @@ export default function TransactionsPage() {
   }, []);
 
   // ── Transactions query ────────────────────────────────────────────────────
+  // NOTE: `type` filtering is NOT sent to the backend anymore. The DB can
+  // have inconsistent spellings ("topup", "TopUp", "top_up", etc.), so an
+  // exact-match server-side filter can silently exclude valid rows. Instead
+  // we fetch everything (search/status still filtered server-side) and do
+  // the type filtering ourselves using normalizeTxType, which is the same
+  // logic that decides what gets displayed as "Fare" / "Top-up".
   const params: any = {};
   if (search) params.search = search;
-  if (typeFilter !== "all") params.type = typeFilter;
   if (statusFilter !== "all") params.status = statusFilter;
 
   useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter]);
@@ -303,7 +308,10 @@ export default function TransactionsPage() {
 
   useRealtimeRefetch(["transactions"], () => { refetchTransactions(); });
 
-  const transactionList = Array.isArray(transactions) ? transactions : [];
+  const rawTransactionList = Array.isArray(transactions) ? transactions : [];
+  const transactionList = typeFilter === "all"
+    ? rawTransactionList
+    : rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === typeFilter);
   const totalPages = Math.max(1, Math.ceil(transactionList.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const startIndex = (safePage - 1) * PAGE_SIZE;
