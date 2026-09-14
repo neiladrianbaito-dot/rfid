@@ -9,6 +9,31 @@ import { ArrowLeft, Printer, Loader2, Wallet, Plus, Minus, RotateCcw, CheckCircl
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// Maps whatever role value the backend/auth returns into a display label.
+// Same logic as Layout.tsx — kept in sync so "Staff" vs "Super Admin"
+// shows the same everywhere. Adjust the string comparisons below if your
+// backend/Supabase metadata uses different role values.
+function getRoleLabel(user: any): string {
+  const rawRole =
+    user?.role ||
+    user?.userRole ||
+    user?.user_metadata?.role ||
+    user?.app_metadata?.role ||
+    "";
+
+  const role = String(rawRole).toLowerCase().trim();
+
+  if (role === "super_admin" || role === "superadmin" || role === "super admin") {
+    return "Super Admin";
+  }
+  if (role === "staff" || role === "admin") {
+    return "Staff";
+  }
+
+  // Fallback: show whatever role string exists, or a generic label
+  return rawRole ? String(rawRole) : "System Administrator";
+}
+
 // FIX: get the date string in LOCAL time (YYYY-MM-DD), not UTC.
 // new Date().toISOString() always converts to UTC, which is 8 hours
 // behind Philippine time — so between 12am–8am local time it returns
@@ -76,6 +101,7 @@ export default function ReportPreviewPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const adminName = user?.name || "System Administrator";
+  const adminRoleLabel = getRoleLabel(user); // "Staff" or "Super Admin", fetched from the signed-in user
 
   const [zoom, setZoom] = React.useState(ZOOM_DEFAULT);
   const zoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, z + ZOOM_STEP));
@@ -378,7 +404,7 @@ export default function ReportPreviewPage() {
                 </tr>
                 <tr>
                   <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, fontWeight: "bold", background: THEME.headerBg, color: THEME.dark }}>Prepared By</td>
-                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}` }}>{adminName}</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}` }}>{adminName} ({adminRoleLabel})</td>
                   <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, fontWeight: "bold", background: THEME.headerBg, color: THEME.dark }}>Classification</td>
                   <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}` }}>CONFIDENTIAL — FOR OFFICIAL USE</td>
                 </tr>
@@ -483,7 +509,7 @@ export default function ReportPreviewPage() {
                   <td style={{ width: "50%", border: "none", paddingRight: "20px", verticalAlign: "top" }}>
                     <div style={{ borderBottom: `1.5px solid ${THEME.dark}`, marginBottom: "4px", paddingBottom: "20px" }} />
                     <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase", color: THEME.darkest }}>{adminName}</div>
-                    <div style={{ fontSize: "8.5pt", color: THEME.muted }}>System Administrator / Report Author</div>
+                    <div style={{ fontSize: "8.5pt", color: THEME.muted }}>{adminRoleLabel} / Report Author</div>
                     <div style={{ fontSize: "8pt", color: THEME.muted, marginTop: "2px" }}>Fare Collection System</div>
                     <div style={{ fontSize: "8pt", color: THEME.muted, marginTop: "8px", fontStyle: "italic" }}>
                       Date: ___________________________
