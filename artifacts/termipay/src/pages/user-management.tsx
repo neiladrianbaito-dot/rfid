@@ -17,7 +17,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { useAdminAuth } from "@/hooks/use-admin-auth"; // 👈 BAGO: para malaman kung view-only ba yung naka-login na admin
 import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft } from "lucide-react";
 import {
   AlertDialog,
@@ -250,9 +249,6 @@ function ChevronStaircase({ color }: { color: string }) {
 
 export default function UserManagementPage() {
   const { isDark } = useTheme();
-  // 👈 BAGO: kunin kung sino currently naka-login (role) at kung view-only ba
-  // (super_admin = always full access; staff = depende sa itinakda ng super admin)
-  const { role, isViewOnly, isLoading: authLoading } = useAdminAuth();
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>("All");
   // ➕ Status filter state (Active / Inactive / Blocked / Expired)
@@ -372,23 +368,7 @@ export default function UserManagementPage() {
     },
   });
 
-  // 🚫➕ BAGO: central guard — kapag view-only ang naka-login na staff, huwag
-  // payagan mag-open ng kahit anong mutating dialog (edit/renew/transfer/delete),
-  // kahit na-bypass yung disabled state ng button. Ito UX-level lang; ang
-  // totoong security enforcement ay nasa backend (requireFullAccess middleware
-  // sa mutating routes) — hindi dapat umasa dito mag-isa.
-  const blockIfViewOnly = () => {
-    if (!isViewOnly) return false;
-    toast({
-      title: "View-only access",
-      description: "Your account can view records but can't make changes. Contact a Super Admin for full access.",
-      variant: "destructive",
-    });
-    return true;
-  };
-
   const openEdit = (user: any) => {
-    if (blockIfViewOnly()) return;
     setEditUser(user);
     const initial = {
       fullName: user.fullName,
@@ -409,7 +389,7 @@ export default function UserManagementPage() {
     editForm.contactNumber !== originalForm.contactNumber;
 
   const handleUpdate = () => {
-    if (!editUser || !hasChanges || isViewOnly) return;
+    if (!editUser || !hasChanges) return;
     updateMutation.mutate({
       id: editUser.id,
       data: {
@@ -419,15 +399,8 @@ export default function UserManagementPage() {
     });
   };
 
-  // ✅ BAGO: dedicated open handler for Delete (dati inline setDeleteUser call
-  // lang sa button) — para dumaan din sa view-only guard.
-  const openDelete = (user: any) => {
-    if (blockIfViewOnly()) return;
-    setDeleteUser(user);
-  };
-
   const confirmDelete = () => {
-    if (!deleteUser || isViewOnly) return;
+    if (!deleteUser) return;
     deleteMutation.mutate(
       { id: deleteUser.id },
       { onSettled: () => setDeleteUser(null) },
@@ -438,9 +411,7 @@ export default function UserManagementPage() {
   // 🚫➕ GUARD: if the card hasn't expired yet, renewal is blocked here too
   // (on top of the disabled buttons) — the dialog simply won't open, and the
   // user gets a toast explaining why.
-  // 🚫➕ BAGO: view-only guard checked FIRST, before the expiration check.
   const openRenew = (user: any) => {
-    if (blockIfViewOnly()) return;
     if (!isCardExpired(user.expirationDate)) {
       toast({
         title: "Card is still valid",
@@ -458,9 +429,9 @@ export default function UserManagementPage() {
   // math at nag-eextend mula sa GREATEST(current_expiration, now()).
   // 🚫➕ GUARD: final safety check right before the RPC call — even if
   // something upstream let a non-expired card slip through, we refuse to
-  // fire the renewal here. Also refuses if somehow called while view-only.
+  // fire the renewal here.
   const confirmRenew = async () => {
-    if (!renewUser || isViewOnly) return;
+    if (!renewUser) return;
 
     if (!isCardExpired(renewUser.expirationDate)) {
       toast({
@@ -493,9 +464,7 @@ export default function UserManagementPage() {
 
   // ✅ Opens the transfer-balance dialog for a given user (the lost/stolen card).
   // 🚫➕ GUARD: a card with zero balance has nothing to transfer.
-  // 🚫➕ BAGO: view-only guard checked first.
   const openTransfer = (user: any) => {
-    if (blockIfViewOnly()) return;
     if ((user.balance || 0) <= 0) {
       toast({
         title: "Nothing to transfer",
@@ -532,7 +501,7 @@ export default function UserManagementPage() {
   // target card, and marks the source card as Blocked. We just read back
   // the completed row for the confirmation toast.
   const confirmTransfer = async () => {
-    if (!transferUser || !transferTarget || isViewOnly) return;
+    if (!transferUser || !transferTarget) return;
 
     setIsTransferring(true);
 
@@ -612,23 +581,10 @@ export default function UserManagementPage() {
           </p>
         </div>
 
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2">
-            {/* 🚫➕ BAGO: View Only badge — makikita lang kapag staff account na
-                naka-set ng super admin sa view_only. Super admins hindi makikita
-                dahil isViewOnly ay laging false para sa kanila. */}
-            {!authLoading && isViewOnly && (
-              <div className={`flex items-center gap-2 px-4 py-2 border rounded-lg ${isDark ? "bg-amber-950/40 border-amber-900" : "bg-amber-50 border-amber-100"}`}>
-                <Eye className={isDark ? "text-amber-400" : "text-amber-600"} size={16} />
-                <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-amber-400" : "text-amber-700"}`}>
-                  View Only Access
-                </span>
-              </div>
-            )}
-            <div className={`flex items-center gap-2 px-4 py-2 border rounded-lg ${isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"}`}>
-              <Zap className="text-blue-500" size={16} />
-              <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
-            </div>
+        <div className="flex flex-col items-end gap-1">
+          <div className={`flex items-center gap-2 px-4 py-2 border rounded-lg ${isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"}`}>
+            <Zap className="text-blue-500" size={16} />
+            <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
           </div>
           {lastUpdated && (
             <span className={`text-[10px] font-mono pr-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
@@ -880,9 +836,9 @@ export default function UserManagementPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => openRenew(user)}
-                                  disabled={!expired || isViewOnly}
+                                  disabled={!expired}
                                   className={`h-8 w-8 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40" : "text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50"}`}
-                                  title={isViewOnly ? "View-only access — renewal disabled" : expired ? "Renew card (extend 1 year)" : `Not yet expired — valid until ${formatDate(user.expirationDate)}`}
+                                  title={expired ? "Renew card (extend 1 year)" : `Not yet expired — valid until ${formatDate(user.expirationDate)}`}
                                 >
                                   <RefreshCw className="w-3.5 h-3.5" />
                                 </Button>
@@ -890,9 +846,9 @@ export default function UserManagementPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => openTransfer(user)}
-                                  disabled={(user.balance || 0) <= 0 || isViewOnly}
+                                  disabled={(user.balance || 0) <= 0}
                                   className={`h-8 w-8 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "text-orange-400 hover:text-orange-300 hover:bg-orange-950/40" : "text-orange-500 hover:text-orange-700 hover:bg-orange-50"}`}
-                                  title={isViewOnly ? "View-only access — transfer disabled" : (user.balance || 0) > 0 ? "Transfer balance (lost/stolen card)" : "No balance to transfer"}
+                                  title={(user.balance || 0) > 0 ? "Transfer balance (lost/stolen card)" : "No balance to transfer"}
                                 >
                                   <ArrowRightLeft className="w-3.5 h-3.5" />
                                 </Button>
@@ -900,19 +856,17 @@ export default function UserManagementPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => openEdit(user)}
-                                  disabled={isViewOnly}
-                                  className={`h-8 w-8 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
-                                  title={isViewOnly ? "View-only access — editing disabled" : "Edit user"}
+                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
+                                  title="Edit user"
                                 >
                                   <Pencil className="w-3.5 h-3.5" />
                                 </Button>
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => openDelete(user)}
-                                  disabled={isViewOnly}
-                                  className={`h-8 w-8 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
-                                  title={isViewOnly ? "View-only access — deletion disabled" : "Delete user"}
+                                  onClick={() => setDeleteUser(user)}
+                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
+                                  title="Delete user"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </Button>
@@ -1171,8 +1125,8 @@ export default function UserManagementPage() {
                   setPreviewUser(null);
                   openRenew(user);
                 }}
-                disabled={!isCardExpired(previewUser.expirationDate) || isViewOnly}
-                title={isViewOnly ? "View-only access — renewal disabled" : !isCardExpired(previewUser.expirationDate) ? `Not yet expired — valid until ${formatDate(previewUser.expirationDate)}` : undefined}
+                disabled={!isCardExpired(previewUser.expirationDate)}
+                title={!isCardExpired(previewUser.expirationDate) ? `Not yet expired — valid until ${formatDate(previewUser.expirationDate)}` : undefined}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-emerald-600"
               >
                 <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
@@ -1288,7 +1242,7 @@ export default function UserManagementPage() {
             </Button>
             <Button
               onClick={handleUpdate}
-              disabled={!hasChanges || updateMutation.isPending || isViewOnly}
+              disabled={!hasChanges || updateMutation.isPending}
               className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
             >
               {updateMutation.isPending ? "Saving..." : "Save Changes"}
@@ -1346,7 +1300,7 @@ export default function UserManagementPage() {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmRenew}
-              disabled={isRenewing || isViewOnly || !!(renewUser && !isCardExpired(renewUser.expirationDate))}
+              disabled={isRenewing || !!(renewUser && !isCardExpired(renewUser.expirationDate))}
               className="bg-emerald-600 text-white hover:bg-emerald-700 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-emerald-600"
             >
               {isRenewing ? "Renewing..." : "Confirm Renewal"}
@@ -1452,7 +1406,7 @@ export default function UserManagementPage() {
             </Button>
             <Button
               onClick={confirmTransfer}
-              disabled={isTransferring || !transferTarget || isViewOnly}
+              disabled={isTransferring || !transferTarget}
               className="bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold px-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-orange-600"
             >
               <ArrowRightLeft className="w-3.5 h-3.5 mr-1.5" />
@@ -1485,7 +1439,7 @@ export default function UserManagementPage() {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDelete}
-              disabled={deleteMutation.isPending || isViewOnly}
+              disabled={deleteMutation.isPending}
               className="bg-red-600 text-white hover:bg-red-700 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
             >
               {deleteMutation.isPending ? "Deleting..." : "Confirm Delete"}
