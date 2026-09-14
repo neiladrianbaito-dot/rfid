@@ -18,6 +18,8 @@ import {
   RefreshCw,
   Filter,
   RotateCcw,
+  Landmark,
+  Smartphone,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -38,6 +40,12 @@ const DISBURSEMENTS_PER_PAGE = 10;
 // Ideally this list lives in one shared module imported by both sides;
 // duplicating it here is a stopgap until that's wired up. ──
 const NON_FARE_MARKERS = ["topup", "top_up", "top-up", "cash_in", "cashin", "cash-in", "load", "reload"];
+
+// ── GCash detection markers — used ONLY to narrow top-up transactions
+// down to the ones that specifically came in through GCash (as opposed
+// to other e-wallets/bank channels you might add later). Adjust/extend
+// if your backend spells the channel differently. ──
+const GCASH_MARKERS = ["gcash", "g-cash", "g_cash"];
 
 function getLocalDateString(): string {
   return new Date().toLocaleDateString("en-CA");
@@ -136,6 +144,36 @@ function isFareTransaction(tx: any): boolean {
   return !NON_FARE_MARKERS.some((marker) => raw.includes(marker));
 }
 
+// ── The inverse of isFareTransaction: true only when the transaction IS
+// a top-up/cash-in/load (i.e. money a passenger added to their own
+// balance, not fare revenue). ──
+function isTopupTransaction(tx: any): boolean {
+  const raw = (tx.type ?? tx.transaction_type ?? tx.category ?? "")
+    .toString()
+    .toLowerCase()
+    .trim();
+  if (!raw) return false; // no type field present — can't confirm it's a top-up
+  return NON_FARE_MARKERS.some((marker) => raw.includes(marker));
+}
+
+// ── Identifies whether a (top-up) transaction specifically came in
+// through GCash, as opposed to another e-wallet/bank channel.
+//
+// IMPORTANT: adjust the field lookup below to match whatever field your
+// backend actually stores the payment channel in (e.g. `channel`,
+// `payment_channel`, `payment_method`, `channel_code`). If no
+// channel-like field is present at all, this currently assumes GCash —
+// flip that default to `false` once you have a real channel field, so
+// top-ups from other channels don't get miscounted. ──
+function isGcashChannel(tx: any): boolean {
+  const raw = (tx.channel ?? tx.payment_channel ?? tx.payment_method ?? tx.channel_code ?? "")
+    .toString()
+    .toLowerCase()
+    .trim();
+  if (!raw) return true; // no channel field present — TODO: flip to false once a real field exists
+  return GCASH_MARKERS.some((marker) => raw.includes(marker));
+}
+
 // Returns the transaction's local "YYYY-MM-DD" date key
 function getTxDateKey(tx: any): string | null {
   const ts = tx.timestamp || tx.created_at;
@@ -209,6 +247,12 @@ export default function DisbursementPage() {
   const [disbursementHistory, setDisbursementHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
+  // ── REAL Xendit account balance — fetched straight from Xendit's
+  // Balance API (via the get-xendit-balance function), i.e. how much is
+  // actually sitting in your Xendit account right now. ──
+  const [xenditBalance, setXenditBalance] = useState<number | null>(null);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+
   // ── current page (1-indexed) for the Disbursement History table ──
   const [disbursementPage, setDisbursementPage] = useState(1);
 
@@ -258,13 +302,58 @@ export default function DisbursementPage() {
     fetchDisbursementHistory();
   }, [fetchDisbursementHistory]);
 
+  // ── fetches the REAL Xendit balance (via the get-xendit-balance
+  // function). Called on mount and manually via the Refresh button next
+  // to the balance card. ──
+  const fetchXenditBalance = React.useCallback(async () => {
+    setIsLoadingBalance(true);
+    try {
+      const functionsUrl = getSupabaseFunctionsUrl();
+      const token = window.localStorage.getItem("termipay_auth_token");
+      const res = await fetch(`${functionsUrl}/get-xendit-balance`, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (!res.ok) {
+        console.warn("Failed to fetch Xendit balance:", await res.text());
+        setXenditBalance(null);
+        return;
+      }
+      const data = await res.json();
+      setXenditBalance(typeof data?.balance === "number" ? data.balance : null);
+    } catch (err) {
+      console.warn("Failed to fetch Xendit balance:", err);
+      setXenditBalance(null);
+    } finally {
+      setIsLoadingBalance(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchXenditBalance();
+  }, [fetchXenditBalance]);
+
   const { data: transactions, refetch: refetchTransactions } = useListTransactions();
 
   useRealtimeRefetch(["transactions"], () => {
     refetchTransactions();
+    // a new top-up or a new disbursement can change the real Xendit
+    // balance, so keep it fresh too
+    fetchXenditBalance();
   });
 
   const txList = useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
+
+  // ── total amount, ACROSS ALL TIME, that users have topped up
+  // specifically via GCash. Not scoped to the Year/Month/Day filter above
+  // — this is a running lifetime total, separate from the disbursable
+  // fare revenue. ──
+  const totalGcashTopups = useMemo(
+    () =>
+      txList
+        .filter((tx: any) => isTopupTransaction(tx) && isGcashChannel(tx))
+        .reduce((sum: number, tx: any) => sum + Math.abs(Number(tx.amount) || 0), 0),
+    [txList]
+  );
 
   // ── derive available years straight from transactions so the Year
   // dropdown reflects everything that actually has records ──
@@ -488,6 +577,8 @@ export default function DisbursementPage() {
       // actual DB-generated amount/status) shows up without waiting for
       // the modal auto-close
       fetchDisbursementHistory();
+      // the balance in Xendit just changed too (money went out)
+      fetchXenditBalance();
 
       // ── auto-close the modal once the disbursement request succeeds.
       // A short delay lets the admin actually read the success message
@@ -555,6 +646,63 @@ export default function DisbursementPage() {
             <span>, and review past payouts.</span>
           </p>
         </div>
+      </div>
+
+      {/* ══ XENDIT BALANCE + GCASH TOP-UPS SUMMARY ══ */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-600 via-blue-500 to-transparent" />
+          <CardContent className="p-5 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                <Landmark size={12} className="text-indigo-500" />
+                Xendit Balance
+              </p>
+              <p className={`text-xl font-bold font-mono mt-1 ${isDark ? "text-white" : "text-slate-900"}`}>
+                {isLoadingBalance ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-indigo-500" />
+                ) : xenditBalance !== null ? (
+                  formatPeso(xenditBalance)
+                ) : (
+                  "—"
+                )}
+              </p>
+              <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                Available to disburse right now
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={fetchXenditBalance}
+              disabled={isLoadingBalance}
+              data-testid="button-refresh-xendit-balance"
+              title="Refresh"
+              className={`h-8 w-8 flex-none flex items-center justify-center rounded-md transition-colors disabled:opacity-50 ${
+                isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+              }`}
+            >
+              <RefreshCw size={14} className={isLoadingBalance ? "animate-spin" : ""} />
+            </button>
+          </CardContent>
+        </Card>
+
+        <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-blue-400 to-transparent" />
+          <CardContent className="p-5 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                <Smartphone size={12} className="text-sky-500" />
+                Total GCash Top-ups
+              </p>
+              <p className={`text-xl font-bold font-mono mt-1 ${isDark ? "text-white" : "text-slate-900"}`}>
+                {formatPeso(totalGcashTopups)}
+              </p>
+              <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                Passenger-added balance, all-time — not fare revenue
+              </p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* ══ FILTER + DISBURSE TRIGGER ══ */}
