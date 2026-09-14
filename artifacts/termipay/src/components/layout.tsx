@@ -102,7 +102,7 @@ const navGroups = [
     ],
   },
   {
-    label: "Payments & Disbursement",
+    label: "Payout",
     items: [
       { path: "/disbursement", label: "Disbursement Payments", icon: Banknote },
     ],
