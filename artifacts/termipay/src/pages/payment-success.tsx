@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useSearch, useLocation } from "wouter";
+import { useEffect, useRef, useState } from "react";
+import { useSearch } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +9,8 @@ import {
   ArrowLeft,
   Clock,
   Smartphone,
-  SearchX,
+  RadioTower,
+  Home,
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import { motion } from "framer-motion";
@@ -19,14 +20,133 @@ const formatPeso = (value: number) =>
 
 const DASHBOARD_URL = "https://rfid-termipay-sigma.vercel.app/user-dashboard";
 
+// ── Exact copy of NotFound.tsx — same text, same dark theme, unchanged ──
+function BrokenSignalNotFound() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const prefersReducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
+    if (prefersReducedMotion) return;
+
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    let raf: number;
+    let last = 0;
+
+    const drawNoise = () => {
+      const { width: w, height: h } = canvas;
+      const imageData = ctx.createImageData(w, h);
+      const buffer = new Uint32Array(imageData.data.buffer);
+      for (let i = 0; i < buffer.length; i++) {
+        if (Math.random() > 0.5) buffer[i] = 0xff000000;
+      }
+      ctx.putImageData(imageData, 0, 0);
+    };
+
+    const loop = (ts: number) => {
+      if (ts - last > 90) {
+        drawNoise();
+        last = ts;
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center bg-[#0b0d0c] relative overflow-hidden font-mono">
+      <canvas
+        ref={canvasRef}
+        className="pointer-events-none fixed inset-0 opacity-[0.05] z-[3]"
+      />
+      <div
+        className="pointer-events-none fixed inset-0 z-[4]"
+        style={{
+          background:
+            "repeating-linear-gradient(to bottom, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 3px)",
+          mixBlendMode: "overlay",
+        }}
+      />
+      <div
+        className="pointer-events-none fixed inset-0 z-[4]"
+        style={{
+          background:
+            "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.55) 100%)",
+        }}
+      />
+
+      <Card className="w-full max-w-md mx-4 relative z-10 bg-[#121513] border-[#1f2622] text-[#d7ded9]">
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-2 mb-1 text-[11px] tracking-[0.18em] uppercase text-[#7c8a83]">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#ff7b54] opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#ff7b54]" />
+            </span>
+            connection lost
+          </div>
+
+          <div className="flex items-start gap-3 mt-4 mb-2">
+            <RadioTower className="h-7 w-7 text-[#7CFFB2] shrink-0 mt-1" />
+            <h1 className="text-2xl font-bold text-[#d7ded9] leading-tight">
+              404 — this page didn't make it to air
+            </h1>
+          </div>
+
+          <p className="mt-3 text-sm text-[#7c8a83] leading-relaxed">
+            Nothing's broadcasting at{" "}
+            <code className="bg-[#0b0d0c] border border-[#1f2622] px-1.5 py-0.5 rounded text-[#4ea878] text-xs">
+              this address
+            </code>
+            . Check the URL for typos, or did you forget to add the page to
+            the router?
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-3 mt-6">
+            
+              href="/"
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-[#7CFFB2] text-[#06120c] text-sm font-semibold px-4 py-2.5 hover:bg-[#4ea878] transition-colors"
+            >
+              <Home className="h-4 w-4" />
+              Back to home
+            </a>
+            <button
+              onClick={() => window.history.back()}
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-[#1f2622] text-[#d7ded9] text-sm px-4 py-2.5 hover:border-[#4ea878] hover:text-[#7CFFB2] transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Go back
+            </button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Main page ────────────────────────────────────────────────────────────
+
 export default function GCashPaymentSuccessPage() {
   const { isDark } = useTheme();
   const searchString = useSearch();
-  const [, setLocation] = useLocation();
   const [copied, setCopied] = useState(false);
 
-  // Xendit success redirect naglalagay ng details bilang query params,
-  // see create-topup edge function's successRedirectUrl.
   const params = new URLSearchParams(searchString);
   const referenceNo = params.get("reference");
   const amountParam = params.get("amount");
@@ -34,8 +154,6 @@ export default function GCashPaymentSuccessPage() {
   const paidAtParam = params.get("paidAt");
   const paidAt = paidAtParam ? new Date(paidAtParam) : new Date();
 
-  // ✅ Walang laman o invalid ang params (di galing sa Xendit / direct visit
-  // sa URL na walang token) → hindi valid na payment confirmation ito.
   const isValidPaymentData =
     !!referenceNo &&
     referenceNo.trim().length > 0 &&
@@ -46,7 +164,7 @@ export default function GCashPaymentSuccessPage() {
   useEffect(() => {
     document.title = isValidPaymentData
       ? "Payment Successful — TermiPay"
-      : "Page Not Found — TermiPay";
+      : "404 Not Found";
   }, [isValidPaymentData]);
 
   const handleCopy = async () => {
@@ -59,67 +177,8 @@ export default function GCashPaymentSuccessPage() {
     }
   };
 
-  // ✅ 404 fallback — kapag walang valid token/payment data mula sa Xendit
   if (!isValidPaymentData) {
-    return (
-      <div
-        className={`min-h-screen flex items-center justify-center p-3 sm:p-4 transition-colors ${
-          isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
-        }`}
-        data-testid="gcash-success-page-404"
-      >
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-          className="w-full max-w-md"
-        >
-          <Card
-            className={`relative overflow-hidden shadow-sm transition-colors ${
-              isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
-            }`}
-          >
-            <div className="absolute top-0 left-0 h-[3px] w-full bg-slate-400" />
-
-            <CardHeader className="flex flex-col items-center text-center pt-10 sm:pt-12 pb-4 px-4 sm:px-6">
-              <div
-                className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full border flex items-center justify-center mb-3 sm:mb-4 ${
-                  isDark
-                    ? "bg-slate-800/60 border-slate-700 text-slate-400"
-                    : "bg-slate-100 border-slate-200 text-slate-500"
-                }`}
-              >
-                <SearchX size={28} className="sm:hidden" strokeWidth={2} />
-                <SearchX size={32} className="hidden sm:block" strokeWidth={2} />
-              </div>
-              <CardTitle
-                className={`text-lg sm:text-xl font-bold tracking-tight ${
-                  isDark ? "text-white" : "text-slate-900"
-                }`}
-              >
-                404 — Page Not Found
-              </CardTitle>
-              <p className={`text-xs sm:text-sm mt-1.5 max-w-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                Walang nahanap na valid na payment confirmation. Maaaring nag-expire, na-refresh, o na-access nang direkta ang page na ito nang walang payment token mula sa Xendit.
-              </p>
-            </CardHeader>
-
-            <CardContent className="pb-8 sm:pb-10 px-4 sm:px-6">
-              <div className="flex flex-col gap-2 mt-4">
-                <Button
-                  onClick={() => setLocation("/user-dashboard")}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white"
-                  data-testid="button-back-dashboard-404"
-                >
-                  <ArrowLeft size={16} className="mr-1.5" />
-                  Back to Dashboard
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      </div>
-    );
+    return <BrokenSignalNotFound />;
   }
 
   return (
@@ -149,7 +208,6 @@ export default function GCashPaymentSuccessPage() {
             isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
           }`}
         >
-          {/* Top accent bar */}
           <div className="absolute top-0 left-0 h-[3px] w-full bg-emerald-500" />
 
           <CardHeader className="flex flex-col items-center text-center pt-8 sm:pt-10 pb-4 px-4 sm:px-6">
@@ -176,7 +234,6 @@ export default function GCashPaymentSuccessPage() {
           </CardHeader>
 
           <CardContent className="pb-6 sm:pb-8 px-4 sm:px-6">
-            {/* Amount */}
             <div className="flex flex-col items-center py-6">
               <span
                 className={`text-[10px] font-semibold uppercase tracking-widest mb-1 ${
@@ -196,10 +253,8 @@ export default function GCashPaymentSuccessPage() {
               </span>
             </div>
 
-            {/* Divider */}
             <div className={`h-px w-full mb-4 ${isDark ? "bg-slate-800" : "bg-slate-200"}`} />
 
-            {/* Details list */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className={`flex items-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -253,7 +308,6 @@ export default function GCashPaymentSuccessPage() {
               <p className="text-right text-[11px] text-emerald-500 mt-1 -mb-2">Copied!</p>
             )}
 
-            {/* Powered by note */}
             <div
               className={`flex items-center justify-center gap-1.5 mt-6 text-[10px] font-semibold uppercase tracking-widest ${
                 isDark ? "text-slate-600" : "text-slate-400"
@@ -267,7 +321,6 @@ export default function GCashPaymentSuccessPage() {
               />
             </div>
 
-            {/* Actions */}
             <div className="flex flex-col gap-2 mt-6">
               <Button
                 onClick={() => { window.location.href = DASHBOARD_URL; }}
