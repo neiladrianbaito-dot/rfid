@@ -20,7 +20,7 @@ const getLocalDateString = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
-// ── NEW: shared helper to normalize the API base URL for direct fetch()
+// ── shared helper to normalize the API base URL for direct fetch()
 // calls (same logic used in Layout.tsx / ReportsPage.tsx) ──
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
@@ -28,7 +28,7 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string {
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
 }
 
-// ── NEW: fire-and-forget audit log call for the print/PDF export.
+// ── fire-and-forget audit log call for the print/PDF export.
 // Never throws / never blocks the actual print dialog from opening. ──
 async function logExportAudit(params: { entity: string; format: string; details: string }) {
   try {
@@ -53,10 +53,24 @@ const ZOOM_STEP = 10;
 const ZOOM_DEFAULT = 100;
 
 // How long the "Preparing to print..." toast stays on screen before
-// the actual browser print dialog is triggered. Gives the layout a
-// beat to settle and gives the user visual confirmation their click
-// registered.
+// the actual browser print dialog is triggered.
 const PRINT_TOAST_DELAY_MS = 900;
+
+// ══ THEME ══
+// Single source of truth for the report's color palette, matching the
+// sidebar's blue theme in Layout.tsx (blue-950 → blue-600 → blue-300).
+const THEME = {
+  darkest: "#172554",   // blue-950 — letterhead border / headers
+  dark: "#1e3a8a",      // blue-900 — section titles / strong borders
+  primary: "#1d4ed8",   // blue-700 — accents, KPI numbers
+  mid: "#2563eb",       // blue-600 — call-to-action accents
+  border: "#93c5fd",    // blue-300 — light table borders
+  headerBg: "#eff6ff",  // blue-50  — table header fill
+  altRowBg: "#f8faff",  // near-white blue tint for zebra rows
+  totalBg: "#dbeafe",   // blue-100 — grand total row fill
+  text: "#0f172a",      // slate-900 — body copy
+  muted: "#475569",     // slate-600 — secondary copy
+};
 
 export default function ReportPreviewPage() {
   const [, navigate] = useLocation();
@@ -69,8 +83,6 @@ export default function ReportPreviewPage() {
   const zoomReset = () => setZoom(ZOOM_DEFAULT);
 
   // ══ PRINT TOAST ══
-  // Shows a small "Preparing to print the report..." toast the moment
-  // the user clicks Print, then fires window.print() shortly after.
   const [isPreparingPrint, setIsPreparingPrint] = React.useState(false);
   const printTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -84,10 +96,6 @@ export default function ReportPreviewPage() {
     if (isPreparingPrint) return; // guard against double-clicks
     setIsPreparingPrint(true);
 
-    // ── NEW: log the export attempt. We can't know if the user actually
-    // saved the PDF or cancelled the browser's native dialog, so we log
-    // at the moment they click Print — same limitation any app built on
-    // window.print() has. Fire-and-forget, doesn't block the timeout below.
     logExportAudit({
       entity: "Revenue Audit Report",
       format: "PDF/Print",
@@ -101,12 +109,6 @@ export default function ReportPreviewPage() {
   };
 
   // ══ MOUSE-WHEEL ZOOM ══
-  // Ctrl/Cmd + wheel (or trackpad pinch, which browsers report as
-  // wheel + ctrlKey) zooms the document instead of scrolling the page.
-  // Plain wheel still scrolls normally.
-  // React's onWheel is attached as a passive listener under the hood,
-  // so preventDefault() inside it is silently ignored — we have to
-  // attach a native, non-passive listener via a ref instead.
   const pageWrapRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -114,11 +116,10 @@ export default function ReportPreviewPage() {
     if (!el) return;
 
     const handleWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return; // let normal scrolling through
+      if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
 
       setZoom((z) => {
-        // Smaller, smoother steps for wheel/pinch than the toolbar buttons.
         const delta = e.deltaY > 0 ? -5 : 5;
         const next = z + delta;
         return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
@@ -138,15 +139,9 @@ export default function ReportPreviewPage() {
   ).current;
   const datePrinted = timestamp;
 
-  // NOTE: assumes useGetReportSummary/useListTransactions are built on
-  // react-query (or similar) and expose `refetch`. If yours doesn't,
-  // tell me what the hook returns and I'll adjust.
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary();
   const { data: transactions, refetch: refetchTransactions } = useListTransactions();
 
-  // ══ REALTIME: auto-refetch the moment Supabase reports a change ══
-  // Adjust the table list if dailyBreakdown/totalRevenue7Days are
-  // derived from more than just "transactions" on the backend.
   useRealtimeRefetch(["transactions"], () => {
     refetchReport();
     refetchTransactions();
@@ -163,8 +158,6 @@ export default function ReportPreviewPage() {
   const todayRevenue = (() => {
     const breakdown = report?.dailyBreakdown || [];
     if (!breakdown.length) return 0;
-    // FIX: use local date, not UTC, so "today" matches the actual
-    // calendar date the report's dailyBreakdown rows are keyed on.
     const today = getLocalDateString(new Date());
     const todayRow = breakdown.find((d: any) => d.date === today);
     if (!todayRow) return 0;
@@ -184,9 +177,9 @@ export default function ReportPreviewPage() {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-100">
-        <Loader2 className="h-8 w-8 animate-spin text-slate-500" />
-        <p className="mt-4 text-sm font-medium text-slate-500">Loading report preview...</p>
+      <div className="flex h-screen w-full flex-col items-center justify-center bg-blue-50">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+        <p className="mt-4 text-sm font-medium text-blue-900">Loading report preview...</p>
       </div>
     );
   }
@@ -231,46 +224,46 @@ export default function ReportPreviewPage() {
       {/* ══ "PREPARING TO PRINT" TOAST ══ */}
       {isPreparingPrint && (
         <div
-          className="print-toast fixed bottom-6 left-1/2 z-50 flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-xl"
+          className="print-toast fixed bottom-6 left-1/2 z-50 flex items-center gap-3 rounded-lg border border-blue-200 bg-white px-4 py-3 shadow-xl"
           style={{ animation: "print-toast-in 180ms ease-out" }}
           role="status"
           aria-live="polite"
           data-testid="toast-preparing-print"
         >
           <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-blue-600" />
-          <span className="text-xs font-semibold text-slate-700">
+          <span className="text-xs font-semibold text-blue-900">
             Preparing to print the report<span className="animate-pulse">…</span>
           </span>
         </div>
       )}
 
-      <div className="flex min-h-screen flex-col bg-slate-200">
-        {/* ══ TOOLBAR (fixed to top, like a header) ══ */}
-        <div className="preview-toolbar sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-slate-300 bg-white px-6 py-4 shadow-sm">
+      <div className="flex min-h-screen flex-col bg-blue-100/60">
+        {/* ══ TOOLBAR ══ */}
+        <div className="preview-toolbar sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-blue-200 bg-white px-6 py-4 shadow-sm">
           <Button
             variant="outline"
             onClick={handleBack}
-            className="font-bold uppercase text-xs tracking-widest cursor-pointer transition-colors duration-150 hover:bg-slate-100 active:bg-slate-200"
+            className="font-bold uppercase text-xs tracking-widest cursor-pointer border-blue-200 text-blue-700 transition-colors duration-150 hover:bg-blue-50 active:bg-blue-100"
             data-testid="button-back-reports"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
 
-          <div className="text-xs font-black uppercase tracking-widest text-slate-500">
+          <div className="text-xs font-black uppercase tracking-widest text-blue-900">
             Revenue Audit Report Preview
           </div>
 
           <div className="flex items-center gap-3">
             {/* ══ ZOOM CONTROLS ══ */}
-            <div className="flex items-center gap-1 rounded-md border border-slate-300 bg-slate-50 px-1 py-1">
+            <div className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-1 py-1">
               <button
                 type="button"
                 onClick={zoomOut}
                 disabled={zoom <= ZOOM_MIN}
                 title="Zoom out"
                 data-testid="button-zoom-out"
-                className="flex h-7 w-7 items-center justify-center rounded cursor-pointer text-slate-600 transition-colors duration-150 hover:bg-slate-200 active:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                className="flex h-7 w-7 items-center justify-center rounded cursor-pointer text-blue-700 transition-colors duration-150 hover:bg-blue-200 active:bg-blue-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
               >
                 <Minus className="h-3.5 w-3.5" />
               </button>
@@ -280,7 +273,7 @@ export default function ReportPreviewPage() {
                 onClick={zoomReset}
                 title="Reset zoom"
                 data-testid="button-zoom-reset"
-                className="min-w-[3.25rem] cursor-pointer rounded px-1.5 py-1 text-center text-[11px] font-bold tabular-nums text-slate-600 transition-colors duration-150 hover:bg-slate-200 active:bg-slate-300"
+                className="min-w-[3.25rem] cursor-pointer rounded px-1.5 py-1 text-center text-[11px] font-bold tabular-nums text-blue-700 transition-colors duration-150 hover:bg-blue-200 active:bg-blue-300"
               >
                 {zoom}%
               </button>
@@ -291,7 +284,7 @@ export default function ReportPreviewPage() {
                 disabled={zoom >= ZOOM_MAX}
                 title="Zoom in"
                 data-testid="button-zoom-in"
-                className="flex h-7 w-7 items-center justify-center rounded cursor-pointer text-slate-600 transition-colors duration-150 hover:bg-slate-200 active:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                className="flex h-7 w-7 items-center justify-center rounded cursor-pointer text-blue-700 transition-colors duration-150 hover:bg-blue-200 active:bg-blue-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
               >
                 <Plus className="h-3.5 w-3.5" />
               </button>
@@ -300,7 +293,7 @@ export default function ReportPreviewPage() {
             <Button
               onClick={handlePrint}
               disabled={isPreparingPrint}
-              className="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-black uppercase text-xs tracking-widest cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-blue-500/30 disabled:cursor-not-allowed disabled:opacity-70"
+              className="bg-blue-700 hover:bg-blue-600 active:bg-blue-800 text-white font-black uppercase text-xs tracking-widest cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-blue-500/30 disabled:cursor-not-allowed disabled:opacity-70"
               data-testid="button-print"
             >
               {isPreparingPrint ? (
@@ -327,27 +320,26 @@ export default function ReportPreviewPage() {
               minHeight: "297mm",
               padding: "14mm 16mm",
               fontFamily: "'Times New Roman', Times, serif",
-              color: "#000",
+              color: THEME.text,
               lineHeight: 1.4,
               boxSizing: "border-box",
               transform: `scale(${zoom / 100})`,
               transformOrigin: "top center",
               transition: "transform 150ms ease-out",
-              // keep layout flow sane while scaled so it doesn't overlap the footer
               marginBottom: zoom > 100 ? `${(zoom - 100) * 3}mm` : 0,
             }}
           >
             {/* Letterhead */}
-            <div style={{ borderBottom: "3px double #000", paddingBottom: "10px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "16px" }}>
+            <div style={{ borderBottom: `3px double ${THEME.darkest}`, paddingBottom: "10px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "16px" }}>
               <img src="/bagong.png" alt="Bagong Pilipinas" style={{ width: "72px", height: "72px", flexShrink: 0, objectFit: "contain" }} />
               <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ fontSize: "9pt", fontWeight: "bold", letterSpacing: "0.15em", textTransform: "uppercase", borderBottom: "1px solid #000", paddingBottom: "2px", marginBottom: "6px" }}>
+                <div style={{ fontSize: "9pt", fontWeight: "bold", letterSpacing: "0.15em", textTransform: "uppercase", borderBottom: `1px solid ${THEME.dark}`, paddingBottom: "2px", marginBottom: "6px", color: THEME.dark }}>
                   Republic of the Philippines
                 </div>
-                <div style={{ fontSize: "16pt", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                <div style={{ fontSize: "16pt", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.06em", color: THEME.darkest }}>
                   Fare Collection System
                 </div>
-                <div style={{ fontSize: "8pt", letterSpacing: "0.12em", textTransform: "uppercase", color: "#333", marginTop: "4px" }}>
+                <div style={{ fontSize: "8pt", letterSpacing: "0.12em", textTransform: "uppercase", color: THEME.muted, marginTop: "4px" }}>
                   City Accounting Office &nbsp;•&nbsp; Calbayog City, Western Samar
                 </div>
               </div>
@@ -363,44 +355,45 @@ export default function ReportPreviewPage() {
                   textTransform: "uppercase",
                   letterSpacing: "0.08em",
                   paddingBottom: "6px",
-                  borderBottom: "1.5px solid #000",
+                  borderBottom: `1.5px solid ${THEME.primary}`,
                   display: "inline-block",
+                  color: THEME.darkest,
                 }}>
                   Official Revenue Audit Report
                 </div>
               </div>
-              <div style={{ fontSize: "9pt", marginTop: "10px", color: "#222" }}>
+              <div style={{ fontSize: "9pt", marginTop: "10px", color: THEME.muted }}>
                 7-Day Financial Performance Summary
               </div>
             </div>
 
             {/* Metadata table */}
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "8.5pt", marginBottom: "12px", border: "1px solid #000" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "8.5pt", marginBottom: "12px", border: `1px solid ${THEME.border}` }}>
               <tbody>
                 <tr>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000", fontWeight: "bold", width: "25%", background: "#f0f0f0" }}>Document Reference No.</td>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000", width: "25%", fontFamily: "monospace" }}>TP-REV-{traceId}</td>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000", fontWeight: "bold", width: "20%", background: "#f0f0f0" }}>Date Generated</td>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000", width: "30%" }}>{timestamp}</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, fontWeight: "bold", width: "25%", background: THEME.headerBg, color: THEME.dark }}>Document Reference No.</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, width: "25%", fontFamily: "monospace" }}>TP-REV-{traceId}</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, fontWeight: "bold", width: "20%", background: THEME.headerBg, color: THEME.dark }}>Date Generated</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, width: "30%" }}>{timestamp}</td>
                 </tr>
                 <tr>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000", fontWeight: "bold", background: "#f0f0f0" }}>Prepared By</td>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000" }}>{adminName}</td>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000", fontWeight: "bold", background: "#f0f0f0" }}>Classification</td>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000" }}>CONFIDENTIAL — FOR OFFICIAL USE</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, fontWeight: "bold", background: THEME.headerBg, color: THEME.dark }}>Prepared By</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}` }}>{adminName}</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, fontWeight: "bold", background: THEME.headerBg, color: THEME.dark }}>Classification</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}` }}>CONFIDENTIAL — FOR OFFICIAL USE</td>
                 </tr>
                 <tr>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000", fontWeight: "bold", background: "#f0f0f0" }}>Report Coverage</td>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000" }}>Last 7 Calendar Days</td>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000", fontWeight: "bold", background: "#f0f0f0" }}>System Version</td>
-                  <td style={{ padding: "4px 8px", border: "1px solid #000", fontFamily: "monospace" }}>Fare Collection System v1.0.0</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, fontWeight: "bold", background: THEME.headerBg, color: THEME.dark }}>Report Coverage</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}` }}>Last 7 Calendar Days</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, fontWeight: "bold", background: THEME.headerBg, color: THEME.dark }}>System Version</td>
+                  <td style={{ padding: "4px 8px", border: `1px solid ${THEME.border}`, fontFamily: "monospace" }}>Fare Collection System v1.0.0</td>
                 </tr>
               </tbody>
             </table>
 
             {/* Section I */}
             <div style={{ marginBottom: "16px" }}>
-              <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase", borderBottom: "2px solid #000", paddingBottom: "2px", marginBottom: "10px", letterSpacing: "0.06em" }}>
+              <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase", borderBottom: `2px solid ${THEME.dark}`, paddingBottom: "2px", marginBottom: "10px", letterSpacing: "0.06em", color: THEME.darkest }}>
                 I. &nbsp; Executive Summary
               </div>
               <p style={{ fontSize: "9pt", textAlign: "justify", marginBottom: "8px" }}>
@@ -414,11 +407,11 @@ export default function ReportPreviewPage() {
                       { label: "Today's Revenue", value: formatPeso(todayRevenue) },
                       { label: "Total Registered Users", value: String(totalUniqueTaps) },
                     ].map((kpi, i) => (
-                      <td key={i} style={{ width: "33.3%", border: "1px solid #000", padding: "10px 12px", textAlign: "center" }}>
-                        <div style={{ fontSize: "8pt", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid #999", paddingBottom: "4px", marginBottom: "6px" }}>
+                      <td key={i} style={{ width: "33.3%", border: `1px solid ${THEME.border}`, padding: "10px 12px", textAlign: "center", background: THEME.altRowBg }}>
+                        <div style={{ fontSize: "8pt", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: `1px solid ${THEME.border}`, paddingBottom: "4px", marginBottom: "6px", color: THEME.dark }}>
                           {kpi.label}
                         </div>
-                        <div style={{ fontSize: "16pt", fontWeight: "bold", fontFamily: "monospace" }}>
+                        <div style={{ fontSize: "16pt", fontWeight: "bold", fontFamily: "monospace", color: THEME.primary }}>
                           {kpi.value}
                         </div>
                       </td>
@@ -430,16 +423,16 @@ export default function ReportPreviewPage() {
 
             {/* Section II */}
             <div style={{ marginBottom: "16px" }}>
-              <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase", borderBottom: "2px solid #000", paddingBottom: "2px", marginBottom: "10px", letterSpacing: "0.06em" }}>
+              <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase", borderBottom: `2px solid ${THEME.dark}`, paddingBottom: "2px", marginBottom: "10px", letterSpacing: "0.06em", color: THEME.darkest }}>
                 II. &nbsp; Daily Revenue Breakdown
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9pt" }}>
                 <thead>
-                  <tr style={{ background: "#e8e8e8" }}>
-                    <th style={{ border: "1px solid #000", padding: "5px 8px", textAlign: "left", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em" }}>No.</th>
-                    <th style={{ border: "1px solid #000", padding: "5px 8px", textAlign: "left", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em" }}>Date</th>
-                    <th style={{ border: "1px solid #000", padding: "5px 8px", textAlign: "left", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em" }}>Day of Week</th>
-                    <th style={{ border: "1px solid #000", padding: "5px 8px", textAlign: "right", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em" }}>Revenue Collected (PHP)</th>
+                  <tr style={{ background: THEME.dark }}>
+                    <th style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "left", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff" }}>No.</th>
+                    <th style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "left", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff" }}>Date</th>
+                    <th style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "left", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff" }}>Day of Week</th>
+                    <th style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "right", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff" }}>Revenue Collected (PHP)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -447,25 +440,25 @@ export default function ReportPreviewPage() {
                     const date = new Date(day.date + "T00:00:00");
                     const isLast = i === sanitizedBreakdown.length - 1;
                     return (
-                      <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f8f8" }}>
-                        <td style={{ border: "1px solid #000", padding: "4px 8px", textAlign: "center", fontFamily: "monospace" }}>{String(i + 1).padStart(2, "0")}</td>
-                        <td style={{ border: "1px solid #000", padding: "4px 8px", fontWeight: isLast ? "bold" : "normal" }}>
+                      <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : THEME.altRowBg }}>
+                        <td style={{ border: `1px solid ${THEME.border}`, padding: "4px 8px", textAlign: "center", fontFamily: "monospace" }}>{String(i + 1).padStart(2, "0")}</td>
+                        <td style={{ border: `1px solid ${THEME.border}`, padding: "4px 8px", fontWeight: isLast ? "bold" : "normal" }}>
                           {date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
                         </td>
-                        <td style={{ border: "1px solid #000", padding: "4px 8px" }}>
+                        <td style={{ border: `1px solid ${THEME.border}`, padding: "4px 8px" }}>
                           {date.toLocaleDateString("en-US", { weekday: "long" })}
                         </td>
-                        <td style={{ border: "1px solid #000", padding: "4px 8px", textAlign: "right", fontFamily: "monospace", fontWeight: isLast ? "bold" : "normal" }}>
+                        <td style={{ border: `1px solid ${THEME.border}`, padding: "4px 8px", textAlign: "right", fontFamily: "monospace", fontWeight: isLast ? "bold" : "normal", color: isLast ? THEME.primary : THEME.text }}>
                           {day.revenue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
                     );
                   })}
-                  <tr style={{ background: "#e8e8e8", fontWeight: "bold" }}>
-                    <td colSpan={3} style={{ border: "1px solid #000", padding: "5px 8px", textAlign: "right", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  <tr style={{ background: THEME.totalBg, fontWeight: "bold" }}>
+                    <td colSpan={3} style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "right", textTransform: "uppercase", letterSpacing: "0.05em", color: THEME.darkest }}>
                       Grand Total
                     </td>
-                    <td style={{ border: "1px solid #000", padding: "5px 8px", textAlign: "right", fontFamily: "monospace", fontSize: "10pt" }}>
+                    <td style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "right", fontFamily: "monospace", fontSize: "10pt", color: THEME.darkest }}>
                       {grandTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                   </tr>
@@ -475,7 +468,7 @@ export default function ReportPreviewPage() {
 
             {/* Section III */}
             <div style={{ marginBottom: "14px" }}>
-              <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase", borderBottom: "2px solid #000", paddingBottom: "2px", marginBottom: "10px", letterSpacing: "0.06em" }}>
+              <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase", borderBottom: `2px solid ${THEME.dark}`, paddingBottom: "2px", marginBottom: "10px", letterSpacing: "0.06em", color: THEME.darkest }}>
                 III. &nbsp; Certification
               </div>
               <p style={{ fontSize: "9pt", textAlign: "justify" }}>
@@ -488,20 +481,20 @@ export default function ReportPreviewPage() {
               <tbody>
                 <tr>
                   <td style={{ width: "50%", border: "none", paddingRight: "20px", verticalAlign: "top" }}>
-                    <div style={{ borderBottom: "1.5px solid #000", marginBottom: "4px", paddingBottom: "20px" }} />
-                    <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase" }}>{adminName}</div>
-                    <div style={{ fontSize: "8.5pt", color: "#333" }}>System Administrator / Report Author</div>
-                    <div style={{ fontSize: "8pt", color: "#555", marginTop: "2px" }}>Fare Collection System</div>
-                    <div style={{ fontSize: "8pt", color: "#555", marginTop: "8px", fontStyle: "italic" }}>
+                    <div style={{ borderBottom: `1.5px solid ${THEME.dark}`, marginBottom: "4px", paddingBottom: "20px" }} />
+                    <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase", color: THEME.darkest }}>{adminName}</div>
+                    <div style={{ fontSize: "8.5pt", color: THEME.muted }}>System Administrator / Report Author</div>
+                    <div style={{ fontSize: "8pt", color: THEME.muted, marginTop: "2px" }}>Fare Collection System</div>
+                    <div style={{ fontSize: "8pt", color: THEME.muted, marginTop: "8px", fontStyle: "italic" }}>
                       Date: ___________________________
                     </div>
                   </td>
                   <td style={{ width: "50%", border: "none", paddingLeft: "20px", verticalAlign: "top" }}>
-                    <div style={{ borderBottom: "1.5px solid #000", marginBottom: "4px", paddingBottom: "20px" }} />
-                    <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase" }}>Financial Auditor</div>
-                    <div style={{ fontSize: "8.5pt", color: "#333" }}>Verified By / Authorized Signatory</div>
-                    <div style={{ fontSize: "8pt", color: "#555", marginTop: "2px" }}>Financial Audit Division</div>
-                    <div style={{ fontSize: "8pt", color: "#555", marginTop: "8px", fontStyle: "italic" }}>
+                    <div style={{ borderBottom: `1.5px solid ${THEME.dark}`, marginBottom: "4px", paddingBottom: "20px" }} />
+                    <div style={{ fontSize: "10pt", fontWeight: "bold", textTransform: "uppercase", color: THEME.darkest }}>Financial Auditor</div>
+                    <div style={{ fontSize: "8.5pt", color: THEME.muted }}>Verified By / Authorized Signatory</div>
+                    <div style={{ fontSize: "8pt", color: THEME.muted, marginTop: "2px" }}>Financial Audit Division</div>
+                    <div style={{ fontSize: "8pt", color: THEME.muted, marginTop: "8px", fontStyle: "italic" }}>
                       Date: ___________________________
                     </div>
                   </td>
@@ -512,32 +505,32 @@ export default function ReportPreviewPage() {
             {/* Footer */}
             <div style={{
               marginTop: "16px",
-              borderTop: "2px solid #000",
+              borderTop: `2px solid ${THEME.dark}`,
               paddingTop: "8px",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
               fontSize: "7.5pt",
-              color: "#444",
+              color: THEME.muted,
             }}>
               <span><strong>Date Printed:</strong> {datePrinted}</span>
-              <span style={{ textAlign: "center" }}>Fare Collection System — CONFIDENTIAL</span>
+              <span style={{ textAlign: "center", color: THEME.dark, fontWeight: "bold" }}>Fare Collection System — CONFIDENTIAL</span>
               <span><strong>Printed By:</strong> {adminName}</span>
             </div>
           </div>
         </div>
 
-        {/* ══ DASHBOARD FOOTER (fixed to bottom, like the toolbar is fixed to top) ══ */}
-        <footer className="sticky bottom-0 z-20 border-t border-slate-300 bg-white px-6 py-3 shadow-[0_-1px_4px_rgba(0,0,0,0.05)]">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+        {/* ══ DASHBOARD FOOTER ══ */}
+        <footer className="sticky bottom-0 z-20 border-t border-blue-200 bg-white px-6 py-3 shadow-[0_-1px_4px_rgba(0,0,0,0.05)]">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-widest text-blue-800/70">
             <div className="flex items-center gap-2">
-              <Wallet size={10} className="text-slate-400" />
+              <Wallet size={10} className="text-blue-400" />
               <span>Fare Collection System</span>
             </div>
             <div className="flex items-center gap-3">
               <span>© {new Date().getFullYear()} All rights reserved.</span>
-              <span className="text-slate-300">|</span>
-              <span className="text-slate-500">v1.0.0</span>
+              <span className="text-blue-200">|</span>
+              <span className="text-blue-700">v1.0.0</span>
             </div>
           </div>
         </footer>
