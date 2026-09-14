@@ -128,7 +128,12 @@ export default function GCashPaymentSuccessPage() {
                 <span className={`flex items-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   <Smartphone size={15} /> Payment Method
                 </span>
-                <span className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                <span className={`text-sm font-semibold flex items-center gap-1.5 ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                  <img
+                    src="/gcash.svg"
+                    alt="GCash"
+                    className="h-4 w-4 object-contain"
+                  />
                   GCash
                 </span>
               </div>
