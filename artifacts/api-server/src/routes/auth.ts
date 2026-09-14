@@ -10,6 +10,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
 const router: IRouter = Router();
 let linkedCardColumnAvailable: boolean | null = null;
+let permissionColumnAvailable: boolean | null = null;
 
 // ── Role helpers ───────────────────────────────────────────────────────────
 // Only two roles exist now: "staff" and "super_admin". Anything else falls
@@ -25,6 +26,19 @@ function roleLabel(role: string): "Staff" | "Super Admin" {
 
 function isSuperAdmin(role: unknown): boolean {
   return role === "super_admin";
+}
+
+// ── Permission helpers ───────────────────────────────────────────────────────
+// Only meaningful for "staff" accounts. Super Admins are always full_access
+// regardless of what's stored — the toggle simply doesn't apply to them.
+
+function normalizePermission(permission: unknown, role: unknown): "full_access" | "view_only" {
+  if (isSuperAdmin(role)) return "full_access";
+  return permission === "view_only" ? "view_only" : "full_access";
+}
+
+function isViewOnly(role: unknown, permission: unknown): boolean {
+  return !isSuperAdmin(role) && permission === "view_only";
 }
 
 // ── Password helpers (scrypt) ─────────────────────────────────────────────────
@@ -99,6 +113,18 @@ async function ensurePasswordChangedAtColumn(): Promise<void> {
     alter table public.auth_users
     add column if not exists password_changed_at timestamptz
   `);
+}
+
+// ── permission column helper (self-healing migration, mirrors the
+// linked_card_uid pattern above) ─────────────────────────────────────────────
+
+async function ensurePermissionColumn(): Promise<void> {
+  if (permissionColumnAvailable) return;
+  await db.execute(sql`
+    alter table public.admins
+    add column if not exists permission text default 'full_access'
+  `);
+  permissionColumnAvailable = true;
 }
 
 async function checkLinkedCardStatus(linkedCardUid: string | null | undefined): Promise<{
@@ -776,6 +802,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     // Supabase-only logins (no local `admins` row) have no staff role — treat
     // them as "staff" by default, least privilege.
     const role = normalizeRole(admin?.role);
+    const permission = normalizePermission((admin as any)?.permission, role);
 
     await logAudit({
       user: admin?.username ?? normalizedUsername,
@@ -790,6 +817,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       username: admin?.username ?? normalizedUsername,
       name: displayName,
       role,
+      permission,
       token: createAdminToken({
         username: admin?.username ?? normalizedUsername,
         name: displayName,
@@ -913,12 +941,24 @@ router.get("/auth/me", async (req, res): Promise<void> => {
       return;
     }
 
+    const role = normalizeRole((adminUser as any).role);
+
+    // Look up current permission fresh from the DB rather than trusting
+    // anything cached in the token — a super admin may have just flipped
+    // this account to view_only after the token was issued.
+    await ensurePermissionColumn();
+    const adminRaw = await db.execute(sql`
+      select permission from admins where username = ${adminUser.username} limit 1
+    `);
+    const adminRow = extractRows<{ permission: string | null }>(adminRaw)[0];
+    const permission = normalizePermission(adminRow?.permission, role);
+
     const validatedUser = GetMeResponse.parse({
       username: adminUser.username,
       name: adminUser.name,
-      role: normalizeRole((adminUser as any).role),
+      role,
     });
-    res.json(validatedUser);
+    res.json({ ...validatedUser, permission });
   } catch (e) {
     console.error("Auth state error:", e);
     res.status(401).json({ error: "Invalid auth state" });
@@ -937,8 +977,10 @@ router.get("/admin/staff", async (req, res): Promise<void> => {
       return;
     }
 
+    await ensurePermissionColumn();
+
     const rows = await db.execute(sql`
-      select id, username, full_name, role, status, created_at
+      select id, username, full_name, role, status, created_at, permission
       from admins
       order by created_at desc
     `);
@@ -967,11 +1009,18 @@ router.post("/admin/staff", async (req, res): Promise<void> => {
       return;
     }
 
-    const body = req.body as { username?: string; password?: string; fullName?: string; role?: string };
+    const body = req.body as {
+      username?: string;
+      password?: string;
+      fullName?: string;
+      role?: string;
+      permission?: string;
+    };
     const username = typeof body?.username === "string" ? body.username.trim() : "";
     const password = typeof body?.password === "string" ? body.password : "";
     const fullName = typeof body?.fullName === "string" ? body.fullName.trim() : "";
     const role = normalizeRole(body?.role);
+    const permission = normalizePermission(body?.permission, role);
 
     if (!username || !password || !fullName) {
       res.status(400).json({ error: "Username, password, and full name are required" });
@@ -981,6 +1030,8 @@ router.post("/admin/staff", async (req, res): Promise<void> => {
       res.status(400).json({ error: "Password must be at least 6 characters" });
       return;
     }
+
+    await ensurePermissionColumn();
 
     const existingRaw = await db.execute(sql`
       select id from admins where lower(username) = lower(${username}) limit 1
@@ -992,9 +1043,9 @@ router.post("/admin/staff", async (req, res): Promise<void> => {
 
     const passwordHash = hashPassword(password);
     const insertedRaw = await db.execute(sql`
-      insert into admins (username, password_hash, full_name, role, status)
-      values (${username}, ${passwordHash}, ${fullName}, ${role}, 'Active')
-      returning id, username, full_name, role, status, created_at
+      insert into admins (username, password_hash, full_name, role, status, permission)
+      values (${username}, ${passwordHash}, ${fullName}, ${role}, 'Active', ${permission})
+      returning id, username, full_name, role, status, created_at, permission
     `);
     const inserted = extractRows(insertedRaw)[0];
 
@@ -1002,12 +1053,81 @@ router.post("/admin/staff", async (req, res): Promise<void> => {
       user: adminUser.username,
       action: "CREATE",
       entity: roleLabel(role),
-      details: `${adminUser.username} created ${roleLabel(role).toLowerCase()} account "${username}"`,
+      details: `${adminUser.username} created ${roleLabel(role).toLowerCase()} account "${username}" (${permission})`,
     });
 
     res.status(201).json({ success: true, staff: inserted });
   } catch (error) {
     console.error("Create staff error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── UPDATE STAFF ACCESS (ADMIN) ────────────────────────────────────────────
+// Only a Super Admin can change access level. Super Admin accounts are
+// always full_access and can never be set to view_only. This is the route
+// the frontend's "Edit Access" modal calls — it was previously missing,
+// which is why that action returned a 404.
+
+router.patch("/admin/staff/:id/access", async (req, res): Promise<void> => {
+  try {
+    const token = getBearerToken(req.headers.authorization);
+    const adminUser = token ? verifyAdminToken(token) : null;
+    if (!adminUser) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    if (!isSuperAdmin((adminUser as any).role)) {
+      res.status(403).json({ error: "Only a Super Admin can change access levels." });
+      return;
+    }
+
+    const targetId = Number(req.params.id);
+    if (!Number.isInteger(targetId)) {
+      res.status(400).json({ error: "Invalid staff id" });
+      return;
+    }
+
+    const body = req.body as { permission?: string };
+    const permission = body?.permission;
+    if (permission !== "full_access" && permission !== "view_only") {
+      res.status(400).json({ error: "permission must be 'full_access' or 'view_only'" });
+      return;
+    }
+
+    await ensurePermissionColumn();
+
+    const targetRaw = await db.execute(sql`
+      select id, username, role from admins where id = ${targetId} limit 1
+    `);
+    const target = extractRows<{ id: number; username: string; role: string }>(targetRaw)[0];
+    if (!target) {
+      res.status(404).json({ error: "Staff account not found" });
+      return;
+    }
+
+    if (isSuperAdmin(target.role)) {
+      res.status(403).json({ error: "Cannot change access level of a Super Admin." });
+      return;
+    }
+
+    await db.execute(sql`
+      update admins
+      set permission = ${permission}
+      where id = ${targetId}
+    `);
+
+    await logAudit({
+      user: adminUser.username,
+      action: "UPDATE",
+      entity: "Staff",
+      details: `${adminUser.username} set "${target.username}" access to ${permission}`,
+    });
+
+    res.json({ success: true, permission });
+  } catch (error) {
+    console.error("Update staff access error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
