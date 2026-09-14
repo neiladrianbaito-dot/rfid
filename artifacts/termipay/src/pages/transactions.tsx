@@ -34,6 +34,19 @@ type FareRoute = {
   fare_amount: number;
 };
 
+// ── Transaction type normalizer ────────────────────────────────────────────
+// The backend/db may store this as "Fare", "fare", "TopUp", "top_up",
+// "Top Up", "TOP-UP", etc. This forces a single canonical label everywhere
+// in the UI, regardless of how it's spelled/cased at the source.
+type TxType = "Fare" | "Top-up";
+
+function normalizeTxType(type?: string | null): TxType {
+  const key = (type ?? "").toLowerCase().replace(/[\s_-]/g, "");
+  if (key === "fare") return "Fare";
+  // Everything else (topup, top-up, TopUp, etc.) is treated as Top-up.
+  return "Top-up";
+}
+
 // ── Payment method label map (same as TransactionDetailModal) ─────────────────
 
 function formatPaymentMethod(method?: string | null): string {
@@ -77,7 +90,7 @@ function ReceiptModal({
 }) {
   if (!tx) return null;
 
-  const isFare = tx.type === "Fare";
+  const isFare = normalizeTxType(tx.type) === "Fare";
   const amount = Math.abs(Number(tx.amount)).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -450,57 +463,61 @@ export default function TransactionsPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      paginatedList.map((tx: any) => (
-                        <TableRow
-                          key={tx.id}
-                          className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"} ${
-                            newRowId === tx.id ? "row-pulse" : ""
-                          }`}
-                        >
-                          <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                            {new Date(tx.timestamp || tx.created_at).toLocaleString()}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs text-blue-500 font-semibold">
-                            {tx.card_uid || tx.cardUid}
-                          </TableCell>
-                          <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                            {tx.full_name || tx.fullName}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={`text-[10px] font-semibold ${
-                              tx.type === "Fare"
-                                ? isDark ? "border-red-900 text-red-400 bg-red-950/40" : "border-red-200 text-red-600 bg-red-50"
-                                : isDark ? "border-emerald-900 text-emerald-400 bg-emerald-950/40" : "border-emerald-200 text-emerald-600 bg-emerald-50"
+                      paginatedList.map((tx: any) => {
+                        const displayType = normalizeTxType(tx.type);
+                        const isFareRow = displayType === "Fare";
+                        return (
+                          <TableRow
+                            key={tx.id}
+                            className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"} ${
+                              newRowId === tx.id ? "row-pulse" : ""
+                            }`}
+                          >
+                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                              {new Date(tx.timestamp || tx.created_at).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-blue-500 font-semibold">
+                              {tx.card_uid || tx.cardUid}
+                            </TableCell>
+                            <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {tx.full_name || tx.fullName}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={`text-[10px] font-semibold ${
+                                isFareRow
+                                  ? isDark ? "border-red-900 text-red-400 bg-red-950/40" : "border-red-200 text-red-600 bg-red-50"
+                                  : isDark ? "border-emerald-900 text-emerald-400 bg-emerald-950/40" : "border-emerald-200 text-emerald-600 bg-emerald-50"
+                              }`}>
+                                {displayType}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className={`text-sm font-semibold ${
+                              isFareRow
+                                ? isDark ? "text-red-400" : "text-red-600"
+                                : isDark ? "text-emerald-400" : "text-emerald-600"
                             }`}>
-                              {tx.type}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className={`text-sm font-semibold ${
-                            tx.type === "Fare"
-                              ? isDark ? "text-red-400" : "text-red-600"
-                              : isDark ? "text-emerald-400" : "text-emerald-600"
-                          }`}>
-                            {tx.type === "Fare" ? "−" : "+"}₱{formatAmount(Number(tx.amount))}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={`text-[10px] font-semibold ${statusColor(tx.status)}`}>
-                              {tx.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                variant="ghost" size="icon"
-                                className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
-                                onClick={() => setViewTx(tx)}
-                                title="View receipt"
-                              >
-                                <Eye className="w-3.5 h-3.5" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
+                              {isFareRow ? "−" : "+"}₱{formatAmount(Number(tx.amount))}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={`text-[10px] font-semibold ${statusColor(tx.status)}`}>
+                                {tx.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  variant="ghost" size="icon"
+                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
+                                  onClick={() => setViewTx(tx)}
+                                  title="View receipt"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
                     )}
                   </TableBody>
                 </Table>
