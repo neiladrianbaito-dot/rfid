@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearch } from "wouter";
+import { useSearch, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   Clock,
   Smartphone,
+  SearchX,
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import { motion } from "framer-motion";
@@ -21,29 +22,105 @@ const DASHBOARD_URL = "https://rfid-termipay-sigma.vercel.app/user-dashboard";
 export default function GCashPaymentSuccessPage() {
   const { isDark } = useTheme();
   const searchString = useSearch();
+  const [, setLocation] = useLocation();
   const [copied, setCopied] = useState(false);
 
   // Xendit success redirect naglalagay ng details bilang query params,
   // see create-topup edge function's successRedirectUrl.
   const params = new URLSearchParams(searchString);
-  const amount = Math.abs(Number(params.get("amount")) || 0);
-  const referenceNo = params.get("reference") || "N/A";
+  const referenceNo = params.get("reference");
+  const amountParam = params.get("amount");
+  const amount = Math.abs(Number(amountParam) || 0);
   const paidAtParam = params.get("paidAt");
   const paidAt = paidAtParam ? new Date(paidAtParam) : new Date();
 
+  // ✅ Walang laman o invalid ang params (di galing sa Xendit / direct visit
+  // sa URL na walang token) → hindi valid na payment confirmation ito.
+  const isValidPaymentData =
+    !!referenceNo &&
+    referenceNo.trim().length > 0 &&
+    !!amountParam &&
+    !Number.isNaN(Number(amountParam)) &&
+    amount > 0;
+
   useEffect(() => {
-    document.title = "Payment Successful — TermiPay";
-  }, []);
+    document.title = isValidPaymentData
+      ? "Payment Successful — TermiPay"
+      : "Page Not Found — TermiPay";
+  }, [isValidPaymentData]);
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(referenceNo);
+      await navigator.clipboard.writeText(referenceNo || "");
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
       // clipboard not available — ignore silently
     }
   };
+
+  // ✅ 404 fallback — kapag walang valid token/payment data mula sa Xendit
+  if (!isValidPaymentData) {
+    return (
+      <div
+        className={`min-h-screen flex items-center justify-center p-3 sm:p-4 transition-colors ${
+          isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
+        }`}
+        data-testid="gcash-success-page-404"
+      >
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="w-full max-w-md"
+        >
+          <Card
+            className={`relative overflow-hidden shadow-sm transition-colors ${
+              isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+            }`}
+          >
+            <div className="absolute top-0 left-0 h-[3px] w-full bg-slate-400" />
+
+            <CardHeader className="flex flex-col items-center text-center pt-10 sm:pt-12 pb-4 px-4 sm:px-6">
+              <div
+                className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full border flex items-center justify-center mb-3 sm:mb-4 ${
+                  isDark
+                    ? "bg-slate-800/60 border-slate-700 text-slate-400"
+                    : "bg-slate-100 border-slate-200 text-slate-500"
+                }`}
+              >
+                <SearchX size={28} className="sm:hidden" strokeWidth={2} />
+                <SearchX size={32} className="hidden sm:block" strokeWidth={2} />
+              </div>
+              <CardTitle
+                className={`text-lg sm:text-xl font-bold tracking-tight ${
+                  isDark ? "text-white" : "text-slate-900"
+                }`}
+              >
+                404 — Page Not Found
+              </CardTitle>
+              <p className={`text-xs sm:text-sm mt-1.5 max-w-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Walang nahanap na valid na payment confirmation. Maaaring nag-expire, na-refresh, o na-access nang direkta ang page na ito nang walang payment token mula sa Xendit.
+              </p>
+            </CardHeader>
+
+            <CardContent className="pb-8 sm:pb-10 px-4 sm:px-6">
+              <div className="flex flex-col gap-2 mt-4">
+                <Button
+                  onClick={() => setLocation("/user-dashboard")}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white"
+                  data-testid="button-back-dashboard-404"
+                >
+                  <ArrowLeft size={16} className="mr-1.5" />
+                  Back to Dashboard
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -129,13 +206,13 @@ export default function GCashPaymentSuccessPage() {
                   <Smartphone size={15} /> Payment Method
                 </span>
                 <span className={`text-sm font-semibold flex items-center gap-1.5 ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-  <img
-    src="/gcash.svg"
-    alt="GCash"
-    className="h-10 w-10 sm:h-12 sm:w-12 object-contain"
-  />
-  GCash
-</span>
+                  <img
+                    src="/gcash.svg"
+                    alt="GCash"
+                    className="h-10 w-10 sm:h-12 sm:w-12 object-contain"
+                  />
+                  GCash
+                </span>
               </div>
 
               <div className="flex items-center justify-between">
@@ -158,7 +235,7 @@ export default function GCashPaymentSuccessPage() {
                 </span>
                 <button
                   onClick={handleCopy}
-                  title={referenceNo}
+                  title={referenceNo || ""}
                   className={`flex items-center gap-1.5 min-w-0 max-w-[65%] text-xs sm:text-sm font-mono font-semibold rounded px-1.5 py-0.5 transition-colors ${
                     isDark
                       ? "text-blue-400 hover:bg-slate-800"
