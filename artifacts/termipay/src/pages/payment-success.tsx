@@ -20,8 +20,8 @@ const formatPeso = (value: number) =>
 
 const DASHBOARD_URL = "https://rfid-termipay-sigma.vercel.app/user-dashboard";
 
-// ── 404 fallback — used when walang valid payment data mula sa Xendit ──────
-function NoPaymentFound() {
+// ── Copied exactly from NotFound.tsx — no changes to text, UI, or design ──
+function NotFound() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // lightweight film-grain noise, throttled, respects reduced-motion
@@ -94,42 +94,39 @@ function NoPaymentFound() {
         }}
       />
 
-      <Card
-        className="w-full max-w-md mx-4 relative z-10 bg-[#121513] border-[#1f2622] text-[#d7ded9]"
-        data-testid="gcash-no-payment-found"
-      >
+      <Card className="w-full max-w-md mx-4 relative z-10 bg-[#121513] border-[#1f2622] text-[#d7ded9]">
         <CardContent className="pt-6">
           <div className="flex items-center gap-2 mb-1 text-[11px] tracking-[0.18em] uppercase text-[#7c8a83]">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#ff7b54] opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-[#ff7b54]" />
             </span>
-            no signal
+            connection lost
           </div>
 
           <div className="flex items-start gap-3 mt-4 mb-2">
             <RadioTower className="h-7 w-7 text-[#7CFFB2] shrink-0 mt-1" />
             <h1 className="text-2xl font-bold text-[#d7ded9] leading-tight">
-              404 — no payment on record
+              404 — this page didn't make it to air
             </h1>
           </div>
 
           <p className="mt-3 text-sm text-[#7c8a83] leading-relaxed">
-            Walang natanggap na valid na payment confirmation sa{" "}
+            Nothing's broadcasting at{" "}
             <code className="bg-[#0b0d0c] border border-[#1f2622] px-1.5 py-0.5 rounded text-[#4ea878] text-xs">
               this address
             </code>
-            . Maaaring nag-expire ang link, na-refresh ang page, o direktang binisita nang walang payment token mula sa Xendit.
+            . Check the URL for typos, or did you forget to add the page to
+            the router?
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 mt-6">
             
-              href={DASHBOARD_URL}
+              href="/"
               className="flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-[#7CFFB2] text-[#06120c] text-sm font-semibold px-4 py-2.5 hover:bg-[#4ea878] transition-colors"
-              data-testid="button-back-dashboard-404"
             >
               <Home className="h-4 w-4" />
-              Back to dashboard
+              Back to home
             </a>
             <button
               onClick={() => window.history.back()}
@@ -173,7 +170,7 @@ export default function GCashPaymentSuccessPage() {
   useEffect(() => {
     document.title = isValidPaymentData
       ? "Payment Successful — TermiPay"
-      : "404 — TermiPay";
+      : "404 Not Found";
   }, [isValidPaymentData]);
 
   const handleCopy = async () => {
@@ -186,9 +183,9 @@ export default function GCashPaymentSuccessPage() {
     }
   };
 
-  // ✅ Switch to the broadcast-style 404 kapag walang valid na payment token
+  // ✅ Switch to the exact NotFound component kapag walang valid na payment token
   if (!isValidPaymentData) {
-    return <NoPaymentFound />;
+    return <NotFound />;
   }
 
   return (
