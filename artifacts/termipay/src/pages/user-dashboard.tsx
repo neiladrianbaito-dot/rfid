@@ -59,9 +59,7 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string {
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
 }
 
-// ── Virtual card design copied from User Management card preview ──
-// Keeps the dashboard card visually identical to the admin/user-management
-// card, while using the currently linked user's live card data.
+// ── Virtual card design — matches the User Management card preview 1:1 ──
 function getCardTheme(type: string | null | undefined) {
   const t = (type || "Regular").toLowerCase();
   switch (t) {
@@ -163,6 +161,114 @@ function formatCardDate(value: string | null | undefined): string {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// 🔒 LOCKED-SCALE CARD SYSTEM — copied verbatim from User Management so the
+// dashboard's virtual card behaves identically.
+//
+// Why: the OLD dashboard card used Tailwind responsive classes
+// (p-4 sm:p-6 md:p-7, text-lg sm:text-2xl md:text-3xl, etc). At certain
+// container widths the browser jumps between breakpoints, so text,
+// padding, and the logo each resize at DIFFERENT moments — the card
+// visibly "reflows" / elements drift out of position instead of scaling
+// together as one unit.
+//
+// The fix: author the card ONCE at a fixed pixel canvas
+// (CARD_DESIGN_WIDTH x CARD_DESIGN_HEIGHT). Every element inside uses
+// fixed px values only — no breakpoints, no "sm:"/"md:" classes. That
+// canvas is dropped into a responsive-width container and scaled
+// down/up with a single CSS `transform: scale(ratio)`, where ratio is
+// measured live (via ResizeObserver) from the space actually available.
+// Because it's one transform on one wrapper, every child (logo, UID,
+// name, "Valid Until" label) shrinks or grows by the exact same amount,
+// in the exact same relative position — nothing reflows, nothing
+// repositions independently, no matter how far the container is
+// stretched or shrunk. It behaves exactly like scaling a locked image.
+// ═══════════════════════════════════════════════════════════════════════
+
+const CARD_DESIGN_WIDTH = 700;
+// Keeps the real 1376:774 physical-card aspect ratio, just authored at a
+// smaller, easier-to-design canvas size.
+const CARD_DESIGN_HEIGHT = Math.round((CARD_DESIGN_WIDTH * 774) / 1376); // 394
+
+function useScaleToFit(designWidth: number) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const w = el.offsetWidth;
+      if (w > 0) setScale(w / designWidth);
+    };
+    update();
+
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [designWidth]);
+
+  return { containerRef, scale };
+}
+
+// 🔒 Renders a fixed-size, flippable card canvas that scales as one locked
+// unit to fit whatever width its parent gives it.
+function LockedFlipCard({
+  flipped,
+  onFlip,
+  front,
+  back,
+}: {
+  flipped: boolean;
+  onFlip: () => void;
+  front: React.ReactNode;
+  back: React.ReactNode;
+}) {
+  const { containerRef, scale } = useScaleToFit(CARD_DESIGN_WIDTH);
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full cursor-pointer select-none"
+      style={{ aspectRatio: `${CARD_DESIGN_WIDTH} / ${CARD_DESIGN_HEIGHT}` }}
+      onClick={onFlip}
+      role="button"
+      tabIndex={0}
+      aria-label="Flip card"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onFlip();
+        }
+      }}
+    >
+      {/* Fixed-size design canvas, scaled as a single locked unit */}
+      <div
+        className="absolute top-0 left-0"
+        style={{
+          width: CARD_DESIGN_WIDTH,
+          height: CARD_DESIGN_HEIGHT,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        <div className="card-flip-scene-locked">
+          <div className={`card-flip-inner-locked ${flipped ? "is-flipped" : ""}`}>
+            <div className="card-face-locked">{front}</div>
+            <div className="card-face-locked card-face-back-locked">{back}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── VirtualCard — now built on the same LockedFlipCard system as
+// User Management's card preview. Design values (padding 30, logo 62px,
+// UID 44px, name 25px, type label 24px, "Valid Until" 11/15px) are copied
+// 1:1 from the admin preview so both surfaces render identically and the
+// card never reflows at any screen width. ──
 function VirtualCard({
   user,
   isDark,
@@ -201,129 +307,131 @@ function VirtualCard({
         </button>
       </div>
 
-      <div
-        className="card-flip-scene relative w-full max-w-2xl mx-auto aspect-[1376/774] cursor-pointer select-none"
-        onClick={onFlip}
-        role="button"
-        tabIndex={0}
-        aria-label="Flip virtual fare card"
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onFlip();
+      <div className="w-full max-w-2xl mx-auto">
+        <LockedFlipCard
+          flipped={flipped}
+          onFlip={onFlip}
+          front={
+            <div
+              className="rounded-2xl overflow-hidden border h-full w-full relative"
+              style={{
+                backgroundColor: theme.cardBg,
+                borderColor: theme.isLight ? "#cbd5e1" : "transparent",
+                boxShadow: theme.isLight
+                  ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
+                  : "0 10px 25px -5px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.2)",
+              }}
+            >
+              <ChevronStaircase color={theme.pattern} />
+
+              <div className="relative h-full w-full flex flex-col justify-between" style={{ padding: 30 }}>
+                {/* Header / logo badge */}
+                <div className="flex items-center" style={{ gap: 16 }}>
+                  <div
+                    className="rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden"
+                    style={{
+                      width: 62,
+                      height: 62,
+                      backgroundColor: theme.isLight ? "#f1f5f9" : "rgba(255,255,255,0.10)",
+                      borderColor: theme.isLight ? "#cbd5e1" : "rgba(255,255,255,0.30)",
+                    }}
+                  >
+                    <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                  </div>
+                  <span
+                    className="font-bold tracking-wide uppercase"
+                    style={{ color: theme.textColor, fontSize: 22, lineHeight: 1.15 }}
+                  >
+                    Fare Collection System
+                  </span>
+                </div>
+
+                {/* Body */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div
+                    className="font-mono font-extrabold tracking-wide"
+                    style={{ color: theme.uidColor, fontSize: 44, lineHeight: 1.1 }}
+                  >
+                    {cardUid}
+                  </div>
+                  <div
+                    className="font-semibold"
+                    style={{ color: theme.textColor, fontSize: 25, lineHeight: 1.2 }}
+                  >
+                    {fullName}
+                  </div>
+                </div>
+
+                {/* Footer row: type label (left) + valid until (right) — fixed px, position locked */}
+                <div className="flex items-end justify-between">
+                  <div
+                    className="font-extrabold tracking-wide"
+                    style={{ color: theme.accent, fontSize: 24, lineHeight: 1.1 }}
+                  >
+                    {theme.label}
+                  </div>
+                  <div className="text-right">
+                    <div
+                      className="uppercase tracking-wide font-semibold"
+                      style={{ color: "#ffffff", fontSize: 11, lineHeight: 1.3 }}
+                    >
+                      Valid Until
+                    </div>
+                    <div
+                      className="font-mono font-bold"
+                      style={{ color: "#ffffff", fontSize: 15, lineHeight: 1.3 }}
+                    >
+                      {formatCardDate(user?.expirationDate)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           }
-        }}
-      >
-        <div className={`card-flip-inner ${flipped ? "is-flipped" : ""}`}>
-          {/* FRONT — identical visual structure to User Management */}
-          <div
-            className={`card-face rounded-2xl overflow-hidden border ${
-              theme.isLight ? "border-slate-300" : "border-transparent"
-            }`}
-            style={{
-              backgroundColor: theme.cardBg,
-              boxShadow: theme.isLight
-                ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
-                : "0 10px 25px -5px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.2)",
-            }}
-          >
-            <ChevronStaircase color={theme.pattern} />
-
-            <div className="relative h-full w-full flex flex-col justify-between p-4 sm:p-6 md:p-7">
-              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-                <div
-                  className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden ${
-                    theme.isLight ? "bg-slate-100 border-slate-300" : "bg-white/10 border-white/30"
-                  }`}
-                >
-                  <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+          back={
+            <div
+              className="rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300 h-full w-full"
+              style={{ boxShadow: "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)" }}
+            >
+              <div style={{ height: "18%" }} className="bg-[#221f20] flex-shrink-0" />
+              <div className="flex-1 min-h-0 flex flex-col" style={{ padding: "12px 28px" }}>
+                <div className="bg-white border-y border-slate-300" style={{ padding: "8px 14px", marginBottom: 14 }}>
+                  <span className="font-extrabold text-slate-900" style={{ fontSize: 19 }}>
+                    Terms and Condition
+                  </span>
                 </div>
-                <span
-                  className="font-bold tracking-wide text-[11px] sm:text-sm md:text-base uppercase truncate"
-                  style={{ color: theme.textColor }}
+                <ul
+                  className="text-slate-800 flex-1 min-h-0 overflow-hidden"
+                  style={{ fontSize: 13, lineHeight: 1.45, display: "flex", flexDirection: "column", gap: 3 }}
                 >
-                  Fare Collection System
-                </span>
-              </div>
-
-              <div className="space-y-0.5 sm:space-y-1 min-w-0">
-                <div
-                  className="font-mono font-extrabold text-lg sm:text-2xl md:text-3xl tracking-wide truncate"
-                  style={{ color: theme.uidColor }}
-                >
-                  {cardUid}
-                </div>
-                <div
-                  className="font-semibold text-sm sm:text-base md:text-lg truncate"
-                  style={{ color: theme.textColor }}
-                >
-                  {fullName}
-                </div>
-              </div>
-
-              <div className="flex items-end justify-between gap-3">
-                <div
-                  className="font-extrabold text-base sm:text-lg md:text-xl tracking-wide"
-                  style={{ color: theme.accent }}
-                >
-                  {theme.label}
-                </div>
-                <div className="text-right min-w-0">
+                  <li>• Property of the Fare Collection System Operator.</li>
+                  <li>• Non-transferable and subject to transit system rules.</li>
+                  <li>• Positive balance required to pass through.</li>
+                  <li>• Non-refundable card issuance fee applies.</li>
+                  <li>• Operator is not responsible for lost or stolen cards.</li>
+                  <li>• Unused balances on unregistered cards are non-refundable.</li>
+                  <li>• Tampering or unauthorized duplication is strictly prohibited.</li>
+                </ul>
+                <div className="flex items-center border-t border-slate-300" style={{ gap: 10, paddingTop: 10, marginTop: 6 }}>
                   <div
-                    className="text-[8px] sm:text-[9px] md:text-[10px] uppercase tracking-wide font-semibold"
-                    style={{ color: theme.subTextColor }}
+                    className="rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden"
+                    style={{ width: 38, height: 38 }}
                   >
-                    Valid Until
+                    <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
                   </div>
-                  <div
-                    className="font-mono font-bold text-[10px] sm:text-xs md:text-sm whitespace-nowrap"
-                    style={{ color: theme.textColor }}
-                  >
-                    {formatCardDate(user?.expirationDate)}
-                  </div>
+                  <span className="font-extrabold tracking-wide text-slate-900 uppercase" style={{ fontSize: 15 }}>
+                    Fare Collection System
+                  </span>
                 </div>
               </div>
             </div>
-          </div>
-
-          {/* BACK — identical terms/branding to User Management */}
-          <div
-            className="card-face card-face-back rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300"
-            style={{ boxShadow: "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)" }}
-          >
-            <div className="h-[18%] bg-[#221f20] flex-shrink-0" />
-            <div className="flex-1 min-h-0 flex flex-col px-3 sm:px-4 md:px-6 py-1.5 sm:py-2 md:py-3">
-              <div className="bg-white border-y border-slate-300 py-1 px-2.5 sm:py-1.5 sm:px-3 mb-1.5 sm:mb-2 md:mb-3">
-                <span className="text-[10px] sm:text-[13px] md:text-base font-extrabold text-slate-900">
-                  Terms and Condition
-                </span>
-              </div>
-              <ul className="space-y-0.5 sm:space-y-1 text-[7px] sm:text-[9px] md:text-[11px] leading-tight text-slate-800 flex-1 min-h-0 overflow-hidden">
-                <li>• Property of the Fare Collection System Operator.</li>
-                <li>• Non-transferable and subject to transit system rules.</li>
-                <li>• Positive balance required to pass through.</li>
-                <li>• Non-refundable card issuance fee applies.</li>
-                <li>• Operator is not responsible for lost or stolen cards.</li>
-                <li>• Unused balances on unregistered cards are non-refundable.</li>
-                <li>• Tampering or unauthorized duplication is strictly prohibited.</li>
-              </ul>
-              <div className={`flex items-center gap-1.5 sm:gap-2 border-t pt-1 sm:pt-1.5 md:pt-2 mt-1 ${isDark ? "border-slate-400/40" : "border-slate-300"}`}>
-                <div className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden">
-                  <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
-                </div>
-                <span className="text-[7px] sm:text-[9px] md:text-[11px] font-extrabold tracking-wide text-slate-900 uppercase truncate">
-                  Fare Collection System
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+          }
+        />
       </div>
 
       <p className={`text-center text-[9px] sm:text-[10px] mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
         Tap the card to flip
       </p>
-
     </div>
   );
 }
@@ -688,22 +796,31 @@ export default function PaymongoDashboardPage() {
       <ChangePasswordModal {...changePassword} />
       <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} routes={routes} />
       <style>{`${DASHBOARD_STYLES}
-        .card-flip-scene { perspective: 1600px; }
-        .card-flip-inner {
+        /* 🔒 Locked-scale flip card — see LockedFlipCard component above.
+           The design canvas itself never reflows; only the outer wrapper's
+           transform: scale(...) changes, in a single React inline style.
+           Copied 1:1 from User Management's card preview CSS. */
+        .card-flip-scene-locked {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          perspective: 1600px;
+        }
+        .card-flip-inner-locked {
           position: relative;
           width: 100%;
           height: 100%;
           transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
           transform-style: preserve-3d;
         }
-        .card-flip-inner.is-flipped { transform: rotateY(180deg); }
-        .card-face {
+        .card-flip-inner-locked.is-flipped { transform: rotateY(180deg); }
+        .card-face-locked {
           position: absolute;
           inset: 0;
           backface-visibility: hidden;
           -webkit-backface-visibility: hidden;
         }
-        .card-face-back { transform: rotateY(180deg); }
+        .card-face-back-locked { transform: rotateY(180deg); }
       `}</style>
 
       {/* ✅ Logout confirmation dialog — compact, Yes/No always one line, small boxes */}
