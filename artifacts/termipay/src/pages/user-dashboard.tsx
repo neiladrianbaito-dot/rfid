@@ -4,7 +4,7 @@ import {
   User, Phone, Tag, ShieldCheck,
   LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings,
   ChevronRight, ArrowLeft, ArrowRight, List, Pencil, Check, X as XIcon,
-  Sun, Moon, Link2, AlertTriangle,
+  Sun, Moon, Link2, AlertTriangle, RotateCw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +57,303 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
   if (!trimmed) return "";
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
+}
+
+// ── Virtual card design copied from User Management card preview ──
+// Keeps the dashboard card visually identical to the admin/user-management
+// card, while using the currently linked user's live card data.
+function getCardTheme(type: string | null | undefined) {
+  const t = (type || "Regular").toLowerCase();
+  switch (t) {
+    case "student":
+      return {
+        accent: "#2563eb",
+        pattern: "#3b82f6",
+        label: "STUDENT",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
+    case "senior":
+      return {
+        accent: "#ca8a04",
+        pattern: "#eab308",
+        label: "SENIOR",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
+    case "pwd":
+      return {
+        accent: "#059669",
+        pattern: "#10b981",
+        label: "PWD",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
+    case "regular":
+    default:
+      return {
+        accent: "#f87171",
+        pattern: "#f97316",
+        label: "REGULAR",
+        cardBg: "#1b1f5c",
+        textColor: "#ffffff",
+        subTextColor: "rgba(255,255,255,0.7)",
+        uidColor: "#5eead4",
+        isLight: false,
+      };
+  }
+}
+
+function ChevronStaircase({ color }: { color: string }) {
+  const rows = 6;
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {Array.from({ length: rows }).map((_, i) => {
+        const offset = (rows - 1 - i) * 11;
+        return (
+          <div
+            key={i}
+            className="absolute right-0 h-[15%] w-full"
+            style={{ top: `${i * (100 / rows)}%`, transform: `translateX(${offset}%)` }}
+          >
+            <div
+              className="absolute top-0 left-0 right-0 h-[2px]"
+              style={{
+                backgroundImage: `repeating-linear-gradient(90deg, ${color} 0 10px, transparent 10px 16px)`,
+              }}
+            />
+            <div
+              className="absolute inset-x-0 bottom-0 h-[70%] opacity-80"
+              style={{
+                backgroundImage: `repeating-linear-gradient(135deg, ${color}55 0px, ${color}55 7px, transparent 7px, transparent 14px), repeating-linear-gradient(45deg, ${color}55 0px, ${color}55 7px, transparent 7px, transparent 14px)`,
+                backgroundSize: "28px 100%",
+              }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function formatPeso(value: number | string): string {
+  return `₱${Number(value || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatCardDate(value: string | null | undefined): string {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "N/A";
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function VirtualCard({
+  user,
+  isDark,
+  flipped,
+  onFlip,
+}: {
+  user: any;
+  isDark: boolean;
+  flipped: boolean;
+  onFlip: () => void;
+}) {
+  const theme = getCardTheme(user?.type);
+  const cardUid = user?.cardUid || "----";
+  const fullName = user?.fullName || "Card Holder";
+  const status = user?.status || "Inactive";
+  const balance = Number(user?.balance || 0);
+
+  return (
+    <div className="w-full">
+      <div className="flex items-center justify-between gap-3 mb-2 px-0.5">
+        <div className="flex items-center gap-2">
+          <CreditCard className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />
+          <p className={`text-[10px] font-black uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            My Virtual Card
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onFlip}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
+            isDark
+              ? "text-slate-400 hover:text-white hover:bg-slate-800"
+              : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+          }`}
+        >
+          <RotateCw className="h-3 w-3" />
+          {flipped ? "Front" : "Back"}
+        </button>
+      </div>
+
+      <div
+        className="card-flip-scene relative w-full max-w-2xl mx-auto aspect-[1376/774] cursor-pointer select-none"
+        onClick={onFlip}
+        role="button"
+        tabIndex={0}
+        aria-label="Flip virtual fare card"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onFlip();
+          }
+        }}
+      >
+        <div className={`card-flip-inner ${flipped ? "is-flipped" : ""}`}>
+          {/* FRONT — identical visual structure to User Management */}
+          <div
+            className={`card-face rounded-2xl overflow-hidden border ${
+              theme.isLight ? "border-slate-300" : "border-transparent"
+            }`}
+            style={{
+              backgroundColor: theme.cardBg,
+              boxShadow: theme.isLight
+                ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
+                : "0 10px 25px -5px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.2)",
+            }}
+          >
+            <ChevronStaircase color={theme.pattern} />
+
+            <div className="relative h-full w-full flex flex-col justify-between p-4 sm:p-6 md:p-7">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <div
+                  className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden ${
+                    theme.isLight ? "bg-slate-100 border-slate-300" : "bg-white/10 border-white/30"
+                  }`}
+                >
+                  <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                </div>
+                <span
+                  className="font-bold tracking-wide text-[11px] sm:text-sm md:text-base uppercase truncate"
+                  style={{ color: theme.textColor }}
+                >
+                  Fare Collection System
+                </span>
+              </div>
+
+              <div className="space-y-0.5 sm:space-y-1 min-w-0">
+                <div
+                  className="font-mono font-extrabold text-lg sm:text-2xl md:text-3xl tracking-wide truncate"
+                  style={{ color: theme.uidColor }}
+                >
+                  {cardUid}
+                </div>
+                <div
+                  className="font-semibold text-sm sm:text-base md:text-lg truncate"
+                  style={{ color: theme.textColor }}
+                >
+                  {fullName}
+                </div>
+              </div>
+
+              <div className="flex items-end justify-between gap-3">
+                <div
+                  className="font-extrabold text-base sm:text-lg md:text-xl tracking-wide"
+                  style={{ color: theme.accent }}
+                >
+                  {theme.label}
+                </div>
+                <div className="text-right min-w-0">
+                  <div
+                    className="text-[8px] sm:text-[9px] md:text-[10px] uppercase tracking-wide font-semibold"
+                    style={{ color: theme.subTextColor }}
+                  >
+                    Valid Until
+                  </div>
+                  <div
+                    className="font-mono font-bold text-[10px] sm:text-xs md:text-sm whitespace-nowrap"
+                    style={{ color: theme.textColor }}
+                  >
+                    {formatCardDate(user?.expirationDate)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* BACK — identical terms/branding to User Management */}
+          <div
+            className="card-face card-face-back rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300"
+            style={{ boxShadow: "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)" }}
+          >
+            <div className="h-[18%] bg-[#221f20] flex-shrink-0" />
+            <div className="flex-1 min-h-0 flex flex-col px-3 sm:px-4 md:px-6 py-1.5 sm:py-2 md:py-3">
+              <div className="bg-white border-y border-slate-300 py-1 px-2.5 sm:py-1.5 sm:px-3 mb-1.5 sm:mb-2 md:mb-3">
+                <span className="text-[10px] sm:text-[13px] md:text-base font-extrabold text-slate-900">
+                  Terms and Condition
+                </span>
+              </div>
+              <ul className="space-y-0.5 sm:space-y-1 text-[7px] sm:text-[9px] md:text-[11px] leading-tight text-slate-800 flex-1 min-h-0 overflow-hidden">
+                <li>• Property of the Fare Collection System Operator.</li>
+                <li>• Non-transferable and subject to transit system rules.</li>
+                <li>• Positive balance required to pass through.</li>
+                <li>• Non-refundable card issuance fee applies.</li>
+                <li>• Operator is not responsible for lost or stolen cards.</li>
+                <li>• Unused balances on unregistered cards are non-refundable.</li>
+                <li>• Tampering or unauthorized duplication is strictly prohibited.</li>
+              </ul>
+              <div className={`flex items-center gap-1.5 sm:gap-2 border-t pt-1 sm:pt-1.5 md:pt-2 mt-1 ${isDark ? "border-slate-400/40" : "border-slate-300"}`}>
+                <div className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+                </div>
+                <span className="text-[7px] sm:text-[9px] md:text-[11px] font-extrabold tracking-wide text-slate-900 uppercase truncate">
+                  Fare Collection System
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p className={`text-center text-[9px] sm:text-[10px] mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+        Tap the card to flip
+      </p>
+
+      <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-3 sm:mt-4 max-w-2xl mx-auto">
+        <div className={`rounded-lg border px-2.5 py-2 sm:px-3 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+          <span className={`text-[8px] sm:text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+            Balance
+          </span>
+          <div className={`text-xs sm:text-sm font-semibold truncate ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+            {formatPeso(balance)}
+          </div>
+        </div>
+        <div className={`rounded-lg border px-2.5 py-2 sm:px-3 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+          <span className={`text-[8px] sm:text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+            Status
+          </span>
+          <div className={`text-xs sm:text-sm font-semibold truncate ${status === "Active" ? (isDark ? "text-emerald-400" : "text-emerald-600") : (isDark ? "text-red-400" : "text-red-600")}`}>
+            {status}
+          </div>
+        </div>
+        <div className={`rounded-lg border px-2.5 py-2 sm:px-3 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+          <span className={`text-[8px] sm:text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+            Card Type
+          </span>
+          <div className={`text-xs sm:text-sm font-semibold truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+            {user?.type || "Regular"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ✅ Fix: memo — hindi na mag-re-render ang row kapag hindi nagbago ang tx
@@ -116,6 +413,7 @@ export default function PaymongoDashboardPage() {
   const [cardUid, setCardUid] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [virtualCardFlipped, setVirtualCardFlipped] = useState(false);
   const [routes, setRoutes] = useState<FareRoute[]>([]);
   // ✅ Logout confirmation dialog state
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -163,6 +461,7 @@ export default function PaymongoDashboardPage() {
 
   // Reset local overrides + editing state whenever a different card is loaded
   useEffect(() => {
+    setVirtualCardFlipped(false);
     setLocalContact(null);
     setLocalEmail(null);
     setEditingContact(false);
@@ -416,7 +715,24 @@ export default function PaymongoDashboardPage() {
       <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
       <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} routes={routes} />
-      <style>{DASHBOARD_STYLES}</style>
+      <style>{`${DASHBOARD_STYLES}
+        .card-flip-scene { perspective: 1600px; }
+        .card-flip-inner {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+          transform-style: preserve-3d;
+        }
+        .card-flip-inner.is-flipped { transform: rotateY(180deg); }
+        .card-face {
+          position: absolute;
+          inset: 0;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+        }
+        .card-face-back { transform: rotateY(180deg); }
+      `}</style>
 
       {/* ✅ Logout confirmation dialog — compact, Yes/No always one line, small boxes */}
       <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
@@ -537,6 +853,19 @@ export default function PaymongoDashboardPage() {
                 {isLinked ? "Here's your account overview." : "Link a card to see your account overview."}
               </p>
             </div>
+
+            {/* Virtual Card — uses the same full card design as User Management.
+                Responsive on mobile and desktop; shown only after a card is linked. */}
+            {isLinked && user && (
+              <div className="col-span-1 md:col-span-3">
+                <VirtualCard
+                  user={user}
+                  isDark={isDark}
+                  flipped={virtualCardFlipped}
+                  onFlip={() => setVirtualCardFlipped((f) => !f)}
+                />
+              </div>
+            )}
 
             {/* Balance Card — dulled/blank until a card is linked */}
             <Card className={`md:col-span-1 backdrop-blur-md border-t-emerald-500/50 border-t-2 ${
