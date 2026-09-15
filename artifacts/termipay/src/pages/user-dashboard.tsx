@@ -643,7 +643,7 @@ export default function PaymongoDashboardPage() {
         <div
           className={
             activeTab === "Transactions"
-              ? `fixed inset-0 flex flex-col md:hidden z-10 ${isDark ? "bg-[#020617]" : "bg-white"}`
+              ? `fixed inset-0 flex flex-col md:hidden z-10 ${isDark ? "bg-[#020617]" : "bg-slate-50"}`
               : "hidden"
           }
           style={{ top: `${headerHeight}px`, bottom: `${navHeight}px` }}
@@ -654,16 +654,7 @@ export default function PaymongoDashboardPage() {
               Transactions History
             </p>
           </div>
-          {/* 🔧 FIX: this wrapper's background now matches the row-list
-              background (white / #020617) instead of the page background
-              (slate-50 / #020617). Previously, in light mode this div was
-              bg-slate-50 while the actual transaction rows below were
-              bg-white — whenever there were too few transactions to fill
-              the screen, that mismatch showed up as a visible grey gap
-              between the last row and the bottom nav bar. Now the whole
-              area is a single solid color end-to-end, so the list always
-              appears to run flush to the navbar regardless of item count. */}
-          <div className={`flex-1 overflow-y-auto overscroll-contain ${isDark ? "bg-[#020617]" : "bg-white"}`}>
+          <div className={`flex-1 overflow-y-auto overscroll-contain ${isDark ? "bg-[#020617]" : "bg-slate-50"}`}>
             {!isLinked ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3 px-6">
                 <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
@@ -692,7 +683,7 @@ export default function PaymongoDashboardPage() {
                 <p className={`text-xs italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>No transactions yet.</p>
               </div>
             ) : (
-              <div className={`min-h-full ${isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-200 bg-white"}`}>
+              <div className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-200 bg-white"}>
                 {transactions.map((tx) => (
                   <MobileTxRow key={tx.id} tx={tx} onClick={() => handleTxClick(tx)} isDark={isDark} />
                 ))}
@@ -955,14 +946,14 @@ export default function PaymongoDashboardPage() {
       </div>
 
       {/* Mobile Bottom Nav */}
-      <nav
-        ref={navRef}
-        className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 border-t transition-all duration-300 ${
-          isDark ? "bg-[#020617] border-slate-800/60" : "bg-slate-50 border-slate-200"
-        } ${
-          linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
-        }`}
-      >
+     <nav
+  ref={navRef}
+  className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 border-t transition-all duration-300 ${
+    isDark ? "bg-[#020617] border-slate-800/60" : "bg-white border-slate-200"
+  } ${
+    linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
+  }`}
+>
         {navItems.map(({ tab, icon, label }) => {
           const isActive = activeTab === tab;
           return (
