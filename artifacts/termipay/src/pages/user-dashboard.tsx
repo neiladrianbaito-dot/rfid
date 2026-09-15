@@ -177,8 +177,6 @@ function VirtualCard({
   const theme = getCardTheme(user?.type);
   const cardUid = user?.cardUid || "----";
   const fullName = user?.fullName || "Card Holder";
-  const status = user?.status || "Inactive";
-  const balance = Number(user?.balance || 0);
 
   return (
     <div className="w-full">
@@ -326,32 +324,6 @@ function VirtualCard({
         Tap the card to flip
       </p>
 
-      <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-3 sm:mt-4 max-w-2xl mx-auto">
-        <div className={`rounded-lg border px-2.5 py-2 sm:px-3 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-          <span className={`text-[8px] sm:text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-            Balance
-          </span>
-          <div className={`text-xs sm:text-sm font-semibold truncate ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-            {formatPeso(balance)}
-          </div>
-        </div>
-        <div className={`rounded-lg border px-2.5 py-2 sm:px-3 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-          <span className={`text-[8px] sm:text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-            Status
-          </span>
-          <div className={`text-xs sm:text-sm font-semibold truncate ${status === "Active" ? (isDark ? "text-emerald-400" : "text-emerald-600") : (isDark ? "text-red-400" : "text-red-600")}`}>
-            {status}
-          </div>
-        </div>
-        <div className={`rounded-lg border px-2.5 py-2 sm:px-3 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-          <span className={`text-[8px] sm:text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-            Card Type
-          </span>
-          <div className={`text-xs sm:text-sm font-semibold truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-            {user?.type || "Regular"}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
