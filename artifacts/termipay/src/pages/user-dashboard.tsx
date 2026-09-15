@@ -854,19 +854,6 @@ export default function PaymongoDashboardPage() {
               </p>
             </div>
 
-            {/* Virtual Card — uses the same full card design as User Management.
-                Responsive on mobile and desktop; shown only after a card is linked. */}
-            {isLinked && user && (
-              <div className="col-span-1 md:col-span-3">
-                <VirtualCard
-                  user={user}
-                  isDark={isDark}
-                  flipped={virtualCardFlipped}
-                  onFlip={() => setVirtualCardFlipped((f) => !f)}
-                />
-              </div>
-            )}
-
             {/* Balance Card — dulled/blank until a card is linked */}
             <Card className={`md:col-span-1 backdrop-blur-md border-t-emerald-500/50 border-t-2 ${
               isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"
@@ -924,6 +911,18 @@ export default function PaymongoDashboardPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Virtual Card — mobile only. Hidden on desktop and placed directly below the Balance card. */}
+            {isLinked && user && (
+              <div className="col-span-1 md:hidden">
+                <VirtualCard
+                  user={user}
+                  isDark={isDark}
+                  flipped={virtualCardFlipped}
+                  onFlip={() => setVirtualCardFlipped((f) => !f)}
+                />
+              </div>
+            )}
 
             {/* Profile Card — desktop only, dulled/blank until a card is linked */}
             <Card className={`hidden md:block md:col-span-2 backdrop-blur-md ${isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"}`}>
