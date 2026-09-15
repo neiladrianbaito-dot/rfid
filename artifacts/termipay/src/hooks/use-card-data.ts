@@ -45,6 +45,11 @@ export function useCardData(cardUid: string) {
           type: rawUser.type,
           balance: newBalance,
           status: rawUser.status ?? "Inactive",
+          // 🔧 FIX: this was missing entirely, so the dashboard's
+          // "Valid Until" field always fell back to "N/A" no matter what
+          // the API actually returned. Handles both camelCase (already
+          // mapped upstream) and snake_case (raw Postgres column name).
+          expirationDate: rawUser.expirationDate ?? rawUser.expiration_date ?? null,
         });
       } else {
         setUser(null);
