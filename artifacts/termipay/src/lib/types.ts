@@ -6,6 +6,11 @@ export type UserRecord = {
   type?: string;
   balance: string | number;
   status: string;
+  // 🔧 FIX: was missing — this is why "Valid Until" always rendered N/A.
+  // The value flows: backend `/paymongo/dashboard` response -> getUserByCardUid()
+  // -> useCardData() hook -> this type -> PaymongoDashboardPage's VirtualCard.
+  // If any one of those links doesn't carry it, it comes out N/A.
+  expirationDate?: string | null;
 };
 
 export type TransactionRecord = {
