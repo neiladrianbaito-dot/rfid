@@ -22,6 +22,11 @@ export function useCardData(cardUid: string) {
       const payload = await getUserByCardUid(uid);
       const rawUser = payload.user || null;
 
+      // 🔍 TEMP DEBUG — remove once expirationDate is confirmed working.
+      // This prints exactly what the backend sent for this user, so we can
+      // see whether expiration_date / expirationDate is present at all.
+      console.log("[useCardData] raw user payload from backend:", rawUser);
+
       if (rawUser) {
         const newBalance = Number(rawUser.balance ?? 0);
         const newTxCount = (payload.transactions || []).length;
