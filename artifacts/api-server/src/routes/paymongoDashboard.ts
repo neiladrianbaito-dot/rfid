@@ -38,15 +38,22 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
       return;
     }
 
+    // 🔧 FIX: u.expiration_date was never selected here, so the dashboard's
+    // "Valid Until" field always came back as null/N/A — the column simply
+    // never left the database. User Management works because it queries
+    // through a different (generated) API client that already selects this
+    // column. Added it below as "expirationDate" to match the camelCase
+    // convention the rest of this query already uses.
     const userResult = await db.execute(sql`
       select
-        u.card_uid       as "cardUid",
-        u.full_name      as "fullName",
-        u.contact_number as "contactNumber",
+        u.card_uid        as "cardUid",
+        u.full_name       as "fullName",
+        u.contact_number  as "contactNumber",
         u.type,
         u.status,
         u.balance,
-        a.email          as "email"
+        u.expiration_date as "expirationDate",
+        a.email           as "email"
       from users u
       left join auth_users a on a.linked_card_uid = u.card_uid
       where u.card_uid = ${cardUid}
@@ -61,6 +68,7 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
       balance: string;
       status: string;
       email: string | null;
+      expirationDate: string | null;
     };
 
     const user = extractRows<UserRow>(userResult)[0];
@@ -79,13 +87,15 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
 
     res.json({
       user: {
-        cardUid:       user.cardUid,
-        fullName:      user.fullName,
-        contactNumber: user.contactNumber,
-        email:         user.email ?? null,
-        type:          user.type ?? "Regular",
-        balance:       Number(user.balance ?? 0),
-        status:        user.status ?? "Inactive",
+        cardUid:        user.cardUid,
+        fullName:       user.fullName,
+        contactNumber:  user.contactNumber,
+        email:          user.email ?? null,
+        type:           user.type ?? "Regular",
+        balance:        Number(user.balance ?? 0),
+        status:         user.status ?? "Inactive",
+        // 🔧 FIX: pass the newly-selected column through to the response.
+        expirationDate: user.expirationDate ?? null,
       },
       transactions: txRows.map((tx) => ({
         id:        tx.id,
