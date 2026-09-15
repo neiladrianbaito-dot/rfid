@@ -59,6 +59,60 @@ function normalizeApiBaseUrl(rawUrl?: string | null): string {
   return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// 🆕 SKELETON HELPERS — plain pulse blocks used everywhere we need a
+// "data is still loading" placeholder instead of a misleading blank /
+// "Not Linked" fallback. Kept dumb on purpose (just a sized div) so it
+// can be dropped into any layout.
+// ═══════════════════════════════════════════════════════════════════════
+function SkeletonBar({ className = "", isDark }: { className?: string; isDark: boolean }) {
+  return <div className={`animate-pulse rounded ${isDark ? "bg-slate-800" : "bg-slate-200"} ${className}`} />;
+}
+
+function SkeletonRow({ isDark }: { isDark: boolean }) {
+  return (
+    <div className="flex items-center gap-3">
+      <SkeletonBar isDark={isDark} className="h-9 w-9 rounded-full shrink-0" />
+      <div className="flex-1 space-y-1.5">
+        <SkeletonBar isDark={isDark} className="h-2.5 w-16" />
+        <SkeletonBar isDark={isDark} className="h-3.5 w-32" />
+      </div>
+    </div>
+  );
+}
+
+// Full-page gate shown while we're still confirming who's logged in /
+// whether their account has a linked card. Prevents the dashboard from
+// flashing an "unlinked" or blank state on refresh while that check is
+// still in flight (this is what shows up as a long blank screen when the
+// backend is cold-starting).
+function AuthCheckingScreen({ isDark, slowHint }: { isDark: boolean; slowHint: boolean }) {
+  return (
+    <div className={`min-h-screen flex items-center justify-center ${isDark ? "bg-[#020617] text-slate-100" : "bg-slate-50 text-slate-800"}`}>
+      <div className="flex flex-col items-center gap-4 px-6 text-center">
+        <img src="/calbayog.png" alt="Calbayog" className="h-14 w-14 rounded-xl object-contain animate-pulse" />
+        <div className="flex items-center gap-2">
+          {[0, 150, 300].map((delay) => (
+            <div
+              key={delay}
+              className={`h-2 w-2 rounded-full animate-bounce ${isDark ? "bg-emerald-400" : "bg-emerald-500"}`}
+              style={{ animationDelay: `${delay}ms` }}
+            />
+          ))}
+        </div>
+        <p className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+          Loading your account…
+        </p>
+        {slowHint && (
+          <p className={`text-[11px] max-w-xs leading-snug ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+            The server may be waking up from a cold start — this can take up to a minute on the first load.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Virtual card design — matches the User Management card preview 1:1 ──
 function getCardTheme(type: string | null | undefined) {
   const t = (type || "Regular").toLowerCase();
@@ -436,6 +490,33 @@ function VirtualCard({
   );
 }
 
+// 🆕 Skeleton placeholder for the virtual card, shown while a linked
+// card's data is still being fetched (e.g. right after refresh, or a
+// backend cold start) instead of just not rendering anything.
+function VirtualCardSkeleton({ isDark }: { isDark: boolean }) {
+  return (
+    <div className="w-full">
+      <div className="flex items-center justify-between gap-3 mb-2 px-0.5">
+        <div className="flex items-center gap-2">
+          <CreditCard className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />
+          <p className={`text-[10px] font-black uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            My Virtual Card
+          </p>
+        </div>
+      </div>
+      <div className="w-full max-w-2xl mx-auto">
+        <div
+          className={`w-full rounded-2xl animate-pulse ${isDark ? "bg-slate-800" : "bg-slate-200"}`}
+          style={{ aspectRatio: `${CARD_DESIGN_WIDTH} / ${CARD_DESIGN_HEIGHT}` }}
+        />
+      </div>
+      <p className={`text-center text-[9px] sm:text-[10px] mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+        Loading your card…
+      </p>
+    </div>
+  );
+}
+
 // ✅ Fix: memo — hindi na mag-re-render ang row kapag hindi nagbago ang tx
 const MobileTxRow = memo(function MobileTxRow({
   tx,
@@ -498,14 +579,35 @@ export default function PaymongoDashboardPage() {
   // ✅ Logout confirmation dialog state
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
+  // 🆕 True until the initial "who's logged in / do they have a linked
+  // card" check finishes. While true we show a full-page loading gate
+  // instead of the dashboard, so a refresh (or a cold-starting backend)
+  // never flashes the "no card linked" empty state for an account that
+  // actually DOES have one.
+  const [authChecking, setAuthChecking] = useState(true);
+  // 🆕 Shown only if a loading state (auth check OR card-data fetch) runs
+  // past ~3.5s — most likely explanation at that point is a cold-started
+  // backend waking up, so we say so instead of leaving a bare spinner.
+  const [slowLoadHint, setSlowLoadHint] = useState(false);
+
   const { user, transactions, loading, error, lastUpdated, isPulsing } = useCardData(cardUid);
   const currentBalance = Number(user?.balance || 0);
 
-  // ── NEW: single source of truth for "does this account have a linked card yet".
-  // Dashboard is ALWAYS reachable once logged in — this flag only controls
-  // whether the real data/actions are shown, or a dulled/blank placeholder state. ──
+  // ── NEW: single source of truth for "does this account have a linked
+  // card yet". Dashboard is ALWAYS reachable once logged in — this flag
+  // only controls whether the real data/actions are shown, or a
+  // dulled/blank placeholder state. ──
   const isLinked = Boolean(cardUid);
   const dullClass = !isLinked ? "opacity-40 grayscale pointer-events-none select-none" : "";
+
+  // 🆕 True when we KNOW a card is linked but its data hasn't arrived yet
+  // (fresh mount, tab refresh, or the backend is cold-starting). This is
+  // distinct from `!isLinked` — that means "confirmed, no card at all".
+  // Using this instead of falling straight to "—" / "Not Linked" fixes
+  // the "hindi makita ang user" bug: previously a linked account would
+  // render the exact same blank fallback text as an unlinked one while
+  // data was still in flight.
+  const cardDataLoading = isLinked && loading && !user;
 
   const linkCard = useLinkCard((uid) => setCardUid(uid));
   const topup = useTopup(cardUid, currentBalance);
@@ -547,6 +649,19 @@ export default function PaymongoDashboardPage() {
     setEditingContact(false);
     setEditingEmail(false);
   }, [cardUid]);
+
+  // 🆕 Shows the cold-start hint once any busy state (auth check or
+  // card-data fetch) has been running for a little while, and clears it
+  // the moment we're not busy anymore.
+  useEffect(() => {
+    const isBusy = authChecking || cardDataLoading;
+    if (!isBusy) {
+      setSlowLoadHint(false);
+      return;
+    }
+    const t = setTimeout(() => setSlowLoadHint(true), 3500);
+    return () => clearTimeout(t);
+  }, [authChecking, cardDataLoading]);
 
   const startEditContact = () => {
     // ── Guard: can't edit contact info for an account with no linked card yet ──
@@ -669,10 +784,20 @@ export default function PaymongoDashboardPage() {
   // if there's no linked card yet, cardUid just stays empty and the UI
   // renders in its dulled/blank state (see isLinked below). Linking is
   // opt-in: the user opens the modal themselves via the reminder banner
-  // or the "Link Card" buttons. ──
+  // or the "Link Card" buttons.
+  //
+  // 🆕 `authChecking` wraps this whole flow now (see AuthCheckingScreen
+  // above). It's set to false in `finally`, whether the check succeeded,
+  // failed, or the token was simply missing — that way a slow/cold-started
+  // profile fetch keeps the loading gate up instead of letting the
+  // dashboard render prematurely with `isLinked` false. ──
   useEffect(() => {
     const token = window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
-    if (!token) { setLocation("/signin"); return; }
+    if (!token) {
+      setLocation("/signin");
+      setAuthChecking(false);
+      return;
+    }
     void (async () => {
       try {
         const profile = await getSignedInUser();
@@ -691,6 +816,8 @@ export default function PaymongoDashboardPage() {
       } catch {
         window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
         setLocation("/signin");
+      } finally {
+        setAuthChecking(false);
       }
     })();
   }, []);
@@ -788,6 +915,13 @@ export default function PaymongoDashboardPage() {
       </span>
     </button>
   );
+
+  // 🆕 Full-page gate — see AuthCheckingScreen above. Bails out before any
+  // of the "no card linked yet" UI can render, which is what used to
+  // flash on refresh / cold start.
+  if (authChecking) {
+    return <AuthCheckingScreen isDark={isDark} slowHint={slowLoadHint} />;
+  }
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#020617] text-slate-100" : "bg-slate-50 text-slate-800"}`}>
@@ -913,6 +1047,18 @@ export default function PaymongoDashboardPage() {
           </div>
         )}
 
+        {/* 🆕 Cold-start hint — only surfaces once a linked account's card
+            data has been loading for a while, so it doesn't flash on
+            ordinary fast loads. */}
+        {cardDataLoading && slowLoadHint && (
+          <div className={`p-3 rounded-lg text-xs border flex items-center gap-2 ${
+            isDark ? "bg-slate-800/60 border-slate-700 text-slate-400" : "bg-slate-100 border-slate-200 text-slate-500"
+          }`}>
+            <RotateCw className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            Still loading your card — the server may be waking up from a cold start.
+          </div>
+        )}
+
         {/* ── Persistent reminder banner while no card is linked yet.
             Desktop only — on mobile, Link Card lives inside the Settings tab. ── */}
         {!isLinked && (
@@ -935,224 +1081,257 @@ export default function PaymongoDashboardPage() {
               <p className={`text-xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
                 Welcome back,{" "}
                 <span className={isDark ? "text-emerald-400" : "text-emerald-600"}>
-                  {displayName?.split(" ")[0] || "User"}
+                  {cardDataLoading ? "…" : (displayName?.split(" ")[0] || "User")}
                 </span> 👋
               </p>
               <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                {isLinked ? "Here's your account overview." : "Link a card to see your account overview."}
+                {cardDataLoading ? "Loading your account overview…" : isLinked ? "Here's your account overview." : "Link a card to see your account overview."}
               </p>
             </div>
 
-            {/* Balance Card — dulled/blank until a card is linked */}
+            {/* Balance Card — dulled/blank until a card is linked, skeleton while a linked card's data is still loading */}
             <Card className={`md:col-span-1 backdrop-blur-md border-t-emerald-500/50 border-t-2 ${
               isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"
             }`}>
               <CardContent className={`pt-4 pb-4 px-4 ${dullClass}`}>
-                <div className="flex justify-between items-start mb-1.5">
-                  <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>Available Balance</p>
-                  <Button size="sm" variant="outline" disabled={!isLinked} onClick={() => isLinked && topup.setIsOpen(true)}
-                    className={`h-6 text-[10px] px-2 cursor-pointer disabled:cursor-not-allowed ${
-                      isDark
-                        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white"
-                        : "bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-600 hover:text-white"
-                    }`}>
-                    <PlusCircle className="h-3 w-3 mr-1" /> TOP UP
-                  </Button>
-                </div>
-                <h2 className={`text-4xl font-black tracking-tighter ${isDark ? "text-white" : "text-slate-900"} ${isPulsing ? "balance-pulse" : ""}`}>
-                  {isLinked ? balanceText : "\u20B1— .—"}
-                </h2>
-                <div className="mt-2 space-y-1">
-                  <div className={`w-full rounded-full h-1 overflow-hidden ${isDark ? "bg-slate-800" : "bg-slate-200"}`}>
-                    <div
-                      className={`h-1 rounded-full transition-all ${
-                        !isLinked ? (isDark ? "bg-slate-700" : "bg-slate-300")
-                          : isAtMaxBalance ? "bg-red-500" : currentBalance / 20000 >= 0.8 ? "bg-amber-400" : "bg-emerald-500"
-                      }`}
-                      style={{ width: isLinked ? `${Math.min((currentBalance / 20000) * 100, 100)}%` : "0%" }}
-                    />
+                {cardDataLoading ? (
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-start">
+                      <SkeletonBar isDark={isDark} className="h-3 w-28" />
+                      <SkeletonBar isDark={isDark} className="h-6 w-16 rounded-md" />
+                    </div>
+                    <SkeletonBar isDark={isDark} className="h-9 w-40" />
+                    <SkeletonBar isDark={isDark} className="h-1 w-full rounded-full" />
+                    <div className="flex gap-2 pt-1">
+                      <SkeletonBar isDark={isDark} className="h-5 w-16 rounded-full" />
+                      <SkeletonBar isDark={isDark} className="h-5 w-24 rounded-full" />
+                    </div>
                   </div>
-                  <p className={`text-[9px] font-mono ${isDark ? "text-slate-600" : "text-slate-400"}`}>
-                    {!isLinked ? (
-                      <span>— remaining</span>
-                    ) : isAtMaxBalance ? (
-                      <span className={isDark ? "text-red-400/70" : "text-red-500/80"}>Max balance reached</span>
-                    ) : (
-                      <>₱{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })} remaining</>
-                    )}
-                  </p>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Badge className={
-                    isLinked && user?.status === "Active"
-                      ? isDark
-                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-2 py-0.5 text-[10px]"
-                        : "bg-emerald-50 text-emerald-700 border-emerald-200 px-2 py-0.5 text-[10px]"
-                      : isDark
-                        ? "bg-red-500/10 text-red-400 border-red-500/20 px-2 py-0.5 text-[10px]"
-                        : "bg-red-50 text-red-700 border-red-200 px-2 py-0.5 text-[10px]"
-                  }>
-                    <ShieldCheck className="h-3 w-3 mr-1" />{isLinked ? (user?.status || "Inactive") : "—"}
-                  </Badge>
-                  <Badge variant="outline" className={`px-2 py-0.5 text-[10px] ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
-                    {isLinked ? (user?.type || "Standard User") : "—"}
-                  </Badge>
-                </div>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-start mb-1.5">
+                      <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>Available Balance</p>
+                      <Button size="sm" variant="outline" disabled={!isLinked} onClick={() => isLinked && topup.setIsOpen(true)}
+                        className={`h-6 text-[10px] px-2 cursor-pointer disabled:cursor-not-allowed ${
+                          isDark
+                            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white"
+                            : "bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-600 hover:text-white"
+                        }`}>
+                        <PlusCircle className="h-3 w-3 mr-1" /> TOP UP
+                      </Button>
+                    </div>
+                    <h2 className={`text-4xl font-black tracking-tighter ${isDark ? "text-white" : "text-slate-900"} ${isPulsing ? "balance-pulse" : ""}`}>
+                      {isLinked ? balanceText : "\u20B1— .—"}
+                    </h2>
+                    <div className="mt-2 space-y-1">
+                      <div className={`w-full rounded-full h-1 overflow-hidden ${isDark ? "bg-slate-800" : "bg-slate-200"}`}>
+                        <div
+                          className={`h-1 rounded-full transition-all ${
+                            !isLinked ? (isDark ? "bg-slate-700" : "bg-slate-300")
+                              : isAtMaxBalance ? "bg-red-500" : currentBalance / 20000 >= 0.8 ? "bg-amber-400" : "bg-emerald-500"
+                          }`}
+                          style={{ width: isLinked ? `${Math.min((currentBalance / 20000) * 100, 100)}%` : "0%" }}
+                        />
+                      </div>
+                      <p className={`text-[9px] font-mono ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+                        {!isLinked ? (
+                          <span>— remaining</span>
+                        ) : isAtMaxBalance ? (
+                          <span className={isDark ? "text-red-400/70" : "text-red-500/80"}>Max balance reached</span>
+                        ) : (
+                          <>₱{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })} remaining</>
+                        )}
+                      </p>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Badge className={
+                        isLinked && user?.status === "Active"
+                          ? isDark
+                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-2 py-0.5 text-[10px]"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200 px-2 py-0.5 text-[10px]"
+                          : isDark
+                            ? "bg-red-500/10 text-red-400 border-red-500/20 px-2 py-0.5 text-[10px]"
+                            : "bg-red-50 text-red-700 border-red-200 px-2 py-0.5 text-[10px]"
+                      }>
+                        <ShieldCheck className="h-3 w-3 mr-1" />{isLinked ? (user?.status || "Inactive") : "—"}
+                      </Badge>
+                      <Badge variant="outline" className={`px-2 py-0.5 text-[10px] ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
+                        {isLinked ? (user?.type || "Standard User") : "—"}
+                      </Badge>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
 
             {/* Virtual Card — mobile only. Hidden on desktop and placed directly below the Balance card. */}
-            {isLinked && user && (
+            {isLinked && (
               <div className="col-span-1 md:hidden">
-                <VirtualCard
-                  user={user}
-                  isDark={isDark}
-                  flipped={virtualCardFlipped}
-                  onFlip={() => setVirtualCardFlipped((f) => !f)}
-                />
+                {user ? (
+                  <VirtualCard
+                    user={user}
+                    isDark={isDark}
+                    flipped={virtualCardFlipped}
+                    onFlip={() => setVirtualCardFlipped((f) => !f)}
+                  />
+                ) : (
+                  <VirtualCardSkeleton isDark={isDark} />
+                )}
               </div>
             )}
 
-            {/* Profile Card — desktop only, dulled/blank until a card is linked */}
+            {/* Profile Card — desktop only, dulled/blank until a card is linked, skeleton while loading */}
             <Card className={`hidden md:block md:col-span-2 backdrop-blur-md ${isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"}`}>
               <CardContent className="pt-6 grid grid-cols-1 sm:grid-cols-2 gap-y-6 gap-x-4">
-                {[
-                  { icon: <User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />, bg: "bg-blue-500/10 border-blue-500/20", label: "Name", value: isLinked ? (user?.fullName || "Not Linked") : "—" },
-                  { icon: <CreditCard className={`h-4 w-4 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
-                  { icon: <Tag className={`h-4 w-4 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: isLinked ? (user?.type || "General") : "—" },
-                ].map(({ icon, bg, label, value, mono }) => (
-                  <div key={label} className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                    <div className={`h-9 w-9 rounded-full flex items-center justify-center border ${bg}`}>{icon}</div>
-                    <div>
-                      <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
-                      <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"} ${mono ? "font-mono" : ""}`}>{value}</p>
+                {cardDataLoading ? (
+                  <>
+                    <SkeletonRow isDark={isDark} />
+                    <SkeletonRow isDark={isDark} />
+                    <SkeletonRow isDark={isDark} />
+                    <SkeletonRow isDark={isDark} />
+                    <SkeletonRow isDark={isDark} />
+                  </>
+                ) : (
+                  <>
+                    {[
+                      { icon: <User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />, bg: "bg-blue-500/10 border-blue-500/20", label: "Name", value: isLinked ? (user?.fullName || "Not Linked") : "—" },
+                      { icon: <CreditCard className={`h-4 w-4 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
+                      { icon: <Tag className={`h-4 w-4 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: isLinked ? (user?.type || "General") : "—" },
+                    ].map(({ icon, bg, label, value, mono }) => (
+                      <div key={label} className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                        <div className={`h-9 w-9 rounded-full flex items-center justify-center border ${bg}`}>{icon}</div>
+                        <div>
+                          <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+                          <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"} ${mono ? "font-mono" : ""}`}>{value}</p>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* ✅ Contact — editable, disabled until a card is linked */}
+                    <div className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                      <div className="h-9 w-9 rounded-full flex items-center justify-center border bg-orange-500/10 border-orange-500/20 shrink-0">
+                        <Phone className={`h-4 w-4 ${isDark ? "text-orange-400" : "text-orange-600"}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
+                        {editingContact ? (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="tel"
+                              value={contactValue}
+                              onChange={(e) => setContactValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveContact();
+                                if (e.key === "Escape") cancelEditContact();
+                              }}
+                              disabled={savingField === "contact"}
+                              autoFocus
+                              className={`text-sm font-semibold rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                                isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                              }`}
+                            />
+                            <button
+                              onClick={handleSaveContact}
+                              disabled={savingField === "contact"}
+                              className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                              }`}
+                              title="Save"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={cancelEditContact}
+                              disabled={savingField === "contact"}
+                              className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "bg-slate-800 text-slate-400 hover:bg-slate-700" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                              }`}
+                              title="Cancel"
+                            >
+                              <XIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 group">
+                            <p className={`text-sm font-semibold truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{isLinked ? (displayContact || "None") : "—"}</p>
+                            <button
+                              onClick={startEditContact}
+                              disabled={!isLinked}
+                              className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                              }`}
+                              title="Edit contact number"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
 
-                {/* ✅ Contact — editable, disabled until a card is linked */}
-                <div className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                  <div className="h-9 w-9 rounded-full flex items-center justify-center border bg-orange-500/10 border-orange-500/20 shrink-0">
-                    <Phone className={`h-4 w-4 ${isDark ? "text-orange-400" : "text-orange-600"}`} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
-                    {editingContact ? (
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="tel"
-                          value={contactValue}
-                          onChange={(e) => setContactValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") handleSaveContact();
-                            if (e.key === "Escape") cancelEditContact();
-                          }}
-                          disabled={savingField === "contact"}
-                          autoFocus
-                          className={`text-sm font-semibold rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
-                            isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
-                          }`}
-                        />
-                        <button
-                          onClick={handleSaveContact}
-                          disabled={savingField === "contact"}
-                          className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                            isDark ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
-                          }`}
-                          title="Save"
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={cancelEditContact}
-                          disabled={savingField === "contact"}
-                          className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                            isDark ? "bg-slate-800 text-slate-400 hover:bg-slate-700" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                          }`}
-                          title="Cancel"
-                        >
-                          <XIcon className="h-3.5 w-3.5" />
-                        </button>
+                    {/* ✅ Email — editable, disabled until a card is linked */}
+                    <div className={`flex items-center gap-3 sm:col-span-2 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                      <div className="h-9 w-9 rounded-full bg-sky-500/10 flex items-center justify-center border border-sky-500/20 shrink-0">
+                        <Mail className={`h-4 w-4 ${isDark ? "text-sky-400" : "text-sky-600"}`} />
                       </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5 group">
-                        <p className={`text-sm font-semibold truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{isLinked ? (displayContact || "None") : "—"}</p>
-                        <button
-                          onClick={startEditContact}
-                          disabled={!isLinked}
-                          className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer disabled:cursor-not-allowed ${
-                            isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
-                          }`}
-                          title="Edit contact number"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</p>
+                        {editingEmail ? (
+                          <div className="flex items-center gap-1.5 max-w-sm">
+                            <input
+                              type="email"
+                              value={emailValue}
+                              onChange={(e) => setEmailValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveEmail();
+                                if (e.key === "Escape") cancelEditEmail();
+                              }}
+                              disabled={savingField === "email"}
+                              autoFocus
+                              className={`text-sm rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                                isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                              }`}
+                            />
+                            <button
+                              onClick={handleSaveEmail}
+                              disabled={savingField === "email"}
+                              className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                              }`}
+                              title="Save"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={cancelEditEmail}
+                              disabled={savingField === "email"}
+                              className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "bg-slate-800 text-slate-400 hover:bg-slate-700" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                              }`}
+                              title="Cancel"
+                            >
+                              <XIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 group">
+                            <p className={`text-sm truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{isLinked ? (displayEmail || "Not linked") : "—"}</p>
+                            <button
+                              onClick={startEditEmail}
+                              disabled={!isLinked}
+                              className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                              }`}
+                              title="Edit email"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* ✅ Email — editable, disabled until a card is linked */}
-                <div className={`flex items-center gap-3 sm:col-span-2 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                  <div className="h-9 w-9 rounded-full bg-sky-500/10 flex items-center justify-center border border-sky-500/20 shrink-0">
-                    <Mail className={`h-4 w-4 ${isDark ? "text-sky-400" : "text-sky-600"}`} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</p>
-                    {editingEmail ? (
-                      <div className="flex items-center gap-1.5 max-w-sm">
-                        <input
-                          type="email"
-                          value={emailValue}
-                          onChange={(e) => setEmailValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") handleSaveEmail();
-                            if (e.key === "Escape") cancelEditEmail();
-                          }}
-                          disabled={savingField === "email"}
-                          autoFocus
-                          className={`text-sm rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
-                            isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
-                          }`}
-                        />
-                        <button
-                          onClick={handleSaveEmail}
-                          disabled={savingField === "email"}
-                          className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                            isDark ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
-                          }`}
-                          title="Save"
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={cancelEditEmail}
-                          disabled={savingField === "email"}
-                          className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                            isDark ? "bg-slate-800 text-slate-400 hover:bg-slate-700" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                          }`}
-                          title="Cancel"
-                        >
-                          <XIcon className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5 group">
-                        <p className={`text-sm truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{isLinked ? (displayEmail || "Not linked") : "—"}</p>
-                        <button
-                          onClick={startEditEmail}
-                          disabled={!isLinked}
-                          className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer disabled:cursor-not-allowed ${
-                            isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
-                          }`}
-                          title="Edit email"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -1175,6 +1354,19 @@ export default function PaymongoDashboardPage() {
                     className="h-7 text-[11px] px-3 bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer">
                     <Link2 className="h-3 w-3 mr-1" /> Link Card
                   </Button>
+                </div>
+              ) : cardDataLoading ? (
+                <div className="p-4 space-y-3">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div key={i} className="flex items-center justify-between gap-4">
+                      <div className="space-y-1.5 flex-1">
+                        <SkeletonBar isDark={isDark} className="h-2.5 w-24" />
+                        <SkeletonBar isDark={isDark} className="h-2 w-16" />
+                      </div>
+                      <SkeletonBar isDark={isDark} className="h-3 w-20" />
+                      <SkeletonBar isDark={isDark} className="h-4 w-16 rounded-full" />
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <>
@@ -1260,6 +1452,19 @@ export default function PaymongoDashboardPage() {
                   <Link2 className="h-3 w-3 mr-1" /> Link Card
                 </Button>
               </div>
+            ) : cardDataLoading ? (
+              <div className="p-4 space-y-4">
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <SkeletonBar isDark={isDark} className="h-9 w-9 rounded-full shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <SkeletonBar isDark={isDark} className="h-2.5 w-20" />
+                      <SkeletonBar isDark={isDark} className="h-2 w-28" />
+                    </div>
+                    <SkeletonBar isDark={isDark} className="h-3 w-14" />
+                  </div>
+                ))}
+              </div>
             ) : transactions.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
                 <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
@@ -1282,154 +1487,171 @@ export default function PaymongoDashboardPage() {
 
             {/* Profile Card */}
             <div className={`rounded-2xl overflow-hidden border ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
-              <div className={`flex items-center gap-3 px-4 py-4 border-b ${isDark ? "border-slate-800/60" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                <div className="h-11 w-11 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0">
-                  <span className={`font-black text-base tracking-tight ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                    {getInitials(isLinked ? (user?.fullName || "?") : "?")}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-bold leading-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
-                    {isLinked ? (user?.fullName || "Not linked") : "—"}
-                  </p>
-                  <p className={`text-[11px] mt-0.5 truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{isLinked ? (displayEmail || "—") : "—"}</p>
-                  <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                    <Badge className={
-                      isLinked && user?.status === "Active"
-                        ? isDark
-                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-1.5 py-0 text-[9px]"
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200 px-1.5 py-0 text-[9px]"
-                        : isDark
-                          ? "bg-red-500/10 text-red-400 border-red-500/20 px-1.5 py-0 text-[9px]"
-                          : "bg-red-50 text-red-700 border-red-200 px-1.5 py-0 text-[9px]"
-                    }>
-                      <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />{isLinked ? (user?.status || "Inactive") : "—"}
-                    </Badge>
-                    <Badge variant="outline" className={`px-1.5 py-0 text-[9px] ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
-                      {isLinked ? (user?.type || "Standard") : "—"}
-                    </Badge>
+              {cardDataLoading ? (
+                <div className="p-4 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <SkeletonBar isDark={isDark} className="h-11 w-11 rounded-full shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <SkeletonBar isDark={isDark} className="h-3 w-32" />
+                      <SkeletonBar isDark={isDark} className="h-2.5 w-40" />
+                    </div>
                   </div>
+                  <SkeletonRow isDark={isDark} />
+                  <SkeletonRow isDark={isDark} />
+                  <SkeletonRow isDark={isDark} />
                 </div>
-              </div>
-
-              {[
-                { icon: <CreditCard className={`h-3.5 w-3.5 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
-                { icon: <Tag className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, label: "Class", value: isLinked ? (user?.type || "General") : "—", mono: false },
-              ].map(({ icon, label, value, mono }) => (
-                <div key={label} className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                  <div className="shrink-0 opacity-80">{icon}</div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
-                    <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"} ${mono ? "font-mono" : "font-medium"}`}>{value}</p>
+              ) : (
+                <>
+                  <div className={`flex items-center gap-3 px-4 py-4 border-b ${isDark ? "border-slate-800/60" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                    <div className="h-11 w-11 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0">
+                      <span className={`font-black text-base tracking-tight ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                        {getInitials(isLinked ? (user?.fullName || "?") : "?")}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-bold leading-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
+                        {isLinked ? (user?.fullName || "Not linked") : "—"}
+                      </p>
+                      <p className={`text-[11px] mt-0.5 truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{isLinked ? (displayEmail || "—") : "—"}</p>
+                      <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                        <Badge className={
+                          isLinked && user?.status === "Active"
+                            ? isDark
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-1.5 py-0 text-[9px]"
+                              : "bg-emerald-50 text-emerald-700 border-emerald-200 px-1.5 py-0 text-[9px]"
+                            : isDark
+                              ? "bg-red-500/10 text-red-400 border-red-500/20 px-1.5 py-0 text-[9px]"
+                              : "bg-red-50 text-red-700 border-red-200 px-1.5 py-0 text-[9px]"
+                        }>
+                          <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />{isLinked ? (user?.status || "Inactive") : "—"}
+                        </Badge>
+                        <Badge variant="outline" className={`px-1.5 py-0 text-[9px] ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
+                          {isLinked ? (user?.type || "Standard") : "—"}
+                        </Badge>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
 
-              {/* ✅ Contact — editable (mobile), disabled until a card is linked */}
-              <div className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                <div className="shrink-0 opacity-80"><Phone className={`h-3.5 w-3.5 ${isDark ? "text-orange-400" : "text-orange-600"}`} /></div>
-                <div className="flex-1 min-w-0">
-                  <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
-                  {editingContact ? (
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <input
-                        type="tel"
-                        value={contactValue}
-                        onChange={(e) => setContactValue(e.target.value)}
-                        disabled={savingField === "contact"}
-                        autoFocus
-                        className={`text-xs rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
-                          isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
-                        }`}
-                      />
-                      <button
-                        onClick={handleSaveContact}
-                        disabled={savingField === "contact"}
-                        className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                          isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600"
-                        }`}
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={cancelEditContact}
-                        disabled={savingField === "contact"}
-                        className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                          isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
-                        }`}
-                      >
-                        <XIcon className="h-3.5 w-3.5" />
-                      </button>
+                  {[
+                    { icon: <CreditCard className={`h-3.5 w-3.5 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
+                    { icon: <Tag className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, label: "Class", value: isLinked ? (user?.type || "General") : "—", mono: false },
+                  ].map(({ icon, label, value, mono }) => (
+                    <div key={label} className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                      <div className="shrink-0 opacity-80">{icon}</div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+                        <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"} ${mono ? "font-mono" : "font-medium"}`}>{value}</p>
+                      </div>
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <p className={`text-xs font-medium truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{isLinked ? (displayContact || "None") : "—"}</p>
-                      <button
-                        onClick={startEditContact}
-                        disabled={!isLinked}
-                        className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer disabled:cursor-not-allowed ${
-                          isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
-                        }`}
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
+                  ))}
 
-              {/* ✅ Email — editable (mobile, auth_users), disabled until a card is linked */}
-              <div className={`flex items-center gap-3 px-4 py-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                <div className="shrink-0 opacity-80"><Mail className={`h-3.5 w-3.5 ${isDark ? "text-sky-400" : "text-sky-600"}`} /></div>
-                <div className="flex-1 min-w-0">
-                  <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</p>
-                  {editingEmail ? (
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <input
-                        type="email"
-                        value={emailValue}
-                        onChange={(e) => setEmailValue(e.target.value)}
-                        disabled={savingField === "email"}
-                        autoFocus
-                        className={`text-xs rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
-                          isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
-                        }`}
-                      />
-                      <button
-                        onClick={handleSaveEmail}
-                        disabled={savingField === "email"}
-                        className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                          isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600"
-                        }`}
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={cancelEditEmail}
-                        disabled={savingField === "email"}
-                        className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                          isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
-                        }`}
-                      >
-                        <XIcon className="h-3.5 w-3.5" />
-                      </button>
+                  {/* ✅ Contact — editable (mobile), disabled until a card is linked */}
+                  <div className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                    <div className="shrink-0 opacity-80"><Phone className={`h-3.5 w-3.5 ${isDark ? "text-orange-400" : "text-orange-600"}`} /></div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
+                      {editingContact ? (
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <input
+                            type="tel"
+                            value={contactValue}
+                            onChange={(e) => setContactValue(e.target.value)}
+                            disabled={savingField === "contact"}
+                            autoFocus
+                            className={`text-xs rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                              isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                            }`}
+                          />
+                          <button
+                            onClick={handleSaveContact}
+                            disabled={savingField === "contact"}
+                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600"
+                            }`}
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={cancelEditContact}
+                            disabled={savingField === "contact"}
+                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            <XIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <p className={`text-xs font-medium truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{isLinked ? (displayContact || "None") : "—"}</p>
+                          <button
+                            onClick={startEditContact}
+                            disabled={!isLinked}
+                            className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
+                            }`}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{isLinked ? (displayEmail || "Not linked") : "—"}</p>
-                      <button
-                        onClick={startEditEmail}
-                        disabled={!isLinked}
-                        className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer disabled:cursor-not-allowed ${
-                          isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
-                        }`}
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
+                  </div>
+
+                  {/* ✅ Email — editable (mobile, auth_users), disabled until a card is linked */}
+                  <div className={`flex items-center gap-3 px-4 py-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                    <div className="shrink-0 opacity-80"><Mail className={`h-3.5 w-3.5 ${isDark ? "text-sky-400" : "text-sky-600"}`} /></div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</p>
+                      {editingEmail ? (
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <input
+                            type="email"
+                            value={emailValue}
+                            onChange={(e) => setEmailValue(e.target.value)}
+                            disabled={savingField === "email"}
+                            autoFocus
+                            className={`text-xs rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                              isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                            }`}
+                          />
+                          <button
+                            onClick={handleSaveEmail}
+                            disabled={savingField === "email"}
+                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600"
+                            }`}
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={cancelEditEmail}
+                            disabled={savingField === "email"}
+                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            <XIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{isLinked ? (displayEmail || "Not linked") : "—"}</p>
+                          <button
+                            onClick={startEditEmail}
+                            disabled={!isLinked}
+                            className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
+                            }`}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Account actions — always usable regardless of link status */}
