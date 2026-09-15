@@ -1,0 +1,4 @@
+import { useEffect,useState } from "react";
+import type { FareRoute } from "@/components/transaction-detail-modal";
+import { supabase } from "@/lib/supabase";
+export function useFareRoutes(){const[routes,setRoutes]=useState<FareRoute[]>([]);useEffect(()=>{const loadRoutes=async()=>{const{data,error}=await supabase.from("fare_routes").select("id, origin, destination, fare_amount, is_active").order("id");if(!error&&data)setRoutes(data.map((r:any)=>({id:r.id,origin:r.origin,destination:r.destination,fareAmount:r.fare_amount,isActive:r.is_active})));};void loadRoutes();const channel=supabase.channel("fare_routes_changes").on("postgres_changes",{event:"*",schema:"public",table:"fare_routes"},()=>void loadRoutes()).subscribe();return()=>{void supabase.removeChannel(channel);};},[]);return routes;}

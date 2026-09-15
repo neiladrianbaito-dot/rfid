@@ -1,0 +1,2 @@
+import { useEffect,useRef,useState } from "react";
+export function useDashboardLayout(){const headerRef=useRef<HTMLDivElement>(null);const navRef=useRef<HTMLElement>(null);const[headerHeight,setHeaderHeight]=useState(57);const[navHeight,setNavHeight]=useState(64);useEffect(()=>{const h=headerRef.current,n=navRef.current;if(!h||!n)return;const update=()=>{setHeaderHeight(h.offsetHeight);setNavHeight(n.offsetHeight)};update();const ro=new ResizeObserver(update);ro.observe(h);ro.observe(n);return()=>ro.disconnect();},[]);return{headerRef,navRef,headerHeight,navHeight};}
