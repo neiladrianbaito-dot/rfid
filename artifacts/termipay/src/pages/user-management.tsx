@@ -1091,40 +1091,41 @@ export default function UserManagementPage() {
 
                       <div
                         className="relative h-full w-full flex flex-col justify-between"
-                        style={{ padding: 34 }}
+                        style={{ padding: 30 }}
                       >
-                        {/* Header / logo badge — fixed px, position locked */}
-                        <div className="flex items-center" style={{ gap: 14 }}>
+                        {/* Header / logo badge — ENLARGED: 44px -> 62px, gap bumped for balance */}
+                        <div className="flex items-center" style={{ gap: 16 }}>
                           <div
                             className="rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden"
                             style={{
-                              width: 44,
-                              height: 44,
+                              width: 62,
+                              height: 62,
                               backgroundColor: theme.isLight ? "#f1f5f9" : "rgba(255,255,255,0.10)",
                               borderColor: theme.isLight ? "#cbd5e1" : "rgba(255,255,255,0.30)",
                             }}
                           >
                             <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
                           </div>
+                          {/* ENLARGED: 17px -> 22px */}
                           <span
                             className="font-bold tracking-wide uppercase"
-                            style={{ color: theme.textColor, fontSize: 17, lineHeight: 1.1 }}
+                            style={{ color: theme.textColor, fontSize: 22, lineHeight: 1.15 }}
                           >
                             Fare Collection System
                           </span>
                         </div>
 
-                        {/* Body — fixed px, position locked */}
+                        {/* Body — ENLARGED: UID 38px -> 44px, name 20px -> 25px */}
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           <div
                             className="font-mono font-extrabold tracking-wide"
-                            style={{ color: theme.uidColor, fontSize: 38, lineHeight: 1.1 }}
+                            style={{ color: theme.uidColor, fontSize: 44, lineHeight: 1.1 }}
                           >
                             {previewUser.cardUid}
                           </div>
                           <div
                             className="font-semibold"
-                            style={{ color: theme.textColor, fontSize: 20, lineHeight: 1.2 }}
+                            style={{ color: theme.textColor, fontSize: 25, lineHeight: 1.2 }}
                           >
                             {previewUser.fullName}
                           </div>
@@ -1138,16 +1139,21 @@ export default function UserManagementPage() {
                           >
                             {theme.label}
                           </div>
+                          {/* "Valid Until" label + date forced to WHITE per request.
+                              ⚠️ NOTE: on Student/Senior/PWD cards the background is white,
+                              so white text here will be very hard to read. Regular card
+                              (navy bg) is fine. Ping me if you want this to stay white only
+                              on dark cards and switch to dark text automatically on light cards. */}
                           <div className="text-right">
                             <div
                               className="uppercase tracking-wide font-semibold"
-                              style={{ color: theme.subTextColor, fontSize: 11, lineHeight: 1.3 }}
+                              style={{ color: "#ffffff", fontSize: 11, lineHeight: 1.3 }}
                             >
                               Valid Until
                             </div>
                             <div
                               className="font-mono font-bold"
-                              style={{ color: theme.textColor, fontSize: 15, lineHeight: 1.3 }}
+                              style={{ color: "#ffffff", fontSize: 15, lineHeight: 1.3 }}
                             >
                               {formatDate(previewUser.expirationDate)}
                             </div>
@@ -1189,13 +1195,13 @@ export default function UserManagementPage() {
                         >
                           <div
                             className="rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden"
-                            style={{ width: 30, height: 30 }}
+                            style={{ width: 38, height: 38 }}
                           >
                             <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
                           </div>
                           <span
                             className="font-extrabold tracking-wide text-slate-900 uppercase"
-                            style={{ fontSize: 13 }}
+                            style={{ fontSize: 15 }}
                           >
                             Fare Collection System
                           </span>
