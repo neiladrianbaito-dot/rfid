@@ -13,9 +13,6 @@ let linkedCardColumnAvailable: boolean | null = null;
 let permissionColumnAvailable: boolean | null = null;
 
 // ── Role helpers ───────────────────────────────────────────────────────────
-// Only two roles exist now: "staff" and "super_admin". Anything else falls
-// back to "staff" (safe default — least privilege).
-
 function normalizeRole(role: unknown): "staff" | "super_admin" {
   return role === "super_admin" ? "super_admin" : "staff";
 }
@@ -29,9 +26,6 @@ function isSuperAdmin(role: unknown): boolean {
 }
 
 // ── Permission helpers ───────────────────────────────────────────────────────
-// Only meaningful for "staff" accounts. Super Admins are always full_access
-// regardless of what's stored — the toggle simply doesn't apply to them.
-
 function normalizePermission(permission: unknown, role: unknown): "full_access" | "view_only" {
   if (isSuperAdmin(role)) return "full_access";
   return permission === "view_only" ? "view_only" : "full_access";
@@ -127,6 +121,11 @@ async function ensurePermissionColumn(): Promise<void> {
   permissionColumnAvailable = true;
 }
 
+// NOTE: card status is still looked up and returned to the client so the
+// frontend can show "your card is blocked, contact support" banners etc,
+// but it no longer blocks login. Login access and card access are now
+// independent — a blocked/unlinked card just means restricted card
+// features, not a locked-out account.
 async function checkLinkedCardStatus(linkedCardUid: string | null | undefined): Promise<{
   blocked: boolean;
   status: string | null;
@@ -313,17 +312,10 @@ router.post("/auth/user-signin", async (req, res): Promise<void> => {
       return;
     }
 
-    const { blocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
-    if (blocked) {
-      res.status(403).json({
-        success: false,
-        message:
-          cardStatus === "Blocked"
-            ? "Your card has been blocked. Please contact support."
-            : "Your card is inactive. Please contact support.",
-      });
-      return;
-    }
+    // Card status no longer blocks login — it's only informational now.
+    // A user can always sign in to their account; a blocked/inactive card
+    // just means restricted card-related features on the frontend.
+    const { blocked: cardBlocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
 
     await logAudit({
       user: user.email,
@@ -341,6 +333,8 @@ router.post("/auth/user-signin", async (req, res): Promise<void> => {
         fullName: user.full_name,
         email: user.email,
         linkedCardUid: user.linked_card_uid ?? "",
+        cardBlocked,
+        cardStatus,
       },
     });
   } catch (error) {
@@ -374,17 +368,9 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
       return;
     }
 
-    const { blocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
-    if (blocked) {
-      res.status(403).json({
-        success: false,
-        message:
-          cardStatus === "Blocked"
-            ? "Your card has been blocked. Please contact support."
-            : "Your card is inactive. Please contact support.",
-      });
-      return;
-    }
+    // Same as signin: card status is informational only, never blocks
+    // access to the account itself.
+    const { blocked: cardBlocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
 
     res.json({
       success: true,
@@ -393,6 +379,8 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
         fullName: user.full_name,
         email: user.email,
         linkedCardUid: user.linked_card_uid ?? "",
+        cardBlocked,
+        cardStatus,
       },
     });
   } catch (error) {
@@ -638,6 +626,66 @@ router.post("/auth/user/link-card", async (req, res): Promise<void> => {
   }
 });
 
+// ── ADMIN: UNLINK CARD ────────────────────────────────────────────────────────
+// Lets an admin/staff account remove a card from whichever auth_users
+// account it's linked to, so it becomes available to link to a new/other
+// account (e.g. after a card is reported lost, blocked, or reassigned).
+// Requires a valid admin token (staff or super_admin) — not user token.
+
+router.post("/admin/users/unlink-card", async (req, res): Promise<void> => {
+  try {
+    const token = getBearerToken(req.headers.authorization);
+    const adminUser = token ? verifyAdminToken(token) : null;
+    if (!adminUser) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    const body = req.body as { cardUid?: string };
+    const cardUid = typeof body?.cardUid === "string" ? body.cardUid.trim().toUpperCase() : "";
+    if (!cardUid) {
+      res.status(400).json({ error: "cardUid is required" });
+      return;
+    }
+
+    await ensureLinkedCardUidColumn();
+
+    const existingRaw = await db.execute(sql`
+      select id, full_name, email from auth_users
+      where upper(trim(linked_card_uid)) = ${cardUid}
+      limit 1
+    `);
+    const existing = extractRows<{ id: string; full_name: string; email: string }>(existingRaw)[0];
+
+    if (!existing) {
+      res.status(404).json({ error: "No account is currently linked to this card" });
+      return;
+    }
+
+    await db.execute(sql`
+      update auth_users
+      set linked_card_uid = null, updated_at = now()
+      where id = ${existing.id}
+    `);
+
+    await logAudit({
+      user: adminUser.username,
+      action: "UPDATE",
+      entity: "User",
+      details: `${adminUser.username} unlinked card ${cardUid} from account ${existing.email} (${existing.full_name})`,
+    });
+
+    res.json({
+      success: true,
+      message: `Card ${cardUid} has been unlinked from ${existing.full_name}'s account.`,
+      previousAccount: { id: existing.id, fullName: existing.full_name, email: existing.email },
+    });
+  } catch (error) {
+    console.error("Admin unlink card error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── CHANGE PASSWORD (User) ────────────────────────────────────────────────────
 
 const PASSWORD_CHANGE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -799,8 +847,6 @@ router.post("/auth/login", async (req, res): Promise<void> => {
         : null) ||
       normalizedUsername;
 
-    // Supabase-only logins (no local `admins` row) have no staff role — treat
-    // them as "staff" by default, least privilege.
     const role = normalizeRole(admin?.role);
     const permission = normalizePermission((admin as any)?.permission, role);
 
@@ -943,9 +989,6 @@ router.get("/auth/me", async (req, res): Promise<void> => {
 
     const role = normalizeRole((adminUser as any).role);
 
-    // Look up current permission fresh from the DB rather than trusting
-    // anything cached in the token — a super admin may have just flipped
-    // this account to view_only after the token was issued.
     await ensurePermissionColumn();
     const adminRaw = await db.execute(sql`
       select permission from admins where username = ${adminUser.username} limit 1
@@ -966,7 +1009,6 @@ router.get("/auth/me", async (req, res): Promise<void> => {
 });
 
 // ── LIST STAFF (ADMIN) ────────────────────────────────────────────────────────
-// Any authenticated staff or super admin can view the list.
 
 router.get("/admin/staff", async (req, res): Promise<void> => {
   try {
@@ -993,7 +1035,6 @@ router.get("/admin/staff", async (req, res): Promise<void> => {
 });
 
 // ── CREATE STAFF (ADMIN) ───────────────────────────────────────────────────────
-// Only a Super Admin can create staff or other super admin accounts.
 
 router.post("/admin/staff", async (req, res): Promise<void> => {
   try {
@@ -1064,10 +1105,6 @@ router.post("/admin/staff", async (req, res): Promise<void> => {
 });
 
 // ── UPDATE STAFF ACCESS (ADMIN) ────────────────────────────────────────────
-// Only a Super Admin can change access level. Super Admin accounts are
-// always full_access and can never be set to view_only. This is the route
-// the frontend's "Edit Access" modal calls — it was previously missing,
-// which is why that action returned a 404.
 
 router.patch("/admin/staff/:id/access", async (req, res): Promise<void> => {
   try {
@@ -1133,8 +1170,6 @@ router.patch("/admin/staff/:id/access", async (req, res): Promise<void> => {
 });
 
 // ── DELETE STAFF (ADMIN) ───────────────────────────────────────────────────────
-// Only a Super Admin can remove staff accounts. Prevents removing your own
-// account through this route.
 
 router.delete("/admin/staff/:id", async (req, res): Promise<void> => {
   try {
