@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { User, Phone, Tag, ShieldCheck, LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings, ChevronRight, ArrowLeft, ArrowRight, List, Pencil, Check, X as XIcon, Sun, Moon, Link2, AlertTriangle, RotateCw } from "lucide-react";
+import { User, Phone, Tag, ShieldCheck, LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings, ChevronRight, ArrowLeft, ArrowRight, List, Pencil, Check, X as XIcon, Sun, Moon, Link2, Unlink2, AlertTriangle, RotateCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,7 @@ import { VirtualCard, VirtualCardSkeleton } from "@/components/dashboard/virtual
 import { MobileTxRow } from "@/components/dashboard/mobile-tx-row";
 import { LinkReminderBanner } from "@/components/dashboard/link-reminder-banner";
 import { formatAmount, getInitials, normalizeApiBaseUrl } from "@/lib/dashboard-formatters";
-import { USER_AUTH_TOKEN_KEY } from "@/lib/api";
+import { USER_AUTH_TOKEN_KEY, unlinkUserCard } from "@/lib/api";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 
 export default function PaymongoDashboardPage() {
@@ -52,11 +52,17 @@ export default function PaymongoDashboardPage() {
   const displayEmail = localEmail ?? (isLinked ? user?.email : authProfile?.email) ?? "";
   const remainingTopup = Math.max(0, 20000 - currentBalance);
   const isAtMaxBalance = remainingTopup <= 0;
+  // Card must be linked AND status must be "Active" for top-up (and other
+  // card actions) to be allowed. A blocked/inactive card should never let
+  // the user push more money onto it.
+  const isCardUsable = isLinked && user?.status === "Active";
 
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [virtualCardFlipped, setVirtualCardFlipped] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
   const [slowLoadHint, setSlowLoadHint] = useState(false);
 
   useEffect(() => {
@@ -100,6 +106,22 @@ export default function PaymongoDashboardPage() {
   const confirmLogout = () => {
     setLogoutConfirmOpen(false);
     void handleLogout();
+  };
+
+  // ✅ Unlink card logic — user-initiated, requires confirmation
+  const handleUnlinkCard = async () => {
+    setUnlinking(true);
+    try {
+      await unlinkUserCard();
+      toast({ title: "Card unlinked", description: "Your card has been unlinked from your account." });
+      setUnlinkConfirmOpen(false);
+      setCardUid("");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to unlink card.";
+      toast({ title: "Unlink failed", description: message, variant: "destructive" });
+    } finally {
+      setUnlinking(false);
+    }
   };
 
   const balanceText = useMemo(() => {
@@ -198,6 +220,37 @@ export default function PaymongoDashboardPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ✅ Unlink card confirmation dialog */}
+      <AlertDialog open={unlinkConfirmOpen} onOpenChange={setUnlinkConfirmOpen}>
+        <AlertDialogContent className={`max-w-[85vw] sm:max-w-xs p-4 rounded-xl ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
+          <AlertDialogHeader className="space-y-1">
+            <AlertDialogTitle className={`font-bold text-sm leading-snug ${isDark ? "text-white" : "text-slate-900"}`}>
+              Unlink this card?
+            </AlertDialogTitle>
+            <AlertDialogDescription className={`text-[11px] leading-snug ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              You'll lose access to this card's balance and history until you link a card again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-row justify-end items-center gap-1.5 mt-3 sm:gap-1.5">
+            <AlertDialogCancel
+              disabled={unlinking}
+              className={`text-[11px] h-7 px-2.5 min-w-0 mt-0 cursor-pointer ${
+                isDark ? "bg-slate-900 border-slate-800 text-white hover:bg-slate-800" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); void handleUnlinkCard(); }}
+              disabled={unlinking}
+              className="bg-red-600 text-white hover:bg-red-500 font-bold text-[11px] h-7 px-2.5 min-w-0 cursor-pointer"
+            >
+              {unlinking ? "Unlinking…" : "Unlink"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* STICKY HEADER */}
       <div ref={headerRef} className={`sticky top-0 z-40 w-full backdrop-blur-md border-b ${isDark ? "bg-[#020617]/95 border-slate-800" : "bg-white/95 border-slate-200"}`}>
         <div className="mx-auto w-full max-w-6xl px-4 sm:px-8 py-3 flex items-center justify-between">
@@ -256,6 +309,15 @@ export default function PaymongoDashboardPage() {
         {error && isLinked && (
           <div className={`p-3 rounded-lg text-xs border ${isDark ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-red-50 border-red-200 text-red-600"}`}>
             Warning: {error}
+          </div>
+        )}
+
+        {/* ✅ Blocked/inactive card warning — top-up and other card actions
+            are disabled while this is visible. */}
+        {isLinked && !cardDataLoading && user?.status && user.status !== "Active" && (
+          <div className={`p-3 rounded-lg text-xs border flex items-center gap-2 ${isDark ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-red-50 border-red-200 text-red-600"}`}>
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            Your card is currently <strong className="mx-1">{user.status}</strong> — top-up is disabled. You can unlink it below and contact an admin for a new card.
           </div>
         )}
 
@@ -323,7 +385,7 @@ export default function PaymongoDashboardPage() {
                   <>
                     <div className="flex justify-between items-start mb-1.5">
                       <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>Available Balance</p>
-                      <Button size="sm" variant="outline" disabled={!isLinked} onClick={() => isLinked && topup.setIsOpen(true)}
+                      <Button size="sm" variant="outline" disabled={!isCardUsable} onClick={() => isCardUsable && topup.setIsOpen(true)}
                         className={`h-6 text-[10px] px-2 cursor-pointer disabled:cursor-not-allowed ${
                           isDark
                             ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white"
@@ -881,6 +943,22 @@ export default function PaymongoDashboardPage() {
                   <div className="flex-1 text-left">
                     <p className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>Link Card</p>
                     <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Connect a card to activate your account</p>
+                  </div>
+                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
+                </button>
+              )}
+
+              {isLinked && (
+                <button onClick={() => setUnlinkConfirmOpen(true)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 border-b transition-colors cursor-pointer ${
+                    isDark ? "border-slate-800/50 hover:bg-red-500/5 active:bg-red-500/10" : "border-slate-100 hover:bg-red-50 active:bg-red-100"
+                  }`}>
+                  <div className="h-8 w-8 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                    <Unlink2 className={`h-3.5 w-3.5 ${isDark ? "text-red-400" : "text-red-600"}`} />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className={`text-xs font-semibold ${isDark ? "text-red-400" : "text-red-600"}`}>Unlink Card</p>
+                    <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Remove this card from your account</p>
                   </div>
                   <ChevronRight className={`h-3.5 w-3.5 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
                 </button>

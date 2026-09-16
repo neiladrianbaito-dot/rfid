@@ -157,6 +157,16 @@ export async function changeUserPassword(currentPassword: string, newPassword: s
   return payload;
 }
 
+export async function unlinkUserCard() {
+  const response = await fetch(buildApiUrl("/auth/user/unlink-card"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getUserAuthHeaders() },
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload?.message || payload?.error || "Failed to unlink card.");
+  return payload;
+}
+
 // ── FIX: was pointing at the old PayMongo function ("create-checkout").
 // Now points at the Xendit-based function ("create-topup"), and sends
 // snake_case "card_uid" to match what that function expects. If your

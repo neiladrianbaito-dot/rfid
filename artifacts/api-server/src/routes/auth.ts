@@ -1104,6 +1104,49 @@ router.post("/admin/staff", async (req, res): Promise<void> => {
   }
 });
 
+// ── USER SELF-SERVICE: UNLINK CARD ───────────────────────────────────────────
+router.post("/auth/user/unlink-card", async (req, res): Promise<void> => {
+  try {
+    const currentUser = getUserFromAuthHeader(req.headers.authorization);
+    if (!currentUser) {
+      res.status(401).json({ success: false, message: "Not authenticated" });
+      return;
+    }
+
+    await ensureLinkedCardUidColumn();
+
+    const currentUserRaw = await db.execute(sql`
+      select linked_card_uid from auth_users
+      where id = ${currentUser.id}
+      limit 1
+    `);
+    const linkedCardUid = extractRows<{ linked_card_uid: string | null }>(currentUserRaw)[0]?.linked_card_uid;
+
+    if (!linkedCardUid || linkedCardUid.trim() === "") {
+      res.status(400).json({ success: false, message: "No card is currently linked to your account." });
+      return;
+    }
+
+    await db.execute(sql`
+      update auth_users
+      set linked_card_uid = null, updated_at = now()
+      where id = ${currentUser.id}
+    `);
+
+    await logAudit({
+      user: currentUser.email ?? String(currentUser.id),
+      action: "UPDATE",
+      entity: "User",
+      details: `${currentUser.email ?? currentUser.id} unlinked their own card (${linkedCardUid})`,
+    });
+
+    res.json({ success: true, message: "Card unlinked successfully." });
+  } catch (error) {
+    console.error("User unlink card error:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
 // ── UPDATE STAFF ACCESS (ADMIN) ────────────────────────────────────────────
 
 router.patch("/admin/staff/:id/access", async (req, res): Promise<void> => {
