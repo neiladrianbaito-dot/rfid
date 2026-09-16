@@ -49,6 +49,7 @@ import {
   Award,
   Users,
   Sparkles,
+  TrendingDown,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -116,6 +117,14 @@ const ROUTE_LINE_COLORS = ["#3b82f6", "#f97316", "#10b981", "#a855f7", "#ef4444"
 const ROUTE_FORECAST_DAYS = 7;
 // How many of the busiest routes get their own line on the chart.
 const ROUTE_CHART_TOP_N = 5;
+
+// ➕ Standard PH statutory discount rate for Student/Senior/PWD fares
+// (20% off). Used to back-calculate how much revenue was foregone by
+// honoring the discount: if a rider paid `discounted = full * 0.8`,
+// then the amount NOT collected is `discounted * (0.20 / 0.80)` =
+// `discounted * 0.25`.
+const DISCOUNT_RATE = 0.20;
+const LOST_REVENUE_MULTIPLIER = DISCOUNT_RATE / (1 - DISCOUNT_RATE); // 0.25
 
 function getLocalDateString(): string {
   return new Date().toLocaleDateString("en-CA");
@@ -818,6 +827,13 @@ export default function ReportsPage() {
   // Fare transaction list so partial/empty calendar days don't dilute
   // it. Feeds the summary chips and the per-type badges on the Discount
   // Collection Analytics card. ──
+  //
+  // ➕ Also computes `revenueLost`: the estimated peso amount NOT
+  // collected because Student/Senior/PWD riders were charged the
+  // statutory 20%-off fare instead of the full (Regular) fare. Since the
+  // amount actually recorded on a discounted transaction is already the
+  // POST-discount amount (i.e. 80% of the full fare), the un-collected
+  // 20% is derived as `discountedRevenue * (0.20 / 0.80)`.
   const discountSummary = React.useMemo(() => {
     let totalCollected = 0;
     let regularRevenue = 0;
@@ -845,6 +861,17 @@ export default function ReportsPage() {
     const discountedCount = byType.Student.count + byType.Senior.count + byType.PWD.count;
     const discountedSharePct = totalCollected > 0 ? (discountedRevenue / totalCollected) * 100 : 0;
 
+    // ➕ Revenue lost to the 20% discount, overall and per discount type.
+    const revenueLost = discountedRevenue * LOST_REVENUE_MULTIPLIER;
+    const revenueLostByType: Record<"Student" | "Senior" | "PWD", number> = {
+      Student: byType.Student.revenue * LOST_REVENUE_MULTIPLIER,
+      Senior: byType.Senior.revenue * LOST_REVENUE_MULTIPLIER,
+      PWD: byType.PWD.revenue * LOST_REVENUE_MULTIPLIER,
+    };
+    // What would have been collected if every discounted rider paid full
+    // (Regular) fare instead — i.e. discountedRevenue + revenueLost.
+    const wouldBeRevenueAtFullFare = totalCollected + revenueLost;
+
     return {
       totalCollected,
       regularRevenue,
@@ -853,6 +880,9 @@ export default function ReportsPage() {
       discountedCount,
       discountedSharePct,
       byType,
+      revenueLost,
+      revenueLostByType,
+      wouldBeRevenueAtFullFare,
     };
   }, [filteredFareList, getTxCardType]);
 
@@ -1149,6 +1179,10 @@ export default function ReportsPage() {
       { header: "Discounted Total (PHP)", width: 20, get: (d) => peso2(d.student + d.senior + d.pwd) },
       { header: "Discounted Share", width: 16, get: (d) =>
         d.total > 0 ? `${(((d.student + d.senior + d.pwd) / d.total) * 100).toFixed(1)}%` : "0.0%"
+      },
+      // ➕ Revenue lost to the 20% discount, per day.
+      { header: "Revenue Lost to 20% Discount (PHP)", width: 24, get: (d) =>
+        peso2((d.student + d.senior + d.pwd) * LOST_REVENUE_MULTIPLIER)
       },
     ];
 
@@ -1548,13 +1582,15 @@ export default function ReportsPage() {
           ) : (
             <>
               {/* Summary chips */}
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                 {[
                   { label: "Total Fare Collected", value: formatPeso(discountSummary.totalCollected), icon: Wallet, color: isDark ? "text-blue-400" : "text-blue-600", bg: isDark ? "bg-blue-950/40" : "bg-blue-50", border: isDark ? "border-blue-900" : "border-blue-100" },
                   { label: "Daily Average", value: formatPeso(discountDailyAverage), icon: Activity, color: isDark ? "text-cyan-400" : "text-cyan-600", bg: isDark ? "bg-cyan-950/40" : "bg-cyan-50", border: isDark ? "border-cyan-900" : "border-cyan-100" },
                   { label: "Regular (Full Fare)", value: formatPeso(discountSummary.regularRevenue), icon: Receipt, color: isDark ? "text-slate-300" : "text-slate-600", bg: isDark ? "bg-slate-800/60" : "bg-slate-100", border: isDark ? "border-slate-700" : "border-slate-200" },
                   { label: "Total Discounted", value: formatPeso(discountSummary.discountedRevenue), icon: Percent, color: isDark ? "text-purple-400" : "text-purple-600", bg: isDark ? "bg-purple-950/40" : "bg-purple-50", border: isDark ? "border-purple-900" : "border-purple-100" },
                   { label: "Discounted Share", value: `${discountSummary.discountedSharePct.toFixed(1)}%`, icon: Percent, color: isDark ? "text-orange-400" : "text-orange-600", bg: isDark ? "bg-orange-950/40" : "bg-orange-50", border: isDark ? "border-orange-900" : "border-orange-100" },
+                  // ➕ Revenue lost to the 20% statutory discount.
+                  { label: "Revenue Lost (20% Discount)", value: formatPeso(discountSummary.revenueLost), icon: TrendingDown, color: isDark ? "text-rose-400" : "text-rose-600", bg: isDark ? "bg-rose-950/40" : "bg-rose-50", border: isDark ? "border-rose-900" : "border-rose-100" },
                 ].map((stat, idx) => (
                   <div key={idx} className={`rounded-lg border px-4 py-3 ${stat.bg} ${stat.border}`}>
                     <div className="flex items-center justify-between">
@@ -1580,6 +1616,7 @@ export default function ReportsPage() {
                   const t = discountSummary.byType[kind];
                   const sharePct =
                     discountSummary.discountedRevenue > 0 ? (t.revenue / discountSummary.discountedRevenue) * 100 : 0;
+                  const lost = discountSummary.revenueLostByType[kind];
                   return (
                     <div
                       key={kind}
@@ -1596,6 +1633,10 @@ export default function ReportsPage() {
                           <span className="text-[10px] font-normal opacity-70">
                             ({t.count} {t.count === 1 ? "ride" : "rides"} · {sharePct.toFixed(0)}% of discounts)
                           </span>
+                        </div>
+                        {/* ➕ per-type revenue lost to the 20% discount */}
+                        <div className="text-[11px] font-mono mt-0.5 opacity-80">
+                          −{formatPeso(lost)} lost to 20% discount
                         </div>
                       </div>
                     </div>
@@ -1717,6 +1758,8 @@ export default function ReportsPage() {
                         <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-yellow-600">Senior</TableHead>
                         <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">PWD</TableHead>
                         <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Discounted %</TableHead>
+                        {/* ➕ per-day revenue lost column */}
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-rose-500">Revenue Lost</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1724,6 +1767,7 @@ export default function ReportsPage() {
                         const date = new Date(day.date + "T00:00:00");
                         const discountedTotal = day.student + day.senior + day.pwd;
                         const sharePct = day.total > 0 ? (discountedTotal / day.total) * 100 : 0;
+                        const dayLost = discountedTotal * LOST_REVENUE_MULTIPLIER;
                         return (
                           <TableRow
                             key={i}
@@ -1749,6 +1793,10 @@ export default function ReportsPage() {
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
                               {sharePct.toFixed(1)}%
+                            </TableCell>
+                            {/* ➕ per-day revenue lost value */}
+                            <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-rose-400" : "text-rose-600"}`}>
+                              −{formatPeso(dayLost)}
                             </TableCell>
                           </TableRow>
                         );
