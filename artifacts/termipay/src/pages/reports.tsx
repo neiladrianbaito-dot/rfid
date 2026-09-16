@@ -63,6 +63,28 @@ async function logExportAudit(params: { entity: string; format: string; details:
   }
 }
 
+// ── EXPORT-ONLY FETCH ──
+// Pulls the complete, current transaction list straight from the
+// database via GET /api/transactions with NO query params, so it is
+// never limited by whatever useListTransactions() happens to have
+// cached client-side. Used exclusively by handleExportExcelLogs.
+async function fetchAllTransactionsFromDb(): Promise<any[]> {
+  const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
+  const token = window.localStorage.getItem("termipay_auth_token");
+  const res = await fetch(`${apiBaseUrl}/api/transactions`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch transactions for export (${res.status})`);
+  }
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
+
 // ── date-filter helpers ──
 const MONTH_OPTIONS = [
   { value: "01", label: "January" },
@@ -164,6 +186,10 @@ export default function ReportsPage() {
 
   const prevRevenueRef = useRef<number | null>(null);
   const [revenueFlash, setRevenueFlash] = useState(false);
+
+  // ── export state ──
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   // ── filter state ──
   const [filterYear, setFilterYear] = useState<string>("all");
@@ -316,21 +342,6 @@ export default function ReportsPage() {
     });
   }, [baseBreakdown, filterYear, filterMonth, filterDay, isFilterActive, revenueByDate]);
 
-  // ── filtered transactions (drives Excel export) — unaffected by the
-  // calendar fill-in above, since exports should only ever list actual
-  // transaction records, not empty calendar days. ──
-  const filteredTxList = React.useMemo(() => {
-    if (!isFilterActive) return txList;
-    return txList.filter((tx: any) => {
-      const parts = getTxDateParts(tx);
-      if (!parts) return false;
-      if (filterYear !== "all" && parts.year !== filterYear) return false;
-      if (filterMonth !== "all" && parts.month !== filterMonth) return false;
-      if (filterDay !== "all" && parts.day !== filterDay) return false;
-      return true;
-    });
-  }, [txList, filterYear, filterMonth, filterDay, isFilterActive]);
-
   const filteredRevenueTotal = React.useMemo(
     () => filteredBreakdown.reduce((sum: number, d: any) => sum + (Number(d.revenue) || 0), 0),
     [filteredBreakdown]
@@ -354,246 +365,279 @@ export default function ReportsPage() {
   };
 
   const handleExportExcelLogs = async () => {
-    const XLSXStyle = await import("xlsx-js-style" as any);
-    const { utils, writeFile } = XLSXStyle;
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      const XLSXStyle = await import("xlsx-js-style" as any);
+      const { utils, writeFile } = XLSXStyle;
 
-    const exportTxList = filteredTxList;
-    const stamp = getLocalDateString();
-    const generatedAt = new Date().toLocaleString("en-PH", {
-      year: "numeric", month: "long", day: "numeric",
-      hour: "2-digit", minute: "2-digit", second: "2-digit",
-    });
+      // ── ALWAYS pull the complete, current dataset straight from the
+      // database for exports. Do NOT use txList/filteredTxList here —
+      // those reflect whatever useListTransactions() has cached
+      // client-side, which is not guaranteed to be the full table. ──
+      const allTx = await fetchAllTransactionsFromDb();
 
-    const filenameSuffix = isFilterActive
-      ? `-${[filterYear !== "all" ? filterYear : null, filterMonth !== "all" ? filterMonth : null, filterDay !== "all" ? filterDay : null]
-          .filter(Boolean)
-          .join("-")}`
-      : "";
+      const exportTxList = isFilterActive
+        ? allTx.filter((tx: any) => {
+            const parts = getTxDateParts(tx);
+            if (!parts) return false;
+            if (filterYear !== "all" && parts.year !== filterYear) return false;
+            if (filterMonth !== "all" && parts.month !== filterMonth) return false;
+            if (filterDay !== "all" && parts.day !== filterDay) return false;
+            return true;
+          })
+        : allTx;
 
-    logExportAudit({
-      entity: "Transaction Logs",
-      format: "Excel",
-      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx)${
-        isFilterActive ? ` [Filtered: ${filterLabel}]` : ""
-      }`,
-    });
+      // Revenue total computed fresh from the just-fetched full dataset,
+      // rather than from filteredBreakdown (which is derived from the
+      // possibly-stale/cached txList used for the on-screen chart).
+      const freshFilteredRevenueTotal = exportTxList.reduce(
+        (sum: number, tx: any) => sum + Math.abs(Number(tx.amount) || 0),
+        0
+      );
 
-    const summaryRow1Label = isFilterActive ? `Filtered Revenue (${filterLabel})` : "Today's Revenue";
-    const summaryRow1Value = isFilterActive ? formatPeso(filteredRevenueTotal) : formatPeso(todayRevenue);
-    const summaryRow2Label = isFilterActive ? "Filtered Records" : "7-Day Revenue";
-    const summaryRow2Value = isFilterActive ? exportTxList.length : formatPeso(totalRevenue7Days);
+      const stamp = getLocalDateString();
+      const generatedAt = new Date().toLocaleString("en-PH", {
+        year: "numeric", month: "long", day: "numeric",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+      });
 
-    const aoa: any[][] = [
-      ["Fare Collection System", "", "", "", "", "", ""],
-      ["Transaction Logs Export", "", "", "", "", "", ""],
-      [`Generated: ${generatedAt}`, "", "", `Prepared by: ${adminName}`, "", "", ""],
-      [],
-      [summaryRow1Label, summaryRow1Value, "", "Total Registered Users", totalUniqueTaps, "", ""],
-      [summaryRow2Label, summaryRow2Value, "", "Total Linked Cards", totalLinkedCards, "", ""],
-      [],
-      ["Timestamp", "Card UID", "Full Name", "Type", "Amount (PHP)", "Signed Amount", "Status"],
-    ];
+      const filenameSuffix = isFilterActive
+        ? `-${[filterYear !== "all" ? filterYear : null, filterMonth !== "all" ? filterMonth : null, filterDay !== "all" ? filterDay : null]
+            .filter(Boolean)
+            .join("-")}`
+        : "";
 
-    exportTxList.forEach((tx: any) => {
-      const ts = tx.timestamp || tx.created_at;
-      const amount = Math.abs(Number(tx.amount) || 0);
-      aoa.push([
-        ts ? new Date(ts).toLocaleString("en-PH") : "",
-        tx.card_uid || tx.cardUid || "",
-        tx.full_name || tx.fullName || "",
-        tx.type || "",
-        amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-        `+${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        tx.status || "",
-      ]);
-    });
+      logExportAudit({
+        entity: "Transaction Logs",
+        format: "Excel",
+        details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx)${
+          isFilterActive ? ` [Filtered: ${filterLabel}]` : ""
+        }`,
+      });
 
-    const worksheet = utils.aoa_to_sheet(aoa);
+      const summaryRow1Label = isFilterActive ? `Filtered Revenue (${filterLabel})` : "Today's Revenue";
+      const summaryRow1Value = isFilterActive ? formatPeso(freshFilteredRevenueTotal) : formatPeso(todayRevenue);
+      const summaryRow2Label = isFilterActive ? "Filtered Records" : "7-Day Revenue";
+      const summaryRow2Value = isFilterActive ? exportTxList.length : formatPeso(totalRevenue7Days);
 
-    worksheet["!cols"] = [
-      { wch: 26 },
-      { wch: 18 },
-      { wch: 24 },
-      { wch: 24 },
-      { wch: 20 },
-      { wch: 16 },
-      { wch: 14 },
-    ];
+      const aoa: any[][] = [
+        ["Fare Collection System", "", "", "", "", "", ""],
+        ["Transaction Logs Export", "", "", "", "", "", ""],
+        [`Generated: ${generatedAt}`, "", "", `Prepared by: ${adminName}`, "", "", ""],
+        [],
+        [summaryRow1Label, summaryRow1Value, "", "Total Registered Users", totalUniqueTaps, "", ""],
+        [summaryRow2Label, summaryRow2Value, "", "Total Linked Cards", totalLinkedCards, "", ""],
+        [],
+        ["Timestamp", "Card UID", "Full Name", "Type", "Amount (PHP)", "Signed Amount", "Status"],
+      ];
 
-    worksheet["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 2 } },
-      { s: { r: 2, c: 3 }, e: { r: 2, c: 6 } },
-      { s: { r: 4, c: 0 }, e: { r: 4, c: 0 } },
-      { s: { r: 5, c: 0 }, e: { r: 5, c: 0 } },
-      { s: { r: 4, c: 3 }, e: { r: 4, c: 3 } },
-      { s: { r: 5, c: 3 }, e: { r: 5, c: 3 } },
-    ];
+      exportTxList.forEach((tx: any) => {
+        const ts = tx.timestamp || tx.created_at;
+        const amount = Math.abs(Number(tx.amount) || 0);
+        aoa.push([
+          ts ? new Date(ts).toLocaleString("en-PH") : "",
+          tx.card_uid || tx.cardUid || "",
+          tx.full_name || tx.fullName || "",
+          tx.type || "",
+          amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+          `+${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          tx.status || "",
+        ]);
+      });
 
-    const setStyle = (cellRef: string, style: any) => {
-      if (!worksheet[cellRef]) worksheet[cellRef] = { t: "z", v: "" };
-      worksheet[cellRef].s = style;
-    };
+      const worksheet = utils.aoa_to_sheet(aoa);
 
-    const thinBorder = {
-      top:    { style: "thin",   color: { rgb: "CBD5E1" } },
-      bottom: { style: "thin",   color: { rgb: "CBD5E1" } },
-      left:   { style: "thin",   color: { rgb: "CBD5E1" } },
-      right:  { style: "thin",   color: { rgb: "CBD5E1" } },
-    };
-    const mediumBorder = {
-      top:    { style: "medium", color: { rgb: "0F172A" } },
-      bottom: { style: "medium", color: { rgb: "0F172A" } },
-      left:   { style: "thin",   color: { rgb: "334155" } },
-      right:  { style: "thin",   color: { rgb: "334155" } },
-    };
-    const hairBorder = {
-      top:    { style: "hair",   color: { rgb: "E2E8F0" } },
-      bottom: { style: "hair",   color: { rgb: "E2E8F0" } },
-      left:   { style: "hair",   color: { rgb: "E2E8F0" } },
-      right:  { style: "hair",   color: { rgb: "E2E8F0" } },
-    };
+      worksheet["!cols"] = [
+        { wch: 26 },
+        { wch: 18 },
+        { wch: 24 },
+        { wch: 24 },
+        { wch: 20 },
+        { wch: 16 },
+        { wch: 14 },
+      ];
 
-    setStyle("A1", {
-      font: { bold: true, sz: 16, color: { rgb: "FFFFFF" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "0F172A" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-    });
-    setStyle("A2", {
-      font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "1E40AF" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-    });
+      worksheet["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 2 } },
+        { s: { r: 2, c: 3 }, e: { r: 2, c: 6 } },
+        { s: { r: 4, c: 0 }, e: { r: 4, c: 0 } },
+        { s: { r: 5, c: 0 }, e: { r: 5, c: 0 } },
+        { s: { r: 4, c: 3 }, e: { r: 4, c: 3 } },
+        { s: { r: 5, c: 3 }, e: { r: 5, c: 3 } },
+      ];
 
-    const metaBase = {
-      font: { italic: true, sz: 10, color: { rgb: "475569" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "F1F5F9" }, patternType: "solid" },
-      alignment: { horizontal: "left", vertical: "center" },
-    };
-    setStyle("A3", metaBase);
-    setStyle("D3", { ...metaBase, font: { ...metaBase.font, italic: false, bold: true } });
+      const setStyle = (cellRef: string, style: any) => {
+        if (!worksheet[cellRef]) worksheet[cellRef] = { t: "z", v: "" };
+        worksheet[cellRef].s = style;
+      };
 
-    const summaryLabel = {
-      font: { bold: true, sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "E2E8F0" }, patternType: "solid" },
-      alignment: { horizontal: "left", vertical: "center" },
-      border: thinBorder,
-    };
-    const summaryEmerald = {
-      font: { bold: true, sz: 11, color: { rgb: "15803D" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "F0FDF4" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-      border: thinBorder,
-    };
-    const summaryBlue = {
-      font: { bold: true, sz: 11, color: { rgb: "1D4ED8" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "EFF6FF" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-      border: thinBorder,
-    };
-    const summaryIndigo = {
-      font: { bold: true, sz: 11, color: { rgb: "3730A3" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "EEF2FF" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-      border: thinBorder,
-    };
-    const summarySky = {
-      font: { bold: true, sz: 11, color: { rgb: "0369A1" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "F0F9FF" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-      border: thinBorder,
-    };
+      const thinBorder = {
+        top:    { style: "thin",   color: { rgb: "CBD5E1" } },
+        bottom: { style: "thin",   color: { rgb: "CBD5E1" } },
+        left:   { style: "thin",   color: { rgb: "CBD5E1" } },
+        right:  { style: "thin",   color: { rgb: "CBD5E1" } },
+      };
+      const mediumBorder = {
+        top:    { style: "medium", color: { rgb: "0F172A" } },
+        bottom: { style: "medium", color: { rgb: "0F172A" } },
+        left:   { style: "thin",   color: { rgb: "334155" } },
+        right:  { style: "thin",   color: { rgb: "334155" } },
+      };
+      const hairBorder = {
+        top:    { style: "hair",   color: { rgb: "E2E8F0" } },
+        bottom: { style: "hair",   color: { rgb: "E2E8F0" } },
+        left:   { style: "hair",   color: { rgb: "E2E8F0" } },
+        right:  { style: "hair",   color: { rgb: "E2E8F0" } },
+      };
 
-    setStyle("A5", summaryLabel);
-    setStyle("B5", summaryEmerald);
-    setStyle("D5", summaryLabel);
-    setStyle("E5", summaryIndigo);
+      setStyle("A1", {
+        font: { bold: true, sz: 16, color: { rgb: "FFFFFF" }, name: "Calibri" },
+        fill: { fgColor: { rgb: "0F172A" }, patternType: "solid" },
+        alignment: { horizontal: "center", vertical: "center" },
+      });
+      setStyle("A2", {
+        font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
+        fill: { fgColor: { rgb: "1E40AF" }, patternType: "solid" },
+        alignment: { horizontal: "center", vertical: "center" },
+      });
 
-    setStyle("A6", summaryLabel);
-    setStyle("B6", summaryBlue);
-    setStyle("D6", summaryLabel);
-    setStyle("E6", summarySky);
-
-    const headerStyle = {
-      font: { bold: true, sz: 10, color: { rgb: "FFFFFF" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "1E3A5F" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-      border: mediumBorder,
-    };
-    ["A", "B", "C", "D", "E", "F", "G"].forEach((col) => setStyle(`${col}8`, headerStyle));
-
-    exportTxList.forEach((tx: any, i: number) => {
-      const rowNum = 9 + i;
-      const isEven = i % 2 === 0;
-      const amount = Math.abs(Number(tx.amount) || 0);
-      const status = (tx.status || "").toLowerCase();
-      const baseFill = isEven ? "FFFFFF" : "F8FAFC";
-
-      const base = {
-        font: { sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
-        fill: { fgColor: { rgb: baseFill }, patternType: "solid" },
+      const metaBase = {
+        font: { italic: true, sz: 10, color: { rgb: "475569" }, name: "Calibri" },
+        fill: { fgColor: { rgb: "F1F5F9" }, patternType: "solid" },
         alignment: { horizontal: "left", vertical: "center" },
-        border: hairBorder,
+      };
+      setStyle("A3", metaBase);
+      setStyle("D3", { ...metaBase, font: { ...metaBase.font, italic: false, bold: true } });
+
+      const summaryLabel = {
+        font: { bold: true, sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
+        fill: { fgColor: { rgb: "E2E8F0" }, patternType: "solid" },
+        alignment: { horizontal: "left", vertical: "center" },
+        border: thinBorder,
+      };
+      const summaryEmerald = {
+        font: { bold: true, sz: 11, color: { rgb: "15803D" }, name: "Calibri" },
+        fill: { fgColor: { rgb: "F0FDF4" }, patternType: "solid" },
+        alignment: { horizontal: "center", vertical: "center" },
+        border: thinBorder,
+      };
+      const summaryBlue = {
+        font: { bold: true, sz: 11, color: { rgb: "1D4ED8" }, name: "Calibri" },
+        fill: { fgColor: { rgb: "EFF6FF" }, patternType: "solid" },
+        alignment: { horizontal: "center", vertical: "center" },
+        border: thinBorder,
+      };
+      const summaryIndigo = {
+        font: { bold: true, sz: 11, color: { rgb: "3730A3" }, name: "Calibri" },
+        fill: { fgColor: { rgb: "EEF2FF" }, patternType: "solid" },
+        alignment: { horizontal: "center", vertical: "center" },
+        border: thinBorder,
+      };
+      const summarySky = {
+        font: { bold: true, sz: 11, color: { rgb: "0369A1" }, name: "Calibri" },
+        fill: { fgColor: { rgb: "F0F9FF" }, patternType: "solid" },
+        alignment: { horizontal: "center", vertical: "center" },
+        border: thinBorder,
       };
 
-      setStyle(`A${rowNum}`, { ...base, font: { ...base.font, color: { rgb: "64748B" } } });
-      setStyle(`B${rowNum}`, { ...base, font: { ...base.font, name: "Courier New", color: { rgb: "7C3AED" } } });
-      setStyle(`C${rowNum}`, { ...base, font: { ...base.font, bold: true } });
-      setStyle(`D${rowNum}`, {
-        ...base,
-        font: { ...base.font, color: { rgb: "4338CA" } },
-        fill: { fgColor: { rgb: isEven ? "F5F3FF" : "EDE9FE" }, patternType: "solid" },
-        alignment: { horizontal: "center", vertical: "center" },
-      });
-      setStyle(`E${rowNum}`, {
-        ...base,
-        font: { ...base.font, bold: true, color: { rgb: "15803D" } },
-        alignment: { horizontal: "right", vertical: "center" },
-      });
-      setStyle(`F${rowNum}`, {
-        ...base,
-        font: { ...base.font, color: { rgb: "22C55E" } },
-        alignment: { horizontal: "right", vertical: "center" },
-      });
+      setStyle("A5", summaryLabel);
+      setStyle("B5", summaryEmerald);
+      setStyle("D5", summaryLabel);
+      setStyle("E5", summaryIndigo);
 
-      type StatusMap = { [key: string]: { font: string; fill: string } };
-      const statusMap: StatusMap = {
-        success:   { font: "166534", fill: "DCFCE7" },
-        completed: { font: "166534", fill: "DCFCE7" },
-        failed:    { font: "991B1B", fill: "FEE2E2" },
-        error:     { font: "991B1B", fill: "FEE2E2" },
-        pending:   { font: "92400E", fill: "FEF3C7" },
+      setStyle("A6", summaryLabel);
+      setStyle("B6", summaryBlue);
+      setStyle("D6", summaryLabel);
+      setStyle("E6", summarySky);
+
+      const headerStyle = {
+        font: { bold: true, sz: 10, color: { rgb: "FFFFFF" }, name: "Calibri" },
+        fill: { fgColor: { rgb: "1E3A5F" }, patternType: "solid" },
+        alignment: { horizontal: "center", vertical: "center" },
+        border: mediumBorder,
       };
-      const sc = statusMap[status] || { font: "1E293B", fill: baseFill };
-      setStyle(`G${rowNum}`, {
-        ...base,
-        font: { ...base.font, bold: true, color: { rgb: sc.font } },
-        fill: { fgColor: { rgb: sc.fill }, patternType: "solid" },
-        alignment: { horizontal: "center", vertical: "center" },
+      ["A", "B", "C", "D", "E", "F", "G"].forEach((col) => setStyle(`${col}8`, headerStyle));
+
+      exportTxList.forEach((tx: any, i: number) => {
+        const rowNum = 9 + i;
+        const isEven = i % 2 === 0;
+        const amount = Math.abs(Number(tx.amount) || 0);
+        const status = (tx.status || "").toLowerCase();
+        const baseFill = isEven ? "FFFFFF" : "F8FAFC";
+
+        const base = {
+          font: { sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
+          fill: { fgColor: { rgb: baseFill }, patternType: "solid" },
+          alignment: { horizontal: "left", vertical: "center" },
+          border: hairBorder,
+        };
+
+        setStyle(`A${rowNum}`, { ...base, font: { ...base.font, color: { rgb: "64748B" } } });
+        setStyle(`B${rowNum}`, { ...base, font: { ...base.font, name: "Courier New", color: { rgb: "7C3AED" } } });
+        setStyle(`C${rowNum}`, { ...base, font: { ...base.font, bold: true } });
+        setStyle(`D${rowNum}`, {
+          ...base,
+          font: { ...base.font, color: { rgb: "4338CA" } },
+          fill: { fgColor: { rgb: isEven ? "F5F3FF" : "EDE9FE" }, patternType: "solid" },
+          alignment: { horizontal: "center", vertical: "center" },
+        });
+        setStyle(`E${rowNum}`, {
+          ...base,
+          font: { ...base.font, bold: true, color: { rgb: "15803D" } },
+          alignment: { horizontal: "right", vertical: "center" },
+        });
+        setStyle(`F${rowNum}`, {
+          ...base,
+          font: { ...base.font, color: { rgb: "22C55E" } },
+          alignment: { horizontal: "right", vertical: "center" },
+        });
+
+        type StatusMap = { [key: string]: { font: string; fill: string } };
+        const statusMap: StatusMap = {
+          success:   { font: "166534", fill: "DCFCE7" },
+          completed: { font: "166534", fill: "DCFCE7" },
+          failed:    { font: "991B1B", fill: "FEE2E2" },
+          error:     { font: "991B1B", fill: "FEE2E2" },
+          pending:   { font: "92400E", fill: "FEF3C7" },
+        };
+        const sc = statusMap[status] || { font: "1E293B", fill: baseFill };
+        setStyle(`G${rowNum}`, {
+          ...base,
+          font: { ...base.font, bold: true, color: { rgb: sc.font } },
+          fill: { fgColor: { rgb: sc.fill }, patternType: "solid" },
+          alignment: { horizontal: "center", vertical: "center" },
+        });
       });
-    });
 
-    worksheet["!rows"] = [
-      { hpt: 34 },
-      { hpt: 22 },
-      { hpt: 16 },
-      { hpt: 8 },
-      { hpt: 20 },
-      { hpt: 20 },
-      { hpt: 8 },
-      { hpt: 22 },
-    ];
+      worksheet["!rows"] = [
+        { hpt: 34 },
+        { hpt: 22 },
+        { hpt: 16 },
+        { hpt: 8 },
+        { hpt: 20 },
+        { hpt: 20 },
+        { hpt: 8 },
+        { hpt: 22 },
+      ];
 
-    const workbook = utils.book_new();
-    utils.book_append_sheet(workbook, worksheet, "Transaction Logs");
-    workbook.Props = {
-      Title: "Transaction Logs",
-      Subject: "Fare Collection Transaction Export",
-      Author: adminName,
-      CreatedDate: new Date(),
-    };
-    writeFile(workbook, `transaction-logs${filenameSuffix}-${stamp}.xlsx`);
+      const workbook = utils.book_new();
+      utils.book_append_sheet(workbook, worksheet, "Transaction Logs");
+      workbook.Props = {
+        Title: "Transaction Logs",
+        Subject: "Fare Collection Transaction Export",
+        Author: adminName,
+        CreatedDate: new Date(),
+      };
+      writeFile(workbook, `transaction-logs${filenameSuffix}-${stamp}.xlsx`);
+    } catch (err) {
+      console.error("Excel export failed:", err);
+      setExportError("Export failed — could not load the full transaction list. Please try again.");
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -630,14 +674,20 @@ export default function ReportsPage() {
               Real-time Stream Active
             </span>
           </div>
-          <Button
-            onClick={handleExportExcelLogs}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm"
-            data-testid="button-export-excel-logs"
-          >
-            <FileSpreadsheet className="w-4 h-4 mr-2" />
-            Export Excel Logs
-          </Button>
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              onClick={handleExportExcelLogs}
+              disabled={isExporting}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+              data-testid="button-export-excel-logs"
+            >
+              <FileSpreadsheet className="w-4 h-4 mr-2" />
+              {isExporting ? "Exporting..." : "Export Excel Logs"}
+            </Button>
+            {exportError && (
+              <span className="text-[11px] text-red-500 font-medium max-w-[220px] text-right">{exportError}</span>
+            )}
+          </div>
           <Button
             onClick={handleOpenPreview}
             className={`font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm border ${
