@@ -779,6 +779,18 @@ export default function ReportsPage() {
     };
   }, [filteredFareList, getTxCardType]);
 
+  // ── Daily Average (Fare collections) for the currently active filter
+  // period — total collected divided by the number of calendar days
+  // covered by filteredFareDiscountBreakdown (which is already the full,
+  // zero-filled range whenever a Year is selected, or just the days that
+  // exist when it isn't). Powers the new "Daily Average" chip on the
+  // Discount Collection Analytics tab. ──
+  const discountDailyAverage = React.useMemo(() => {
+    const dayCount = filteredFareDiscountBreakdown.length;
+    if (dayCount === 0) return 0;
+    return discountSummary.totalCollected / dayCount;
+  }, [filteredFareDiscountBreakdown, discountSummary.totalCollected]);
+
   // ── filtered transfers, same date-filter rule as transactions above,
   // driving the "Transfers" export tab. ──
   const filteredTransfersList = React.useMemo(() => {
@@ -1314,9 +1326,10 @@ export default function ReportsPage() {
           ) : (
             <>
               {/* Summary chips */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                 {[
                   { label: "Total Fare Collected", value: formatPeso(discountSummary.totalCollected), icon: Wallet, color: isDark ? "text-blue-400" : "text-blue-600", bg: isDark ? "bg-blue-950/40" : "bg-blue-50", border: isDark ? "border-blue-900" : "border-blue-100" },
+                  { label: "Daily Average", value: formatPeso(discountDailyAverage), icon: Activity, color: isDark ? "text-cyan-400" : "text-cyan-600", bg: isDark ? "bg-cyan-950/40" : "bg-cyan-50", border: isDark ? "border-cyan-900" : "border-cyan-100" },
                   { label: "Regular (Full Fare)", value: formatPeso(discountSummary.regularRevenue), icon: Receipt, color: isDark ? "text-slate-300" : "text-slate-600", bg: isDark ? "bg-slate-800/60" : "bg-slate-100", border: isDark ? "border-slate-700" : "border-slate-200" },
                   { label: "Total Discounted", value: formatPeso(discountSummary.discountedRevenue), icon: Percent, color: isDark ? "text-purple-400" : "text-purple-600", bg: isDark ? "bg-purple-950/40" : "bg-purple-50", border: isDark ? "border-purple-900" : "border-purple-100" },
                   { label: "Discounted Share", value: `${discountSummary.discountedSharePct.toFixed(1)}%`, icon: Percent, color: isDark ? "text-orange-400" : "text-orange-600", bg: isDark ? "bg-orange-950/40" : "bg-orange-50", border: isDark ? "border-orange-900" : "border-orange-100" },
