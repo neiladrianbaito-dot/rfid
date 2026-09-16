@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { useGetReportSummary, useListTransactions, useListUsers } from "@workspace/api-client-react";
+import { useGetReportSummary, useListTransactions, useListUsers, useListRoutes } from "@workspace/api-client-react";
+// NOTE: if your generated client names this hook differently (e.g.
+// useListFareRoutes / useListActiveRoutes), rename the import + the call
+// below to match — it should hit the same GET /routes endpoint that
+// returns { id, origin, destination, fareAmount, isActive, deviceId }.
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -41,6 +45,10 @@ import {
   Percent,
   Wallet,
   Receipt,
+  Route as RouteIcon,
+  Award,
+  Users,
+  Sparkles,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -99,6 +107,15 @@ const DISCOUNT_LINE_COLORS = {
   senior: "#eab308", // yellow
   pwd: "#10b981", // emerald
 };
+
+// 🎨 Line colors for the Route Performance chart — one per plotted route
+// (up to 5 shown at once to keep the chart legible). Cycles if more.
+const ROUTE_LINE_COLORS = ["#3b82f6", "#f97316", "#10b981", "#a855f7", "#ef4444"];
+
+// How many days ahead the Route Performance forecast projects.
+const ROUTE_FORECAST_DAYS = 7;
+// How many of the busiest routes get their own line on the chart.
+const ROUTE_CHART_TOP_N = 5;
 
 function getLocalDateString(): string {
   return new Date().toLocaleDateString("en-CA");
@@ -249,6 +266,44 @@ function generateDateRange(filterYear: string, filterMonth: string, filterDay: s
 
   // Year + Month + Day -> the single day
   return [`${year}-${filterMonth}-${filterDay}`];
+}
+
+// Returns the "YYYY-MM-DD" date that is `days` after `dateStr` (local time).
+// Used to extend the x-axis past the last real day of data so the forecast
+// lines on the Route Performance chart have somewhere to go.
+function addDaysToDateString(dateStr: string, days: number): string {
+  const dt = new Date(dateStr + "T00:00:00");
+  dt.setDate(dt.getDate() + days);
+  return dt.toLocaleDateString("en-CA");
+}
+
+// ── Simple least-squares linear regression forecast ──
+// Not a full predictive-analytics model — just a lightweight trend
+// projection (best-fit straight line through the recent daily counts,
+// extended `forecastCount` days forward). Good enough to flag "this route
+// is trending up/down" without pretending to be more precise than the data
+// supports. Negative predictions are clamped to 0 since ridership/revenue
+// can't go below zero.
+function linearRegressionForecast(values: number[], forecastCount: number): number[] {
+  const n = values.length;
+  if (n === 0) return Array(forecastCount).fill(0);
+  if (n === 1) return Array(forecastCount).fill(Math.max(0, values[0]));
+
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  values.forEach((y, x) => {
+    sumX += x;
+    sumY += y;
+    sumXY += x * y;
+    sumXX += x * x;
+  });
+  const denominator = n * sumXX - sumX * sumX;
+  const slope = denominator !== 0 ? (n * sumXY - sumX * sumY) / denominator : 0;
+  const intercept = (sumY - slope * sumX) / n;
+
+  return Array.from({ length: forecastCount }, (_, i) => {
+    const x = n + i;
+    return Math.max(0, Math.round(intercept + slope * x));
+  });
 }
 
 // ── shared Excel styling helpers (used by every sheet the export builds) ──
@@ -454,7 +509,7 @@ export default function ReportsPage() {
   // one-tab-visible-at-a-time pattern as the Top-up / Fare / Transfer
   // switch on the Transactions page. The Year/Month/Day filter above
   // applies to whichever tab is active. ──
-  const [activeTab, setActiveTab] = useState<"chart" | "discount" | "log">("chart");
+  const [activeTab, setActiveTab] = useState<"chart" | "discount" | "log" | "routes">("chart");
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
@@ -464,6 +519,7 @@ export default function ReportsPage() {
   });
   const { data: transactions, refetch: refetchTransactions } = useListTransactions();
   const { data: users, refetch: refetchUsers } = useListUsers();
+  const { data: routes, refetch: refetchRoutes } = useListRoutes();
 
   // ── card balance transfers (needed for the "Transfers" export tab). Not
   // exposed anywhere else on this page — fetched the same way the
@@ -499,6 +555,7 @@ export default function ReportsPage() {
     refetchReport();
     refetchTransactions();
     refetchUsers();
+    refetchRoutes();
   });
 
   useEffect(() => {
@@ -516,6 +573,26 @@ export default function ReportsPage() {
 
   const txList = React.useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
   const userList = React.useMemo(() => (Array.isArray(users) ? users : []), [users]);
+  const routeList = React.useMemo(() => (Array.isArray(routes) ? routes : []), [routes]);
+
+  // ── route_id -> "Origin → Destination" lookup, used to turn the raw
+  // routeId on each Fare transaction into a readable route name for the
+  // Route Performance tab. Falls back to "Route #<id>" for a route that
+  // was deleted after transactions referencing it were recorded. ──
+  const routeNameById = React.useMemo(() => {
+    const map = new Map<number, string>();
+    routeList.forEach((r: any) => {
+      const id = Number(r.id);
+      if (!Number.isFinite(id)) return;
+      map.set(id, `${r.origin} → ${r.destination}`);
+    });
+    return map;
+  }, [routeList]);
+
+  const getRouteName = React.useCallback(
+    (routeId: number) => routeNameById.get(routeId) || `Route #${routeId}`,
+    [routeNameById]
+  );
 
   // ── card_uid -> card type lookup, used to attribute each Fare
   // transaction to Regular / Student / Senior / PWD for the discount
@@ -790,6 +867,139 @@ export default function ReportsPage() {
     if (dayCount === 0) return 0;
     return discountSummary.totalCollected / dayCount;
   }, [filteredFareDiscountBreakdown, discountSummary.totalCollected]);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ROUTE PERFORMANCE — which route gets the most riders/day, a line-graph
+  // trend per route with a short forecast, and each route's daily average.
+  // Built from Fare transactions only (routeId is null on Top-up rows).
+  // ══════════════════════════════════════════════════════════════════════
+
+  // ── per-day, per-route ride count + revenue, from the filtered Fare
+  // list. Keyed by date -> routeId -> { count, revenue }. ──
+  const routeDailyMap = React.useMemo(() => {
+    const map = new Map<string, Map<number, { count: number; revenue: number }>>();
+    filteredFareList.forEach((tx: any) => {
+      const routeId = tx.routeId ?? tx.route_id;
+      if (routeId === null || routeId === undefined) return;
+      const rid = Number(routeId);
+      if (!Number.isFinite(rid)) return;
+      const dateKey = getTxDateKey(tx);
+      if (!dateKey) return;
+      const amount = Math.abs(Number(tx.amount) || 0);
+      const dayMap = map.get(dateKey) || new Map<number, { count: number; revenue: number }>();
+      const entry = dayMap.get(rid) || { count: 0, revenue: 0 };
+      entry.count += 1;
+      entry.revenue += amount;
+      dayMap.set(rid, entry);
+      map.set(dateKey, dayMap);
+    });
+    return map;
+  }, [filteredFareList]);
+
+  // ── totals per route across the whole filtered period, used for the
+  // "most sinasakyang ruta" ranking and the daily-average table. ──
+  const routeTotals = React.useMemo(() => {
+    const totals = new Map<number, { count: number; revenue: number }>();
+    filteredFareList.forEach((tx: any) => {
+      const routeId = tx.routeId ?? tx.route_id;
+      if (routeId === null || routeId === undefined) return;
+      const rid = Number(routeId);
+      if (!Number.isFinite(rid)) return;
+      const amount = Math.abs(Number(tx.amount) || 0);
+      const t = totals.get(rid) || { count: 0, revenue: 0 };
+      t.count += 1;
+      t.revenue += amount;
+      totals.set(rid, t);
+    });
+    return totals;
+  }, [filteredFareList]);
+
+  // The full calendar-day range for the active filter (already computed
+  // above for the discount table) — reused here as the shared x-axis for
+  // the route ridership chart, and as the denominator for daily averages.
+  const routePeriodDates = React.useMemo(
+    () => filteredFareDiscountBreakdown.map((d) => d.date),
+    [filteredFareDiscountBreakdown]
+  );
+  const routePeriodDayCount = routePeriodDates.length || 1;
+
+  // Total routed Fare rides in the period — denominator for each route's
+  // "share of rides" figure below.
+  const totalRoutedRides = React.useMemo(() => {
+    let total = 0;
+    routeTotals.forEach((t) => (total += t.count));
+    return total;
+  }, [routeTotals]);
+
+  // Every route that had at least one ride in the period, ranked by total
+  // rides descending — #1 is the "pinaka-sinasakyang ruta".
+  const rankedRoutes = React.useMemo(() => {
+    return Array.from(routeTotals.entries())
+      .map(([routeId, t]) => ({
+        routeId,
+        name: getRouteName(routeId),
+        totalRides: t.count,
+        totalRevenue: t.revenue,
+        avgRidesPerDay: t.count / routePeriodDayCount,
+        avgRevenuePerDay: t.revenue / routePeriodDayCount,
+        sharePct: totalRoutedRides > 0 ? (t.count / totalRoutedRides) * 100 : 0,
+      }))
+      .sort((a, b) => b.totalRides - a.totalRides);
+  }, [routeTotals, getRouteName, routePeriodDayCount, totalRoutedRides]);
+
+  const topRoute = rankedRoutes[0] || null;
+  const topRoutesForChart = rankedRoutes.slice(0, ROUTE_CHART_TOP_N);
+
+  // ── chart data: actual daily ride counts for the top routes, plus a
+  // short linear-trend forecast appended after the last real day. Two
+  // dataKeys per route ("..._actual" solid, "..._forecast" dashed) so
+  // recharts can style the projected segment differently. The forecast
+  // series starts on the last actual day (duplicating that value) so the
+  // dashed line visually connects to the solid one instead of jumping. ──
+  const { routeChartData, routeChartSeries } = React.useMemo(() => {
+    if (topRoutesForChart.length === 0 || routePeriodDates.length === 0) {
+      return { routeChartData: [] as any[], routeChartSeries: [] as any[] };
+    }
+
+    const series = topRoutesForChart.map((r, idx) => {
+      const actualValues = routePeriodDates.map((date) => {
+        const dayMap = routeDailyMap.get(date);
+        return dayMap?.get(r.routeId)?.count ?? 0;
+      });
+      const forecastValues = linearRegressionForecast(actualValues, ROUTE_FORECAST_DAYS);
+      return {
+        routeId: r.routeId,
+        name: r.name,
+        color: ROUTE_LINE_COLORS[idx % ROUTE_LINE_COLORS.length],
+        actualKey: `r${r.routeId}_actual`,
+        forecastKey: `r${r.routeId}_forecast`,
+        actualValues,
+        forecastValues,
+      };
+    });
+
+    const lastDate = routePeriodDates[routePeriodDates.length - 1];
+    const forecastDates = Array.from({ length: ROUTE_FORECAST_DAYS }, (_, i) =>
+      addDaysToDateString(lastDate, i + 1)
+    );
+    const allDates = [...routePeriodDates, ...forecastDates];
+
+    const data = allDates.map((date, idx) => {
+      const row: any = { date, isForecast: idx >= routePeriodDates.length };
+      series.forEach((s) => {
+        if (idx < routePeriodDates.length) {
+          row[s.actualKey] = s.actualValues[idx];
+          row[s.forecastKey] = idx === routePeriodDates.length - 1 ? s.actualValues[idx] : null;
+        } else {
+          row[s.actualKey] = null;
+          row[s.forecastKey] = s.forecastValues[idx - routePeriodDates.length];
+        }
+      });
+      return row;
+    });
+
+    return { routeChartData: data, routeChartSeries: series };
+  }, [topRoutesForChart, routePeriodDates, routeDailyMap]);
 
   // ── filtered transfers, same date-filter rule as transactions above,
   // driving the "Transfers" export tab. ──
@@ -1219,6 +1429,18 @@ export default function ReportsPage() {
           <FileText className="w-3.5 h-3.5" />
           Detailed Revenue Log
         </button>
+        <button
+          onClick={() => setActiveTab("routes")}
+          data-testid="button-tab-routes"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+            activeTab === "routes"
+              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <RouteIcon className="w-3.5 h-3.5" />
+          Route Performance
+        </button>
       </div>
 
       {/* ══ TAB CONTENT — only the active tab's card renders ══ */}
@@ -1535,6 +1757,237 @@ export default function ReportsPage() {
                   </Table>
                 </div>
               )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+      )}
+
+      {/* ══ ROUTE PERFORMANCE ══
+          Which route gets the most riders/day (Fare transactions only,
+          grouped by routeId), a line-graph trend per route with a short
+          linear-trend forecast, and each route's daily average. Same
+          Year/Month/Day filter as the other tabs. */}
+      {activeTab === "routes" && (
+      <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-amber-500 to-transparent" />
+        <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <RouteIcon size={14} className="text-orange-500" />
+              Route Performance
+              {isFilterActive && (
+                <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  — {filterLabel}
+                </span>
+              )}
+            </CardTitle>
+            <div className={`text-[10px] font-medium uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              <Sparkles size={11} className="text-amber-500" />
+              Fare rides only · {ROUTE_FORECAST_DAYS}-day trend forecast
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6 space-y-6">
+          {isLoading ? (
+            <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+          ) : rankedRoutes.length === 0 ? (
+            <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              No routed Fare rides match the selected filter.
+            </div>
+          ) : (
+            <>
+              {/* ── Top route highlight ── */}
+              {topRoute && (
+                <div className={`flex items-center gap-4 rounded-lg border px-5 py-4 ${
+                  isDark ? "bg-amber-950/30 border-amber-900" : "bg-amber-50 border-amber-200"
+                }`}>
+                  <div className={`w-11 h-11 rounded-lg flex items-center justify-center flex-none ${
+                    isDark ? "bg-amber-900/50 text-amber-400" : "bg-amber-100 text-amber-600"
+                  }`}>
+                    <Award size={22} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-amber-500/80" : "text-amber-700/80"}`}>
+                      Pinaka-Sinasakyang Ruta {isFilterActive ? `(${filterLabel})` : "(All-time)"}
+                    </p>
+                    <p className={`text-lg font-bold tracking-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
+                      {topRoute.name}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-6 flex-none">
+                    <div className="text-right">
+                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Rides</p>
+                      <p className={`text-lg font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>{topRoute.totalRides.toLocaleString("en-US")}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily Avg</p>
+                      <p className={`text-lg font-bold font-mono ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                        {topRoute.avgRidesPerDay.toFixed(1)} <span className="text-xs font-normal opacity-70">rides/day</span>
+                      </p>
+                    </div>
+                    <div className="text-right hidden sm:block">
+                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revenue</p>
+                      <p className={`text-lg font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>{formatPeso(topRoute.totalRevenue)}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Ranking badges for the rest of the top routes ── */}
+              {rankedRoutes.length > 1 && (
+                <div className="flex flex-wrap gap-3">
+                  {rankedRoutes.slice(1, ROUTE_CHART_TOP_N).map((r, idx) => (
+                    <div
+                      key={r.routeId}
+                      className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${
+                        isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50 border-slate-200"
+                      }`}
+                    >
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold flex-none ${
+                        isDark ? "bg-slate-700 text-slate-300" : "bg-slate-200 text-slate-600"
+                      }`}>
+                        {idx + 2}
+                      </div>
+                      <div>
+                        <div className={`text-xs font-bold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</div>
+                        <div className={`text-[11px] font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {r.totalRides.toLocaleString("en-US")} rides · {r.avgRidesPerDay.toFixed(1)}/day · {r.sharePct.toFixed(0)}% share
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Line graph: ridership trend per route + short forecast ── */}
+              {routeChartData.length === 0 ? (
+                <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  Not enough data to chart a trend for this filter.
+                </div>
+              ) : (
+                <div className="h-[340px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={routeChartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={(d: string) => {
+                          const date = new Date(d + "T00:00:00");
+                          return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                        }}
+                        stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
+                      />
+                      <YAxis
+                        allowDecimals={false}
+                        stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
+                        tickFormatter={(v: number) => `${v}`} axisLine={false} tickLine={false}
+                        label={{
+                          value: "Rides / day",
+                          angle: -90,
+                          position: "insideLeft",
+                          style: { fontSize: 10, fontWeight: 600, fill: isDark ? "#64748b" : "#94a3b8" },
+                        }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                          border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                          borderRadius: "8px",
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                        }}
+                        labelFormatter={(d: string) => {
+                          const date = new Date(d + "T00:00:00");
+                          return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                        }}
+                        labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
+                        formatter={(value: number, name: string) =>
+                          value === null || value === undefined ? ["—", name] : [`${value} rides`, name]
+                        }
+                      />
+                      <Legend
+                        wrapperStyle={{ fontSize: "11px", fontWeight: 600 }}
+                        formatter={(value: string) => (
+                          <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>
+                        )}
+                      />
+                      {routeChartSeries.map((s) => (
+                        <Line
+                          key={s.actualKey}
+                          type="monotone"
+                          dataKey={s.actualKey}
+                          name={s.name}
+                          stroke={s.color}
+                          strokeWidth={2.5}
+                          dot={false}
+                          activeDot={{ r: 4 }}
+                          connectNulls={false}
+                        />
+                      ))}
+                      {routeChartSeries.map((s) => (
+                        <Line
+                          key={s.forecastKey}
+                          type="monotone"
+                          dataKey={s.forecastKey}
+                          name={`${s.name} (Forecast)`}
+                          stroke={s.color}
+                          strokeWidth={2}
+                          strokeDasharray="5 4"
+                          dot={false}
+                          activeDot={{ r: 3 }}
+                          legendType="none"
+                          connectNulls={false}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* ── Daily average table, every routed ride in the period ── */}
+              <div className="overflow-x-auto -mx-2 px-2">
+                <Table>
+                  <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
+                    <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>#</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Route</TableHead>
+                      <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-orange-500">Total Rides</TableHead>
+                      <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">Daily Avg (Rides)</TableHead>
+                      <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Revenue</TableHead>
+                      <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily Avg (Revenue)</TableHead>
+                      <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Share</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rankedRoutes.map((r, i) => (
+                      <TableRow
+                        key={r.routeId}
+                        className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
+                      >
+                        <TableCell className={`text-xs font-bold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{i + 1}</TableCell>
+                        <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</TableCell>
+                        <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                          {r.totalRides.toLocaleString("en-US")}
+                        </TableCell>
+                        <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                          {r.avgRidesPerDay.toFixed(1)}
+                        </TableCell>
+                        <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {formatPeso(r.totalRevenue)}
+                        </TableCell>
+                        <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {formatPeso(r.avgRevenuePerDay)}
+                        </TableCell>
+                        <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
+                          {r.sharePct.toFixed(1)}%
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </>
           )}
         </CardContent>
