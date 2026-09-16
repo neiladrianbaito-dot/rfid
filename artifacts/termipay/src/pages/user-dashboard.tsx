@@ -1,1095 +1,1055 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import {
-  useListTransactions,
-} from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation } from "wouter";
+import { User, Phone, Tag, ShieldCheck, LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings, ChevronRight, ArrowLeft, ArrowRight, List, Pencil, Check, X as XIcon, Sun, Moon, Link2, Unlink2, AlertTriangle, RotateCw } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useCardData } from "@/hooks/use-card-data";
+import { useChangePassword } from "@/hooks/use-change-password";
+import { useLinkCard } from "@/hooks/use-link-card";
+import { useTopup } from "@/hooks/use-topup";
+import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import {
-  Search, Zap, History, ChevronLeft, ChevronRight,
-  Eye, CheckCircle2, XCircle, Clock, Route, CreditCard, ArrowLeftRight,
-  ArrowRightLeft, ReceiptText,
-} from "lucide-react";
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
-import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
-import { supabase } from "@/lib/supabase";
+import { useDashboardAuth } from "@/hooks/use-dashboard-auth";
+import { useDashboardProfile } from "@/hooks/use-dashboard-profile";
+import { useFareRoutes } from "@/hooks/use-fare-routes";
+import { useDashboardLayout } from "@/hooks/use-dashboard-layout";
+import { LinkCardModal } from "@/components/link-card-modal";
+import { TopupModal } from "@/components/topup-modal";
+import { ChangePasswordModal } from "@/components/change-password-modal";
+import { TransactionDetailModal, type Transaction } from "@/components/transaction-detail-modal";
+import { AuthCheckingScreen } from "@/components/dashboard/auth-checking-screen";
+import { SkeletonBar, SkeletonRow } from "@/components/dashboard/skeletons";
+import { VirtualCard, VirtualCardSkeleton } from "@/components/dashboard/virtual-card";
+import { MobileTxRow } from "@/components/dashboard/mobile-tx-row";
+import { LinkReminderBanner } from "@/components/dashboard/link-reminder-banner";
+import { formatAmount, getInitials, normalizeApiBaseUrl } from "@/lib/dashboard-formatters";
+import { USER_AUTH_TOKEN_KEY, unlinkUserCard } from "@/lib/api";
+import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 
-const PAGE_SIZE = 10;
+export default function PaymongoDashboardPage() {
+  const [, setLocation] = useLocation();
+  const { isDark, toggleTheme } = useTheme();
+  const { cardUid, setCardUid, authProfile, authChecking } = useDashboardAuth();
+  const { user, transactions, loading, error, isPulsing } = useCardData(cardUid);
+  const currentBalance = Number(user?.balance || 0);
+  const isLinked = Boolean(cardUid);
+  const dullClass = !isLinked ? "opacity-40 grayscale pointer-events-none select-none" : "";
+  const cardDataLoading = isLinked && loading && !user;
+  const linkCard = useLinkCard((uid) => setCardUid(uid));
+  const topup = useTopup(cardUid, currentBalance);
+  const changePassword = useChangePassword();
+  const { toast } = useToast();
+  const routes = useFareRoutes();
+  const { headerRef, navRef, headerHeight, navHeight } = useDashboardLayout();
+  const displayName = (isLinked ? user?.fullName : authProfile?.fullName) || "";
+  const displayContactBase = isLinked ? (user?.contactNumber || "") : "";
+  const displayEmailBase = isLinked ? (user?.email || "") : (authProfile?.email || "");
+  const profile = useDashboardProfile({ cardUid, isLinked, displayContact: displayContactBase, displayEmail: displayEmailBase, toast });
+  const { editingContact, editingEmail, contactValue, emailValue, savingField, localContact, localEmail, setContactValue, setEmailValue, startEditContact, cancelEditContact, handleSaveContact, startEditEmail, cancelEditEmail, handleSaveEmail } = profile;
+  const displayContact = isLinked ? (localContact ?? user?.contactNumber ?? "") : "";
+  const displayEmail = localEmail ?? (isLinked ? user?.email : authProfile?.email) ?? "";
+  const remainingTopup = Math.max(0, 20000 - currentBalance);
+  const isAtMaxBalance = remainingTopup <= 0;
+  // Card must be linked AND status must be "Active" for top-up (and other
+  // card actions) to be allowed. A blocked/inactive card should never let
+  // the user push more money onto it.
+  const isCardUsable = isLinked && user?.status === "Active";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-type FareRoute = {
-  id: number;
-  origin: string;
-  destination: string;
-  fare_amount: number;
-};
-
-// A "card" here is really the row from `users` that a card is tied to.
-// NOTE: adjust `card_uid` / `full_name` below if your `users` table uses
-// different column names — these mirror the fields transactions expose.
-type TransferCard = {
-  id: number;
-  card_uid?: string | null;
-  cardUid?: string | null;
-  full_name?: string | null;
-  fullName?: string | null;
-};
-
-type TransferStatus = "pending" | "completed" | "failed";
-
-type CardTransfer = {
-  id: number;
-  source_card_id: number;
-  target_card_id: number;
-  amount: number;
-  reason: string;
-  source_balance_before: number | null;
-  target_balance_before: number | null;
-  status: string;
-  created_at: string;
-  completed_at: string | null;
-  source: TransferCard | null;
-  target: TransferCard | null;
-};
-
-// ── Transaction type normalizer ────────────────────────────────────────────
-// The backend/db may store this as "Fare", "fare", "TopUp", "top_up",
-// "Top Up", "TOP-UP", etc. This forces a single canonical label everywhere
-// in the UI, regardless of how it's spelled/cased at the source.
-type TxType = "Fare" | "Top-up";
-
-function normalizeTxType(type?: string | null): TxType {
-  const key = (type ?? "").toLowerCase().replace(/[\s_-]/g, "");
-  if (key === "fare") return "Fare";
-  // Everything else (topup, top-up, TopUp, etc.) is treated as Top-up.
-  return "Top-up";
-}
-
-// Same idea as normalizeTxType — normalize whatever `status` comes back as
-// on card_balance_transfers ("pending", "Pending", "COMPLETED", etc.) into a
-// single canonical label.
-function normalizeTransferStatus(status?: string | null): TransferStatus {
-  const key = (status ?? "").toLowerCase().trim();
-  if (key === "completed" || key === "complete" || key === "success") return "completed";
-  if (key === "failed" || key === "failure" || key === "error") return "failed";
-  return "pending";
-}
-
-function cardUidOf(card?: TransferCard | null): string {
-  return card?.card_uid || card?.cardUid || "—";
-}
-
-function fullNameOf(card?: TransferCard | null): string {
-  return card?.full_name || card?.fullName || "Unknown";
-}
-
-// ── Payment method label map (same as TransactionDetailModal) ─────────────────
-
-function formatPaymentMethod(method?: string | null): string {
-  if (!method) return "—";
-  const map: Record<string, string> = {
-    gcash: "GCash",
-    paymaya: "Maya",
-    card: "Card",
-    grab_pay: "GrabPay",
-    billease: "BillEase",
-    dob: "Online Banking",
-    dob_ubp: "UnionBank",
-    qrph: "QR Ph",
-  };
-  const key = method.toLowerCase().trim();
-  return map[key] ?? method.charAt(0).toUpperCase() + method.slice(1);
-}
-
-// ── Payment method logo map (same pattern as TransactionDetailModal) ──────────
-// Only GCash has a dedicated logo right now; extend this as more logos are
-// added to /public (e.g. "/paymaya.svg", "/grabpay.svg", etc).
-function getPaymentMethodLogo(method?: string | null): string | null {
-  if (!method) return null;
-  const key = method.toLowerCase().trim();
-  if (key === "gcash") return "/gcash.svg";
-  return null;
-}
-
-// ── Receipt Modal ─────────────────────────────────────────────────────────────
-
-function ReceiptModal({
-  tx,
-  routes,
-  onClose,
-  isDark,
-}: {
-  tx: any | null;
-  routes: FareRoute[];
-  onClose: () => void;
-  isDark: boolean;
-}) {
-  if (!tx) return null;
-
-  const isFare = normalizeTxType(tx.type) === "Fare";
-  const amount = Math.abs(Number(tx.amount)).toLocaleString("en-PH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-  // Match route by route_id — same logic as TransactionDetailModal
-  const matchedRoute = isFare && tx.route_id
-    ? routes.find((r) => r.id === tx.route_id) ?? null
-    : null;
-
-  // Payment method is a plain string field on the transaction
-  const paymentMethodLabel = !isFare
-    ? formatPaymentMethod(tx.payment_method)
-    : null;
-  const paymentMethodLogo = !isFare
-    ? getPaymentMethodLogo(tx.payment_method)
-    : null;
-
-  const StatusIcon =
-    tx.status === "Failed" ? XCircle
-    : tx.status === "Pending" ? Clock
-    : CheckCircle2;
-
-  // Ring/icon color follows the TYPE theme (Fare = red, Top-up = green)
-  const statusRingClass = isFare
-    ? isDark
-      ? "ring-red-900 bg-red-950/40 text-red-400"
-      : "ring-red-100 bg-red-50 text-red-600"
-    : isDark
-      ? "ring-emerald-900 bg-emerald-950/40 text-emerald-400"
-      : "ring-emerald-100 bg-emerald-50 text-emerald-600";
-
-  const amountColor = isFare
-    ? isDark ? "text-red-400" : "text-red-600"
-    : isDark ? "text-emerald-400" : "text-emerald-600";
-  const accentColor = isFare ? "from-red-500 to-rose-400" : "from-emerald-500 to-cyan-400";
-  const closeBg = isFare ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700";
-
-  return (
-    <Dialog open={!!tx} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
-          isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
-        }`}
-      >
-
-        {/* a11y — DialogContent needs a Title + Description for screen readers */}
-        <VisuallyHidden>
-          <DialogTitle>Transaction Receipt</DialogTitle>
-          <DialogDescription>
-            Details for transaction #{tx.id}, a {isFare ? "fare deduction" : "balance top-up"} of ₱{amount}, status {tx.status}.
-          </DialogDescription>
-        </VisuallyHidden>
-
-        {/* Accent stripe */}
-        <div className={`h-1 w-full bg-gradient-to-r ${accentColor}`} />
-
-        <div className="px-5 pt-5 pb-6 space-y-5">
-
-          {/* Status + amount hero */}
-          <div className="flex flex-col items-center gap-2 pt-1">
-            <div className={`flex items-center justify-center w-12 h-12 rounded-full ring-2 ${statusRingClass}`}>
-              <StatusIcon className="w-5 h-5" />
-            </div>
-            <p className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              {isFare ? "Fare Deduction" : "Balance Top-up"}
-            </p>
-            <p className={`text-4xl font-bold tabular-nums tracking-tight ${amountColor}`}>
-              {isFare ? "−" : "+"}₱{amount}
-            </p>
-          </div>
-
-          {/* Dashed divider */}
-          <div className={`border-t border-dashed ${isDark ? "border-slate-800" : "border-slate-200"}`} />
-
-          {/* Detail rows */}
-          <div className={`rounded-xl overflow-hidden border divide-y ${isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-100"}`}>
-            {[
-              { label: "Transaction ID", value: `#${tx.id}`, mono: true },
-              {
-                label: "Timestamp",
-                value: new Date(tx.timestamp || tx.created_at).toLocaleString("en-PH", {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                }),
-              },
-              { label: "Card UID", value: tx.card_uid || tx.cardUid || "—", mono: true, accent: isDark ? "text-blue-400" : "text-blue-600" },
-              { label: "Full Name", value: tx.full_name || tx.fullName || "—", bold: true },
-              { label: "Status", value: tx.status },
-            ].map(({ label, value, mono, accent, bold }) => (
-              <div key={label} className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isDark ? "bg-slate-950/60" : "bg-slate-50"}`}>
-                <span className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  {label}
-                </span>
-                <span className={`text-xs text-right truncate max-w-[60%] ${mono ? "font-mono" : ""} ${bold ? "font-bold" : "font-medium"} ${accent ?? (isDark ? "text-slate-300" : "text-slate-700")}`}>
-                  {value}
-                </span>
-              </div>
-            ))}
-
-            {/* Route — Fare only, matched from Supabase fare_routes */}
-            {isFare && (
-              <div className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isDark ? "bg-slate-950/60" : "bg-slate-50"}`}>
-                <span className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  <Route className="w-3.5 h-3.5" />
-                  Route
-                </span>
-                <span className={`text-xs font-medium text-right max-w-[60%] flex items-center justify-end gap-1 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                  {matchedRoute
-                    ? (
-                      <>
-                        <span className="truncate">{matchedRoute.origin}</span>
-                        <ArrowLeftRight className="w-3 h-3 shrink-0 opacity-60" />
-                        <span className="truncate">{matchedRoute.destination}</span>
-                      </>
-                    )
-                    : <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>
-                  }
-                </span>
-              </div>
-            )}
-
-            {/* Payment method — Top-up only, read from tx.payment_method */}
-            {!isFare && (
-              <div className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isDark ? "bg-slate-950/60" : "bg-slate-50"}`}>
-                <span className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  <CreditCard className="w-3.5 h-3.5" />
-                  Payment method
-                </span>
-                <span className={`flex items-center justify-end gap-1.5 text-xs font-medium text-right truncate max-w-[60%] ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                  {paymentMethodLogo && (
-                    <img
-                      src={paymentMethodLogo}
-                      alt={paymentMethodLabel ?? ""}
-                      className="h-7 sm:h-8 w-auto max-w-[44px] object-contain shrink-0"
-                    />
-                  )}
-                  <span className="truncate">{paymentMethodLabel}</span>
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Total line */}
-          <div className={`border-t border-dashed pt-3 flex items-center justify-between ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-            <span className={`text-[11px] font-medium ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              {isFare ? "Amount deducted" : "Amount credited"}
-            </span>
-            <span className={`text-sm font-bold ${amountColor}`}>
-              {isFare ? "−" : "+"}₱{amount}
-            </span>
-          </div>
-
-          {/* Close button */}
-          <Button
-            onClick={onClose}
-            className={`w-full text-white font-semibold uppercase text-[11px] tracking-widest ${closeBg} transition-colors cursor-pointer`}
-          >
-            Close
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Transfer Detail Modal ──────────────────────────────────────────────────────
-// Same receipt-style treatment as ReceiptModal, but for a card_balance_transfers
-// row: who sent it (source card), who received it (target card), how much, why,
-// and whether it went through.
-
-function TransferModal({
-  transfer,
-  onClose,
-  isDark,
-}: {
-  transfer: CardTransfer | null;
-  onClose: () => void;
-  isDark: boolean;
-}) {
-  if (!transfer) return null;
-
-  const status = normalizeTransferStatus(transfer.status);
-  const amount = Math.abs(Number(transfer.amount)).toLocaleString("en-PH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-  const StatusIcon =
-    status === "failed" ? XCircle
-    : status === "pending" ? Clock
-    : CheckCircle2;
-
-  const statusRingClass = isDark
-    ? "ring-blue-900 bg-blue-950/40 text-blue-400"
-    : "ring-blue-100 bg-blue-50 text-blue-600";
-
-  return (
-    <Dialog open={!!transfer} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
-          isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
-        }`}
-      >
-        <VisuallyHidden>
-          <DialogTitle>Card Balance Transfer</DialogTitle>
-          <DialogDescription>
-            Transfer #{transfer.id}, ₱{amount} from card {cardUidOf(transfer.source)} to card{" "}
-            {cardUidOf(transfer.target)}, status {transfer.status}.
-          </DialogDescription>
-        </VisuallyHidden>
-
-        <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-400" />
-
-        <div className="px-5 pt-5 pb-6 space-y-5">
-          {/* Status + amount hero */}
-          <div className="flex flex-col items-center gap-2 pt-1">
-            <div className={`flex items-center justify-center w-12 h-12 rounded-full ring-2 ${statusRingClass}`}>
-              <StatusIcon className="w-5 h-5" />
-            </div>
-            <p className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              Card Balance Transfer
-            </p>
-            <p className={`text-4xl font-bold tabular-nums tracking-tight ${isDark ? "text-blue-400" : "text-blue-600"}`}>
-              ₱{amount}
-            </p>
-          </div>
-
-          {/* From → To */}
-          <div className={`flex items-center gap-2 rounded-xl border p-3 ${isDark ? "border-slate-800 bg-slate-950/60" : "border-slate-200 bg-slate-50"}`}>
-            <div className="flex-1 min-w-0">
-              <p className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>From</p>
-              <p className={`text-xs font-mono font-semibold truncate ${isDark ? "text-blue-400" : "text-blue-600"}`}>{cardUidOf(transfer.source)}</p>
-              <p className={`text-xs truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{fullNameOf(transfer.source)}</p>
-            </div>
-            <ArrowRightLeft className={`w-4 h-4 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
-            <div className="flex-1 min-w-0 text-right">
-              <p className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>To</p>
-              <p className={`text-xs font-mono font-semibold truncate ${isDark ? "text-blue-400" : "text-blue-600"}`}>{cardUidOf(transfer.target)}</p>
-              <p className={`text-xs truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{fullNameOf(transfer.target)}</p>
-            </div>
-          </div>
-
-          {/* Dashed divider */}
-          <div className={`border-t border-dashed ${isDark ? "border-slate-800" : "border-slate-200"}`} />
-
-          {/* Detail rows */}
-          <div className={`rounded-xl overflow-hidden border divide-y ${isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-100"}`}>
-            {[
-              { label: "Transfer ID", value: `#${transfer.id}`, mono: true },
-              {
-                label: "Requested",
-                value: new Date(transfer.created_at).toLocaleString("en-PH", {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                }),
-              },
-              ...(transfer.completed_at
-                ? [{
-                    label: "Completed",
-                    value: new Date(transfer.completed_at).toLocaleString("en-PH", {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    }),
-                  }]
-                : []),
-              { label: "Reason", value: transfer.reason || "—" },
-              ...(transfer.source_balance_before != null
-                ? [{ label: "Source balance before", value: `₱${Number(transfer.source_balance_before).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`, mono: true }]
-                : []),
-              ...(transfer.target_balance_before != null
-                ? [{ label: "Target balance before", value: `₱${Number(transfer.target_balance_before).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`, mono: true }]
-                : []),
-              { label: "Status", value: status.charAt(0).toUpperCase() + status.slice(1) },
-            ].map(({ label, value, mono }) => (
-              <div key={label} className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isDark ? "bg-slate-950/60" : "bg-slate-50"}`}>
-                <span className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  {label}
-                </span>
-                <span className={`text-xs text-right truncate max-w-[60%] font-medium ${mono ? "font-mono" : ""} ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                  {value}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <Button
-            onClick={onClose}
-            className="w-full text-white font-semibold uppercase text-[11px] tracking-widest bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer"
-          >
-            Close
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Main Page ─────────────────────────────────────────────────────────────────
-
-// ── Main Page ─────────────────────────────────────────────────────────────────
-
-export default function TransactionsPage() {
-  const { isDark } = useTheme();
-
-  // Three tabs now: Top-up, Fare, and Transfer — each shows its own full set
-  // of columns inline (no need to open the receipt modal to see payment
-  // method, transaction id, or route).
-  const [activeView, setActiveView] = useState<"topup" | "fare" | "transfers">("topup");
-
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [viewTx, setViewTx] = useState<any>(null);
-  const [page, setPage] = useState(1);
-  const [routes, setRoutes] = useState<FareRoute[]>([]);
-
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [newRowId, setNewRowId] = useState<number | null>(null);
-  const prevTopIdRef = useRef<number | null>(null);
-
-  // ── Transfers state ───────────────────────────────────────────────────────
-  const [transfers, setTransfers] = useState<CardTransfer[]>([]);
-  const [transfersLoading, setTransfersLoading] = useState(true);
-  const [transferSearch, setTransferSearch] = useState("");
-  const [transferStatusFilter, setTransferStatusFilter] = useState<string>("all");
-  const [transferPage, setTransferPage] = useState(1);
-  const [viewTransfer, setViewTransfer] = useState<CardTransfer | null>(null);
-  const [transfersLastUpdated, setTransfersLastUpdated] = useState<Date | null>(null);
-  const [newTransferRowId, setNewTransferRowId] = useState<number | null>(null);
-  const prevTopTransferIdRef = useRef<number | null>(null);
-
-  // ── Fetch fare_routes from Supabase once (same as dashboard) ──────────────
-  useEffect(() => {
-    const loadRoutes = async () => {
-      const { data, error } = await supabase
-        .from("fare_routes")
-        .select("id, origin, destination, fare_amount")
-        .order("id");
-      if (!error && data) setRoutes(data as FareRoute[]);
-    };
-    loadRoutes();
-
-    const channel = supabase
-      .channel("admin_fare_routes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "fare_routes" }, loadRoutes)
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, []);
-
-  // ── Fetch card_balance_transfers from Supabase, joined with the source /
-  // target `users` rows so we can show each card's UID + owner name. ────────
-  // If your `users` table doesn't expose `card_uid` / `full_name` directly,
-  // adjust the select() column list below to match.
-  useEffect(() => {
-    const loadTransfers = async () => {
-      setTransfersLoading(true);
-      const { data, error } = await supabase
-        .from("card_balance_transfers")
-        .select(`
-          id, source_card_id, target_card_id, amount, reason,
-          source_balance_before, target_balance_before, status,
-          created_at, completed_at,
-          source:users!card_balance_transfers_source_card_id_fkey(id, card_uid, full_name),
-          target:users!card_balance_transfers_target_card_id_fkey(id, card_uid, full_name)
-        `)
-        .order("created_at", { ascending: false });
-      if (!error && data) setTransfers(data as unknown as CardTransfer[]);
-      setTransfersLoading(false);
-    };
-    loadTransfers();
-
-    const channel = supabase
-      .channel("admin_card_balance_transfers")
-      .on("postgres_changes", { event: "*", schema: "public", table: "card_balance_transfers" }, loadTransfers)
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, []);
-
-  // ── Transactions query ────────────────────────────────────────────────────
-  // `type` is no longer sent to the backend — the DB can have inconsistent
-  // spellings ("topup", "TopUp", "top_up", etc.), so an exact-match
-  // server-side filter can silently exclude valid rows. Instead we fetch
-  // everything (search/status still filtered server-side) and split it into
-  // the Top-up / Fare tabs ourselves using normalizeTxType.
-  const params: any = {};
-  if (search) params.search = search;
-  if (statusFilter !== "all") params.status = statusFilter;
-
-  useEffect(() => { setPage(1); }, [search, statusFilter, activeView]);
-  useEffect(() => { setTransferPage(1); }, [transferSearch, transferStatusFilter]);
-
-  const { data: transactions, isLoading, refetch: refetchTransactions } =
-    useListTransactions(params, { query: { refetchOnWindowFocus: true } });
-
-  useRealtimeRefetch(["transactions"], () => { refetchTransactions(); });
-
-  const rawTransactionList = Array.isArray(transactions) ? transactions : [];
-
-  // Split once into the two type-based tabs. Memoized so these arrays keep
-  // the same reference across re-renders when nothing relevant changed —
-  // without this, `.filter()` would return a brand-new array every render,
-  // which retriggers the effect below (it depends on the list), which calls
-  // setLastUpdated → re-render → new filtered array → effect fires again,
-  // forever (React error #185 / "Maximum update depth exceeded").
-  const topupList = useMemo(
-    () => rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === "Top-up"),
-    [rawTransactionList],
-  );
-  const fareList = useMemo(
-    () => rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === "Fare"),
-    [rawTransactionList],
-  );
-  const currentTypeList = activeView === "fare" ? fareList : topupList;
-
-  const totalPages = Math.max(1, Math.ceil(currentTypeList.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const startIndex = (safePage - 1) * PAGE_SIZE;
-  const paginatedList = currentTypeList.slice(startIndex, startIndex + PAGE_SIZE);
+  const [activeTab, setActiveTab] = useState<Tab>("home");
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [virtualCardFlipped, setVirtualCardFlipped] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
+  const [slowLoadHint, setSlowLoadHint] = useState(false);
 
   useEffect(() => {
-    if (activeView === "transfers") return;
-    if (currentTypeList.length === 0) return;
-    const topId = currentTypeList[0]?.id;
-    if (prevTopIdRef.current !== null && topId !== prevTopIdRef.current) {
-      setNewRowId(topId);
-      setTimeout(() => setNewRowId(null), 800);
+    const isBusy = authChecking || cardDataLoading;
+    if (!isBusy) {
+      setSlowLoadHint(false);
+      return;
     }
-    prevTopIdRef.current = topId;
-    setLastUpdated(new Date());
-  }, [currentTypeList, activeView]);
+    const timer = setTimeout(() => setSlowLoadHint(true), 3500);
+    return () => clearTimeout(timer);
+  }, [authChecking, cardDataLoading]);
 
-  // ── Transfers filtering/search (client-side, same pattern as transactions) ─
-  const filteredTransferList = useMemo(() => {
-    let list = transfers;
-    if (transferStatusFilter !== "all") {
-      list = list.filter((t) => normalizeTransferStatus(t.status) === transferStatusFilter);
-    }
-    const q = transferSearch.trim().toLowerCase();
-    if (q) {
-      list = list.filter((t) => {
-        const haystack = [
-          cardUidOf(t.source), fullNameOf(t.source),
-          cardUidOf(t.target), fullNameOf(t.target),
-        ].join(" ").toLowerCase();
-        return haystack.includes(q);
-      });
-    }
-    return list;
-  }, [transfers, transferStatusFilter, transferSearch]);
 
-  const transferTotalPages = Math.max(1, Math.ceil(filteredTransferList.length / PAGE_SIZE));
-  const safeTransferPage = Math.min(transferPage, transferTotalPages);
-  const transferStartIndex = (safeTransferPage - 1) * PAGE_SIZE;
-  const paginatedTransferList = filteredTransferList.slice(transferStartIndex, transferStartIndex + PAGE_SIZE);
+  // ✅ Actual logout logic — only runs after user confirms
+  const handleLogout = async () => {
+    const token = window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
 
-  useEffect(() => {
-    if (filteredTransferList.length === 0) return;
-    const topId = filteredTransferList[0]?.id;
-    if (prevTopTransferIdRef.current !== null && topId !== prevTopTransferIdRef.current) {
-      setNewTransferRowId(topId);
-      setTimeout(() => setNewTransferRowId(null), 800);
-    }
-    prevTopTransferIdRef.current = topId;
-    setTransfersLastUpdated(new Date());
-  }, [filteredTransferList]);
-
-  const statusColor = (status: string) => {
-    if (isDark) {
-      switch (status) {
-        case "Success": return "bg-emerald-950/40 text-emerald-400 border-emerald-900";
-        case "Failed":  return "bg-red-950/40 text-red-400 border-red-900";
-        case "Pending": return "bg-amber-950/40 text-amber-400 border-amber-900";
-        default:        return "bg-slate-800 text-slate-400 border-slate-700";
+    if (token) {
+      try {
+        const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
+        await Promise.race([
+          fetch(`${apiBaseUrl}/api/auth/user/logout`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 1500)),
+        ]);
+      } catch (err) {
+        console.warn("Logout API call failed (ignoring):", err);
       }
     }
-    switch (status) {
-      case "Success": return "bg-emerald-50 text-emerald-600 border-emerald-200";
-      case "Failed":  return "bg-red-50 text-red-600 border-red-200";
-      case "Pending": return "bg-amber-50 text-amber-600 border-amber-200";
-      default:        return "bg-slate-100 text-slate-500 border-slate-200";
+
+    window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
+    setLocation("/signin");
+  };
+
+  const requestLogout = () => {
+    setLogoutConfirmOpen(true);
+  };
+
+  const confirmLogout = () => {
+    setLogoutConfirmOpen(false);
+    void handleLogout();
+  };
+
+  // ✅ Unlink card logic — user-initiated, requires confirmation
+  const handleUnlinkCard = async () => {
+    setUnlinking(true);
+    try {
+      await unlinkUserCard();
+      toast({ title: "Card unlinked", description: "Your card has been unlinked from your account." });
+      setUnlinkConfirmOpen(false);
+      setCardUid("");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to unlink card.";
+      toast({ title: "Unlink failed", description: message, variant: "destructive" });
+    } finally {
+      setUnlinking(false);
     }
   };
 
-  const transferStatusColor = (status: TransferStatus) => {
-    if (isDark) {
-      switch (status) {
-        case "completed": return "bg-emerald-950/40 text-emerald-400 border-emerald-900";
-        case "failed":    return "bg-red-950/40 text-red-400 border-red-900";
-        default:          return "bg-amber-950/40 text-amber-400 border-amber-900";
-      }
-    }
-    switch (status) {
-      case "completed": return "bg-emerald-50 text-emerald-600 border-emerald-200";
-      case "failed":    return "bg-red-50 text-red-600 border-red-200";
-      default:          return "bg-amber-50 text-amber-600 border-amber-200";
-    }
+  const balanceText = useMemo(() => {
+    return `\u20B1${Number(user?.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+  }, [user?.balance]);
+
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab);
+    setSelectedTx(null);
   };
 
-  const formatAmount = (amount: number) =>
-    Math.abs(amount).toLocaleString("en-PH", {
-      minimumFractionDigits: 2, maximumFractionDigits: 2,
-    });
+  const handleTxClick = useCallback((tx: Transaction) => {
+    setSelectedTx(tx);
+  }, []);
 
-  const isFareView = activeView === "fare";
-  const isTransferView = activeView === "transfers";
+  useEffect(() => {
+    const isBusy = authChecking || cardDataLoading;
+    if (!isBusy) { setSlowLoadHint(false); return; }
+    const timer = setTimeout(() => setSlowLoadHint(true), 3500);
+    return () => clearTimeout(timer);
+  }, [authChecking, cardDataLoading]);
+
+  const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
+    { tab: "home", icon: <Home className="h-5 w-5" />, label: "Home" },
+    { tab: "Transactions", icon: <List className="h-5 w-5" />, label: "Transactions" },
+    { tab: "settings", icon: <Settings className="h-5 w-5" />, label: "Settings" },
+  ];
+
+  // 🆕 Full-page gate — see AuthCheckingScreen above. Bails out before any
+  // of the "no card linked yet" UI can render, which is what used to
+  // flash on refresh / cold start.
+  if (authChecking) {
+    return <AuthCheckingScreen isDark={isDark} slowHint={slowLoadHint} />;
+  }
 
   return (
-    <div className={`space-y-8 h-full min-h-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-      <style>{`
-        @keyframes row-pulse {
-          0%   { background-color: transparent; }
-          50%  { background-color: rgba(37,99,235,0.08); }
-          100% { background-color: transparent; }
+    <div className={`min-h-screen ${isDark ? "bg-[#020617] text-slate-100" : "bg-slate-50 text-slate-800"}`}>
+      {linkCard.isOpen && <LinkCardModal {...linkCard} />}
+      <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
+      <ChangePasswordModal {...changePassword} />
+      <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} routes={routes} />
+      <style>{`${DASHBOARD_STYLES}
+        /* 🔒 Locked-scale flip card — see LockedFlipCard component above.
+           The design canvas itself never reflows; only the outer wrapper's
+           transform: scale(...) changes, in a single React inline style.
+           Copied 1:1 from User Management's card preview CSS. */
+        .card-flip-scene-locked {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          perspective: 1600px;
         }
-        .row-pulse { animation: row-pulse 0.8s ease-in-out; }
-        @keyframes realtime-dot { 0%,100% { opacity:1; } 50% { opacity:0.2; } }
-        .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+        .card-flip-inner-locked {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+          transform-style: preserve-3d;
+        }
+        .card-flip-inner-locked.is-flipped { transform: rotateY(180deg); }
+        .card-face-locked {
+          position: absolute;
+          inset: 0;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+        }
+        .card-face-back-locked { transform: rotateY(180deg); }
       `}</style>
 
-      {/* Header */}
-      <div className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-        <div>
-          <h2 className={`text-2xl font-bold tracking-tight flex items-center gap-3 ${isDark ? "text-white" : "text-slate-900"}`}>
-            <History className="text-blue-500" size={26} />
-            Transaction Logs
-          </h2>
-          <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Monitor all Top-ups, Fare deductions, and Card Transfers in real-time
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <div className={`flex items-center gap-2 px-4 py-2 border rounded-lg ${isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"}`}>
-            <Zap className="text-blue-500" size={16} />
-            <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
+      {/* ✅ Logout confirmation dialog — compact, Yes/No always one line, small boxes */}
+      <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+        <AlertDialogContent className={`max-w-[85vw] sm:max-w-xs p-4 rounded-xl ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
+          <AlertDialogHeader className="space-y-1">
+            <AlertDialogTitle className={`font-bold text-sm leading-snug ${isDark ? "text-white" : "text-slate-900"}`}>
+              Are you sure you want to logout?
+            </AlertDialogTitle>
+            <AlertDialogDescription className={`text-[11px] leading-snug ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              You will need to sign in again to access your account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-row justify-end items-center gap-1.5 mt-3 sm:gap-1.5">
+            <AlertDialogCancel
+              className={`text-[11px] h-7 px-2.5 min-w-0 mt-0 cursor-pointer ${
+                isDark ? "bg-slate-900 border-slate-800 text-white hover:bg-slate-800" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              No
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmLogout}
+              className="bg-red-600 text-white hover:bg-red-500 font-bold text-[11px] h-7 px-2.5 min-w-0 cursor-pointer"
+            >
+              Yes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ✅ Unlink card confirmation dialog */}
+      <AlertDialog open={unlinkConfirmOpen} onOpenChange={setUnlinkConfirmOpen}>
+        <AlertDialogContent className={`max-w-[85vw] sm:max-w-xs p-4 rounded-xl ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
+          <AlertDialogHeader className="space-y-1">
+            <AlertDialogTitle className={`font-bold text-sm leading-snug ${isDark ? "text-white" : "text-slate-900"}`}>
+              Unlink this card?
+            </AlertDialogTitle>
+            <AlertDialogDescription className={`text-[11px] leading-snug ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              You'll lose access to this card's balance and history until you link a card again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-row justify-end items-center gap-1.5 mt-3 sm:gap-1.5">
+            <AlertDialogCancel
+              disabled={unlinking}
+              className={`text-[11px] h-7 px-2.5 min-w-0 mt-0 cursor-pointer ${
+                isDark ? "bg-slate-900 border-slate-800 text-white hover:bg-slate-800" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); void handleUnlinkCard(); }}
+              disabled={unlinking}
+              className="bg-red-600 text-white hover:bg-red-500 font-bold text-[11px] h-7 px-2.5 min-w-0 cursor-pointer"
+            >
+              {unlinking ? "Unlinking…" : "Unlink"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* STICKY HEADER */}
+      <div ref={headerRef} className={`sticky top-0 z-40 w-full backdrop-blur-md border-b ${isDark ? "bg-[#020617]/95 border-slate-800" : "bg-white/95 border-slate-200"}`}>
+        <div className="mx-auto w-full max-w-6xl px-4 sm:px-8 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <img
+              src="/calbayog.png"
+              alt="Calbayog logo"
+              className="h-9 w-9 rounded-lg object-contain shrink-0"
+            />
+            <h1 className={`text-base font-bold tracking-tight leading-none ${isDark ? "text-white" : "text-slate-900"}`}>
+              Fare Collection System
+            </h1>
           </div>
-          {(isTransferView ? transfersLastUpdated : lastUpdated) && (
-            <span className={`text-[10px] font-mono pr-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              Last sync: {(isTransferView ? transfersLastUpdated : lastUpdated)!.toLocaleTimeString()}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* View switch: Top-up / Fare / Transfer */}
-      <div className={`-mt-4 inline-flex self-start rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
-        <button
-          onClick={() => setActiveView("topup")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeView === "topup"
-              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          <CreditCard className="w-3.5 h-3.5" />
-          Top-up
-          <span className={`text-[10px] font-mono px-1.5 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
-            {topupList.length}
-          </span>
-        </button>
-        <button
-          onClick={() => setActiveView("fare")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeView === "fare"
-              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          <Route className="w-3.5 h-3.5" />
-          Fare
-          <span className={`text-[10px] font-mono px-1.5 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
-            {fareList.length}
-          </span>
-        </button>
-        <button
-          onClick={() => setActiveView("transfers")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeView === "transfers"
-              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          <ArrowRightLeft className="w-3.5 h-3.5" />
-          Transfer
-          <span className={`text-[10px] font-mono px-1.5 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
-            {transfers.length}
-          </span>
-        </button>
-      </div>
-
-      {!isTransferView ? (
-      <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${isFareView ? "from-red-500 to-rose-400" : "from-emerald-500 to-cyan-400"}`} />
-
-        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-          <div className="flex flex-col lg:flex-row gap-4 items-center">
-            <div className="flex items-center gap-2 mr-2 shrink-0">
-              <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
-                isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+          <div className="hidden md:flex items-center gap-2">
+            {!isLinked && (
+              <Button
+                variant="ghost"
+                onClick={() => linkCard.setIsOpen(true)}
+                className={`gap-2 text-sm cursor-pointer ${
+                  isDark ? "text-amber-400 hover:text-amber-300 hover:bg-amber-400/10" : "text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                }`}>
+                <Link2 className="h-4 w-4" /><span>Link Card</span>
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              onClick={toggleTheme}
+              title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+              className={`gap-2 text-sm cursor-pointer ${
+                isDark ? "text-slate-400 hover:text-amber-300 hover:bg-amber-400/10" : "text-slate-500 hover:text-amber-600 hover:bg-amber-50"
+              }`}
+            >
+              {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              <span>{isDark ? "Light Mode" : "Dark Mode"}</span>
+            </Button>
+            <Button variant="ghost" onClick={changePassword.open}
+              className={`gap-2 text-sm cursor-pointer ${
+                isDark ? "text-slate-400 hover:text-violet-400 hover:bg-violet-400/10" : "text-slate-500 hover:text-violet-600 hover:bg-violet-50"
               }`}>
-                <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
-                LIVE
-              </span>
-            </div>
-            <div className="relative flex-1 w-full">
-              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-              <Input
-                placeholder="Search card UID or name..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className={`pl-10 font-medium text-sm focus-visible:ring-blue-500 ${
-                  isDark
-                    ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
-                    : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
-                }`}
-              />
-            </div>
-            <div className="flex gap-3 w-full lg:w-auto">
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className={`w-full lg:w-[150px] font-medium text-xs cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                  <SelectItem value="all" className="cursor-pointer">All Status</SelectItem>
-                  <SelectItem value="Success" className="cursor-pointer">Success</SelectItem>
-                  <SelectItem value="Failed" className="cursor-pointer">Failed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+              <KeyRound className="h-4 w-4" /><span>Change Password</span>
+            </Button>
+            <Button variant="ghost" onClick={requestLogout}
+              className={`gap-2 text-sm cursor-pointer ${
+                isDark ? "text-slate-400 hover:text-red-400 hover:bg-red-400/10" : "text-slate-500 hover:text-red-600 hover:bg-red-50"
+              }`}>
+              <LogOut className="h-4 w-4" /><span>Logout</span>
+            </Button>
           </div>
-        </CardHeader>
+        </div>
+      </div>
 
-        <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4 flex flex-col overflow-hidden">
-          {isLoading ? (
-            <div className="space-y-4 pt-6">
-              {Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                <Skeleton key={i} className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
-              ))}
+      {/* SCROLLABLE CONTENT */}
+      <div className={`mx-auto w-full max-w-6xl px-3 sm:px-8 pb-20 md:pb-8 pt-4 space-y-4 dashboard-content ${
+        linkCard.isOpen ? "is-obscured" : ""
+      }`}>
+        {error && isLinked && (
+          <div className={`p-3 rounded-lg text-xs border ${isDark ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-red-50 border-red-200 text-red-600"}`}>
+            Warning: {error}
+          </div>
+        )}
+
+        {/* ✅ Blocked/inactive card warning — top-up and other card actions
+            are disabled while this is visible. */}
+        {isLinked && !cardDataLoading && user?.status && user.status !== "Active" && (
+          <div className={`p-3 rounded-lg text-xs border flex items-center gap-2 ${isDark ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-red-50 border-red-200 text-red-600"}`}>
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            Your card is currently <strong className="mx-1">{user.status}</strong> — top-up is disabled. You can unlink it below and contact an admin for a new card.
+          </div>
+        )}
+
+        {/* 🆕 Cold-start hint — only surfaces once a linked account's card
+            data has been loading for a while, so it doesn't flash on
+            ordinary fast loads. */}
+        {cardDataLoading && slowLoadHint && (
+          <div className={`p-3 rounded-lg text-xs border flex items-center gap-2 ${
+            isDark ? "bg-slate-800/60 border-slate-700 text-slate-400" : "bg-slate-100 border-slate-200 text-slate-500"
+          }`}>
+            <RotateCw className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            Still loading your card — the server may be waking up from a cold start.
+          </div>
+        )}
+
+        {/* ── Persistent reminder banner while no card is linked yet.
+            Desktop only — on mobile, Link Card lives inside the Settings tab. ── */}
+        {!isLinked && (
+          <div className="hidden md:block">
+            <LinkReminderBanner isDark={isDark} onLink={() => linkCard.setIsOpen(true)} />
+          </div>
+        )}
+
+        {/* HOME tab */}
+        <div className={activeTab === "home" ? "block" : "hidden md:block"}>
+          {/* ── Mobile-only reminder — desktop already shows this banner
+              above, outside the tab sections. ── */}
+          {!isLinked && (
+            <div className="md:hidden mb-4">
+              <LinkReminderBanner isDark={isDark} onLink={() => linkCard.setIsOpen(true)} />
             </div>
-          ) : (
-            <>
-              <div className="relative mt-6 flex-1 min-h-0 overflow-auto">
-                <Table>
-                  <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-                    <TableRow className="border-none hover:bg-transparent">
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Txn ID</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Timestamp</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card UID</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Full Name</TableHead>
-                      {isFareView ? (
-                        <>
-                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Origin</TableHead>
-                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Destination</TableHead>
-                        </>
-                      ) : (
-                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Payment Method</TableHead>
-                      )}
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Amount</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedList.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={9} className="text-center py-32">
-                          <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
-                            <History size={48} className="mb-2" />
-                            <p className="text-xs font-semibold uppercase tracking-widest">No records found</p>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="col-span-1 md:col-span-3">
+              <p className={`text-xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+                Welcome back,{" "}
+                <span className={isDark ? "text-emerald-400" : "text-emerald-600"}>
+                  {cardDataLoading ? "…" : (displayName?.split(" ")[0] || "User")}
+                </span> 👋
+              </p>
+              <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                {cardDataLoading ? "Loading your account overview…" : isLinked ? "Here's your account overview." : "Link a card to see your account overview."}
+              </p>
+            </div>
+
+            {/* Balance Card — dulled/blank until a card is linked, skeleton while a linked card's data is still loading */}
+            <Card className={`md:col-span-1 backdrop-blur-md border-t-emerald-500/50 border-t-2 ${
+              isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"
+            }`}>
+              <CardContent className={`pt-4 pb-4 px-4 ${dullClass}`}>
+                {cardDataLoading ? (
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-start">
+                      <SkeletonBar isDark={isDark} className="h-3 w-28" />
+                      <SkeletonBar isDark={isDark} className="h-6 w-16 rounded-md" />
+                    </div>
+                    <SkeletonBar isDark={isDark} className="h-9 w-40" />
+                    <SkeletonBar isDark={isDark} className="h-1 w-full rounded-full" />
+                    <div className="flex gap-2 pt-1">
+                      <SkeletonBar isDark={isDark} className="h-5 w-16 rounded-full" />
+                      <SkeletonBar isDark={isDark} className="h-5 w-24 rounded-full" />
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-start mb-1.5">
+                      <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>Available Balance</p>
+                      <Button size="sm" variant="outline" disabled={!isCardUsable} onClick={() => isCardUsable && topup.setIsOpen(true)}
+                        className={`h-6 text-[10px] px-2 cursor-pointer disabled:cursor-not-allowed ${
+                          isDark
+                            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white"
+                            : "bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-600 hover:text-white"
+                        }`}>
+                        <PlusCircle className="h-3 w-3 mr-1" /> TOP UP
+                      </Button>
+                    </div>
+                    <h2 className={`text-4xl font-black tracking-tighter ${isDark ? "text-white" : "text-slate-900"} ${isPulsing ? "balance-pulse" : ""}`}>
+                      {isLinked ? balanceText : "\u20B1— .—"}
+                    </h2>
+                    <div className="mt-2 space-y-1">
+                      <div className={`w-full rounded-full h-1 overflow-hidden ${isDark ? "bg-slate-800" : "bg-slate-200"}`}>
+                        <div
+                          className={`h-1 rounded-full transition-all ${
+                            !isLinked ? (isDark ? "bg-slate-700" : "bg-slate-300")
+                              : isAtMaxBalance ? "bg-red-500" : currentBalance / 20000 >= 0.8 ? "bg-amber-400" : "bg-emerald-500"
+                          }`}
+                          style={{ width: isLinked ? `${Math.min((currentBalance / 20000) * 100, 100)}%` : "0%" }}
+                        />
+                      </div>
+                      <p className={`text-[9px] font-mono ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+                        {!isLinked ? (
+                          <span>— remaining</span>
+                        ) : isAtMaxBalance ? (
+                          <span className={isDark ? "text-red-400/70" : "text-red-500/80"}>Max balance reached</span>
+                        ) : (
+                          <>₱{remainingTopup.toLocaleString(undefined, { minimumFractionDigits: 2 })} remaining</>
+                        )}
+                      </p>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Badge className={
+                        isLinked && user?.status === "Active"
+                          ? isDark
+                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-2 py-0.5 text-[10px]"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200 px-2 py-0.5 text-[10px]"
+                          : isDark
+                            ? "bg-red-500/10 text-red-400 border-red-500/20 px-2 py-0.5 text-[10px]"
+                            : "bg-red-50 text-red-700 border-red-200 px-2 py-0.5 text-[10px]"
+                      }>
+                        <ShieldCheck className="h-3 w-3 mr-1" />{isLinked ? (user?.status || "Inactive") : "—"}
+                      </Badge>
+                      <Badge variant="outline" className={`px-2 py-0.5 text-[10px] ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
+                        {isLinked ? (user?.type || "Standard User") : "—"}
+                      </Badge>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Virtual Card — mobile only. Hidden on desktop and placed directly below the Balance card. */}
+            {isLinked && (
+              <div className="col-span-1 md:hidden">
+                {user ? (
+                  <VirtualCard
+                    user={user}
+                    isDark={isDark}
+                    flipped={virtualCardFlipped}
+                    onFlip={() => setVirtualCardFlipped((f) => !f)}
+                  />
+                ) : (
+                  <VirtualCardSkeleton isDark={isDark} />
+                )}
+              </div>
+            )}
+
+            {/* Profile Card — desktop only, dulled/blank until a card is linked, skeleton while loading */}
+            <Card className={`hidden md:block md:col-span-2 backdrop-blur-md ${isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"}`}>
+              <CardContent className="pt-6 grid grid-cols-1 sm:grid-cols-2 gap-y-6 gap-x-4">
+                {cardDataLoading ? (
+                  <>
+                    <SkeletonRow isDark={isDark} />
+                    <SkeletonRow isDark={isDark} />
+                    <SkeletonRow isDark={isDark} />
+                    <SkeletonRow isDark={isDark} />
+                    <SkeletonRow isDark={isDark} />
+                  </>
+                ) : (
+                  <>
+                    {[
+                      { icon: <User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />, bg: "bg-blue-500/10 border-blue-500/20", label: "Name", value: isLinked ? (user?.fullName || "Not Linked") : "—" },
+                      { icon: <CreditCard className={`h-4 w-4 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
+                      { icon: <Tag className={`h-4 w-4 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: isLinked ? (user?.type || "General") : "—" },
+                    ].map(({ icon, bg, label, value, mono }) => (
+                      <div key={label} className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                        <div className={`h-9 w-9 rounded-full flex items-center justify-center border ${bg}`}>{icon}</div>
+                        <div>
+                          <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+                          <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"} ${mono ? "font-mono" : ""}`}>{value}</p>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* ✅ Contact — editable, disabled until a card is linked */}
+                    <div className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                      <div className="h-9 w-9 rounded-full flex items-center justify-center border bg-orange-500/10 border-orange-500/20 shrink-0">
+                        <Phone className={`h-4 w-4 ${isDark ? "text-orange-400" : "text-orange-600"}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
+                        {editingContact ? (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="tel"
+                              value={contactValue}
+                              onChange={(e) => setContactValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveContact();
+                                if (e.key === "Escape") cancelEditContact();
+                              }}
+                              disabled={savingField === "contact"}
+                              autoFocus
+                              className={`text-sm font-semibold rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                                isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                              }`}
+                            />
+                            <button
+                              onClick={handleSaveContact}
+                              disabled={savingField === "contact"}
+                              className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                              }`}
+                              title="Save"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={cancelEditContact}
+                              disabled={savingField === "contact"}
+                              className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "bg-slate-800 text-slate-400 hover:bg-slate-700" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                              }`}
+                              title="Cancel"
+                            >
+                              <XIcon className="h-3.5 w-3.5" />
+                            </button>
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      paginatedList.map((tx: any) => {
-                        const matchedRoute = isFareView && tx.route_id
-                          ? routes.find((r) => r.id === tx.route_id) ?? null
-                          : null;
-                        const paymentMethodLabel = !isFareView ? formatPaymentMethod(tx.payment_method) : null;
-                        const paymentMethodLogo = !isFareView ? getPaymentMethodLogo(tx.payment_method) : null;
-                        return (
-                          <TableRow
-                            key={tx.id}
-                            className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"} ${
-                              newRowId === tx.id ? "row-pulse" : ""
-                            }`}
-                          >
-                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                              #{tx.id}
-                            </TableCell>
-                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                              {new Date(tx.timestamp || tx.created_at).toLocaleString()}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs text-blue-500 font-semibold">
-                              {tx.card_uid || tx.cardUid}
-                            </TableCell>
-                            <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                              {tx.full_name || tx.fullName}
-                            </TableCell>
-                            {isFareView ? (
-                              <>
-                                <TableCell className={`text-xs ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                                  {matchedRoute ? matchedRoute.origin : <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>}
-                                </TableCell>
-                                <TableCell className={`text-xs ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                                  {matchedRoute ? matchedRoute.destination : <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>}
-                                </TableCell>
-                              </>
-                            ) : (
-                              <TableCell className={`text-xs ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                                <div className="flex items-center gap-1.5">
-                                  {paymentMethodLogo && (
-                                    <img src={paymentMethodLogo} alt="" className="h-4 w-auto max-w-[28px] object-contain shrink-0" />
-                                  )}
-                                  <span>{paymentMethodLabel}</span>
-                                </div>
-                              </TableCell>
-                            )}
-                            <TableCell className={`text-sm font-semibold ${
-                              isFareView
-                                ? isDark ? "text-red-400" : "text-red-600"
-                                : isDark ? "text-emerald-400" : "text-emerald-600"
-                            }`}>
-                              {isFareView ? "−" : "+"}₱{formatAmount(Number(tx.amount))}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={`text-[10px] font-semibold ${statusColor(tx.status)}`}>
+                        ) : (
+                          <div className="flex items-center gap-1.5 group">
+                            <p className={`text-sm font-semibold truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{isLinked ? (displayContact || "None") : "—"}</p>
+                            <button
+                              onClick={startEditContact}
+                              disabled={!isLinked}
+                              className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                              }`}
+                              title="Edit contact number"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* ✅ Email — editable, disabled until a card is linked */}
+                    <div className={`flex items-center gap-3 sm:col-span-2 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                      <div className="h-9 w-9 rounded-full bg-sky-500/10 flex items-center justify-center border border-sky-500/20 shrink-0">
+                        <Mail className={`h-4 w-4 ${isDark ? "text-sky-400" : "text-sky-600"}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</p>
+                        {editingEmail ? (
+                          <div className="flex items-center gap-1.5 max-w-sm">
+                            <input
+                              type="email"
+                              value={emailValue}
+                              onChange={(e) => setEmailValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveEmail();
+                                if (e.key === "Escape") cancelEditEmail();
+                              }}
+                              disabled={savingField === "email"}
+                              autoFocus
+                              className={`text-sm rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                                isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                              }`}
+                            />
+                            <button
+                              onClick={handleSaveEmail}
+                              disabled={savingField === "email"}
+                              className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                              }`}
+                              title="Save"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={cancelEditEmail}
+                              disabled={savingField === "email"}
+                              className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "bg-slate-800 text-slate-400 hover:bg-slate-700" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                              }`}
+                              title="Cancel"
+                            >
+                              <XIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 group">
+                            <p className={`text-sm truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{isLinked ? (displayEmail || "Not linked") : "—"}</p>
+                            <button
+                              onClick={startEditEmail}
+                              disabled={!isLinked}
+                              className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer disabled:cursor-not-allowed ${
+                                isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                              }`}
+                              title="Edit email"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* TRANSACTIONS — Desktop */}
+        <div className="hidden md:block">
+          <Card className={`backdrop-blur-md overflow-hidden ${isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"}`}>
+            <CardHeader className={`py-3 border-b ${isDark ? "bg-slate-900/20 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
+              <CardTitle className={`text-xs font-bold flex items-center gap-2 uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />Transactions History
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {!isLinked ? (
+                <div className="flex flex-col items-center justify-center py-14 gap-3">
+                  <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
+                  <p className={`text-xs italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>Link a card to see your transactions.</p>
+                  <Button size="sm" onClick={() => linkCard.setIsOpen(true)}
+                    className="h-7 text-[11px] px-3 bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer">
+                    <Link2 className="h-3 w-3 mr-1" /> Link Card
+                  </Button>
+                </div>
+              ) : cardDataLoading ? (
+                <div className="p-4 space-y-3">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div key={i} className="flex items-center justify-between gap-4">
+                      <div className="space-y-1.5 flex-1">
+                        <SkeletonBar isDark={isDark} className="h-2.5 w-24" />
+                        <SkeletonBar isDark={isDark} className="h-2 w-16" />
+                      </div>
+                      <SkeletonBar isDark={isDark} className="h-3 w-20" />
+                      <SkeletonBar isDark={isDark} className="h-4 w-16 rounded-full" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <p className={`px-4 pt-2 pb-1 text-[10px] italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>Tap a row to view transaction details.</p>
+                  <div className="max-h-[400px] overflow-y-auto">
+                    <table className="w-full text-left table-fixed">
+                      <colgroup>
+                        <col style={{ width: "30%" }} /><col style={{ width: "18%" }} />
+                        <col style={{ width: "30%" }} /><col style={{ width: "22%" }} />
+                      </colgroup>
+                      <thead className={isDark ? "bg-slate-950/50" : "bg-slate-50"}>
+                        <tr>
+                          {(["Timestamp", "Service", "Amount", "Result"] as const).map((h, i) => (
+                            <th key={h} className={`px-3 py-2.5 text-[9px] font-black uppercase whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"} ${
+                              i === 2 ? "text-right" : i === 3 ? "text-center" : ""}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-100"}>
+                        {transactions.length === 0 ? (
+                          <tr><td className={`p-12 text-center text-sm italic ${isDark ? "text-slate-600" : "text-slate-400"}`} colSpan={4}>No activity recorded.</td></tr>
+                        ) : transactions.map((tx) => (
+                          <tr key={tx.id} onClick={() => handleTxClick(tx)}
+                            className={`transition-colors cursor-pointer ${isDark ? "hover:bg-slate-800/30 active:bg-slate-800/50" : "hover:bg-slate-50 active:bg-slate-100"}`}>
+                            <td className="px-3 py-2.5">
+                              <p className={`text-[10px] font-medium leading-tight whitespace-nowrap ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                {new Date(tx.timestamp).toLocaleDateString()}
+                              </p>
+                              <p className={`text-[9px] font-mono leading-tight whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                                {new Date(tx.timestamp).toLocaleTimeString()}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className={`text-[10px] font-semibold uppercase whitespace-nowrap ${isDark ? "text-slate-200" : "text-slate-700"}`}>{tx.type}</span>
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              <span className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${
+                                tx.type === "Fare" ? (isDark ? "text-red-400" : "text-red-600") : (isDark ? "text-emerald-400" : "text-emerald-600")}`}>
+                                {formatAmount(tx.type, tx.amount)}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <Badge variant="outline" className={`text-[9px] font-black tracking-widest uppercase py-0 whitespace-nowrap ${
+                                tx.status === "Success"
+                                  ? isDark ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5" : "text-emerald-700 border-emerald-200 bg-emerald-50"
+                                  : isDark ? "text-red-400 border-red-500/30 bg-red-500/5" : "text-red-700 border-red-200 bg-red-50"}`}>
                                 {tx.status}
                               </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
-                                <Button
-                                  variant="ghost" size="icon"
-                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
-                                  onClick={() => setViewTx(tx)}
-                                  title="View receipt"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
-              {/* Pagination */}
-              <div className={`flex items-center justify-between pt-4 border-t mt-2 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-                <span className={`text-xs font-mono uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  Showing{" "}
-                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                    {currentTypeList.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, currentTypeList.length)}
-                  </span>{" "}
-                  of <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{currentTypeList.length}</span> records
-                </span>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" disabled={safePage <= 1}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
-                      isDark ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
-                    }`}>
-                    <ChevronLeft className="w-3 h-3 mr-1" />Prev
-                  </Button>
-                  <span className={`text-xs font-semibold px-2 tabular-nums ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                    <span className="text-blue-500">{safePage}</span>
-                    <span className={isDark ? "text-slate-700" : "text-slate-300"}> / {totalPages}</span>
-                  </span>
-                  <Button variant="ghost" size="sm" disabled={safePage >= totalPages}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
-                      isDark ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
-                    }`}>
-                    Next<ChevronRight className="w-3 h-3 ml-1" />
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-      ) : (
-      <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-indigo-400" />
-
-        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-          <div className="flex flex-col lg:flex-row gap-4 items-center">
-            <div className="flex items-center gap-2 mr-2 shrink-0">
-              <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
-                isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
-              }`}>
-                <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
-                LIVE
-              </span>
-            </div>
-            <div className="relative flex-1 w-full">
-              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-              <Input
-                placeholder="Search source/target card UID or name..."
-                value={transferSearch}
-                onChange={(e) => setTransferSearch(e.target.value)}
-                className={`pl-10 font-medium text-sm focus-visible:ring-blue-500 ${
-                  isDark
-                    ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
-                    : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
-                }`}
-              />
-            </div>
-            <div className="flex gap-3 w-full lg:w-auto">
-              <Select value={transferStatusFilter} onValueChange={setTransferStatusFilter}>
-                <SelectTrigger className={`w-full lg:w-[150px] font-medium text-xs cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                  <SelectItem value="all" className="cursor-pointer">All Status</SelectItem>
-                  <SelectItem value="pending" className="cursor-pointer">Pending</SelectItem>
-                  <SelectItem value="completed" className="cursor-pointer">Completed</SelectItem>
-                  <SelectItem value="failed" className="cursor-pointer">Failed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        {/* TRANSACTIONS — Mobile */}
+        <div
+          className={
+            activeTab === "Transactions"
+              ? `fixed inset-0 flex flex-col md:hidden z-10 ${isDark ? "bg-[#020617]" : "bg-slate-50"}`
+              : "hidden"
+          }
+          style={{ top: `${headerHeight}px`, bottom: `${navHeight}px` }}
+        >
+          <div className={`backdrop-blur-md px-4 py-2.5 border-b shrink-0 ${isDark ? "bg-[#020617]/95 border-slate-800/60" : "bg-white/95 border-slate-200"}`}>
+            <p className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+              <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />
+              Transactions History
+            </p>
           </div>
-        </CardHeader>
+          <div className={`flex-1 overflow-y-auto overscroll-contain ${isDark ? "bg-[#020617]" : "bg-slate-50"}`}>
+            {!isLinked ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 px-6">
+                <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
+                <p className={`text-xs italic text-center ${isDark ? "text-slate-600" : "text-slate-400"}`}>Link a card to see your transactions.</p>
+                <Button size="sm" onClick={() => linkCard.setIsOpen(true)}
+                  className="h-8 text-[11px] px-3 bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer">
+                  <Link2 className="h-3 w-3 mr-1" /> Link Card
+                </Button>
+              </div>
+            ) : cardDataLoading ? (
+              <div className="p-4 space-y-4">
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <SkeletonBar isDark={isDark} className="h-9 w-9 rounded-full shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <SkeletonBar isDark={isDark} className="h-2.5 w-20" />
+                      <SkeletonBar isDark={isDark} className="h-2 w-28" />
+                    </div>
+                    <SkeletonBar isDark={isDark} className="h-3 w-14" />
+                  </div>
+                ))}
+              </div>
+            ) : transactions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
+                <p className={`text-xs italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>No transactions yet.</p>
+              </div>
+            ) : (
+              <div className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-200 bg-white"}>
+                {transactions.map((tx) => (
+                  <MobileTxRow key={tx.id} tx={tx} onClick={() => handleTxClick(tx)} isDark={isDark} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
-        <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4 flex flex-col overflow-hidden">
-          {transfersLoading ? (
-            <div className="space-y-4 pt-6">
-              {Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                <Skeleton key={i} className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
-              ))}
-            </div>
-          ) : (
-            <>
-              <div className="relative mt-6 flex-1 min-h-0 overflow-auto">
-                <Table>
-                  <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-                    <TableRow className="border-none hover:bg-transparent">
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Transfer ID</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Timestamp</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>From (Card UID)</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>To (Card UID)</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Amount</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Reason</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedTransferList.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={8} className="text-center py-32">
-                          <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
-                            <ArrowRightLeft size={48} className="mb-2" />
-                            <p className="text-xs font-semibold uppercase tracking-widest">No transfers found</p>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      paginatedTransferList.map((t) => {
-                        const status = normalizeTransferStatus(t.status);
-                        return (
-                          <TableRow
-                            key={t.id}
-                            className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"} ${
-                              newTransferRowId === t.id ? "row-pulse" : ""
+        {/* SETTINGS tab (mobile only) */}
+        <div className={activeTab === "settings" ? "block md:hidden" : "hidden"}>
+          <div className="space-y-3">
+
+
+            {/* Profile Card */}
+            <div className={`rounded-2xl overflow-hidden border ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
+              {cardDataLoading ? (
+                <div className="p-4 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <SkeletonBar isDark={isDark} className="h-11 w-11 rounded-full shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <SkeletonBar isDark={isDark} className="h-3 w-32" />
+                      <SkeletonBar isDark={isDark} className="h-2.5 w-40" />
+                    </div>
+                  </div>
+                  <SkeletonRow isDark={isDark} />
+                  <SkeletonRow isDark={isDark} />
+                  <SkeletonRow isDark={isDark} />
+                </div>
+              ) : (
+                <>
+                  <div className={`flex items-center gap-3 px-4 py-4 border-b ${isDark ? "border-slate-800/60" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                    <div className="h-11 w-11 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0">
+                      <span className={`font-black text-base tracking-tight ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                        {getInitials(isLinked ? (user?.fullName || "?") : "?")}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-bold leading-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
+                        {isLinked ? (user?.fullName || "Not linked") : "—"}
+                      </p>
+                      <p className={`text-[11px] mt-0.5 truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{isLinked ? (displayEmail || "—") : "—"}</p>
+                      <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                        <Badge className={
+                          isLinked && user?.status === "Active"
+                            ? isDark
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-1.5 py-0 text-[9px]"
+                              : "bg-emerald-50 text-emerald-700 border-emerald-200 px-1.5 py-0 text-[9px]"
+                            : isDark
+                              ? "bg-red-500/10 text-red-400 border-red-500/20 px-1.5 py-0 text-[9px]"
+                              : "bg-red-50 text-red-700 border-red-200 px-1.5 py-0 text-[9px]"
+                        }>
+                          <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />{isLinked ? (user?.status || "Inactive") : "—"}
+                        </Badge>
+                        <Badge variant="outline" className={`px-1.5 py-0 text-[9px] ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
+                          {isLinked ? (user?.type || "Standard") : "—"}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+
+                  {[
+                    { icon: <CreditCard className={`h-3.5 w-3.5 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
+                    { icon: <Tag className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, label: "Class", value: isLinked ? (user?.type || "General") : "—", mono: false },
+                  ].map(({ icon, label, value, mono }) => (
+                    <div key={label} className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                      <div className="shrink-0 opacity-80">{icon}</div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+                        <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"} ${mono ? "font-mono" : "font-medium"}`}>{value}</p>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* ✅ Contact — editable (mobile), disabled until a card is linked */}
+                  <div className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                    <div className="shrink-0 opacity-80"><Phone className={`h-3.5 w-3.5 ${isDark ? "text-orange-400" : "text-orange-600"}`} /></div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
+                      {editingContact ? (
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <input
+                            type="tel"
+                            value={contactValue}
+                            onChange={(e) => setContactValue(e.target.value)}
+                            disabled={savingField === "contact"}
+                            autoFocus
+                            className={`text-xs rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                              isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                            }`}
+                          />
+                          <button
+                            onClick={handleSaveContact}
+                            disabled={savingField === "contact"}
+                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600"
                             }`}
                           >
-                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                              #{t.id}
-                            </TableCell>
-                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                              {new Date(t.created_at).toLocaleString()}
-                            </TableCell>
-                            <TableCell>
-                              <div className="font-mono text-xs text-blue-500 font-semibold">{cardUidOf(t.source)}</div>
-                              <div className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{fullNameOf(t.source)}</div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="font-mono text-xs text-blue-500 font-semibold">{cardUidOf(t.target)}</div>
-                              <div className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{fullNameOf(t.target)}</div>
-                            </TableCell>
-                            <TableCell className={`text-sm font-semibold ${isDark ? "text-blue-400" : "text-blue-600"}`}>
-                              ₱{formatAmount(Number(t.amount))}
-                            </TableCell>
-                            <TableCell className={`text-xs max-w-[180px] truncate ${isDark ? "text-slate-400" : "text-slate-500"}`} title={t.reason}>
-                              {t.reason || "—"}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={`text-[10px] font-semibold capitalize ${transferStatusColor(status)}`}>
-                                {status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
-                                <Button
-                                  variant="ghost" size="icon"
-                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
-                                  onClick={() => setViewTransfer(t)}
-                                  title="View transfer details"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                            <Check className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={cancelEditContact}
+                            disabled={savingField === "contact"}
+                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            <XIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <p className={`text-xs font-medium truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{isLinked ? (displayContact || "None") : "—"}</p>
+                          <button
+                            onClick={startEditContact}
+                            disabled={!isLinked}
+                            className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
+                            }`}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-              {/* Pagination */}
-              <div className={`flex items-center justify-between pt-4 border-t mt-2 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-                <span className={`text-xs font-mono uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  Showing{" "}
-                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                    {filteredTransferList.length === 0 ? 0 : transferStartIndex + 1}–{Math.min(transferStartIndex + PAGE_SIZE, filteredTransferList.length)}
-                  </span>{" "}
-                  of <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{filteredTransferList.length}</span> records
-                </span>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" disabled={safeTransferPage <= 1}
-                    onClick={() => setTransferPage((p) => Math.max(1, p - 1))}
-                    className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
-                      isDark ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
-                    }`}>
-                    <ChevronLeft className="w-3 h-3 mr-1" />Prev
-                  </Button>
-                  <span className={`text-xs font-semibold px-2 tabular-nums ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                    <span className="text-blue-500">{safeTransferPage}</span>
-                    <span className={isDark ? "text-slate-700" : "text-slate-300"}> / {transferTotalPages}</span>
-                  </span>
-                  <Button variant="ghost" size="sm" disabled={safeTransferPage >= transferTotalPages}
-                    onClick={() => setTransferPage((p) => Math.min(transferTotalPages, p + 1))}
-                    className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
-                      isDark ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
-                    }`}>
-                    Next<ChevronRight className="w-3 h-3 ml-1" />
-                  </Button>
+                  {/* ✅ Email — editable (mobile, auth_users), disabled until a card is linked */}
+                  <div className={`flex items-center gap-3 px-4 py-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                    <div className="shrink-0 opacity-80"><Mail className={`h-3.5 w-3.5 ${isDark ? "text-sky-400" : "text-sky-600"}`} /></div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</p>
+                      {editingEmail ? (
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <input
+                            type="email"
+                            value={emailValue}
+                            onChange={(e) => setEmailValue(e.target.value)}
+                            disabled={savingField === "email"}
+                            autoFocus
+                            className={`text-xs rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                              isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                            }`}
+                          />
+                          <button
+                            onClick={handleSaveEmail}
+                            disabled={savingField === "email"}
+                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600"
+                            }`}
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={cancelEditEmail}
+                            disabled={savingField === "email"}
+                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            <XIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{isLinked ? (displayEmail || "Not linked") : "—"}</p>
+                          <button
+                            onClick={startEditEmail}
+                            disabled={!isLinked}
+                            className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer disabled:cursor-not-allowed ${
+                              isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
+                            }`}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Account actions — always usable regardless of link status */}
+            <div className={`rounded-2xl overflow-hidden border ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
+              <p className={`px-4 pt-3 pb-1.5 text-[9px] font-black uppercase tracking-widest ${isDark ? "text-slate-600" : "text-slate-400"}`}>Account</p>
+
+              {!isLinked && (
+                <button onClick={() => linkCard.setIsOpen(true)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 border-b transition-colors cursor-pointer ${
+                    isDark ? "border-slate-800/50 hover:bg-emerald-500/5 active:bg-emerald-500/10" : "border-slate-100 hover:bg-emerald-50 active:bg-emerald-100"
+                  }`}>
+                  <div className="h-8 w-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                    <Link2 className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>Link Card</p>
+                    <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Connect a card to activate your account</p>
+                  </div>
+                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
+                </button>
+              )}
+
+              {isLinked && (
+                <button onClick={() => setUnlinkConfirmOpen(true)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 border-b transition-colors cursor-pointer ${
+                    isDark ? "border-slate-800/50 hover:bg-red-500/5 active:bg-red-500/10" : "border-slate-100 hover:bg-red-50 active:bg-red-100"
+                  }`}>
+                  <div className="h-8 w-8 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                    <Unlink2 className={`h-3.5 w-3.5 ${isDark ? "text-red-400" : "text-red-600"}`} />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className={`text-xs font-semibold ${isDark ? "text-red-400" : "text-red-600"}`}>Unlink Card</p>
+                    <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Remove this card from your account</p>
+                  </div>
+                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
+                </button>
+              )}
+
+              <button onClick={toggleTheme}
+                className={`w-full flex items-center gap-3 px-4 py-3 border-b transition-colors cursor-pointer ${
+                  isDark ? "border-slate-800/50 hover:bg-slate-800/30 active:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50 active:bg-slate-100"
+                }`}>
+                <div className="h-8 w-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                  {isDark ? <Sun className="h-3.5 w-3.5 text-amber-400" /> : <Moon className="h-3.5 w-3.5 text-amber-600" />}
                 </div>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-      )}
+                <div className="flex-1 text-left">
+                  <p className={`text-xs font-semibold ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                    {isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                  </p>
+                  <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Change app appearance</p>
+                </div>
+                <ChevronRight className={`h-3.5 w-3.5 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
+              </button>
 
-      {/* Receipt / Transfer Modals — still available if the admin wants the full receipt view */}
-      <ReceiptModal tx={viewTx} routes={routes} onClose={() => setViewTx(null)} isDark={isDark} />
-      <TransferModal transfer={viewTransfer} onClose={() => setViewTransfer(null)} isDark={isDark} />
+              <button onClick={changePassword.open}
+                className={`w-full flex items-center gap-3 px-4 py-3 border-b transition-colors cursor-pointer ${
+                  isDark ? "border-slate-800/50 hover:bg-slate-800/30 active:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50 active:bg-slate-100"
+                }`}>
+                <div className="h-8 w-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center shrink-0">
+                  <KeyRound className={`h-3.5 w-3.5 ${isDark ? "text-violet-400" : "text-violet-600"}`} />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className={`text-xs font-semibold ${isDark ? "text-slate-200" : "text-slate-700"}`}>Change Password</p>
+                  <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Update your account password</p>
+                </div>
+                <ChevronRight className={`h-3.5 w-3.5 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
+              </button>
+              <button onClick={requestLogout}
+                className={`w-full flex items-center gap-3 px-4 py-3 transition-colors cursor-pointer ${
+                  isDark ? "hover:bg-red-500/5 active:bg-red-500/10" : "hover:bg-red-50 active:bg-red-100"
+                }`}>
+                <div className="h-8 w-8 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                  <LogOut className={`h-3.5 w-3.5 ${isDark ? "text-red-400" : "text-red-600"}`} />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className={`text-xs font-semibold ${isDark ? "text-red-400" : "text-red-600"}`}>Logout</p>
+                  <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Sign out of your account</p>
+                </div>
+                <ChevronRight className={`h-3.5 w-3.5 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
+              </button>
+            </div>
+
+            <p className={`text-center text-[9px] font-mono uppercase tracking-widest pb-1 ${isDark ? "text-slate-700" : "text-slate-300"}`}>
+              Fare Collection System &mdash; v1.0.0
+            </p>
+          </div>
+        </div>
+
+        {/* Footer (desktop only) */}
+        <footer className={`hidden md:block border-t pt-4 pb-2 ${isDark ? "border-slate-800/60" : "border-slate-200"}`}>
+          <div className={`flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-widest ${isDark ? "text-slate-700" : "text-slate-400"}`}>
+            <span>Fare Collection System</span>
+            <span>&copy; {new Date().getFullYear()} All rights reserved. | v1.0.0</span>
+          </div>
+        </footer>
+      </div>
+
+      {/* Mobile Bottom Nav */}
+     <nav
+  ref={navRef}
+  className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 border-t transition-all duration-300 ${
+    isDark ? "bg-[#020617] border-slate-800/60" : "bg-white border-slate-200"
+  } ${
+    linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
+  }`}
+>
+        {navItems.map(({ tab, icon, label }) => {
+          const isActive = activeTab === tab;
+          return (
+            <button key={tab} onClick={() => handleTabChange(tab)}
+              className={`relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors duration-150 cursor-pointer ${
+                isActive
+                  ? isDark ? "text-emerald-400" : "text-emerald-600"
+                  : isDark ? "text-slate-600 hover:text-slate-400" : "text-slate-400 hover:text-slate-600"
+              }`}>
+              {isActive && (
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-emerald-400" />
+              )}
+              {icon}
+              <span className="text-[9px] font-bold uppercase tracking-wider">{label}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }
