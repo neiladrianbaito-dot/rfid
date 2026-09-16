@@ -5,7 +5,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Cell,
+} from "recharts";
 import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
@@ -76,6 +88,17 @@ function getDiscountDotColor(kind: "Student" | "Senior" | "PWD") {
       return "bg-emerald-500";
   }
 }
+
+// 🎨 Line colors for the Discount Collection Analytics line graph — kept
+// in sync with the badge/dot colors above and the table's column colors
+// so "Student" always means blue, "Senior" always means yellow, etc.
+const DISCOUNT_LINE_COLORS = {
+  total: "#7c3aed", // purple — matches the export tab's band color
+  regular: "#64748b", // slate
+  student: "#3b82f6", // blue
+  senior: "#eab308", // yellow
+  pwd: "#10b981", // emerald
+};
 
 function getLocalDateString(): string {
   return new Date().toLocaleDateString("en-CA");
@@ -1261,7 +1284,11 @@ export default function ReportsPage() {
 
       {/* ══ DISCOUNT COLLECTION ANALYTICS ══
           Fare revenue only, split into Regular vs. Student/Senior/PWD.
-          Follows the same Year/Month/Day filter as the chart above. */}
+          Follows the same Year/Month/Day filter as the chart above.
+          Trend is now shown as a LINE GRAPH (Total/Regular/Student/Senior/PWD
+          over time) instead of a plain table, matching the bar chart style
+          used on the "Daily Revenue Breakdown" tab. The daily table is kept
+          below the chart for exact per-day figures. */}
       {activeTab === "discount" && (
       <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-600 via-indigo-500 to-transparent" />
@@ -1341,7 +1368,104 @@ export default function ReportsPage() {
                 })}
               </div>
 
-              {/* Daily breakdown table */}
+              {/* ── Line graph: Total / Regular / Student / Senior / PWD
+                  collections trending over the filtered date range ── */}
+              {filteredFareDiscountBreakdown.length === 0 ? (
+                <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  No fare records match the selected filter.
+                </div>
+              ) : (
+                <div className="h-[320px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={filteredFareDiscountBreakdown} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={(d: string) => {
+                          const date = new Date(d + "T00:00:00");
+                          return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                        }}
+                        stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
+                      />
+                      <YAxis
+                        stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
+                        tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                          border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                          borderRadius: "8px",
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                        }}
+                        labelFormatter={(d: string) => {
+                          const date = new Date(d + "T00:00:00");
+                          return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                        }}
+                        labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
+                        formatter={(value: number, name: string) => [formatPeso(Math.abs(value)), name]}
+                      />
+                      <Legend
+                        wrapperStyle={{ fontSize: "11px", fontWeight: 600 }}
+                        formatter={(value: string) => (
+                          <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>
+                        )}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="total"
+                        name="Total Collected"
+                        stroke={DISCOUNT_LINE_COLORS.total}
+                        strokeWidth={2.5}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="regular"
+                        name="Regular"
+                        stroke={DISCOUNT_LINE_COLORS.regular}
+                        strokeWidth={2}
+                        strokeDasharray="4 3"
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="student"
+                        name="Student"
+                        stroke={DISCOUNT_LINE_COLORS.student}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="senior"
+                        name="Senior"
+                        stroke={DISCOUNT_LINE_COLORS.senior}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="pwd"
+                        name="PWD"
+                        stroke={DISCOUNT_LINE_COLORS.pwd}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Daily breakdown table — exact per-day figures backing the
+                  line graph above */}
               {filteredFareDiscountBreakdown.length === 0 ? (
                 <div className={`py-8 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                   No fare records match the selected filter.
