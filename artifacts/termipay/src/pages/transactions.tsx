@@ -17,6 +17,7 @@ import { useTheme } from "@/hooks/use-theme";
 import {
   Search, Zap, History, ChevronLeft, ChevronRight,
   Eye, CheckCircle2, XCircle, Clock, Route, CreditCard, ArrowLeftRight,
+  ArrowRightLeft, ReceiptText,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
@@ -34,6 +35,34 @@ type FareRoute = {
   fare_amount: number;
 };
 
+// A "card" here is really the row from `users` that a card is tied to.
+// NOTE: adjust `card_uid` / `full_name` below if your `users` table uses
+// different column names — these mirror the fields transactions expose.
+type TransferCard = {
+  id: number;
+  card_uid?: string | null;
+  cardUid?: string | null;
+  full_name?: string | null;
+  fullName?: string | null;
+};
+
+type TransferStatus = "pending" | "completed" | "failed";
+
+type CardTransfer = {
+  id: number;
+  source_card_id: number;
+  target_card_id: number;
+  amount: number;
+  reason: string;
+  source_balance_before: number | null;
+  target_balance_before: number | null;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+  source: TransferCard | null;
+  target: TransferCard | null;
+};
+
 // ── Transaction type normalizer ────────────────────────────────────────────
 // The backend/db may store this as "Fare", "fare", "TopUp", "top_up",
 // "Top Up", "TOP-UP", etc. This forces a single canonical label everywhere
@@ -45,6 +74,24 @@ function normalizeTxType(type?: string | null): TxType {
   if (key === "fare") return "Fare";
   // Everything else (topup, top-up, TopUp, etc.) is treated as Top-up.
   return "Top-up";
+}
+
+// Same idea as normalizeTxType — normalize whatever `status` comes back as
+// on card_balance_transfers ("pending", "Pending", "COMPLETED", etc.) into a
+// single canonical label.
+function normalizeTransferStatus(status?: string | null): TransferStatus {
+  const key = (status ?? "").toLowerCase().trim();
+  if (key === "completed" || key === "complete" || key === "success") return "completed";
+  if (key === "failed" || key === "failure" || key === "error") return "failed";
+  return "pending";
+}
+
+function cardUidOf(card?: TransferCard | null): string {
+  return card?.card_uid || card?.cardUid || "—";
+}
+
+function fullNameOf(card?: TransferCard | null): string {
+  return card?.full_name || card?.fullName || "Unknown";
 }
 
 // ── Payment method label map (same as TransactionDetailModal) ─────────────────
@@ -257,10 +304,147 @@ function ReceiptModal({
   );
 }
 
+// ── Transfer Detail Modal ──────────────────────────────────────────────────────
+// Same receipt-style treatment as ReceiptModal, but for a card_balance_transfers
+// row: who sent it (source card), who received it (target card), how much, why,
+// and whether it went through.
+
+function TransferModal({
+  transfer,
+  onClose,
+  isDark,
+}: {
+  transfer: CardTransfer | null;
+  onClose: () => void;
+  isDark: boolean;
+}) {
+  if (!transfer) return null;
+
+  const status = normalizeTransferStatus(transfer.status);
+  const amount = Math.abs(Number(transfer.amount)).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  const StatusIcon =
+    status === "failed" ? XCircle
+    : status === "pending" ? Clock
+    : CheckCircle2;
+
+  const statusRingClass = isDark
+    ? "ring-blue-900 bg-blue-950/40 text-blue-400"
+    : "ring-blue-100 bg-blue-50 text-blue-600";
+
+  return (
+    <Dialog open={!!transfer} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
+          isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+        }`}
+      >
+        <VisuallyHidden>
+          <DialogTitle>Card Balance Transfer</DialogTitle>
+          <DialogDescription>
+            Transfer #{transfer.id}, ₱{amount} from card {cardUidOf(transfer.source)} to card{" "}
+            {cardUidOf(transfer.target)}, status {transfer.status}.
+          </DialogDescription>
+        </VisuallyHidden>
+
+        <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-400" />
+
+        <div className="px-5 pt-5 pb-6 space-y-5">
+          {/* Status + amount hero */}
+          <div className="flex flex-col items-center gap-2 pt-1">
+            <div className={`flex items-center justify-center w-12 h-12 rounded-full ring-2 ${statusRingClass}`}>
+              <StatusIcon className="w-5 h-5" />
+            </div>
+            <p className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              Card Balance Transfer
+            </p>
+            <p className={`text-4xl font-bold tabular-nums tracking-tight ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+              ₱{amount}
+            </p>
+          </div>
+
+          {/* From → To */}
+          <div className={`flex items-center gap-2 rounded-xl border p-3 ${isDark ? "border-slate-800 bg-slate-950/60" : "border-slate-200 bg-slate-50"}`}>
+            <div className="flex-1 min-w-0">
+              <p className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>From</p>
+              <p className={`text-xs font-mono font-semibold truncate ${isDark ? "text-blue-400" : "text-blue-600"}`}>{cardUidOf(transfer.source)}</p>
+              <p className={`text-xs truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{fullNameOf(transfer.source)}</p>
+            </div>
+            <ArrowRightLeft className={`w-4 h-4 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
+            <div className="flex-1 min-w-0 text-right">
+              <p className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>To</p>
+              <p className={`text-xs font-mono font-semibold truncate ${isDark ? "text-blue-400" : "text-blue-600"}`}>{cardUidOf(transfer.target)}</p>
+              <p className={`text-xs truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{fullNameOf(transfer.target)}</p>
+            </div>
+          </div>
+
+          {/* Dashed divider */}
+          <div className={`border-t border-dashed ${isDark ? "border-slate-800" : "border-slate-200"}`} />
+
+          {/* Detail rows */}
+          <div className={`rounded-xl overflow-hidden border divide-y ${isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-100"}`}>
+            {[
+              { label: "Transfer ID", value: `#${transfer.id}`, mono: true },
+              {
+                label: "Requested",
+                value: new Date(transfer.created_at).toLocaleString("en-PH", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }),
+              },
+              ...(transfer.completed_at
+                ? [{
+                    label: "Completed",
+                    value: new Date(transfer.completed_at).toLocaleString("en-PH", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }),
+                  }]
+                : []),
+              { label: "Reason", value: transfer.reason || "—" },
+              ...(transfer.source_balance_before != null
+                ? [{ label: "Source balance before", value: `₱${Number(transfer.source_balance_before).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`, mono: true }]
+                : []),
+              ...(transfer.target_balance_before != null
+                ? [{ label: "Target balance before", value: `₱${Number(transfer.target_balance_before).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`, mono: true }]
+                : []),
+              { label: "Status", value: status.charAt(0).toUpperCase() + status.slice(1) },
+            ].map(({ label, value, mono }) => (
+              <div key={label} className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isDark ? "bg-slate-950/60" : "bg-slate-50"}`}>
+                <span className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  {label}
+                </span>
+                <span className={`text-xs text-right truncate max-w-[60%] font-medium ${mono ? "font-mono" : ""} ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                  {value}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <Button
+            onClick={onClose}
+            className="w-full text-white font-semibold uppercase text-[11px] tracking-widest bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer"
+          >
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function TransactionsPage() {
   const { isDark } = useTheme();
+
+  // Which table this page is showing: normal transactions, or card-to-card
+  // balance transfers (from `card_balance_transfers`).
+  const [activeView, setActiveView] = useState<"transactions" | "transfers">("transactions");
+
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -271,6 +455,17 @@ export default function TransactionsPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [newRowId, setNewRowId] = useState<number | null>(null);
   const prevTopIdRef = useRef<number | null>(null);
+
+  // ── Transfers state ───────────────────────────────────────────────────────
+  const [transfers, setTransfers] = useState<CardTransfer[]>([]);
+  const [transfersLoading, setTransfersLoading] = useState(true);
+  const [transferSearch, setTransferSearch] = useState("");
+  const [transferStatusFilter, setTransferStatusFilter] = useState<string>("all");
+  const [transferPage, setTransferPage] = useState(1);
+  const [viewTransfer, setViewTransfer] = useState<CardTransfer | null>(null);
+  const [transfersLastUpdated, setTransfersLastUpdated] = useState<Date | null>(null);
+  const [newTransferRowId, setNewTransferRowId] = useState<number | null>(null);
+  const prevTopTransferIdRef = useRef<number | null>(null);
 
   // ── Fetch fare_routes from Supabase once (same as dashboard) ──────────────
   useEffect(() => {
@@ -290,6 +485,35 @@ export default function TransactionsPage() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // ── Fetch card_balance_transfers from Supabase, joined with the source /
+  // target `users` rows so we can show each card's UID + owner name. ────────
+  // If your `users` table doesn't expose `card_uid` / `full_name` directly,
+  // adjust the select() column list below to match.
+  useEffect(() => {
+    const loadTransfers = async () => {
+      setTransfersLoading(true);
+      const { data, error } = await supabase
+        .from("card_balance_transfers")
+        .select(`
+          id, source_card_id, target_card_id, amount, reason,
+          source_balance_before, target_balance_before, status,
+          created_at, completed_at,
+          source:users!card_balance_transfers_source_card_id_fkey(id, card_uid, full_name),
+          target:users!card_balance_transfers_target_card_id_fkey(id, card_uid, full_name)
+        `)
+        .order("created_at", { ascending: false });
+      if (!error && data) setTransfers(data as unknown as CardTransfer[]);
+      setTransfersLoading(false);
+    };
+    loadTransfers();
+
+    const channel = supabase
+      .channel("admin_card_balance_transfers")
+      .on("postgres_changes", { event: "*", schema: "public", table: "card_balance_transfers" }, loadTransfers)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   // ── Transactions query ────────────────────────────────────────────────────
   // NOTE: `type` filtering is NOT sent to the backend anymore. The DB can
   // have inconsistent spellings ("topup", "TopUp", "top_up", etc.), so an
@@ -302,6 +526,7 @@ export default function TransactionsPage() {
   if (statusFilter !== "all") params.status = statusFilter;
 
   useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter]);
+  useEffect(() => { setTransferPage(1); }, [transferSearch, transferStatusFilter]);
 
   const { data: transactions, isLoading, refetch: refetchTransactions } =
     useListTransactions(params, { query: { refetchOnWindowFocus: true } });
@@ -337,6 +562,41 @@ export default function TransactionsPage() {
     setLastUpdated(new Date());
   }, [transactionList]);
 
+  // ── Transfers filtering/search (client-side, same pattern as transactions) ─
+  const filteredTransferList = useMemo(() => {
+    let list = transfers;
+    if (transferStatusFilter !== "all") {
+      list = list.filter((t) => normalizeTransferStatus(t.status) === transferStatusFilter);
+    }
+    const q = transferSearch.trim().toLowerCase();
+    if (q) {
+      list = list.filter((t) => {
+        const haystack = [
+          cardUidOf(t.source), fullNameOf(t.source),
+          cardUidOf(t.target), fullNameOf(t.target),
+        ].join(" ").toLowerCase();
+        return haystack.includes(q);
+      });
+    }
+    return list;
+  }, [transfers, transferStatusFilter, transferSearch]);
+
+  const transferTotalPages = Math.max(1, Math.ceil(filteredTransferList.length / PAGE_SIZE));
+  const safeTransferPage = Math.min(transferPage, transferTotalPages);
+  const transferStartIndex = (safeTransferPage - 1) * PAGE_SIZE;
+  const paginatedTransferList = filteredTransferList.slice(transferStartIndex, transferStartIndex + PAGE_SIZE);
+
+  useEffect(() => {
+    if (filteredTransferList.length === 0) return;
+    const topId = filteredTransferList[0]?.id;
+    if (prevTopTransferIdRef.current !== null && topId !== prevTopTransferIdRef.current) {
+      setNewTransferRowId(topId);
+      setTimeout(() => setNewTransferRowId(null), 800);
+    }
+    prevTopTransferIdRef.current = topId;
+    setTransfersLastUpdated(new Date());
+  }, [filteredTransferList]);
+
   const statusColor = (status: string) => {
     if (isDark) {
       switch (status) {
@@ -351,6 +611,21 @@ export default function TransactionsPage() {
       case "Failed":  return "bg-red-50 text-red-600 border-red-200";
       case "Pending": return "bg-amber-50 text-amber-600 border-amber-200";
       default:        return "bg-slate-100 text-slate-500 border-slate-200";
+    }
+  };
+
+  const transferStatusColor = (status: TransferStatus) => {
+    if (isDark) {
+      switch (status) {
+        case "completed": return "bg-emerald-950/40 text-emerald-400 border-emerald-900";
+        case "failed":    return "bg-red-950/40 text-red-400 border-red-900";
+        default:          return "bg-amber-950/40 text-amber-400 border-amber-900";
+      }
+    }
+    switch (status) {
+      case "completed": return "bg-emerald-50 text-emerald-600 border-emerald-200";
+      case "failed":    return "bg-red-50 text-red-600 border-red-200";
+      default:          return "bg-amber-50 text-amber-600 border-amber-200";
     }
   };
 
@@ -380,7 +655,7 @@ export default function TransactionsPage() {
             Transaction Logs
           </h2>
           <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Monitor all Fare deductions and Top-ups in real-time
+            Monitor all Fare deductions, Top-ups, and Card Transfers in real-time
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -388,14 +663,41 @@ export default function TransactionsPage() {
             <Zap className="text-blue-500" size={16} />
             <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
           </div>
-          {lastUpdated && (
+          {(activeView === "transactions" ? lastUpdated : transfersLastUpdated) && (
             <span className={`text-[10px] font-mono pr-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              Last sync: {lastUpdated.toLocaleTimeString()}
+              Last sync: {(activeView === "transactions" ? lastUpdated : transfersLastUpdated)!.toLocaleTimeString()}
             </span>
           )}
         </div>
       </div>
 
+      {/* View switch: Transactions vs Transfers */}
+      <div className={`-mt-4 inline-flex self-start rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
+        <button
+          onClick={() => setActiveView("transactions")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+            activeView === "transactions"
+              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <ReceiptText className="w-3.5 h-3.5" />
+          Transactions
+        </button>
+        <button
+          onClick={() => setActiveView("transfers")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+            activeView === "transfers"
+              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <ArrowRightLeft className="w-3.5 h-3.5" />
+          Card Transfers
+        </button>
+      </div>
+
+      {activeView === "transactions" ? (
       <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
 
@@ -574,9 +876,172 @@ export default function TransactionsPage() {
           )}
         </CardContent>
       </Card>
+      ) : (
+      <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-indigo-400" />
 
-      {/* Receipt Modal */}
+        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
+          <div className="flex flex-col lg:flex-row gap-4 items-center">
+            <div className="flex items-center gap-2 mr-2 shrink-0">
+              <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
+                isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+              }`}>
+                <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+                LIVE
+              </span>
+            </div>
+            <div className="relative flex-1 w-full">
+              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+              <Input
+                placeholder="Search source/target card UID or name..."
+                value={transferSearch}
+                onChange={(e) => setTransferSearch(e.target.value)}
+                className={`pl-10 font-medium text-sm focus-visible:ring-blue-500 ${
+                  isDark
+                    ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
+                    : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
+                }`}
+              />
+            </div>
+            <div className="flex gap-3 w-full lg:w-auto">
+              <Select value={transferStatusFilter} onValueChange={setTransferStatusFilter}>
+                <SelectTrigger className={`w-full lg:w-[150px] font-medium text-xs cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                  <SelectItem value="all" className="cursor-pointer">All Status</SelectItem>
+                  <SelectItem value="pending" className="cursor-pointer">Pending</SelectItem>
+                  <SelectItem value="completed" className="cursor-pointer">Completed</SelectItem>
+                  <SelectItem value="failed" className="cursor-pointer">Failed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4 flex flex-col overflow-hidden">
+          {transfersLoading ? (
+            <div className="space-y-4 pt-6">
+              {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                <Skeleton key={i} className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="relative mt-6 flex-1 min-h-0 overflow-auto">
+                <Table>
+                  <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+                    <TableRow className="border-none hover:bg-transparent">
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Timestamp</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>From (Card UID)</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>To (Card UID)</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Amount</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Reason</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedTransferList.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center py-32">
+                          <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
+                            <ArrowRightLeft size={48} className="mb-2" />
+                            <p className="text-xs font-semibold uppercase tracking-widest">No transfers found</p>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      paginatedTransferList.map((t) => {
+                        const status = normalizeTransferStatus(t.status);
+                        return (
+                          <TableRow
+                            key={t.id}
+                            className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"} ${
+                              newTransferRowId === t.id ? "row-pulse" : ""
+                            }`}
+                          >
+                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                              {new Date(t.created_at).toLocaleString()}
+                            </TableCell>
+                            <TableCell>
+                              <div className="font-mono text-xs text-blue-500 font-semibold">{cardUidOf(t.source)}</div>
+                              <div className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{fullNameOf(t.source)}</div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="font-mono text-xs text-blue-500 font-semibold">{cardUidOf(t.target)}</div>
+                              <div className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{fullNameOf(t.target)}</div>
+                            </TableCell>
+                            <TableCell className={`text-sm font-semibold ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+                              ₱{formatAmount(Number(t.amount))}
+                            </TableCell>
+                            <TableCell className={`text-xs max-w-[180px] truncate ${isDark ? "text-slate-400" : "text-slate-500"}`} title={t.reason}>
+                              {t.reason || "—"}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={`text-[10px] font-semibold capitalize ${transferStatusColor(status)}`}>
+                                {status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  variant="ghost" size="icon"
+                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
+                                  onClick={() => setViewTransfer(t)}
+                                  title="View transfer details"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Pagination */}
+              <div className={`flex items-center justify-between pt-4 border-t mt-2 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+                <span className={`text-xs font-mono uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  Showing{" "}
+                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                    {filteredTransferList.length === 0 ? 0 : transferStartIndex + 1}–{Math.min(transferStartIndex + PAGE_SIZE, filteredTransferList.length)}
+                  </span>{" "}
+                  of <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{filteredTransferList.length}</span> records
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" disabled={safeTransferPage <= 1}
+                    onClick={() => setTransferPage((p) => Math.max(1, p - 1))}
+                    className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
+                      isDark ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
+                    }`}>
+                    <ChevronLeft className="w-3 h-3 mr-1" />Prev
+                  </Button>
+                  <span className={`text-xs font-semibold px-2 tabular-nums ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                    <span className="text-blue-500">{safeTransferPage}</span>
+                    <span className={isDark ? "text-slate-700" : "text-slate-300"}> / {transferTotalPages}</span>
+                  </span>
+                  <Button variant="ghost" size="sm" disabled={safeTransferPage >= transferTotalPages}
+                    onClick={() => setTransferPage((p) => Math.min(transferTotalPages, p + 1))}
+                    className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
+                      isDark ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
+                    }`}>
+                    Next<ChevronRight className="w-3 h-3 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+      )}
+
+      {/* Receipt / Transfer Modals */}
       <ReceiptModal tx={viewTx} routes={routes} onClose={() => setViewTx(null)} isDark={isDark} />
+      <TransferModal transfer={viewTransfer} onClose={() => setViewTransfer(null)} isDark={isDark} />
     </div>
   );
 }
