@@ -42,10 +42,6 @@ function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
 }
 
 // ── Who's making this request? ──────────────────────────────────────────────
-// This router has no auth-check middleware of its own, so we pull the admin
-// identity straight from the bearer token — best-effort, used only for the
-// audit trail. Falls back to "unknown" rather than blocking the request.
-
 function getBearerToken(authorization?: string): string | null {
   if (!authorization) return null;
   const [scheme, token] = authorization.split(" ");
@@ -400,6 +396,13 @@ router.delete("/users/:id", async (req, res): Promise<void> => {
       if (!existingUser) return false;
 
       deletedUserInfo = { fullName: existingUser.fullName, cardUid: existingUser.cardUid };
+
+      // Remove any card balance transfers referencing this user as source or target
+      await tx.execute(sql`
+        delete from card_balance_transfers
+        where source_card_id = ${existingUser.id}
+           or target_card_id = ${existingUser.id}
+      `);
 
       await tx
         .delete(transactionsTable)
