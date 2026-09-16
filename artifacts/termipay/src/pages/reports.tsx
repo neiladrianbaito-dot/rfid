@@ -516,8 +516,9 @@ export default function ReportsPage() {
   // ── which report section tab is showing: Daily Revenue Breakdown,
   // Discount Collection Analytics, or Detailed Revenue Log — same
   // one-tab-visible-at-a-time pattern as the Top-up / Fare / Transfer
-  // switch on the Transactions page. The Year/Month/Day filter above
-  // applies to whichever tab is active. ──
+  // switch on the Transactions page. The Year/Month/Day filter below
+  // is now rendered INSIDE each tab's own card, and applies to whichever
+  // tab is active. ──
   const [activeTab, setActiveTab] = useState<"chart" | "discount" | "log" | "routes">("chart");
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
@@ -890,7 +891,7 @@ export default function ReportsPage() {
   // period — total collected divided by the number of calendar days
   // covered by filteredFareDiscountBreakdown (which is already the full,
   // zero-filled range whenever a Year is selected, or just the days that
-  // exist when it isn't). Powers the new "Daily Average" chip on the
+  // exist when it isn't). Powers the "Daily Average" chip on the
   // Discount Collection Analytics tab. ──
   const discountDailyAverage = React.useMemo(() => {
     const dayCount = filteredFareDiscountBreakdown.length;
@@ -1259,6 +1260,83 @@ export default function ReportsPage() {
     writeFile(workbook, `transaction-logs${filenameSuffix}-${stamp}.xlsx`);
   };
 
+  // ══════════════════════════════════════════════════════════════════════
+  // SHARED FILTER BAR — now rendered INSIDE each tab's own card (instead
+  // of once, outside/above all the tabs). Same Year/Month/Day selects +
+  // Reset button + active-filter summary chip; each tab just calls
+  // {renderFilterBar()} near the top of its own CardContent so the
+  // control lives inside that tab's card body.
+  // ══════════════════════════════════════════════════════════════════════
+  const renderFilterBar = () => (
+    <div className={`flex flex-wrap items-center gap-2 rounded-lg border px-4 py-3 mb-6 ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+      <Filter size={13} className={isDark ? "text-blue-400" : "text-blue-500"} />
+
+      <select
+        value={filterYear}
+        onChange={(e) => handleYearChange(e.target.value)}
+        data-testid="select-filter-year"
+        className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+          isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-700"
+        }`}
+      >
+        <option value="all">Year</option>
+        {availableYears.map((y) => (
+          <option key={y} value={y}>{y}</option>
+        ))}
+      </select>
+
+      <select
+        value={filterMonth}
+        onChange={(e) => handleMonthChange(e.target.value)}
+        data-testid="select-filter-month"
+        className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+          isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-700"
+        }`}
+      >
+        <option value="all">Month</option>
+        {MONTH_OPTIONS.map((m) => (
+          <option key={m.value} value={m.value}>{m.label}</option>
+        ))}
+      </select>
+
+      <select
+        value={filterDay}
+        onChange={(e) => handleDayChange(e.target.value)}
+        data-testid="select-filter-day"
+        className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+          isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-700"
+        }`}
+      >
+        <option value="all">Day</option>
+        {DAY_OPTIONS.map((d) => (
+          <option key={d.value} value={d.value}>{d.label}</option>
+        ))}
+      </select>
+
+      {isFilterActive && (
+        <button
+          type="button"
+          onClick={resetFilters}
+          data-testid="button-reset-filters"
+          className={`h-8 flex items-center gap-1 px-2.5 rounded-md text-xs font-semibold transition-colors ${
+            isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+          }`}
+        >
+          <RotateCcw size={12} />
+          Reset
+        </button>
+      )}
+
+      {isFilterActive && (
+        <div className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-semibold ${
+          isDark ? "bg-blue-950/40 border-blue-900 text-blue-300" : "bg-blue-50 border-blue-100 text-blue-700"
+        }`}>
+          {filterLabel}: {formatPeso(filteredRevenueTotal)} ({filteredBreakdown.length}d)
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div
       className={`space-y-8 h-full flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}
@@ -1354,78 +1432,10 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* ══ SHARED FILTER BAR — applies to whichever tab below is active ══ */}
-      <div className={`flex flex-wrap items-center gap-2 rounded-lg border px-4 py-3 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <Filter size={13} className={isDark ? "text-blue-400" : "text-blue-500"} />
-
-        <select
-          value={filterYear}
-          onChange={(e) => handleYearChange(e.target.value)}
-          data-testid="select-filter-year"
-          className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-            isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-          }`}
-        >
-          <option value="all">Year</option>
-          {availableYears.map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
-
-        <select
-          value={filterMonth}
-          onChange={(e) => handleMonthChange(e.target.value)}
-          data-testid="select-filter-month"
-          className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-            isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-          }`}
-        >
-          <option value="all">Month</option>
-          {MONTH_OPTIONS.map((m) => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
-
-        <select
-          value={filterDay}
-          onChange={(e) => handleDayChange(e.target.value)}
-          data-testid="select-filter-day"
-          className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-            isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-          }`}
-        >
-          <option value="all">Day</option>
-          {DAY_OPTIONS.map((d) => (
-            <option key={d.value} value={d.value}>{d.label}</option>
-          ))}
-        </select>
-
-        {isFilterActive && (
-          <button
-            type="button"
-            onClick={resetFilters}
-            data-testid="button-reset-filters"
-            className={`h-8 flex items-center gap-1 px-2.5 rounded-md text-xs font-semibold transition-colors ${
-              isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-            }`}
-          >
-            <RotateCcw size={12} />
-            Reset
-          </button>
-        )}
-
-        {isFilterActive && (
-          <div className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-semibold ${
-            isDark ? "bg-blue-950/40 border-blue-900 text-blue-300" : "bg-blue-50 border-blue-100 text-blue-700"
-          }`}>
-            {filterLabel}: {formatPeso(filteredRevenueTotal)} ({filteredBreakdown.length}d)
-          </div>
-        )}
-      </div>
-
       {/* ══ TAB SWITCH — Daily Revenue Breakdown / Discount Collection Analytics /
-          Detailed Revenue Log, same one-tab-visible pattern as the Top-up / Fare /
-          Transfer switch on the Transactions page ══ */}
+          Detailed Revenue Log / Route Performance, same one-tab-visible pattern
+          as the Top-up / Fare / Transfer switch on the Transactions page. The
+          Year/Month/Day filter now lives INSIDE each tab's own card below. ══ */}
       <div className={`inline-flex self-start rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
         <button
           onClick={() => setActiveTab("chart")}
@@ -1477,7 +1487,8 @@ export default function ReportsPage() {
         </button>
       </div>
 
-      {/* ══ TAB CONTENT — only the active tab's card renders ══ */}
+      {/* ══ TAB CONTENT — only the active tab's card renders. Each card now
+          renders the shared filter bar at the top of its own CardContent. ══ */}
       {activeTab === "chart" && (
       <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
@@ -1496,6 +1507,7 @@ export default function ReportsPage() {
           </div>
         </CardHeader>
         <CardContent className="pt-8">
+          {renderFilterBar()}
           {isLoading ? (
             <Skeleton className={`h-72 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
           ) : filteredBreakdown.length === 0 ? (
@@ -1552,11 +1564,11 @@ export default function ReportsPage() {
 
       {/* ══ DISCOUNT COLLECTION ANALYTICS ══
           Fare revenue only, split into Regular vs. Student/Senior/PWD.
-          Follows the same Year/Month/Day filter as the chart above.
-          Trend is now shown as a LINE GRAPH (Total/Regular/Student/Senior/PWD
-          over time) instead of a plain table, matching the bar chart style
-          used on the "Daily Revenue Breakdown" tab. The daily table is kept
-          below the chart for exact per-day figures. */}
+          Follows the same Year/Month/Day filter, now rendered inside this
+          card's own CardContent. Trend is shown as a LINE GRAPH
+          (Total/Regular/Student/Senior/PWD over time), matching the bar
+          chart style used on the "Daily Revenue Breakdown" tab. The daily
+          table is kept below the chart for exact per-day figures. */}
       {activeTab === "discount" && (
       <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-600 via-indigo-500 to-transparent" />
@@ -1577,6 +1589,7 @@ export default function ReportsPage() {
           </div>
         </CardHeader>
         <CardContent className="pt-6 space-y-6">
+          {renderFilterBar()}
           {isLoading ? (
             <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
           ) : (
@@ -1815,7 +1828,8 @@ export default function ReportsPage() {
           Which route gets the most riders/day (Fare transactions only,
           grouped by routeId), a line-graph trend per route with a short
           linear-trend forecast, and each route's daily average. Same
-          Year/Month/Day filter as the other tabs. */}
+          Year/Month/Day filter, rendered inside this card's own
+          CardContent. */}
       {activeTab === "routes" && (
       <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-amber-500 to-transparent" />
@@ -1837,6 +1851,7 @@ export default function ReportsPage() {
           </div>
         </CardHeader>
         <CardContent className="pt-6 space-y-6">
+          {renderFilterBar()}
           {isLoading ? (
             <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
           ) : rankedRoutes.length === 0 ? (
@@ -2059,6 +2074,7 @@ export default function ReportsPage() {
           </div>
         </CardHeader>
         <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
+          {renderFilterBar()}
           {isLoading ? (
             <div className="space-y-4">
               {[1, 2, 3].map((i) => <Skeleton key={i} className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />)}
