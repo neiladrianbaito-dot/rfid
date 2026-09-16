@@ -1871,7 +1871,7 @@ export default function ReportsPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-amber-500/80" : "text-amber-700/80"}`}>
-                      Pinaka-Sinasakyang Ruta {isFilterActive ? `(${filterLabel})` : "(All-time)"}
+                     Most Traveled Route {isFilterActive ? `(${filterLabel})` : "(All-time)"}
                     </p>
                     <p className={`text-lg font-bold tracking-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
                       {topRoute.name}
