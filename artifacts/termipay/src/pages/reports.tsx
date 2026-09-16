@@ -212,168 +212,137 @@ type SheetColumn = {
   get: (row: any, idx: number) => string;
 };
 
-type StyleInstruction = { ref: string; style: any };
-type MergeInstruction = { s: { r: number; c: number }; e: { r: number; c: number } };
+function colLetter(c: number): string {
+  return String.fromCharCode("A".charCodeAt(0) + c);
+}
 
-// ── Single-sheet, stacked-sections builder ──────────────────────────────
-// Instead of one worksheet per record type, everything is written into ONE
-// worksheet: a shared banner/summary block up top, then each record type
-// (Fare, Top-up, Transfers) follows directly underneath as its own colored
-// section — section title band, its own column headers, its own rows —
-// with no tab switching required to see all three.
+type SheetBlock = {
+  title: string;
+  bandColor: string;
+  columns: SheetColumn[];
+  rows: any[];
+  statusColIndex?: number;
+  statusColorFor?: (status: string) => { font: string; fill: string };
+};
 
-class SheetBuilder {
-  colCount: number;
-  aoa: any[][] = [];
-  styles: StyleInstruction[] = [];
-  merges: MergeInstruction[] = [];
-  rowHeights: number[] = [];
-
-  constructor(colCount: number) {
-    this.colCount = colCount;
+// ── Single-sheet, SIDE-BY-SIDE (row format) builder ─────────────────────
+// Fare, Top-up, and Transfers sit next to each other in the SAME row band —
+// each block gets its own column range (e.g. Fare = A:F, Top-up = H:M,
+// Transfers = O:V) — instead of being stacked on top of one another. A
+// shared banner spans the full width above all three blocks.
+function buildRowFormatSheet(
+  utils: any,
+  opts: {
+    generatedAt: string;
+    adminName: string;
+    blocks: SheetBlock[];
   }
+) {
+  const GAP = 1; // blank column between blocks
+  const offsets: number[] = [];
+  let cursor = 0;
+  opts.blocks.forEach((b, i) => {
+    offsets.push(cursor);
+    cursor += b.columns.length;
+    if (i < opts.blocks.length - 1) cursor += GAP;
+  });
+  const totalCols = cursor;
 
-  private colLetter(c: number) {
-    return String.fromCharCode("A".charCodeAt(0) + c);
-  }
+  const HEADER_ROWS = 6; // 0:title 1:subtitle 2:meta 3:blank 4:band 5:column headers
+  const dataRowsCount = Math.max(1, ...opts.blocks.map((b) => b.rows.length));
+  const totalRows = HEADER_ROWS + dataRowsCount;
 
-  private pushRow(row: any[], height = 20) {
-    this.aoa.push(row);
-    this.rowHeights.push(height);
-    return this.aoa.length - 1; // 0-indexed row just pushed
-  }
+  const grid: any[][] = Array.from({ length: totalRows }, () => Array(totalCols).fill(""));
+  const styles: { ref: string; style: any }[] = [];
+  const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [];
+  const rowHeights: number[] = Array(totalRows).fill(18);
+  rowHeights[0] = 34;
+  rowHeights[1] = 22;
+  rowHeights[2] = 16;
+  rowHeights[3] = 8;
+  rowHeights[4] = 24;
+  rowHeights[5] = 22;
 
-  setCellStyle(rowIdx: number, colIdx: number, style: any) {
-    this.styles.push({ ref: `${this.colLetter(colIdx)}${rowIdx + 1}`, style });
-  }
+  const setStyle = (r: number, c: number, style: any) => {
+    styles.push({ ref: `${colLetter(c)}${r + 1}`, style });
+  };
 
-  addBanner(title: string, subtitle: string, generatedAt: string, adminName: string) {
-    const r0 = this.pushRow([title, ...Array(this.colCount - 1).fill("")], 34);
-    this.merges.push({ s: { r: r0, c: 0 }, e: { r: r0, c: this.colCount - 1 } });
-    this.setCellStyle(r0, 0, {
-      font: { bold: true, sz: 16, color: { rgb: "FFFFFF" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "0F172A" }, patternType: "solid" },
+  // ── shared banner across the full width ──
+  grid[0][0] = "Fare Collection System";
+  merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } });
+  setStyle(0, 0, {
+    font: { bold: true, sz: 16, color: { rgb: "FFFFFF" }, name: "Calibri" },
+    fill: { fgColor: { rgb: "0F172A" }, patternType: "solid" },
+    alignment: { horizontal: "center", vertical: "center" },
+  });
+
+  grid[1][0] = "Transaction Logs Export — Fare, Top-up & Transfers (row format)";
+  merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } });
+  setStyle(1, 0, {
+    font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
+    fill: { fgColor: { rgb: "1E40AF" }, patternType: "solid" },
+    alignment: { horizontal: "center", vertical: "center" },
+  });
+
+  grid[2][0] = `Generated: ${opts.generatedAt}    |    Prepared by: ${opts.adminName}`;
+  merges.push({ s: { r: 2, c: 0 }, e: { r: 2, c: totalCols - 1 } });
+  setStyle(2, 0, {
+    font: { italic: true, sz: 10, color: { rgb: "475569" }, name: "Calibri" },
+    fill: { fgColor: { rgb: "F1F5F9" }, patternType: "solid" },
+    alignment: { horizontal: "center", vertical: "center" },
+  });
+
+  // ── each block, placed side by side starting at its own column offset ──
+  opts.blocks.forEach((b, bi) => {
+    const offset = offsets[bi];
+    const colCount = b.columns.length;
+
+    // band title (row 4)
+    grid[4][offset] = b.title;
+    merges.push({ s: { r: 4, c: offset }, e: { r: 4, c: offset + colCount - 1 } });
+    setStyle(4, offset, {
+      font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
+      fill: { fgColor: { rgb: b.bandColor }, patternType: "solid" },
       alignment: { horizontal: "center", vertical: "center" },
     });
 
-    const r1 = this.pushRow([subtitle, ...Array(this.colCount - 1).fill("")], 22);
-    this.merges.push({ s: { r: r1, c: 0 }, e: { r: r1, c: this.colCount - 1 } });
-    this.setCellStyle(r1, 0, {
-      font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "1E40AF" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-    });
-
-    const metaRow = Array(this.colCount).fill("");
-    metaRow[0] = `Generated: ${generatedAt}`;
-    const preparedCol = Math.max(1, this.colCount - 3);
-    metaRow[preparedCol] = `Prepared by: ${adminName}`;
-    const r2 = this.pushRow(metaRow, 16);
-    const metaBase = {
-      font: { italic: true, sz: 10, color: { rgb: "475569" }, name: "Calibri" },
-      fill: { fgColor: { rgb: "F1F5F9" }, patternType: "solid" },
-      alignment: { horizontal: "left", vertical: "center" },
-    };
-    this.merges.push({ s: { r: r2, c: 0 }, e: { r: r2, c: Math.max(0, preparedCol - 1) } });
-    this.setCellStyle(r2, 0, metaBase);
-    this.merges.push({ s: { r: r2, c: preparedCol }, e: { r: r2, c: this.colCount - 1 } });
-    this.setCellStyle(r2, preparedCol, { ...metaBase, font: { ...metaBase.font, italic: false, bold: true } });
-  }
-
-  addOverallSummary(pairs: { label: string; value: string | number }[][]) {
-    // pairs is an array of rows, each row an array of 1-2 {label,value} cells
-    // laid out as [A/B] and [D/E], matching the original two-pair layout.
-    pairs.forEach((pairRow) => {
-      const row = Array(this.colCount).fill("");
-      const rIdx = this.pushRow(row, 20);
-      const labelStyle = {
-        font: { bold: true, sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
-        fill: { fgColor: { rgb: "E2E8F0" }, patternType: "solid" },
-        alignment: { horizontal: "left", vertical: "center" },
-        border: THIN_BORDER,
-      };
-      const valueStyle = {
-        font: { bold: true, sz: 11, color: { rgb: "1D4ED8" }, name: "Calibri" },
-        fill: { fgColor: { rgb: "EFF6FF" }, patternType: "solid" },
-        alignment: { horizontal: "center", vertical: "center" },
-        border: THIN_BORDER,
-      };
-      pairRow.forEach((pair, i) => {
-        const labelCol = i * 3;
-        const valueCol = i * 3 + 1;
-        this.aoa[rIdx][labelCol] = pair.label;
-        this.aoa[rIdx][valueCol] = pair.value;
-        this.setCellStyle(rIdx, labelCol, labelStyle);
-        this.setCellStyle(rIdx, valueCol, valueStyle);
-      });
-    });
-  }
-
-  addBlankRow() {
-    this.pushRow(Array(this.colCount).fill(""), 8);
-  }
-
-  // Section band + its own column headers + its rows, stacked directly
-  // under whatever came before it in this same sheet.
-  addSection(opts: {
-    title: string;
-    bandColor: string;
-    columns: SheetColumn[];
-    rows: any[];
-    statusColIndex?: number;
-    statusColorFor?: (status: string) => { font: string; fill: string };
-  }) {
-    const { title, bandColor, columns, rows, statusColIndex, statusColorFor } = opts;
-
-    const bandRow = Array(this.colCount).fill("");
-    bandRow[0] = title;
-    const rBand = this.pushRow(bandRow, 24);
-    this.merges.push({ s: { r: rBand, c: 0 }, e: { r: rBand, c: this.colCount - 1 } });
-    this.setCellStyle(rBand, 0, {
-      font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
-      fill: { fgColor: { rgb: bandColor }, patternType: "solid" },
-      alignment: { horizontal: "left", vertical: "center" },
-    });
-
-    const headerRow = Array(this.colCount).fill("");
-    columns.forEach((c, i) => (headerRow[i] = c.header));
-    const rHeader = this.pushRow(headerRow, 22);
-    for (let c = 0; c < columns.length; c++) {
-      this.setCellStyle(rHeader, c, {
+    // column headers (row 5)
+    b.columns.forEach((c, ci) => {
+      grid[5][offset + ci] = c.header;
+      setStyle(5, offset + ci, {
         font: { bold: true, sz: 10, color: { rgb: "FFFFFF" }, name: "Calibri" },
         fill: { fgColor: { rgb: "1E3A5F" }, patternType: "solid" },
         alignment: { horizontal: "center", vertical: "center" },
         border: MEDIUM_BORDER,
       });
-    }
+    });
 
-    if (rows.length === 0) {
-      const emptyRow = Array(this.colCount).fill("");
-      emptyRow[0] = "No records for this filter.";
-      const rEmpty = this.pushRow(emptyRow, 20);
-      this.merges.push({ s: { r: rEmpty, c: 0 }, e: { r: rEmpty, c: this.colCount - 1 } });
-      this.setCellStyle(rEmpty, 0, {
+    if (b.rows.length === 0) {
+      grid[HEADER_ROWS][offset] = "No records for this filter.";
+      merges.push({ s: { r: HEADER_ROWS, c: offset }, e: { r: HEADER_ROWS, c: offset + colCount - 1 } });
+      setStyle(HEADER_ROWS, offset, {
         font: { italic: true, sz: 10, color: { rgb: "94A3B8" }, name: "Calibri" },
         fill: { fgColor: { rgb: "F8FAFC" }, patternType: "solid" },
         alignment: { horizontal: "center", vertical: "center" },
       });
+      return;
     }
 
-    rows.forEach((row, i) => {
-      const dataRow = Array(this.colCount).fill("");
-      columns.forEach((c, ci) => (dataRow[ci] = c.get(row, i)));
-      const rIdx = this.pushRow(dataRow, 18);
+    b.rows.forEach((row, i) => {
+      const r = HEADER_ROWS + i;
       const isEven = i % 2 === 0;
       const baseFill = isEven ? "FFFFFF" : "F8FAFC";
-      for (let c = 0; c < columns.length; c++) {
+      b.columns.forEach((c, ci) => {
+        const val = c.get(row, i);
+        grid[r][offset + ci] = val;
         let style: any = {
           font: { sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
           fill: { fgColor: { rgb: baseFill }, patternType: "solid" },
           alignment: { horizontal: "left", vertical: "center" },
           border: HAIR_BORDER,
         };
-        if (statusColIndex !== undefined && c === statusColIndex && statusColorFor) {
-          const sc = statusColorFor(String(dataRow[c] || ""));
+        if (b.statusColIndex !== undefined && ci === b.statusColIndex && b.statusColorFor) {
+          const sc = b.statusColorFor(String(val || ""));
           style = {
             ...style,
             font: { ...style.font, bold: true, color: { rgb: sc.font } },
@@ -381,24 +350,27 @@ class SheetBuilder {
             alignment: { horizontal: "center", vertical: "center" },
           };
         }
-        this.setCellStyle(rIdx, c, style);
-      }
+        setStyle(r, offset + ci, style);
+      });
     });
+  });
 
-    this.addBlankRow();
-  }
+  const worksheet = utils.aoa_to_sheet(grid);
 
-  build(utils: any, colWidths: number[]) {
-    const worksheet = utils.aoa_to_sheet(this.aoa);
-    worksheet["!cols"] = colWidths.map((w) => ({ wch: w }));
-    worksheet["!merges"] = this.merges;
-    worksheet["!rows"] = this.rowHeights.map((hpt) => ({ hpt }));
-    this.styles.forEach(({ ref, style }) => {
-      if (!worksheet[ref]) worksheet[ref] = { t: "z", v: "" };
-      worksheet[ref].s = style;
-    });
-    return worksheet;
-  }
+  const widths = Array(totalCols).fill(3); // gap columns default narrow
+  opts.blocks.forEach((b, bi) => {
+    const offset = offsets[bi];
+    b.columns.forEach((c, ci) => (widths[offset + ci] = c.width));
+  });
+  worksheet["!cols"] = widths.map((w) => ({ wch: w }));
+  worksheet["!merges"] = merges;
+  worksheet["!rows"] = rowHeights.map((hpt) => ({ hpt }));
+  styles.forEach(({ ref, style }) => {
+    if (!worksheet[ref]) worksheet[ref] = { t: "z", v: "" };
+    worksheet[ref].s = style;
+  });
+
+  return worksheet;
 }
 
 export default function ReportsPage() {
@@ -693,11 +665,6 @@ export default function ReportsPage() {
       return map[key] || { font: "1E293B", fill: "F8FAFC" };
     };
 
-    // 8 columns wide — enough for the Transfers section (the widest); the
-    // Fare/Top-up sections just use the first 6 and leave the rest blank.
-    const COL_COUNT = 8;
-    const COL_WIDTHS = [26, 18, 24, 18, 24, 18, 24, 14];
-
     const txColumns = (signPrefix: string): SheetColumn[] => [
       { header: "Timestamp", width: 26, get: (tx) => {
         const ts = tx.timestamp || tx.created_at;
@@ -733,54 +700,36 @@ export default function ReportsPage() {
     const sumAmounts = (list: any[]) =>
       list.reduce((s, tx) => s + Math.abs(Number(tx.amount) || 0), 0);
 
-    const builder = new SheetBuilder(COL_COUNT);
-
-    builder.addBanner(
-      "Fare Collection System",
-      "Transaction Logs Export — Fare, Top-up & Transfers",
+    const worksheet = buildRowFormatSheet(utils, {
       generatedAt,
-      adminName
-    );
-    builder.addOverallSummary([
-      [
-        { label: isFilterActive ? `Fare Total (${filterLabel})` : "Total Fare Deducted", value: formatPeso(sumAmounts(filteredFareList)) },
-        { label: isFilterActive ? `Top-up Total (${filterLabel})` : "Total Top-up Amount", value: formatPeso(sumAmounts(filteredTopupList)) },
+      adminName,
+      blocks: [
+        {
+          title: `FARE — DEDUCTION LOGS (${filteredFareList.length})`,
+          bandColor: "B91C1C",
+          columns: txColumns("−"),
+          rows: filteredFareList,
+          statusColIndex: 5,
+          statusColorFor,
+        },
+        {
+          title: `TOP-UP — BALANCE LOGS (${filteredTopupList.length})`,
+          bandColor: "047857",
+          columns: txColumns("+"),
+          rows: filteredTopupList,
+          statusColIndex: 5,
+          statusColorFor,
+        },
+        {
+          title: `TRANSFERS — CARD BALANCE (${filteredTransfersList.length})`,
+          bandColor: "1D4ED8",
+          columns: transferColumns,
+          rows: filteredTransfersList,
+          statusColIndex: 7,
+          statusColorFor,
+        },
       ],
-      [
-        { label: isFilterActive ? `Transfers Total (${filterLabel})` : "Total Transferred", value: formatPeso(sumAmounts(filteredTransfersList)) },
-        { label: "Total Records", value: filteredFareList.length + filteredTopupList.length + filteredTransfersList.length },
-      ],
-    ]);
-    builder.addBlankRow();
-
-    builder.addSection({
-      title: `FARE — DEDUCTION LOGS (${filteredFareList.length} records)`,
-      bandColor: "B91C1C",
-      columns: txColumns("−"),
-      rows: filteredFareList,
-      statusColIndex: 5,
-      statusColorFor,
     });
-
-    builder.addSection({
-      title: `TOP-UP — BALANCE LOGS (${filteredTopupList.length} records)`,
-      bandColor: "047857",
-      columns: txColumns("+"),
-      rows: filteredTopupList,
-      statusColIndex: 5,
-      statusColorFor,
-    });
-
-    builder.addSection({
-      title: `TRANSFERS — CARD BALANCE (${filteredTransfersList.length} records)`,
-      bandColor: "1D4ED8",
-      columns: transferColumns,
-      rows: filteredTransfersList,
-      statusColIndex: 7,
-      statusColorFor,
-    });
-
-    const worksheet = builder.build(utils, COL_WIDTHS);
 
     const workbook = utils.book_new();
     utils.book_append_sheet(workbook, worksheet, "Transaction Logs");
