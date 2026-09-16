@@ -1139,21 +1139,21 @@ export default function UserManagementPage() {
                           >
                             {theme.label}
                           </div>
-                          {/* "Valid Until" label + date forced to WHITE per request.
-                              ⚠️ NOTE: on Student/Senior/PWD cards the background is white,
-                              so white text here will be very hard to read. Regular card
-                              (navy bg) is fine. Ping me if you want this to stay white only
-                              on dark cards and switch to dark text automatically on light cards. */}
+                          {/* ✅ FIX: "Valid Until" label + date now follow theme.textColor
+                              instead of being hardcoded to white. That means:
+                              - Regular card (navy bg)      -> white text (theme.textColor = "#ffffff")
+                              - Student/Senior/PWD (white bg) -> dark navy text (theme.textColor = "#0f172a")
+                              so it's always legible regardless of card background. */}
                           <div className="text-right">
                             <div
                               className="uppercase tracking-wide font-semibold"
-                              style={{ color: "#ffffff", fontSize: 11, lineHeight: 1.3 }}
+                              style={{ color: theme.subTextColor, fontSize: 11, lineHeight: 1.3 }}
                             >
                               Valid Until
                             </div>
                             <div
                               className="font-mono font-bold"
-                              style={{ color: "#ffffff", fontSize: 15, lineHeight: 1.3 }}
+                              style={{ color: theme.textColor, fontSize: 15, lineHeight: 1.3 }}
                             >
                               {formatDate(previewUser.expirationDate)}
                             </div>
