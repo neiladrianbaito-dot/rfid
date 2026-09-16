@@ -254,8 +254,16 @@ type SheetColumn = {
   get: (row: any, idx: number) => string;
 };
 
+// Excel column letters, supports > 26 columns (AA, AB, ...) even though no
+// single tab currently needs more than a handful of columns.
 function colLetter(c: number): string {
-  return String.fromCharCode("A".charCodeAt(0) + c);
+  let n = c;
+  let s = "";
+  do {
+    s = String.fromCharCode("A".charCodeAt(0) + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return s;
 }
 
 type SheetBlock = {
@@ -267,32 +275,27 @@ type SheetBlock = {
   statusColorFor?: (status: string) => { font: string; fill: string };
 };
 
-// ── Single-sheet, SIDE-BY-SIDE (row format) builder ─────────────────────
-// Fare, Top-up, Transfers, and Discount Analytics sit next to each other in
-// the SAME row band — each block gets its own column range (e.g. Fare =
-// A:F, Top-up = H:M, Transfers = O:V, Discount Analytics = X:...) —
-// instead of being stacked on top of one another. A shared banner spans
-// the full width above all blocks.
-function buildRowFormatSheet(
+// ── Single-sheet (ONE TAB) builder ───────────────────────────────────────
+// Renders exactly ONE block (Fare, Top-up, Transfers, or Discount
+// Analytics) as its own full-width worksheet — banner + subtitle + meta
+// row, then the block's own colored title band and column headers, then
+// its data rows. Each call produces one sheet/tab, mirroring the
+// Fare / Top-up / Transfer tabs on the Transactions page instead of
+// cramming every category side-by-side into a single sheet.
+function buildSingleSheet(
   utils: any,
   opts: {
     generatedAt: string;
     adminName: string;
-    blocks: SheetBlock[];
+    subtitle: string;
+    block: SheetBlock;
   }
 ) {
-  const GAP = 1; // blank column between blocks
-  const offsets: number[] = [];
-  let cursor = 0;
-  opts.blocks.forEach((b, i) => {
-    offsets.push(cursor);
-    cursor += b.columns.length;
-    if (i < opts.blocks.length - 1) cursor += GAP;
-  });
-  const totalCols = cursor;
+  const b = opts.block;
+  const totalCols = Math.max(1, b.columns.length);
 
   const HEADER_ROWS = 6; // 0:title 1:subtitle 2:meta 3:blank 4:band 5:column headers
-  const dataRowsCount = Math.max(1, ...opts.blocks.map((b) => b.rows.length));
+  const dataRowsCount = Math.max(1, b.rows.length);
   const totalRows = HEADER_ROWS + dataRowsCount;
 
   const grid: any[][] = Array.from({ length: totalRows }, () => Array(totalCols).fill(""));
@@ -310,7 +313,7 @@ function buildRowFormatSheet(
     styles.push({ ref: `${colLetter(c)}${r + 1}`, style });
   };
 
-  // ── shared banner across the full width ──
+  // ── banner (full width of this tab) ──
   grid[0][0] = "Fare Collection System";
   merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } });
   setStyle(0, 0, {
@@ -319,7 +322,7 @@ function buildRowFormatSheet(
     alignment: { horizontal: "center", vertical: "center" },
   });
 
-  grid[1][0] = "Transaction Logs Export — Fare, Top-up, Transfers & Discount Analytics (row format)";
+  grid[1][0] = opts.subtitle;
   merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } });
   setStyle(1, 0, {
     font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
@@ -335,49 +338,42 @@ function buildRowFormatSheet(
     alignment: { horizontal: "center", vertical: "center" },
   });
 
-  // ── each block, placed side by side starting at its own column offset ──
-  opts.blocks.forEach((b, bi) => {
-    const offset = offsets[bi];
-    const colCount = b.columns.length;
+  // ── this tab's own colored band title (row 4) ──
+  grid[4][0] = b.title;
+  merges.push({ s: { r: 4, c: 0 }, e: { r: 4, c: totalCols - 1 } });
+  setStyle(4, 0, {
+    font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
+    fill: { fgColor: { rgb: b.bandColor }, patternType: "solid" },
+    alignment: { horizontal: "center", vertical: "center" },
+  });
 
-    // band title (row 4)
-    grid[4][offset] = b.title;
-    merges.push({ s: { r: 4, c: offset }, e: { r: 4, c: offset + colCount - 1 } });
-    setStyle(4, offset, {
-      font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
-      fill: { fgColor: { rgb: b.bandColor }, patternType: "solid" },
+  // ── column headers (row 5) ──
+  b.columns.forEach((c, ci) => {
+    grid[5][ci] = c.header;
+    setStyle(5, ci, {
+      font: { bold: true, sz: 10, color: { rgb: "FFFFFF" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "1E3A5F" }, patternType: "solid" },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: MEDIUM_BORDER,
+    });
+  });
+
+  if (b.rows.length === 0) {
+    grid[HEADER_ROWS][0] = "No records for this filter.";
+    merges.push({ s: { r: HEADER_ROWS, c: 0 }, e: { r: HEADER_ROWS, c: totalCols - 1 } });
+    setStyle(HEADER_ROWS, 0, {
+      font: { italic: true, sz: 10, color: { rgb: "94A3B8" }, name: "Calibri" },
+      fill: { fgColor: { rgb: "F8FAFC" }, patternType: "solid" },
       alignment: { horizontal: "center", vertical: "center" },
     });
-
-    // column headers (row 5)
-    b.columns.forEach((c, ci) => {
-      grid[5][offset + ci] = c.header;
-      setStyle(5, offset + ci, {
-        font: { bold: true, sz: 10, color: { rgb: "FFFFFF" }, name: "Calibri" },
-        fill: { fgColor: { rgb: "1E3A5F" }, patternType: "solid" },
-        alignment: { horizontal: "center", vertical: "center" },
-        border: MEDIUM_BORDER,
-      });
-    });
-
-    if (b.rows.length === 0) {
-      grid[HEADER_ROWS][offset] = "No records for this filter.";
-      merges.push({ s: { r: HEADER_ROWS, c: offset }, e: { r: HEADER_ROWS, c: offset + colCount - 1 } });
-      setStyle(HEADER_ROWS, offset, {
-        font: { italic: true, sz: 10, color: { rgb: "94A3B8" }, name: "Calibri" },
-        fill: { fgColor: { rgb: "F8FAFC" }, patternType: "solid" },
-        alignment: { horizontal: "center", vertical: "center" },
-      });
-      return;
-    }
-
+  } else {
     b.rows.forEach((row, i) => {
       const r = HEADER_ROWS + i;
       const isEven = i % 2 === 0;
       const baseFill = isEven ? "FFFFFF" : "F8FAFC";
       b.columns.forEach((c, ci) => {
         const val = c.get(row, i);
-        grid[r][offset + ci] = val;
+        grid[r][ci] = val;
         let style: any = {
           font: { sz: 10, color: { rgb: "1E293B" }, name: "Calibri" },
           fill: { fgColor: { rgb: baseFill }, patternType: "solid" },
@@ -393,19 +389,13 @@ function buildRowFormatSheet(
             alignment: { horizontal: "center", vertical: "center" },
           };
         }
-        setStyle(r, offset + ci, style);
+        setStyle(r, ci, style);
       });
     });
-  });
+  }
 
   const worksheet = utils.aoa_to_sheet(grid);
-
-  const widths = Array(totalCols).fill(3); // gap columns default narrow
-  opts.blocks.forEach((b, bi) => {
-    const offset = offsets[bi];
-    b.columns.forEach((c, ci) => (widths[offset + ci] = c.width));
-  });
-  worksheet["!cols"] = widths.map((w) => ({ wch: w }));
+  worksheet["!cols"] = b.columns.map((c) => ({ wch: c.width }));
   worksheet["!merges"] = merges;
   worksheet["!rows"] = rowHeights.map((hpt) => ({ hpt }));
   styles.forEach(({ ref, style }) => {
@@ -414,6 +404,12 @@ function buildRowFormatSheet(
   });
 
   return worksheet;
+}
+
+// Excel worksheet (tab) names can't contain : \ / ? * [ ] and max out at 31
+// chars — this keeps every tab name we generate safe.
+function safeSheetName(name: string): string {
+  return name.replace(/[:\\/?*\[\]]/g, "-").slice(0, 31);
 }
 
 export default function ReportsPage() {
@@ -570,7 +566,7 @@ export default function ReportsPage() {
   // ── discount analytics: per-day totals split into Regular vs.
   // Student/Senior/PWD, built from Fare transactions only (top-ups aren't
   // discounted). Powers the "Discount Collection Analytics" card below
-  // and its own Excel export block. ──
+  // and its own Excel export tab. ──
   const fareDiscountDailyBreakdown = React.useMemo(() => {
     const map = new Map<
       string,
@@ -632,13 +628,13 @@ export default function ReportsPage() {
   // when a filter is active, otherwise report's short window ──
   const baseBreakdown = isFilterActive ? aggregatedBreakdown : sanitizedBreakdown;
 
-  // ── FIXED: whenever a Year is selected, always render the COMPLETE
-  // calendar range implied by the filter (Year alone -> Jan 1–Dec 31;
-  // Year+Month -> every day of that month), filling in ₱0 for days that
-  // have no transactions, instead of only showing days that happen to
-  // have data. Falls back to the old "filter existing rows" behavior
-  // when no Year is picked (e.g. Month-only or Day-only filters), since
-  // there's no year to anchor a full range to. ──
+  // ── whenever a Year is selected, always render the COMPLETE calendar
+  // range implied by the filter (Year alone -> Jan 1–Dec 31; Year+Month ->
+  // every day of that month), filling in ₱0 for days that have no
+  // transactions, instead of only showing days that happen to have data.
+  // Falls back to the old "filter existing rows" behavior when no Year is
+  // picked (e.g. Month-only or Day-only filters), since there's no year to
+  // anchor a full range to. ──
   const filteredBreakdown = React.useMemo(() => {
     if (!isFilterActive) return baseBreakdown;
 
@@ -789,9 +785,10 @@ export default function ReportsPage() {
     navigate("/reports/preview");
   };
 
-  // ── EXPORT: single sheet, no tabs. Fare, Top-up, Transfers, and
-  // Discount Analytics are laid out side by side in the SAME worksheet,
-  // each as its own colored section with its own column headers. ──
+  // ── EXPORT: one workbook, FOUR separate tabs/sheets — "Fare",
+  // "Top-up", "Transfers", "Discount Analytics" — mirroring the
+  // Fare / Top-up / Transfer tabs on the Transactions page instead of a
+  // single side-by-side combined sheet. ──
   const handleExportExcelLogs = async () => {
     const XLSXStyle = await import("xlsx-js-style" as any);
     const { utils, writeFile } = XLSXStyle;
@@ -811,7 +808,7 @@ export default function ReportsPage() {
     logExportAudit({
       entity: "Transaction Logs",
       format: "Excel",
-      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — combined Fare/Top-up/Transfers/Discount Analytics sheet${
+      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — 4 separate tabs: Fare, Top-up, Transfers, Discount Analytics${
         isFilterActive ? ` [Filtered: ${filterLabel}]` : ""
       }`,
     });
@@ -861,9 +858,6 @@ export default function ReportsPage() {
       }},
     ];
 
-    const sumAmounts = (list: any[]) =>
-      list.reduce((s, tx) => s + Math.abs(Number(tx.amount) || 0), 0);
-
     // ── discount analytics daily rows (Fare only), grouped from the
     // filtered list so the export only includes days that actually have
     // fare transactions — no zero-filled calendar padding needed here. ──
@@ -906,45 +900,69 @@ export default function ReportsPage() {
       },
     ];
 
-    const worksheet = buildRowFormatSheet(utils, {
+    const filterSuffix = isFilterActive ? ` — Filtered: ${filterLabel}` : "";
+
+    // ── build the 4 tabs, one worksheet each ──
+    const fareSheet = buildSingleSheet(utils, {
       generatedAt,
       adminName,
-      blocks: [
-        {
-          title: `FARE — DEDUCTION LOGS (${filteredFareList.length})`,
-          bandColor: "B91C1C",
-          columns: txColumns("−"),
-          rows: filteredFareList,
-          statusColIndex: 5,
-          statusColorFor,
-        },
-        {
-          title: `TOP-UP — BALANCE LOGS (${filteredTopupList.length})`,
-          bandColor: "047857",
-          columns: txColumns("+"),
-          rows: filteredTopupList,
-          statusColIndex: 5,
-          statusColorFor,
-        },
-        {
-          title: `TRANSFERS — CARD BALANCE (${filteredTransfersList.length})`,
-          bandColor: "1D4ED8",
-          columns: transferColumns,
-          rows: filteredTransfersList,
-          statusColIndex: 7,
-          statusColorFor,
-        },
-        {
-          title: `DISCOUNT ANALYTICS — DAILY (${discountDailyRows.length})`,
-          bandColor: "7C3AED",
-          columns: discountColumns,
-          rows: discountDailyRows,
-        },
-      ],
+      subtitle: `Fare Deduction Logs${filterSuffix}`,
+      block: {
+        title: `FARE — DEDUCTION LOGS (${filteredFareList.length})`,
+        bandColor: "B91C1C",
+        columns: txColumns("−"),
+        rows: filteredFareList,
+        statusColIndex: 5,
+        statusColorFor,
+      },
+    });
+
+    const topupSheet = buildSingleSheet(utils, {
+      generatedAt,
+      adminName,
+      subtitle: `Top-up Balance Logs${filterSuffix}`,
+      block: {
+        title: `TOP-UP — BALANCE LOGS (${filteredTopupList.length})`,
+        bandColor: "047857",
+        columns: txColumns("+"),
+        rows: filteredTopupList,
+        statusColIndex: 5,
+        statusColorFor,
+      },
+    });
+
+    const transfersSheet = buildSingleSheet(utils, {
+      generatedAt,
+      adminName,
+      subtitle: `Card Balance Transfers${filterSuffix}`,
+      block: {
+        title: `TRANSFERS — CARD BALANCE (${filteredTransfersList.length})`,
+        bandColor: "1D4ED8",
+        columns: transferColumns,
+        rows: filteredTransfersList,
+        statusColIndex: 7,
+        statusColorFor,
+      },
+    });
+
+    const discountSheet = buildSingleSheet(utils, {
+      generatedAt,
+      adminName,
+      subtitle: `Discount Collection Analytics — Daily${filterSuffix}`,
+      block: {
+        title: `DISCOUNT ANALYTICS — DAILY (${discountDailyRows.length})`,
+        bandColor: "7C3AED",
+        columns: discountColumns,
+        rows: discountDailyRows,
+      },
     });
 
     const workbook = utils.book_new();
-    utils.book_append_sheet(workbook, worksheet, "Transaction Logs");
+    utils.book_append_sheet(workbook, fareSheet, safeSheetName("Fare"));
+    utils.book_append_sheet(workbook, topupSheet, safeSheetName("Top-up"));
+    utils.book_append_sheet(workbook, transfersSheet, safeSheetName("Transfers"));
+    utils.book_append_sheet(workbook, discountSheet, safeSheetName("Discount Analytics"));
+
     workbook.Props = {
       Title: "Transaction Logs",
       Subject: "Fare Collection Transaction Export",
