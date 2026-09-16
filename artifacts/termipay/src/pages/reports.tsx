@@ -23,6 +23,12 @@ import {
   PhilippinePeso,
   Filter,
   RotateCcw,
+  GraduationCap,
+  HeartPulse,
+  Accessibility,
+  Percent,
+  Wallet,
+  Receipt,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -33,6 +39,42 @@ function normalizeEmail(email: string | null | undefined): string | null {
   const trimmed = email.trim();
   if (trimmed === "" || trimmed.toLowerCase() === "none") return null;
   return trimmed;
+}
+
+// ➕ Normalizes a card's raw `type` field into one of the 4 known card
+// types. Used everywhere below to attribute a Fare transaction to
+// Regular vs. a discounted category (Student/Senior/PWD).
+function normalizeCardType(type?: string | null): "Regular" | "Student" | "Senior" | "PWD" {
+  const t = (type || "Regular").toLowerCase().trim();
+  if (t === "student") return "Student";
+  if (t === "senior") return "Senior";
+  if (t === "pwd") return "PWD";
+  return "Regular";
+}
+
+// 🎨 Badge styling for the discount-type breakdown (Student/Senior/PWD),
+// matching the same palette used on the User Management page so the
+// colors mean the same thing across the app.
+function getDiscountBadgeStyle(kind: "Student" | "Senior" | "PWD", isDark: boolean) {
+  switch (kind) {
+    case "Student":
+      return isDark ? "border-blue-900 text-blue-400 bg-blue-950/40" : "border-blue-200 text-blue-600 bg-blue-50";
+    case "Senior":
+      return isDark ? "border-yellow-900 text-yellow-400 bg-yellow-950/40" : "border-yellow-300 text-yellow-700 bg-yellow-50";
+    case "PWD":
+      return isDark ? "border-emerald-900 text-emerald-400 bg-emerald-950/40" : "border-emerald-200 text-emerald-600 bg-emerald-50";
+  }
+}
+
+function getDiscountDotColor(kind: "Student" | "Senior" | "PWD") {
+  switch (kind) {
+    case "Student":
+      return "bg-blue-500";
+    case "Senior":
+      return "bg-yellow-500";
+    case "PWD":
+      return "bg-emerald-500";
+  }
 }
 
 function getLocalDateString(): string {
@@ -226,10 +268,11 @@ type SheetBlock = {
 };
 
 // ── Single-sheet, SIDE-BY-SIDE (row format) builder ─────────────────────
-// Fare, Top-up, and Transfers sit next to each other in the SAME row band —
-// each block gets its own column range (e.g. Fare = A:F, Top-up = H:M,
-// Transfers = O:V) — instead of being stacked on top of one another. A
-// shared banner spans the full width above all three blocks.
+// Fare, Top-up, Transfers, and Discount Analytics sit next to each other in
+// the SAME row band — each block gets its own column range (e.g. Fare =
+// A:F, Top-up = H:M, Transfers = O:V, Discount Analytics = X:...) —
+// instead of being stacked on top of one another. A shared banner spans
+// the full width above all blocks.
 function buildRowFormatSheet(
   utils: any,
   opts: {
@@ -276,7 +319,7 @@ function buildRowFormatSheet(
     alignment: { horizontal: "center", vertical: "center" },
   });
 
-  grid[1][0] = "Transaction Logs Export — Fare, Top-up & Transfers (row format)";
+  grid[1][0] = "Transaction Logs Export — Fare, Top-up, Transfers & Discount Analytics (row format)";
   merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } });
   setStyle(1, 0, {
     font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
@@ -448,6 +491,28 @@ export default function ReportsPage() {
   const txList = React.useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
   const userList = React.useMemo(() => (Array.isArray(users) ? users : []), [users]);
 
+  // ── card_uid -> card type lookup, used to attribute each Fare
+  // transaction to Regular / Student / Senior / PWD for the discount
+  // analytics section below. Falls back to "Regular" for any card that
+  // can't be matched (e.g. a deleted card). ──
+  const cardTypeByUid = React.useMemo(() => {
+    const map = new Map<string, string>();
+    userList.forEach((u: any) => {
+      const uid = u.cardUid || u.card_uid;
+      if (uid) map.set(uid, u.type || "Regular");
+    });
+    return map;
+  }, [userList]);
+
+  const getTxCardType = React.useCallback(
+    (tx: any): "Regular" | "Student" | "Senior" | "PWD" => {
+      const uid = tx.card_uid || tx.cardUid;
+      if (!uid) return "Regular";
+      return normalizeCardType(cardTypeByUid.get(uid));
+    },
+    [cardTypeByUid]
+  );
+
   const totalUniqueTaps = React.useMemo(() => {
     const uids = new Set(
       txList.map((tx: any) => tx.card_uid || tx.cardUid).filter(Boolean)
@@ -501,6 +566,39 @@ export default function ReportsPage() {
   const revenueByDate = React.useMemo(() => {
     return new Map(aggregatedBreakdown.map((d: any) => [d.date, d.revenue]));
   }, [aggregatedBreakdown]);
+
+  // ── discount analytics: per-day totals split into Regular vs.
+  // Student/Senior/PWD, built from Fare transactions only (top-ups aren't
+  // discounted). Powers the "Discount Collection Analytics" card below
+  // and its own Excel export block. ──
+  const fareDiscountDailyBreakdown = React.useMemo(() => {
+    const map = new Map<
+      string,
+      { total: number; regular: number; student: number; senior: number; pwd: number }
+    >();
+    txList.forEach((tx: any) => {
+      if (normalizeTxType(tx.type) !== "Fare") return;
+      const dateKey = getTxDateKey(tx);
+      if (!dateKey) return;
+      const amount = Math.abs(Number(tx.amount) || 0);
+      const cardType = getTxCardType(tx);
+      const entry = map.get(dateKey) || { total: 0, regular: 0, student: 0, senior: 0, pwd: 0 };
+      entry.total += amount;
+      if (cardType === "Student") entry.student += amount;
+      else if (cardType === "Senior") entry.senior += amount;
+      else if (cardType === "PWD") entry.pwd += amount;
+      else entry.regular += amount;
+      map.set(dateKey, entry);
+    });
+    return Array.from(map.entries())
+      .map(([date, v]) => ({ date, ...v }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [txList, getTxCardType]);
+
+  const fareDiscountByDate = React.useMemo(
+    () => new Map(fareDiscountDailyBreakdown.map((d) => [d.date, d])),
+    [fareDiscountDailyBreakdown]
+  );
 
   // ── derive available years straight from transactions (the full
   // dataset), so the Year dropdown reflects everything that actually
@@ -563,6 +661,29 @@ export default function ReportsPage() {
     });
   }, [baseBreakdown, filterYear, filterMonth, filterDay, isFilterActive, revenueByDate]);
 
+  // Same "always render the complete calendar range when a Year is
+  // selected" behavior as filteredBreakdown above, applied to the
+  // Regular/Student/Senior/PWD discount breakdown.
+  const filteredFareDiscountBreakdown = React.useMemo(() => {
+    if (!isFilterActive) return fareDiscountDailyBreakdown;
+
+    const fullRange = generateDateRange(filterYear, filterMonth, filterDay);
+    if (fullRange) {
+      return fullRange.map((date) => {
+        const existing = fareDiscountByDate.get(date);
+        return existing || { date, total: 0, regular: 0, student: 0, senior: 0, pwd: 0 };
+      });
+    }
+
+    return fareDiscountDailyBreakdown.filter((d) => {
+      const parts = splitDateString(d.date);
+      if (!parts) return false;
+      if (filterMonth !== "all" && parts.month !== filterMonth) return false;
+      if (filterDay !== "all" && parts.day !== filterDay) return false;
+      return true;
+    });
+  }, [fareDiscountDailyBreakdown, fareDiscountByDate, filterYear, filterMonth, filterDay, isFilterActive]);
+
   // ── filtered transactions (drives the Fare / Top-up export tabs) —
   // unaffected by the calendar fill-in above, since exports should only
   // ever list actual transaction records, not empty calendar days. ──
@@ -588,6 +709,49 @@ export default function ReportsPage() {
     () => filteredTxList.filter((tx: any) => normalizeTxType(tx.type) === "Top-up"),
     [filteredTxList]
   );
+
+  // ── discount summary totals for the currently active filter (or
+  // all-time when no filter is set), computed straight from the filtered
+  // Fare transaction list so partial/empty calendar days don't dilute
+  // it. Feeds the summary chips and the per-type badges on the Discount
+  // Collection Analytics card. ──
+  const discountSummary = React.useMemo(() => {
+    let totalCollected = 0;
+    let regularRevenue = 0;
+    let regularCount = 0;
+    const byType: Record<"Student" | "Senior" | "PWD", { revenue: number; count: number }> = {
+      Student: { revenue: 0, count: 0 },
+      Senior: { revenue: 0, count: 0 },
+      PWD: { revenue: 0, count: 0 },
+    };
+
+    filteredFareList.forEach((tx: any) => {
+      const amount = Math.abs(Number(tx.amount) || 0);
+      const cardType = getTxCardType(tx);
+      totalCollected += amount;
+      if (cardType === "Regular") {
+        regularRevenue += amount;
+        regularCount += 1;
+      } else {
+        byType[cardType].revenue += amount;
+        byType[cardType].count += 1;
+      }
+    });
+
+    const discountedRevenue = byType.Student.revenue + byType.Senior.revenue + byType.PWD.revenue;
+    const discountedCount = byType.Student.count + byType.Senior.count + byType.PWD.count;
+    const discountedSharePct = totalCollected > 0 ? (discountedRevenue / totalCollected) * 100 : 0;
+
+    return {
+      totalCollected,
+      regularRevenue,
+      regularCount,
+      discountedRevenue,
+      discountedCount,
+      discountedSharePct,
+      byType,
+    };
+  }, [filteredFareList, getTxCardType]);
 
   // ── filtered transfers, same date-filter rule as transactions above,
   // driving the "Transfers" export tab. ──
@@ -625,9 +789,9 @@ export default function ReportsPage() {
     navigate("/reports/preview");
   };
 
-  // ── EXPORT: single sheet, no tabs. Fare, Top-up, and Transfers are
-  // stacked one after another in the SAME worksheet, each as its own
-  // colored section with its own column headers. ──
+  // ── EXPORT: single sheet, no tabs. Fare, Top-up, Transfers, and
+  // Discount Analytics are laid out side by side in the SAME worksheet,
+  // each as its own colored section with its own column headers. ──
   const handleExportExcelLogs = async () => {
     const XLSXStyle = await import("xlsx-js-style" as any);
     const { utils, writeFile } = XLSXStyle;
@@ -647,7 +811,7 @@ export default function ReportsPage() {
     logExportAudit({
       entity: "Transaction Logs",
       format: "Excel",
-      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — combined Fare/Top-up/Transfers sheet${
+      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — combined Fare/Top-up/Transfers/Discount Analytics sheet${
         isFilterActive ? ` [Filtered: ${filterLabel}]` : ""
       }`,
     });
@@ -700,6 +864,48 @@ export default function ReportsPage() {
     const sumAmounts = (list: any[]) =>
       list.reduce((s, tx) => s + Math.abs(Number(tx.amount) || 0), 0);
 
+    // ── discount analytics daily rows (Fare only), grouped from the
+    // filtered list so the export only includes days that actually have
+    // fare transactions — no zero-filled calendar padding needed here. ──
+    const discountDailyMap = new Map<
+      string,
+      { total: number; regular: number; student: number; senior: number; pwd: number }
+    >();
+    filteredFareList.forEach((tx: any) => {
+      const dateKey = getTxDateKey(tx);
+      if (!dateKey) return;
+      const amount = Math.abs(Number(tx.amount) || 0);
+      const cardType = getTxCardType(tx);
+      const entry = discountDailyMap.get(dateKey) || { total: 0, regular: 0, student: 0, senior: 0, pwd: 0 };
+      entry.total += amount;
+      if (cardType === "Student") entry.student += amount;
+      else if (cardType === "Senior") entry.senior += amount;
+      else if (cardType === "PWD") entry.pwd += amount;
+      else entry.regular += amount;
+      discountDailyMap.set(dateKey, entry);
+    });
+    const discountDailyRows = Array.from(discountDailyMap.entries())
+      .map(([date, v]) => ({ date, ...v }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const peso2 = (n: number) =>
+      n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const discountColumns: SheetColumn[] = [
+      { header: "Date", width: 16, get: (d) =>
+        new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      },
+      { header: "Total Collected (PHP)", width: 20, get: (d) => peso2(d.total) },
+      { header: "Regular (PHP)", width: 16, get: (d) => peso2(d.regular) },
+      { header: "Student (PHP)", width: 16, get: (d) => peso2(d.student) },
+      { header: "Senior (PHP)", width: 16, get: (d) => peso2(d.senior) },
+      { header: "PWD (PHP)", width: 16, get: (d) => peso2(d.pwd) },
+      { header: "Discounted Total (PHP)", width: 20, get: (d) => peso2(d.student + d.senior + d.pwd) },
+      { header: "Discounted Share", width: 16, get: (d) =>
+        d.total > 0 ? `${(((d.student + d.senior + d.pwd) / d.total) * 100).toFixed(1)}%` : "0.0%"
+      },
+    ];
+
     const worksheet = buildRowFormatSheet(utils, {
       generatedAt,
       adminName,
@@ -727,6 +933,12 @@ export default function ReportsPage() {
           rows: filteredTransfersList,
           statusColIndex: 7,
           statusColorFor,
+        },
+        {
+          title: `DISCOUNT ANALYTICS — DAILY (${discountDailyRows.length})`,
+          bandColor: "7C3AED",
+          columns: discountColumns,
+          rows: discountDailyRows,
         },
       ],
     });
@@ -971,6 +1183,149 @@ export default function ReportsPage() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ══ DISCOUNT COLLECTION ANALYTICS ══
+          Fare revenue only, split into Regular vs. Student/Senior/PWD.
+          Follows the same Year/Month/Day filter as the chart above. */}
+      <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-600 via-indigo-500 to-transparent" />
+        <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <Percent size={14} className="text-purple-500" />
+              Discount Collection Analytics
+              {isFilterActive && (
+                <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  — {filterLabel}
+                </span>
+              )}
+            </CardTitle>
+            <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              Fare collections only · Regular vs. Student / Senior / PWD
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6 space-y-6">
+          {isLoading ? (
+            <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+          ) : (
+            <>
+              {/* Summary chips */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { label: "Total Fare Collected", value: formatPeso(discountSummary.totalCollected), icon: Wallet, color: isDark ? "text-blue-400" : "text-blue-600", bg: isDark ? "bg-blue-950/40" : "bg-blue-50", border: isDark ? "border-blue-900" : "border-blue-100" },
+                  { label: "Regular (Full Fare)", value: formatPeso(discountSummary.regularRevenue), icon: Receipt, color: isDark ? "text-slate-300" : "text-slate-600", bg: isDark ? "bg-slate-800/60" : "bg-slate-100", border: isDark ? "border-slate-700" : "border-slate-200" },
+                  { label: "Total Discounted", value: formatPeso(discountSummary.discountedRevenue), icon: Percent, color: isDark ? "text-purple-400" : "text-purple-600", bg: isDark ? "bg-purple-950/40" : "bg-purple-50", border: isDark ? "border-purple-900" : "border-purple-100" },
+                  { label: "Discounted Share", value: `${discountSummary.discountedSharePct.toFixed(1)}%`, icon: Percent, color: isDark ? "text-orange-400" : "text-orange-600", bg: isDark ? "bg-orange-950/40" : "bg-orange-50", border: isDark ? "border-orange-900" : "border-orange-100" },
+                ].map((stat, idx) => (
+                  <div key={idx} className={`rounded-lg border px-4 py-3 ${stat.bg} ${stat.border}`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
+                        <p className={`text-lg font-bold mt-0.5 tracking-tight ${stat.color}`}>{stat.value}</p>
+                      </div>
+                      <stat.icon className={stat.color} size={18} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Per-type breakdown badges */}
+              <div className="flex flex-wrap gap-3">
+                {(
+                  [
+                    { kind: "Student" as const, icon: GraduationCap },
+                    { kind: "Senior" as const, icon: HeartPulse },
+                    { kind: "PWD" as const, icon: Accessibility },
+                  ]
+                ).map(({ kind, icon: Icon }) => {
+                  const t = discountSummary.byType[kind];
+                  const sharePct =
+                    discountSummary.discountedRevenue > 0 ? (t.revenue / discountSummary.discountedRevenue) * 100 : 0;
+                  return (
+                    <div
+                      key={kind}
+                      className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${getDiscountBadgeStyle(kind, isDark)}`}
+                    >
+                      <Icon size={18} />
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`w-1.5 h-1.5 rounded-full inline-block ${getDiscountDotColor(kind)}`} />
+                          <span className="text-xs font-bold uppercase tracking-wide">{kind}</span>
+                        </div>
+                        <div className="text-sm font-mono font-semibold mt-0.5">
+                          {formatPeso(t.revenue)}{" "}
+                          <span className="text-[10px] font-normal opacity-70">
+                            ({t.count} {t.count === 1 ? "ride" : "rides"} · {sharePct.toFixed(0)}% of discounts)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Daily breakdown table */}
+              {filteredFareDiscountBreakdown.length === 0 ? (
+                <div className={`py-8 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  No fare records match the selected filter.
+                </div>
+              ) : (
+                <div className="overflow-x-auto -mx-2 px-2">
+                  <Table>
+                    <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
+                      <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date</TableHead>
+                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Collected</TableHead>
+                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Regular</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Student</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-yellow-600">Senior</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">PWD</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Discounted %</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredFareDiscountBreakdown.map((day, i) => {
+                        const date = new Date(day.date + "T00:00:00");
+                        const discountedTotal = day.student + day.senior + day.pwd;
+                        const sharePct = day.total > 0 ? (discountedTotal / day.total) * 100 : 0;
+                        return (
+                          <TableRow
+                            key={i}
+                            className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
+                          >
+                            <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                            </TableCell>
+                            <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {formatPeso(day.total)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {formatPeso(day.regular)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+                              {formatPeso(day.student)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-yellow-400" : "text-yellow-700"}`}>
+                              {formatPeso(day.senior)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                              {formatPeso(day.pwd)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
+                              {sharePct.toFixed(1)}%
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
