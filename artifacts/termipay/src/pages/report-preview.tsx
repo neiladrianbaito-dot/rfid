@@ -45,6 +45,29 @@ const getLocalDateString = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+// ── transaction type normalizer (same rule used on Reports/Transactions
+// pages) — needed here so we only count FARE taps as "passengers".
+// Top-ups are balance reloads, not boardings, so they must never be
+// counted toward a day's passenger total. ──
+type TxType = "Fare" | "Top-up";
+
+function normalizeTxType(type?: string | null): TxType {
+  const key = (type ?? "").toLowerCase().replace(/[\s_-]/g, "");
+  if (key === "fare") return "Fare";
+  return "Top-up";
+}
+
+// Returns a transaction's local "YYYY-MM-DD" date key, same local-time
+// logic as getLocalDateString above (not UTC), so a fare tap at 1am
+// Philippine time doesn't get bucketed into the previous day.
+function getTxDateKey(tx: any): string | null {
+  const ts = tx.timestamp || tx.created_at;
+  if (!ts) return null;
+  const dt = new Date(ts);
+  if (isNaN(dt.getTime())) return null;
+  return getLocalDateString(dt);
+}
+
 // ── shared helper to normalize the API base URL for direct fetch()
 // calls (same logic used in Layout.tsx / ReportsPage.tsx) ──
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
@@ -173,13 +196,30 @@ export default function ReportPreviewPage() {
     refetchTransactions();
   });
 
+  const txList = React.useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
+
   const totalUniqueTaps = React.useMemo(() => {
-    const txList = Array.isArray(transactions) ? transactions : [];
     const uids = new Set(
       txList.map((tx: any) => tx.card_uid || tx.cardUid).filter(Boolean)
     );
     return uids.size;
-  }, [transactions]);
+  }, [txList]);
+
+  // ── total PASSENGERS per day, i.e. how many Fare (boarding) taps
+  // happened on that date. Top-ups are excluded — reloading balance
+  // isn't a ride. Keyed by the same local "YYYY-MM-DD" string used by
+  // report.dailyBreakdown so it can be matched to each row below,
+  // including "today"'s row. ──
+  const passengersByDate = React.useMemo(() => {
+    const map = new Map<string, number>();
+    txList.forEach((tx: any) => {
+      if (normalizeTxType(tx.type) !== "Fare") return;
+      const dateKey = getTxDateKey(tx);
+      if (!dateKey) return;
+      map.set(dateKey, (map.get(dateKey) || 0) + 1);
+    });
+    return map;
+  }, [txList]);
 
   const todayRevenue = (() => {
     const breakdown = report?.dailyBreakdown || [];
@@ -190,14 +230,26 @@ export default function ReportPreviewPage() {
     return Math.abs(Number(todayRow.revenue) || 0);
   })();
 
+  // Total passengers for "today" specifically — same date key rule as
+  // todayRevenue above, used as the 4th executive-summary KPI.
+  const todayPassengers = (() => {
+    const today = getLocalDateString(new Date());
+    return passengersByDate.get(today) || 0;
+  })();
+
   const totalRevenue7Days = Math.abs(Number(report?.totalRevenue7Days ?? 0));
 
+  // Each row now also carries `passengers`, looked up from the Fare-tap
+  // count for that exact date — this is what powers the new "Total
+  // Passengers" column in Section II, for every day (today included).
   const sanitizedBreakdown = (report?.dailyBreakdown || []).map((d: any) => ({
     ...d,
     revenue: Math.abs(Number(d.revenue) || 0),
+    passengers: passengersByDate.get(d.date) || 0,
   }));
 
   const grandTotal = sanitizedBreakdown.reduce((sum: number, d: any) => sum + d.revenue, 0);
+  const grandTotalPassengers = sanitizedBreakdown.reduce((sum: number, d: any) => sum + (d.passengers || 0), 0);
 
   const handleBack = () => navigate("/reports");
 
@@ -431,9 +483,10 @@ export default function ReportPreviewPage() {
                     {[
                       { label: "Total Revenue (7 Days)", value: formatPeso(totalRevenue7Days) },
                       { label: "Today's Revenue", value: formatPeso(todayRevenue) },
+                      { label: "Today's Total Passengers", value: String(todayPassengers) },
                       { label: "Total Registered Users", value: String(totalUniqueTaps) },
                     ].map((kpi, i) => (
-                      <td key={i} style={{ width: "33.3%", border: `1px solid ${THEME.border}`, padding: "10px 12px", textAlign: "center", background: THEME.altRowBg }}>
+                      <td key={i} style={{ width: "25%", border: `1px solid ${THEME.border}`, padding: "10px 12px", textAlign: "center", background: THEME.altRowBg }}>
                         <div style={{ fontSize: "8pt", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: `1px solid ${THEME.border}`, paddingBottom: "4px", marginBottom: "6px", color: THEME.dark }}>
                           {kpi.label}
                         </div>
@@ -458,6 +511,7 @@ export default function ReportPreviewPage() {
                     <th style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "left", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff" }}>No.</th>
                     <th style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "left", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff" }}>Date</th>
                     <th style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "left", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff" }}>Day of Week</th>
+                    <th style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "right", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff" }}>Total Passengers</th>
                     <th style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "right", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff" }}>Revenue Collected (PHP)</th>
                   </tr>
                 </thead>
@@ -475,6 +529,9 @@ export default function ReportPreviewPage() {
                           {date.toLocaleDateString("en-US", { weekday: "long" })}
                         </td>
                         <td style={{ border: `1px solid ${THEME.border}`, padding: "4px 8px", textAlign: "right", fontFamily: "monospace", fontWeight: isLast ? "bold" : "normal", color: isLast ? THEME.primary : THEME.text }}>
+                          {(day.passengers || 0).toLocaleString("en-US")}
+                        </td>
+                        <td style={{ border: `1px solid ${THEME.border}`, padding: "4px 8px", textAlign: "right", fontFamily: "monospace", fontWeight: isLast ? "bold" : "normal", color: isLast ? THEME.primary : THEME.text }}>
                           {day.revenue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
@@ -483,6 +540,9 @@ export default function ReportPreviewPage() {
                   <tr style={{ background: THEME.totalBg, fontWeight: "bold" }}>
                     <td colSpan={3} style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "right", textTransform: "uppercase", letterSpacing: "0.05em", color: THEME.darkest }}>
                       Grand Total
+                    </td>
+                    <td style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "right", fontFamily: "monospace", fontSize: "10pt", color: THEME.darkest }}>
+                      {grandTotalPassengers.toLocaleString("en-US")}
                     </td>
                     <td style={{ border: `1px solid ${THEME.border}`, padding: "5px 8px", textAlign: "right", fontFamily: "monospace", fontSize: "10pt", color: THEME.darkest }}>
                       {grandTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
