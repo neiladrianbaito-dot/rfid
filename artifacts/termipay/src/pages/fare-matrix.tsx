@@ -181,6 +181,30 @@ export default function FareMatrixPage() {
   // device_id (enforced by the activate_route RPC).
   const activeRoutes = Array.isArray(routes) ? routes.filter((r) => r.isActive) : [];
 
+  // ✅ TAB STATE for the "Active Routes" panel — instead of stacking every
+  // active route as its own row (which gets unwieldy once several readers
+  // are running at once), the panel now shows one tab per active route and
+  // a single detail card for whichever tab is selected. Falls back to the
+  // first active route whenever the current selection no longer exists
+  // (e.g. that route just got deactivated).
+  const [selectedActiveRouteId, setSelectedActiveRouteId] = useState<string | number | null>(null);
+  const activeRouteIdsKey = activeRoutes.map((r) => r.id).join(",");
+
+  useEffect(() => {
+    if (activeRoutes.length === 0) {
+      setSelectedActiveRouteId(null);
+      return;
+    }
+    const stillActive = activeRoutes.some((r) => r.id === selectedActiveRouteId);
+    if (!stillActive) {
+      setSelectedActiveRouteId(activeRoutes[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRouteIdsKey]);
+
+  const selectedActiveRoute =
+    activeRoutes.find((r) => r.id === selectedActiveRouteId) ?? activeRoutes[0] ?? null;
+
   // ✅ Fetches device info for ALL currently active routes in one go (instead
   // of a single activeDeviceInfo), keyed by route id. We still go straight to
   // the fare_routes table for device_id since the generated API client's
@@ -442,6 +466,9 @@ export default function FareMatrixPage() {
         : [activateRoute.id]
     );
 
+    // Jump the tab focus to the route that was just activated.
+    setSelectedActiveRouteId(activateRoute.id);
+
     setActivateRoute(null);
     setSelectedDeviceId("");
     setIsTogglePending(false);
@@ -633,45 +660,79 @@ export default function FareMatrixPage() {
           </div>
         </div>
 
-        {/* ✅ One row per active route, each with its own reader badge.
-            "Active" is now scoped per-device (not global), so with 5 online
-            readers you can have up to 5 routes active at once. Each route's
-            device_id comes from fare_routes and is resolved to a device row
-            via activeDeviceMap (fetched in fetchActiveRoutesDevices). */}
+        {/* ✅ TAB VIEW — one tab per active route instead of stacking every
+            active route as its own row. Keeps the panel compact and easy to
+            scan even when several readers are active at once; click a tab to
+            see that route's fare + assigned reader below. */}
         {activeRoutes.length > 0 && (
-          <div className="flex flex-col gap-2">
-            {activeRoutes.map((route) => {
-              const device = activeDeviceMap[String(route.id)];
-              return (
-                <div
-                  key={route.id}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border p-3 ${
-                    isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
-                  }`}
-                >
-                 <p className={`font-bold tracking-tight flex items-center gap-1.5 flex-wrap ${isDark ? "text-white" : "text-slate-900"}`}>
-                     {route.origin}
-<ArrowLeftRight className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-{route.destination} &nbsp;·&nbsp; ₱
-{route.fareAmount.toFixed(2)} per tap VICE-VERSA
-                   </p>
-                  <div
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
-                      isDark ? "bg-slate-950/60 border-emerald-900" : "bg-emerald-50 border-emerald-200"
+          <div className="flex flex-col gap-3">
+            <div
+              className={`flex items-center gap-1 overflow-x-auto rounded-lg border p-1 ${
+                isDark ? "bg-slate-900/60 border-slate-800" : "bg-white/70 border-emerald-200"
+              }`}
+            >
+              {activeRoutes.map((route) => {
+                const device = activeDeviceMap[String(route.id)];
+                const isSelected = selectedActiveRoute?.id === route.id;
+                return (
+                  <button
+                    key={route.id}
+                    type="button"
+                    onClick={() => setSelectedActiveRouteId(route.id)}
+                    title={`${route.origin} → ${route.destination}`}
+                    data-testid={`tab-active-route-${route.id}`}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                      isSelected
+                        ? isDark
+                          ? "bg-slate-800 text-white shadow-sm"
+                          : "bg-emerald-600 text-white shadow-sm"
+                        : isDark
+                          ? "text-slate-400 hover:text-slate-200"
+                          : "text-emerald-700/70 hover:text-emerald-900"
                     }`}
                   >
-                    <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
-                    <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
-                      {loadingActiveDevices
-                        ? "Reader: Loading..."
-                        : device?.device_id
-                          ? `Reader: ${device.device_id}`
-                          : "Reader: Unassigned"}
-                    </span>
-                  </div>
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                        device?.device_id ? "bg-emerald-400" : isSelected ? "bg-white/60" : "bg-slate-400"
+                      }`}
+                    />
+                    <span className="max-w-[100px] truncate">{route.origin}</span>
+                    <ArrowLeftRight className="w-3 h-3 opacity-60 shrink-0" />
+                    <span className="max-w-[100px] truncate">{route.destination}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Detail card for whichever tab is currently selected */}
+            {selectedActiveRoute && (
+              <div
+                className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border p-3 ${
+                  isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
+                }`}
+              >
+                <p className={`font-bold tracking-tight flex items-center gap-1.5 flex-wrap ${isDark ? "text-white" : "text-slate-900"}`}>
+                  {selectedActiveRoute.origin}
+                  <ArrowLeftRight className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+                  {selectedActiveRoute.destination} &nbsp;·&nbsp; ₱
+                  {selectedActiveRoute.fareAmount.toFixed(2)} per tap VICE-VERSA
+                </p>
+                <div
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shrink-0 ${
+                    isDark ? "bg-slate-950/60 border-emerald-900" : "bg-emerald-50 border-emerald-200"
+                  }`}
+                >
+                  <Zap className={`w-3.5 h-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
+                  <span className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>
+                    {loadingActiveDevices
+                      ? "Reader: Loading..."
+                      : activeDeviceMap[String(selectedActiveRoute.id)]?.device_id
+                        ? `Reader: ${activeDeviceMap[String(selectedActiveRoute.id)]?.device_id}`
+                        : "Reader: Unassigned"}
+                  </span>
                 </div>
-              );
-            })}
+              </div>
+            )}
           </div>
         )}
       </div>
