@@ -438,15 +438,17 @@ function TransferModal({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
 export default function TransactionsPage() {
   const { isDark } = useTheme();
 
-  // Which table this page is showing: normal transactions, or card-to-card
-  // balance transfers (from `card_balance_transfers`).
-  const [activeView, setActiveView] = useState<"transactions" | "transfers">("transactions");
+  // Three tabs now: Top-up, Fare, and Transfer — each shows its own full set
+  // of columns inline (no need to open the receipt modal to see payment
+  // method, transaction id, or route).
+  const [activeView, setActiveView] = useState<"topup" | "fare" | "transfers">("topup");
 
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [viewTx, setViewTx] = useState<any>(null);
   const [page, setPage] = useState(1);
@@ -515,17 +517,16 @@ export default function TransactionsPage() {
   }, []);
 
   // ── Transactions query ────────────────────────────────────────────────────
-  // NOTE: `type` filtering is NOT sent to the backend anymore. The DB can
-  // have inconsistent spellings ("topup", "TopUp", "top_up", etc.), so an
-  // exact-match server-side filter can silently exclude valid rows. Instead
-  // we fetch everything (search/status still filtered server-side) and do
-  // the type filtering ourselves using normalizeTxType, which is the same
-  // logic that decides what gets displayed as "Fare" / "Top-up".
+  // `type` is no longer sent to the backend — the DB can have inconsistent
+  // spellings ("topup", "TopUp", "top_up", etc.), so an exact-match
+  // server-side filter can silently exclude valid rows. Instead we fetch
+  // everything (search/status still filtered server-side) and split it into
+  // the Top-up / Fare tabs ourselves using normalizeTxType.
   const params: any = {};
   if (search) params.search = search;
   if (statusFilter !== "all") params.status = statusFilter;
 
-  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, activeView]);
   useEffect(() => { setTransferPage(1); }, [transferSearch, transferStatusFilter]);
 
   const { data: transactions, isLoading, refetch: refetchTransactions } =
@@ -535,32 +536,38 @@ export default function TransactionsPage() {
 
   const rawTransactionList = Array.isArray(transactions) ? transactions : [];
 
-  // IMPORTANT: memoized so this array keeps the same reference across
-  // re-renders when nothing relevant actually changed. Without this,
-  // `.filter()` returns a brand-new array every render, which retriggers
-  // the `useEffect` below (it depends on `transactionList`), which calls
+  // Split once into the two type-based tabs. Memoized so these arrays keep
+  // the same reference across re-renders when nothing relevant changed —
+  // without this, `.filter()` would return a brand-new array every render,
+  // which retriggers the effect below (it depends on the list), which calls
   // setLastUpdated → re-render → new filtered array → effect fires again,
   // forever (React error #185 / "Maximum update depth exceeded").
-  const transactionList = useMemo(() => {
-    return typeFilter === "all"
-      ? rawTransactionList
-      : rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === typeFilter);
-  }, [rawTransactionList, typeFilter]);
-  const totalPages = Math.max(1, Math.ceil(transactionList.length / PAGE_SIZE));
+  const topupList = useMemo(
+    () => rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === "Top-up"),
+    [rawTransactionList],
+  );
+  const fareList = useMemo(
+    () => rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === "Fare"),
+    [rawTransactionList],
+  );
+  const currentTypeList = activeView === "fare" ? fareList : topupList;
+
+  const totalPages = Math.max(1, Math.ceil(currentTypeList.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const startIndex = (safePage - 1) * PAGE_SIZE;
-  const paginatedList = transactionList.slice(startIndex, startIndex + PAGE_SIZE);
+  const paginatedList = currentTypeList.slice(startIndex, startIndex + PAGE_SIZE);
 
   useEffect(() => {
-    if (transactionList.length === 0) return;
-    const topId = transactionList[0]?.id;
+    if (activeView === "transfers") return;
+    if (currentTypeList.length === 0) return;
+    const topId = currentTypeList[0]?.id;
     if (prevTopIdRef.current !== null && topId !== prevTopIdRef.current) {
       setNewRowId(topId);
       setTimeout(() => setNewRowId(null), 800);
     }
     prevTopIdRef.current = topId;
     setLastUpdated(new Date());
-  }, [transactionList]);
+  }, [currentTypeList, activeView]);
 
   // ── Transfers filtering/search (client-side, same pattern as transactions) ─
   const filteredTransferList = useMemo(() => {
@@ -634,6 +641,9 @@ export default function TransactionsPage() {
       minimumFractionDigits: 2, maximumFractionDigits: 2,
     });
 
+  const isFareView = activeView === "fare";
+  const isTransferView = activeView === "transfers";
+
   return (
     <div className={`space-y-8 h-full min-h-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}>
       <style>{`
@@ -655,7 +665,7 @@ export default function TransactionsPage() {
             Transaction Logs
           </h2>
           <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Monitor all Fare deductions, Top-ups, and Card Transfers in real-time
+            Monitor all Top-ups, Fare deductions, and Card Transfers in real-time
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -663,26 +673,43 @@ export default function TransactionsPage() {
             <Zap className="text-blue-500" size={16} />
             <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
           </div>
-          {(activeView === "transactions" ? lastUpdated : transfersLastUpdated) && (
+          {(isTransferView ? transfersLastUpdated : lastUpdated) && (
             <span className={`text-[10px] font-mono pr-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              Last sync: {(activeView === "transactions" ? lastUpdated : transfersLastUpdated)!.toLocaleTimeString()}
+              Last sync: {(isTransferView ? transfersLastUpdated : lastUpdated)!.toLocaleTimeString()}
             </span>
           )}
         </div>
       </div>
 
-      {/* View switch: Transactions vs Transfers */}
+      {/* View switch: Top-up / Fare / Transfer */}
       <div className={`-mt-4 inline-flex self-start rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
         <button
-          onClick={() => setActiveView("transactions")}
+          onClick={() => setActiveView("topup")}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeView === "transactions"
+            activeView === "topup"
               ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
               : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
           }`}
         >
-          <ReceiptText className="w-3.5 h-3.5" />
-          Transactions
+          <CreditCard className="w-3.5 h-3.5" />
+          Top-up
+          <span className={`text-[10px] font-mono px-1.5 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
+            {topupList.length}
+          </span>
+        </button>
+        <button
+          onClick={() => setActiveView("fare")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+            activeView === "fare"
+              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <Route className="w-3.5 h-3.5" />
+          Fare
+          <span className={`text-[10px] font-mono px-1.5 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
+            {fareList.length}
+          </span>
         </button>
         <button
           onClick={() => setActiveView("transfers")}
@@ -693,13 +720,16 @@ export default function TransactionsPage() {
           }`}
         >
           <ArrowRightLeft className="w-3.5 h-3.5" />
-          Card Transfers
+          Transfer
+          <span className={`text-[10px] font-mono px-1.5 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
+            {transfers.length}
+          </span>
         </button>
       </div>
 
-      {activeView === "transactions" ? (
+      {!isTransferView ? (
       <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
+        <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${isFareView ? "from-red-500 to-rose-400" : "from-emerald-500 to-cyan-400"}`} />
 
         <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
           <div className="flex flex-col lg:flex-row gap-4 items-center">
@@ -725,16 +755,6 @@ export default function TransactionsPage() {
               />
             </div>
             <div className="flex gap-3 w-full lg:w-auto">
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className={`w-full lg:w-[150px] font-medium text-xs cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
-                  <SelectValue placeholder="Type" />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                  <SelectItem value="all" className="cursor-pointer">All Types</SelectItem>
-                  <SelectItem value="Fare" className="cursor-pointer">Fare</SelectItem>
-                  <SelectItem value="Top-up" className="cursor-pointer">Top-up</SelectItem>
-                </SelectContent>
-              </Select>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className={`w-full lg:w-[150px] font-medium text-xs cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
                   <SelectValue placeholder="Status" />
@@ -762,10 +782,18 @@ export default function TransactionsPage() {
                 <Table>
                   <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
                     <TableRow className="border-none hover:bg-transparent">
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Txn ID</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Timestamp</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card UID</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Full Name</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Type</TableHead>
+                      {isFareView ? (
+                        <>
+                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Origin</TableHead>
+                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Destination</TableHead>
+                        </>
+                      ) : (
+                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Payment Method</TableHead>
+                      )}
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Amount</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
@@ -774,7 +802,7 @@ export default function TransactionsPage() {
                   <TableBody>
                     {paginatedList.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-32">
+                        <TableCell colSpan={9} className="text-center py-32">
                           <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                             <History size={48} className="mb-2" />
                             <p className="text-xs font-semibold uppercase tracking-widest">No records found</p>
@@ -783,8 +811,11 @@ export default function TransactionsPage() {
                       </TableRow>
                     ) : (
                       paginatedList.map((tx: any) => {
-                        const displayType = normalizeTxType(tx.type);
-                        const isFareRow = displayType === "Fare";
+                        const matchedRoute = isFareView && tx.route_id
+                          ? routes.find((r) => r.id === tx.route_id) ?? null
+                          : null;
+                        const paymentMethodLabel = !isFareView ? formatPaymentMethod(tx.payment_method) : null;
+                        const paymentMethodLogo = !isFareView ? getPaymentMethodLogo(tx.payment_method) : null;
                         return (
                           <TableRow
                             key={tx.id}
@@ -792,6 +823,9 @@ export default function TransactionsPage() {
                               newRowId === tx.id ? "row-pulse" : ""
                             }`}
                           >
+                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                              #{tx.id}
+                            </TableCell>
                             <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                               {new Date(tx.timestamp || tx.created_at).toLocaleString()}
                             </TableCell>
@@ -801,21 +835,31 @@ export default function TransactionsPage() {
                             <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                               {tx.full_name || tx.fullName}
                             </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={`text-[10px] font-semibold ${
-                                isFareRow
-                                  ? isDark ? "border-red-900 text-red-400 bg-red-950/40" : "border-red-200 text-red-600 bg-red-50"
-                                  : isDark ? "border-emerald-900 text-emerald-400 bg-emerald-950/40" : "border-emerald-200 text-emerald-600 bg-emerald-50"
-                              }`}>
-                                {displayType}
-                              </Badge>
-                            </TableCell>
+                            {isFareView ? (
+                              <>
+                                <TableCell className={`text-xs ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                  {matchedRoute ? matchedRoute.origin : <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>}
+                                </TableCell>
+                                <TableCell className={`text-xs ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                  {matchedRoute ? matchedRoute.destination : <span className={isDark ? "text-slate-600" : "text-slate-400"}>—</span>}
+                                </TableCell>
+                              </>
+                            ) : (
+                              <TableCell className={`text-xs ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                <div className="flex items-center gap-1.5">
+                                  {paymentMethodLogo && (
+                                    <img src={paymentMethodLogo} alt="" className="h-4 w-auto max-w-[28px] object-contain shrink-0" />
+                                  )}
+                                  <span>{paymentMethodLabel}</span>
+                                </div>
+                              </TableCell>
+                            )}
                             <TableCell className={`text-sm font-semibold ${
-                              isFareRow
+                              isFareView
                                 ? isDark ? "text-red-400" : "text-red-600"
                                 : isDark ? "text-emerald-400" : "text-emerald-600"
                             }`}>
-                              {isFareRow ? "−" : "+"}₱{formatAmount(Number(tx.amount))}
+                              {isFareView ? "−" : "+"}₱{formatAmount(Number(tx.amount))}
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className={`text-[10px] font-semibold ${statusColor(tx.status)}`}>
@@ -847,9 +891,9 @@ export default function TransactionsPage() {
                 <span className={`text-xs font-mono uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                   Showing{" "}
                   <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                    {transactionList.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, transactionList.length)}
+                    {currentTypeList.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, currentTypeList.length)}
                   </span>{" "}
-                  of <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{transactionList.length}</span> records
+                  of <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{currentTypeList.length}</span> records
                 </span>
                 <div className="flex items-center gap-2">
                   <Button variant="ghost" size="sm" disabled={safePage <= 1}
@@ -932,6 +976,7 @@ export default function TransactionsPage() {
                 <Table>
                   <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
                     <TableRow className="border-none hover:bg-transparent">
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Transfer ID</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Timestamp</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>From (Card UID)</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>To (Card UID)</TableHead>
@@ -944,7 +989,7 @@ export default function TransactionsPage() {
                   <TableBody>
                     {paginatedTransferList.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-32">
+                        <TableCell colSpan={8} className="text-center py-32">
                           <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                             <ArrowRightLeft size={48} className="mb-2" />
                             <p className="text-xs font-semibold uppercase tracking-widest">No transfers found</p>
@@ -961,6 +1006,9 @@ export default function TransactionsPage() {
                               newTransferRowId === t.id ? "row-pulse" : ""
                             }`}
                           >
+                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                              #{t.id}
+                            </TableCell>
                             <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                               {new Date(t.created_at).toLocaleString()}
                             </TableCell>
@@ -1039,7 +1087,7 @@ export default function TransactionsPage() {
       </Card>
       )}
 
-      {/* Receipt / Transfer Modals */}
+      {/* Receipt / Transfer Modals — still available if the admin wants the full receipt view */}
       <ReceiptModal tx={viewTx} routes={routes} onClose={() => setViewTx(null)} isDark={isDark} />
       <TransferModal transfer={viewTransfer} onClose={() => setViewTransfer(null)} isDark={isDark} />
     </div>
