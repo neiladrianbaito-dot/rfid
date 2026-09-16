@@ -514,11 +514,11 @@ export default function ReportsPage() {
   const [filterDay, setFilterDay] = useState<string>("all");
 
   // ── which report section tab is showing: Daily Revenue Breakdown,
-  // Discount Collection Analytics, Detailed Revenue Log, or Route
-  // Performance — same one-tab-visible-at-a-time pattern as the Top-up /
-  // Fare / Transfer switch on the Transactions page. The Year/Month/Day
-  // filter is rendered inline in each tab's header row, next to the
-  // title, and applies to whichever tab is active. ──
+  // Discount Collection Analytics, or Detailed Revenue Log — same
+  // one-tab-visible-at-a-time pattern as the Top-up / Fare / Transfer
+  // switch on the Transactions page. The Year/Month/Day filter below
+  // is now rendered inline in each tab's header row, next to the title,
+  // and applies to whichever tab is active. ──
   const [activeTab, setActiveTab] = useState<"chart" | "discount" | "log" | "routes">("chart");
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
@@ -1423,706 +1423,702 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          TAB GROUP — the switcher and its active content card are kept
-          together in ONE wrapping block so the button bar always renders
-          immediately above whichever card is showing (Daily Revenue
-          Breakdown / Discount Collection Analytics / Detailed Revenue Log /
-          Route Performance), with no other element able to land between
-          them. ══════════════════════════════════════════════════════════ */}
-      <div className="flex flex-col gap-4 flex-1 min-h-0">
-        {/* ══ TAB SWITCH — always first, directly above the active card ══ */}
-        <div className={`inline-flex self-start rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
-          <button
-            onClick={() => setActiveTab("chart")}
-            data-testid="button-tab-chart"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-              activeTab === "chart"
-                ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-                : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            <PieChart className="w-3.5 h-3.5" />
-            Daily Revenue Breakdown
-          </button>
-          <button
-            onClick={() => setActiveTab("discount")}
-            data-testid="button-tab-discount"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-              activeTab === "discount"
-                ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-                : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            <Percent className="w-3.5 h-3.5" />
-            Discount Collection Analytics
-          </button>
-          <button
-            onClick={() => setActiveTab("log")}
-            data-testid="button-tab-log"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-              activeTab === "log"
-                ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-                : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            Detailed Revenue Log
-          </button>
-          <button
-            onClick={() => setActiveTab("routes")}
-            data-testid="button-tab-routes"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-              activeTab === "routes"
-                ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-                : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            <RouteIcon className="w-3.5 h-3.5" />
-            Route Performance
-          </button>
-        </div>
+      {/* ══ TAB SWITCH — Daily Revenue Breakdown / Discount Collection Analytics /
+          Detailed Revenue Log / Route Performance, same one-tab-visible pattern
+          as the Top-up / Fare / Transfer switch on the Transactions page. The
+          Year/Month/Day filter now lives inline in each tab's header row,
+          next to the title. ══ */}
+      <div className={`inline-flex self-start rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
+        <button
+          onClick={() => setActiveTab("chart")}
+          data-testid="button-tab-chart"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+            activeTab === "chart"
+              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <PieChart className="w-3.5 h-3.5" />
+          Daily Revenue Breakdown
+        </button>
+        <button
+          onClick={() => setActiveTab("discount")}
+          data-testid="button-tab-discount"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+            activeTab === "discount"
+              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <Percent className="w-3.5 h-3.5" />
+          Discount Collection Analytics
+        </button>
+        <button
+          onClick={() => setActiveTab("log")}
+          data-testid="button-tab-log"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+            activeTab === "log"
+              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5" />
+          Detailed Revenue Log
+        </button>
+        <button
+          onClick={() => setActiveTab("routes")}
+          data-testid="button-tab-routes"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+            activeTab === "routes"
+              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <RouteIcon className="w-3.5 h-3.5" />
+          Route Performance
+        </button>
+      </div>
 
-        {/* ══ TAB CONTENT — only the active tab's card renders, always
-            directly below the switch above. ══ */}
-        {activeTab === "chart" && (
-        <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
-          <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  <PieChart size={14} className="text-blue-500" />
-                  Daily Revenue Breakdown
-                  {isFilterActive && (
-                    <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      — {filterLabel}
-                    </span>
-                  )}
-                </CardTitle>
-                {renderFilterBar()}
-              </div>
-              <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Performance Matrix</div>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-6">
-            {isLoading ? (
-              <Skeleton className={`h-72 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
-            ) : filteredBreakdown.length === 0 ? (
-              <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                No records match the selected filter.
-              </div>
-            ) : (
-              <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={filteredBreakdown}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={(d: string) => {
-                        const date = new Date(d + "T00:00:00");
-                        return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                      }}
-                      stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
-                    />
-                    <YAxis
-                      stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
-                      tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false}
-                    />
-                    <Tooltip
-                      cursor={{ fill: isDark ? "rgba(96,165,250,0.08)" : "rgba(37,99,235,0.05)" }}
-                      contentStyle={{
-                        backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                        border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
-                        borderRadius: "8px",
-                        fontSize: "11px",
-                        fontWeight: "600",
-                        boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-                      }}
-                      labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
-                      itemStyle={{ color: isDark ? "#60a5fa" : "#2563eb" }}
-                      formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
-                    />
-                    <Bar dataKey="revenue" radius={[4, 4, 0, 0]} className="cursor-pointer">
-                      {filteredBreakdown.map((_entry: any, index: number) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={index === filteredBreakdown.length - 1 ? "#3b82f6" : isDark ? "#334155" : "#cbd5e1"}
-                          className="cursor-pointer"
-                        />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        )}
-
-        {/* ══ DISCOUNT COLLECTION ANALYTICS ══
-            Fare revenue only, split into Regular vs. Student/Senior/PWD.
-            Follows the same Year/Month/Day filter, rendered inline in this
-            card's header row next to the title. Trend is shown as a LINE
-            GRAPH (Total/Regular/Student/Senior/PWD over time), matching the
-            bar chart style used on the "Daily Revenue Breakdown" tab. The
-            daily table is kept below the chart for exact per-day figures. */}
-        {activeTab === "discount" && (
-        <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-600 via-indigo-500 to-transparent" />
-          <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  <Percent size={14} className="text-purple-500" />
-                  Discount Collection Analytics
-                  {isFilterActive && (
-                    <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      — {filterLabel}
-                    </span>
-                  )}
-                </CardTitle>
-                {renderFilterBar()}
-              </div>
-              <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Fare collections only · Regular vs. Student / Senior / PWD
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-6 space-y-6">
-            {isLoading ? (
-              <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
-            ) : (
-              <>
-                {/* Summary chips */}
-                <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                  {[
-                    { label: "Total Fare Collected", value: formatPeso(discountSummary.totalCollected), icon: Wallet, color: isDark ? "text-blue-400" : "text-blue-600", bg: isDark ? "bg-blue-950/40" : "bg-blue-50", border: isDark ? "border-blue-900" : "border-blue-100" },
-                    { label: "Daily Average", value: formatPeso(discountDailyAverage), icon: Activity, color: isDark ? "text-cyan-400" : "text-cyan-600", bg: isDark ? "bg-cyan-950/40" : "bg-cyan-50", border: isDark ? "border-cyan-900" : "border-cyan-100" },
-                    { label: "Regular (Full Fare)", value: formatPeso(discountSummary.regularRevenue), icon: Receipt, color: isDark ? "text-slate-300" : "text-slate-600", bg: isDark ? "bg-slate-800/60" : "bg-slate-100", border: isDark ? "border-slate-700" : "border-slate-200" },
-                    { label: "Total Discounted", value: formatPeso(discountSummary.discountedRevenue), icon: Percent, color: isDark ? "text-purple-400" : "text-purple-600", bg: isDark ? "bg-purple-950/40" : "bg-purple-50", border: isDark ? "border-purple-900" : "border-purple-100" },
-                    { label: "Discounted Share", value: `${discountSummary.discountedSharePct.toFixed(1)}%`, icon: Percent, color: isDark ? "text-orange-400" : "text-orange-600", bg: isDark ? "bg-orange-950/40" : "bg-orange-50", border: isDark ? "border-orange-900" : "border-orange-100" },
-                    // ➕ Revenue lost to the 20% statutory discount.
-                    { label: "Revenue Lost (20% Discount)", value: formatPeso(discountSummary.revenueLost), icon: TrendingDown, color: isDark ? "text-rose-400" : "text-rose-600", bg: isDark ? "bg-rose-950/40" : "bg-rose-50", border: isDark ? "border-rose-900" : "border-rose-100" },
-                  ].map((stat, idx) => (
-                    <div key={idx} className={`rounded-lg border px-4 py-3 ${stat.bg} ${stat.border}`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
-                          <p className={`text-lg font-bold mt-0.5 tracking-tight ${stat.color}`}>{stat.value}</p>
-                        </div>
-                        <stat.icon className={stat.color} size={18} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Per-type breakdown badges */}
-                <div className="flex flex-wrap gap-3">
-                  {(
-                    [
-                      { kind: "Student" as const, icon: GraduationCap },
-                      { kind: "Senior" as const, icon: HeartPulse },
-                      { kind: "PWD" as const, icon: Accessibility },
-                    ]
-                  ).map(({ kind, icon: Icon }) => {
-                    const t = discountSummary.byType[kind];
-                    const sharePct =
-                      discountSummary.discountedRevenue > 0 ? (t.revenue / discountSummary.discountedRevenue) * 100 : 0;
-                    const lost = discountSummary.revenueLostByType[kind];
-                    return (
-                      <div
-                        key={kind}
-                        className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${getDiscountBadgeStyle(kind, isDark)}`}
-                      >
-                        <Icon size={18} />
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className={`w-1.5 h-1.5 rounded-full inline-block ${getDiscountDotColor(kind)}`} />
-                            <span className="text-xs font-bold uppercase tracking-wide">{kind}</span>
-                          </div>
-                          <div className="text-sm font-mono font-semibold mt-0.5">
-                            {formatPeso(t.revenue)}{" "}
-                            <span className="text-[10px] font-normal opacity-70">
-                              ({t.count} {t.count === 1 ? "ride" : "rides"} · {sharePct.toFixed(0)}% of discounts)
-                            </span>
-                          </div>
-                          {/* ➕ per-type revenue lost to the 20% discount */}
-                          <div className="text-[11px] font-mono mt-0.5 opacity-80">
-                            −{formatPeso(lost)} lost to 20% discount
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* ── Line graph: Total / Regular / Student / Senior / PWD
-                    collections trending over the filtered date range ── */}
-                {filteredFareDiscountBreakdown.length === 0 ? (
-                  <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                    No fare records match the selected filter.
-                  </div>
-                ) : (
-                  <div className="h-[320px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={filteredFareDiscountBreakdown} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
-                        <XAxis
-                          dataKey="date"
-                          tickFormatter={(d: string) => {
-                            const date = new Date(d + "T00:00:00");
-                            return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                          }}
-                          stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
-                        />
-                        <YAxis
-                          stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
-                          tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                            border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
-                            borderRadius: "8px",
-                            fontSize: "11px",
-                            fontWeight: "600",
-                            boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-                          }}
-                          labelFormatter={(d: string) => {
-                            const date = new Date(d + "T00:00:00");
-                            return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-                          }}
-                          labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
-                          formatter={(value: number, name: string) => [formatPeso(Math.abs(value)), name]}
-                        />
-                        <Legend
-                          wrapperStyle={{ fontSize: "11px", fontWeight: 600 }}
-                          formatter={(value: string) => (
-                            <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>
-                          )}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="total"
-                          name="Total Collected"
-                          stroke={DISCOUNT_LINE_COLORS.total}
-                          strokeWidth={2.5}
-                          dot={false}
-                          activeDot={{ r: 4 }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="regular"
-                          name="Regular"
-                          stroke={DISCOUNT_LINE_COLORS.regular}
-                          strokeWidth={2}
-                          strokeDasharray="4 3"
-                          dot={false}
-                          activeDot={{ r: 3 }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="student"
-                          name="Student"
-                          stroke={DISCOUNT_LINE_COLORS.student}
-                          strokeWidth={2}
-                          dot={false}
-                          activeDot={{ r: 3 }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="senior"
-                          name="Senior"
-                          stroke={DISCOUNT_LINE_COLORS.senior}
-                          strokeWidth={2}
-                          dot={false}
-                          activeDot={{ r: 3 }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="pwd"
-                          name="PWD"
-                          stroke={DISCOUNT_LINE_COLORS.pwd}
-                          strokeWidth={2}
-                          dot={false}
-                          activeDot={{ r: 3 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
+      {/* ══ TAB CONTENT — only the active tab's card renders. Each card's
+          header row now carries the title AND the inline filter dropdowns
+          together, so the filter doesn't add its own spacing block. ══ */}
+      {activeTab === "chart" && (
+      <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
+        <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <PieChart size={14} className="text-blue-500" />
+                Daily Revenue Breakdown
+                {isFilterActive && (
+                  <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    — {filterLabel}
+                  </span>
                 )}
-
-                {/* Daily breakdown table — exact per-day figures backing the
-                    line graph above */}
-                {filteredFareDiscountBreakdown.length === 0 ? (
-                  <div className={`py-8 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                    No fare records match the selected filter.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto -mx-2 px-2">
-                    <Table>
-                      <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
-                        <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date</TableHead>
-                          <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Collected</TableHead>
-                          <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Regular</TableHead>
-                          <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Student</TableHead>
-                          <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-yellow-600">Senior</TableHead>
-                          <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">PWD</TableHead>
-                          <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Discounted %</TableHead>
-                          {/* ➕ per-day revenue lost column */}
-                          <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-rose-500">Revenue Lost</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredFareDiscountBreakdown.map((day, i) => {
-                          const date = new Date(day.date + "T00:00:00");
-                          const discountedTotal = day.student + day.senior + day.pwd;
-                          const sharePct = day.total > 0 ? (discountedTotal / day.total) * 100 : 0;
-                          const dayLost = discountedTotal * LOST_REVENUE_MULTIPLIER;
-                          return (
-                            <TableRow
-                              key={i}
-                              className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
-                            >
-                              <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                                {date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                              </TableCell>
-                              <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                                {formatPeso(day.total)}
-                              </TableCell>
-                              <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                                {formatPeso(day.regular)}
-                              </TableCell>
-                              <TableCell className={`text-right font-mono text-xs ${isDark ? "text-blue-400" : "text-blue-600"}`}>
-                                {formatPeso(day.student)}
-                              </TableCell>
-                              <TableCell className={`text-right font-mono text-xs ${isDark ? "text-yellow-400" : "text-yellow-700"}`}>
-                                {formatPeso(day.senior)}
-                              </TableCell>
-                              <TableCell className={`text-right font-mono text-xs ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                                {formatPeso(day.pwd)}
-                              </TableCell>
-                              <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
-                                {sharePct.toFixed(1)}%
-                              </TableCell>
-                              {/* ➕ per-day revenue lost value */}
-                              <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-rose-400" : "text-rose-600"}`}>
-                                −{formatPeso(dayLost)}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
-        )}
-
-        {/* ══ ROUTE PERFORMANCE ══
-            Which route gets the most riders/day (Fare transactions only,
-            grouped by routeId), a line-graph trend per route with a short
-            linear-trend forecast, and each route's daily average. Same
-            Year/Month/Day filter, rendered inline in this card's header row
-            next to the title. */}
-        {activeTab === "routes" && (
-        <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-amber-500 to-transparent" />
-          <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  <RouteIcon size={14} className="text-orange-500" />
-                  Route Performance
-                  {isFilterActive && (
-                    <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      — {filterLabel}
-                    </span>
-                  )}
-                </CardTitle>
-                {renderFilterBar()}
-              </div>
-              <div className={`text-[10px] font-medium uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                <Sparkles size={11} className="text-amber-500" />
-                Fare rides only · {ROUTE_FORECAST_DAYS}-day trend forecast
-              </div>
+              </CardTitle>
+              {renderFilterBar()}
             </div>
-          </CardHeader>
-          <CardContent className="pt-6 space-y-6">
-            {isLoading ? (
-              <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
-            ) : rankedRoutes.length === 0 ? (
-              <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                No routed Fare rides match the selected filter.
-              </div>
-            ) : (
-              <>
-                {/* ── Top route highlight ── */}
-                {topRoute && (
-                  <div className={`flex items-center gap-4 rounded-lg border px-5 py-4 ${
-                    isDark ? "bg-amber-950/30 border-amber-900" : "bg-amber-50 border-amber-200"
-                  }`}>
-                    <div className={`w-11 h-11 rounded-lg flex items-center justify-center flex-none ${
-                      isDark ? "bg-amber-900/50 text-amber-400" : "bg-amber-100 text-amber-600"
-                    }`}>
-                      <Award size={22} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-amber-500/80" : "text-amber-700/80"}`}>
-                        Pinaka-Sinasakyang Ruta {isFilterActive ? `(${filterLabel})` : "(All-time)"}
-                      </p>
-                      <p className={`text-lg font-bold tracking-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
-                        {topRoute.name}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-6 flex-none">
-                      <div className="text-right">
-                        <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Rides</p>
-                        <p className={`text-lg font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>{topRoute.totalRides.toLocaleString("en-US")}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily Avg</p>
-                        <p className={`text-lg font-bold font-mono ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                          {topRoute.avgRidesPerDay.toFixed(1)} <span className="text-xs font-normal opacity-70">rides/day</span>
-                        </p>
-                      </div>
-                      <div className="text-right hidden sm:block">
-                        <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revenue</p>
-                        <p className={`text-lg font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>{formatPeso(topRoute.totalRevenue)}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Ranking badges for the rest of the top routes ── */}
-                {rankedRoutes.length > 1 && (
-                  <div className="flex flex-wrap gap-3">
-                    {rankedRoutes.slice(1, ROUTE_CHART_TOP_N).map((r, idx) => (
-                      <div
-                        key={r.routeId}
-                        className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${
-                          isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50 border-slate-200"
-                        }`}
-                      >
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold flex-none ${
-                          isDark ? "bg-slate-700 text-slate-300" : "bg-slate-200 text-slate-600"
-                        }`}>
-                          {idx + 2}
-                        </div>
-                        <div>
-                          <div className={`text-xs font-bold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</div>
-                          <div className={`text-[11px] font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                            {r.totalRides.toLocaleString("en-US")} rides · {r.avgRidesPerDay.toFixed(1)}/day · {r.sharePct.toFixed(0)}% share
-                          </div>
-                        </div>
-                      </div>
+            <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Performance Matrix</div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6">
+          {isLoading ? (
+            <Skeleton className={`h-72 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+          ) : filteredBreakdown.length === 0 ? (
+            <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              No records match the selected filter.
+            </div>
+          ) : (
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={filteredBreakdown}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={(d: string) => {
+                      const date = new Date(d + "T00:00:00");
+                      return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                    }}
+                    stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
+                  />
+                  <YAxis
+                    stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
+                    tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false}
+                  />
+                  <Tooltip
+                    cursor={{ fill: isDark ? "rgba(96,165,250,0.08)" : "rgba(37,99,235,0.05)" }}
+                    contentStyle={{
+                      backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                      border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                      borderRadius: "8px",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                    }}
+                    labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
+                    itemStyle={{ color: isDark ? "#60a5fa" : "#2563eb" }}
+                    formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
+                  />
+                  <Bar dataKey="revenue" radius={[4, 4, 0, 0]} className="cursor-pointer">
+                    {filteredBreakdown.map((_entry: any, index: number) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={index === filteredBreakdown.length - 1 ? "#3b82f6" : isDark ? "#334155" : "#cbd5e1"}
+                        className="cursor-pointer"
+                      />
                     ))}
-                  </div>
-                )}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      )}
 
-                {/* ── Line graph: ridership trend per route + short forecast ── */}
-                {routeChartData.length === 0 ? (
-                  <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                    Not enough data to chart a trend for this filter.
-                  </div>
-                ) : (
-                  <div className="h-[340px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={routeChartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
-                        <XAxis
-                          dataKey="date"
-                          tickFormatter={(d: string) => {
-                            const date = new Date(d + "T00:00:00");
-                            return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                          }}
-                          stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
-                        />
-                        <YAxis
-                          allowDecimals={false}
-                          stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
-                          tickFormatter={(v: number) => `${v}`} axisLine={false} tickLine={false}
-                          label={{
-                            value: "Rides / day",
-                            angle: -90,
-                            position: "insideLeft",
-                            style: { fontSize: 10, fontWeight: 600, fill: isDark ? "#64748b" : "#94a3b8" },
-                          }}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                            border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
-                            borderRadius: "8px",
-                            fontSize: "11px",
-                            fontWeight: "600",
-                            boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-                          }}
-                          labelFormatter={(d: string) => {
-                            const date = new Date(d + "T00:00:00");
-                            return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-                          }}
-                          labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
-                          formatter={(value: number, name: string) =>
-                            value === null || value === undefined ? ["—", name] : [`${value} rides`, name]
-                          }
-                        />
-                        <Legend
-                          wrapperStyle={{ fontSize: "11px", fontWeight: 600 }}
-                          formatter={(value: string) => (
-                            <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>
-                          )}
-                        />
-                        {routeChartSeries.map((s) => (
-                          <Line
-                            key={s.actualKey}
-                            type="monotone"
-                            dataKey={s.actualKey}
-                            name={s.name}
-                            stroke={s.color}
-                            strokeWidth={2.5}
-                            dot={false}
-                            activeDot={{ r: 4 }}
-                            connectNulls={false}
-                          />
-                        ))}
-                        {routeChartSeries.map((s) => (
-                          <Line
-                            key={s.forecastKey}
-                            type="monotone"
-                            dataKey={s.forecastKey}
-                            name={`${s.name} (Forecast)`}
-                            stroke={s.color}
-                            strokeWidth={2}
-                            strokeDasharray="5 4"
-                            dot={false}
-                            activeDot={{ r: 3 }}
-                            legendType="none"
-                            connectNulls={false}
-                          />
-                        ))}
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
+      {/* ══ DISCOUNT COLLECTION ANALYTICS ══
+          Fare revenue only, split into Regular vs. Student/Senior/PWD.
+          Follows the same Year/Month/Day filter, rendered inline in this
+          card's header row next to the title. Trend is shown as a LINE
+          GRAPH (Total/Regular/Student/Senior/PWD over time), matching the
+          bar chart style used on the "Daily Revenue Breakdown" tab. The
+          daily table is kept below the chart for exact per-day figures. */}
+      {activeTab === "discount" && (
+      <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-600 via-indigo-500 to-transparent" />
+        <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <Percent size={14} className="text-purple-500" />
+                Discount Collection Analytics
+                {isFilterActive && (
+                  <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    — {filterLabel}
+                  </span>
                 )}
+              </CardTitle>
+              {renderFilterBar()}
+            </div>
+            <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              Fare collections only · Regular vs. Student / Senior / PWD
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6 space-y-6">
+          {isLoading ? (
+            <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+          ) : (
+            <>
+              {/* Summary chips */}
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                {[
+                  { label: "Total Fare Collected", value: formatPeso(discountSummary.totalCollected), icon: Wallet, color: isDark ? "text-blue-400" : "text-blue-600", bg: isDark ? "bg-blue-950/40" : "bg-blue-50", border: isDark ? "border-blue-900" : "border-blue-100" },
+                  { label: "Daily Average", value: formatPeso(discountDailyAverage), icon: Activity, color: isDark ? "text-cyan-400" : "text-cyan-600", bg: isDark ? "bg-cyan-950/40" : "bg-cyan-50", border: isDark ? "border-cyan-900" : "border-cyan-100" },
+                  { label: "Regular (Full Fare)", value: formatPeso(discountSummary.regularRevenue), icon: Receipt, color: isDark ? "text-slate-300" : "text-slate-600", bg: isDark ? "bg-slate-800/60" : "bg-slate-100", border: isDark ? "border-slate-700" : "border-slate-200" },
+                  { label: "Total Discounted", value: formatPeso(discountSummary.discountedRevenue), icon: Percent, color: isDark ? "text-purple-400" : "text-purple-600", bg: isDark ? "bg-purple-950/40" : "bg-purple-50", border: isDark ? "border-purple-900" : "border-purple-100" },
+                  { label: "Discounted Share", value: `${discountSummary.discountedSharePct.toFixed(1)}%`, icon: Percent, color: isDark ? "text-orange-400" : "text-orange-600", bg: isDark ? "bg-orange-950/40" : "bg-orange-50", border: isDark ? "border-orange-900" : "border-orange-100" },
+                  // ➕ Revenue lost to the 20% statutory discount.
+                  { label: "Revenue Lost (20% Discount)", value: formatPeso(discountSummary.revenueLost), icon: TrendingDown, color: isDark ? "text-rose-400" : "text-rose-600", bg: isDark ? "bg-rose-950/40" : "bg-rose-50", border: isDark ? "border-rose-900" : "border-rose-100" },
+                ].map((stat, idx) => (
+                  <div key={idx} className={`rounded-lg border px-4 py-3 ${stat.bg} ${stat.border}`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
+                        <p className={`text-lg font-bold mt-0.5 tracking-tight ${stat.color}`}>{stat.value}</p>
+                      </div>
+                      <stat.icon className={stat.color} size={18} />
+                    </div>
+                  </div>
+                ))}
+              </div>
 
-                {/* ── Daily average table, every routed ride in the period ── */}
+              {/* Per-type breakdown badges */}
+              <div className="flex flex-wrap gap-3">
+                {(
+                  [
+                    { kind: "Student" as const, icon: GraduationCap },
+                    { kind: "Senior" as const, icon: HeartPulse },
+                    { kind: "PWD" as const, icon: Accessibility },
+                  ]
+                ).map(({ kind, icon: Icon }) => {
+                  const t = discountSummary.byType[kind];
+                  const sharePct =
+                    discountSummary.discountedRevenue > 0 ? (t.revenue / discountSummary.discountedRevenue) * 100 : 0;
+                  const lost = discountSummary.revenueLostByType[kind];
+                  return (
+                    <div
+                      key={kind}
+                      className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${getDiscountBadgeStyle(kind, isDark)}`}
+                    >
+                      <Icon size={18} />
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`w-1.5 h-1.5 rounded-full inline-block ${getDiscountDotColor(kind)}`} />
+                          <span className="text-xs font-bold uppercase tracking-wide">{kind}</span>
+                        </div>
+                        <div className="text-sm font-mono font-semibold mt-0.5">
+                          {formatPeso(t.revenue)}{" "}
+                          <span className="text-[10px] font-normal opacity-70">
+                            ({t.count} {t.count === 1 ? "ride" : "rides"} · {sharePct.toFixed(0)}% of discounts)
+                          </span>
+                        </div>
+                        {/* ➕ per-type revenue lost to the 20% discount */}
+                        <div className="text-[11px] font-mono mt-0.5 opacity-80">
+                          −{formatPeso(lost)} lost to 20% discount
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* ── Line graph: Total / Regular / Student / Senior / PWD
+                  collections trending over the filtered date range ── */}
+              {filteredFareDiscountBreakdown.length === 0 ? (
+                <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  No fare records match the selected filter.
+                </div>
+              ) : (
+                <div className="h-[320px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={filteredFareDiscountBreakdown} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={(d: string) => {
+                          const date = new Date(d + "T00:00:00");
+                          return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                        }}
+                        stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
+                      />
+                      <YAxis
+                        stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
+                        tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                          border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                          borderRadius: "8px",
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                        }}
+                        labelFormatter={(d: string) => {
+                          const date = new Date(d + "T00:00:00");
+                          return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                        }}
+                        labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
+                        formatter={(value: number, name: string) => [formatPeso(Math.abs(value)), name]}
+                      />
+                      <Legend
+                        wrapperStyle={{ fontSize: "11px", fontWeight: 600 }}
+                        formatter={(value: string) => (
+                          <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>
+                        )}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="total"
+                        name="Total Collected"
+                        stroke={DISCOUNT_LINE_COLORS.total}
+                        strokeWidth={2.5}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="regular"
+                        name="Regular"
+                        stroke={DISCOUNT_LINE_COLORS.regular}
+                        strokeWidth={2}
+                        strokeDasharray="4 3"
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="student"
+                        name="Student"
+                        stroke={DISCOUNT_LINE_COLORS.student}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="senior"
+                        name="Senior"
+                        stroke={DISCOUNT_LINE_COLORS.senior}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="pwd"
+                        name="PWD"
+                        stroke={DISCOUNT_LINE_COLORS.pwd}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Daily breakdown table — exact per-day figures backing the
+                  line graph above */}
+              {filteredFareDiscountBreakdown.length === 0 ? (
+                <div className={`py-8 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  No fare records match the selected filter.
+                </div>
+              ) : (
                 <div className="overflow-x-auto -mx-2 px-2">
                   <Table>
                     <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
                       <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>#</TableHead>
-                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Route</TableHead>
-                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-orange-500">Total Rides</TableHead>
-                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">Daily Avg (Rides)</TableHead>
-                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Revenue</TableHead>
-                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily Avg (Revenue)</TableHead>
-                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Share</TableHead>
+                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date</TableHead>
+                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Collected</TableHead>
+                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Regular</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Student</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-yellow-600">Senior</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">PWD</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Discounted %</TableHead>
+                        {/* ➕ per-day revenue lost column */}
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-rose-500">Revenue Lost</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {rankedRoutes.map((r, i) => (
-                        <TableRow
-                          key={r.routeId}
-                          className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
-                        >
-                          <TableCell className={`text-xs font-bold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{i + 1}</TableCell>
-                          <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</TableCell>
-                          <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                            {r.totalRides.toLocaleString("en-US")}
-                          </TableCell>
-                          <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                            {r.avgRidesPerDay.toFixed(1)}
-                          </TableCell>
-                          <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                            {formatPeso(r.totalRevenue)}
-                          </TableCell>
-                          <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                            {formatPeso(r.avgRevenuePerDay)}
-                          </TableCell>
-                          <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
-                            {r.sharePct.toFixed(1)}%
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {filteredFareDiscountBreakdown.map((day, i) => {
+                        const date = new Date(day.date + "T00:00:00");
+                        const discountedTotal = day.student + day.senior + day.pwd;
+                        const sharePct = day.total > 0 ? (discountedTotal / day.total) * 100 : 0;
+                        const dayLost = discountedTotal * LOST_REVENUE_MULTIPLIER;
+                        return (
+                          <TableRow
+                            key={i}
+                            className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
+                          >
+                            <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                            </TableCell>
+                            <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {formatPeso(day.total)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {formatPeso(day.regular)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+                              {formatPeso(day.student)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-yellow-400" : "text-yellow-700"}`}>
+                              {formatPeso(day.senior)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                              {formatPeso(day.pwd)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
+                              {sharePct.toFixed(1)}%
+                            </TableCell>
+                            {/* ➕ per-day revenue lost value */}
+                            <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-rose-400" : "text-rose-600"}`}>
+                              −{formatPeso(dayLost)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-        )}
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+      )}
 
-        {/* ══ DATA TABLE ══ */}
-        {activeTab === "log" && (
-        <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-          <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  <FileText size={14} className="text-blue-500" />
-                  Detailed Revenue Log
-                  {isFilterActive && (
-                    <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      — {filterLabel}
-                    </span>
-                  )}
-                </CardTitle>
-                {renderFilterBar()}
-              </div>
+      {/* ══ ROUTE PERFORMANCE ══
+          Which route gets the most riders/day (Fare transactions only,
+          grouped by routeId), a line-graph trend per route with a short
+          linear-trend forecast, and each route's daily average. Same
+          Year/Month/Day filter, rendered inline in this card's header row
+          next to the title. */}
+      {activeTab === "routes" && (
+      <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-amber-500 to-transparent" />
+        <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <RouteIcon size={14} className="text-orange-500" />
+                Route Performance
+                {isFilterActive && (
+                  <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    — {filterLabel}
+                  </span>
+                )}
+              </CardTitle>
+              {renderFilterBar()}
             </div>
-          </CardHeader>
-          <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
-            {isLoading ? (
-              <div className="space-y-4">
-                {[1, 2, 3].map((i) => <Skeleton key={i} className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />)}
-              </div>
-            ) : filteredBreakdown.length === 0 ? (
-              <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                No records match the selected filter.
-              </div>
-            ) : (
-              <Table>
-                <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
-                  <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Log Date</TableHead>
-                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Standard Day</TableHead>
-                    <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Revenue Credited</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredBreakdown.map((day: any, i: number) => {
-                    const date = new Date(day.date + "T00:00:00");
-                    return (
+            <div className={`text-[10px] font-medium uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              <Sparkles size={11} className="text-amber-500" />
+              Fare rides only · {ROUTE_FORECAST_DAYS}-day trend forecast
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6 space-y-6">
+          {isLoading ? (
+            <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+          ) : rankedRoutes.length === 0 ? (
+            <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              No routed Fare rides match the selected filter.
+            </div>
+          ) : (
+            <>
+              {/* ── Top route highlight ── */}
+              {topRoute && (
+                <div className={`flex items-center gap-4 rounded-lg border px-5 py-4 ${
+                  isDark ? "bg-amber-950/30 border-amber-900" : "bg-amber-50 border-amber-200"
+                }`}>
+                  <div className={`w-11 h-11 rounded-lg flex items-center justify-center flex-none ${
+                    isDark ? "bg-amber-900/50 text-amber-400" : "bg-amber-100 text-amber-600"
+                  }`}>
+                    <Award size={22} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-amber-500/80" : "text-amber-700/80"}`}>
+                      Pinaka-Sinasakyang Ruta {isFilterActive ? `(${filterLabel})` : "(All-time)"}
+                    </p>
+                    <p className={`text-lg font-bold tracking-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
+                      {topRoute.name}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-6 flex-none">
+                    <div className="text-right">
+                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Rides</p>
+                      <p className={`text-lg font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>{topRoute.totalRides.toLocaleString("en-US")}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily Avg</p>
+                      <p className={`text-lg font-bold font-mono ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                        {topRoute.avgRidesPerDay.toFixed(1)} <span className="text-xs font-normal opacity-70">rides/day</span>
+                      </p>
+                    </div>
+                    <div className="text-right hidden sm:block">
+                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revenue</p>
+                      <p className={`text-lg font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>{formatPeso(topRoute.totalRevenue)}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Ranking badges for the rest of the top routes ── */}
+              {rankedRoutes.length > 1 && (
+                <div className="flex flex-wrap gap-3">
+                  {rankedRoutes.slice(1, ROUTE_CHART_TOP_N).map((r, idx) => (
+                    <div
+                      key={r.routeId}
+                      className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${
+                        isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50 border-slate-200"
+                      }`}
+                    >
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold flex-none ${
+                        isDark ? "bg-slate-700 text-slate-300" : "bg-slate-200 text-slate-600"
+                      }`}>
+                        {idx + 2}
+                      </div>
+                      <div>
+                        <div className={`text-xs font-bold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</div>
+                        <div className={`text-[11px] font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {r.totalRides.toLocaleString("en-US")} rides · {r.avgRidesPerDay.toFixed(1)}/day · {r.sharePct.toFixed(0)}% share
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Line graph: ridership trend per route + short forecast ── */}
+              {routeChartData.length === 0 ? (
+                <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  Not enough data to chart a trend for this filter.
+                </div>
+              ) : (
+                <div className="h-[340px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={routeChartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={(d: string) => {
+                          const date = new Date(d + "T00:00:00");
+                          return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                        }}
+                        stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
+                      />
+                      <YAxis
+                        allowDecimals={false}
+                        stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
+                        tickFormatter={(v: number) => `${v}`} axisLine={false} tickLine={false}
+                        label={{
+                          value: "Rides / day",
+                          angle: -90,
+                          position: "insideLeft",
+                          style: { fontSize: 10, fontWeight: 600, fill: isDark ? "#64748b" : "#94a3b8" },
+                        }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                          border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                          borderRadius: "8px",
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                        }}
+                        labelFormatter={(d: string) => {
+                          const date = new Date(d + "T00:00:00");
+                          return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                        }}
+                        labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
+                        formatter={(value: number, name: string) =>
+                          value === null || value === undefined ? ["—", name] : [`${value} rides`, name]
+                        }
+                      />
+                      <Legend
+                        wrapperStyle={{ fontSize: "11px", fontWeight: 600 }}
+                        formatter={(value: string) => (
+                          <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>
+                        )}
+                      />
+                      {routeChartSeries.map((s) => (
+                        <Line
+                          key={s.actualKey}
+                          type="monotone"
+                          dataKey={s.actualKey}
+                          name={s.name}
+                          stroke={s.color}
+                          strokeWidth={2.5}
+                          dot={false}
+                          activeDot={{ r: 4 }}
+                          connectNulls={false}
+                        />
+                      ))}
+                      {routeChartSeries.map((s) => (
+                        <Line
+                          key={s.forecastKey}
+                          type="monotone"
+                          dataKey={s.forecastKey}
+                          name={`${s.name} (Forecast)`}
+                          stroke={s.color}
+                          strokeWidth={2}
+                          strokeDasharray="5 4"
+                          dot={false}
+                          activeDot={{ r: 3 }}
+                          legendType="none"
+                          connectNulls={false}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* ── Daily average table, every routed ride in the period ── */}
+              <div className="overflow-x-auto -mx-2 px-2">
+                <Table>
+                  <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
+                    <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>#</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Route</TableHead>
+                      <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-orange-500">Total Rides</TableHead>
+                      <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">Daily Avg (Rides)</TableHead>
+                      <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Revenue</TableHead>
+                      <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily Avg (Revenue)</TableHead>
+                      <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Share</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rankedRoutes.map((r, i) => (
                       <TableRow
-                        key={i}
+                        key={r.routeId}
                         className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
                       >
-                        <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                          {date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                        <TableCell className={`text-xs font-bold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{i + 1}</TableCell>
+                        <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</TableCell>
+                        <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                          {r.totalRides.toLocaleString("en-US")}
                         </TableCell>
-                        <TableCell className={`text-[11px] font-semibold uppercase ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                          {date.toLocaleDateString("en-US", { weekday: "long" })}
+                        <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                          {r.avgRidesPerDay.toFixed(1)}
                         </TableCell>
-                        <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                          {formatPeso(day.revenue)}
+                        <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {formatPeso(r.totalRevenue)}
+                        </TableCell>
+                        <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {formatPeso(r.avgRevenuePerDay)}
+                        </TableCell>
+                        <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
+                          {r.sharePct.toFixed(1)}%
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-        )}
-      </div>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+      )}
+
+      {/* ══ DATA TABLE ══ */}
+      {activeTab === "log" && (
+      <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <FileText size={14} className="text-blue-500" />
+                Detailed Revenue Log
+                {isFilterActive && (
+                  <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    — {filterLabel}
+                  </span>
+                )}
+              </CardTitle>
+              {renderFilterBar()}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
+          {isLoading ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />)}
+            </div>
+          ) : filteredBreakdown.length === 0 ? (
+            <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              No records match the selected filter.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
+                <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Log Date</TableHead>
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Standard Day</TableHead>
+                  <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Revenue Credited</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredBreakdown.map((day: any, i: number) => {
+                  const date = new Date(day.date + "T00:00:00");
+                  return (
+                    <TableRow
+                      key={i}
+                      className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
+                    >
+                      <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                        {date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                      </TableCell>
+                      <TableCell className={`text-[11px] font-semibold uppercase ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                        {date.toLocaleDateString("en-US", { weekday: "long" })}
+                      </TableCell>
+                      <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                        {formatPeso(day.revenue)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+      )}
     </div>
   );
 }
