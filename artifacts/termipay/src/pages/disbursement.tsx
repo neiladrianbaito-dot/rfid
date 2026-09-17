@@ -834,6 +834,8 @@ export default function DisbursementPage() {
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Channel</TableHead>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Xendit ID</TableHead>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
+                  <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fee</TableHead>
+                  <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Net Amount</TableHead>
                   <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-indigo-500">Amount</TableHead>
                 </TableRow>
               </TableHeader>
@@ -868,6 +870,12 @@ export default function DisbursementPage() {
                       {row.status === "FAILED" && row.failure_reason && (
                         <div className={`text-[10px] mt-0.5 ${isDark ? "text-red-400/70" : "text-red-500/80"}`}>{row.failure_reason}</div>
                       )}
+                    </TableCell>
+                    <TableCell className={`text-right text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      {row.xendit_fee_amount != null ? formatPeso(Number(row.xendit_fee_amount)) : "—"}
+                    </TableCell>
+                    <TableCell className={`text-right text-xs font-mono ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                      {row.xendit_net_amount != null ? formatPeso(Number(row.xendit_net_amount)) : "—"}
                     </TableCell>
                     <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
                       {formatPeso(Number(row.amount) || 0)}
