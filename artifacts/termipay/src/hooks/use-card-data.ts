@@ -22,9 +22,9 @@ export function useCardData(cardUid: string) {
       const payload = await getUserByCardUid(uid);
       const rawUser = payload.user || null;
 
-      // 🔍 TEMP DEBUG — remove once expirationDate is confirmed working.
+      // 🔍 TEMP DEBUG — remove once expirationDate/id are confirmed working.
       // This prints exactly what the backend sent for this user, so we can
-      // see whether expiration_date / expirationDate is present at all.
+      // see whether expiration_date / expirationDate and id are present at all.
       console.log("[useCardData] raw user payload from backend:", rawUser);
 
       if (rawUser) {
@@ -43,6 +43,12 @@ export function useCardData(cardUid: string) {
         prevTxCountRef.current = newTxCount;
 
         setUser({
+          // 🔧 FIX: id was missing entirely, so user.id was always undefined
+          // downstream — anything that needed the numeric users.id primary
+          // key (e.g. querying card_balance_transfers by source/target
+          // card id) silently failed. Handles both camelCase (already
+          // mapped upstream) and snake_case (raw Postgres column name).
+          id: rawUser.id ?? rawUser.user_id ?? null,
           cardUid: rawUser.cardUid ?? rawUser.card_uid,
           fullName: rawUser.fullName ?? rawUser.full_name,
           email: rawUser.email ?? null,
