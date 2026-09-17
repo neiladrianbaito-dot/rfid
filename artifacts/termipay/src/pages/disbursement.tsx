@@ -967,7 +967,7 @@ export default function DisbursementPage() {
                 <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>{formatPeso(disburseAmount)}</span>
               </div>
               <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Fare transactions lang ang isasama dito — awtomatikong hindi kasama ang top-up/cash-in/load. Kung may bahagi nito na na-disburse na dati, awtomatikong bibilangin lang ang mga bagong fare transaction na hindi pa naipapadala sa Xendit.
+                Only fare transactions will be included here—top-ups, cash-ins, and loads are automatically excluded. If a portion of these transactions was previously disbursed, only new fare transactions that have not yet been sent to Xendit will be counted.
               </p>
 
               <div>
