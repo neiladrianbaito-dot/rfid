@@ -17,7 +17,7 @@ import { useTheme } from "@/hooks/use-theme";
 import {
   Search, Zap, History, ChevronLeft, ChevronRight,
   Eye, CheckCircle2, XCircle, Clock, Route, CreditCard, ArrowLeftRight,
-  ArrowRightLeft, ReceiptText, BadgeCheck, BadgeAlert,
+  ArrowRightLeft, ReceiptText,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
@@ -63,26 +63,10 @@ type CardTransfer = {
   target: TransferCard | null;
 };
 
-// A transaction that's actually been enriched by the Xendit webhook
-// (xendit-webhook-topup) — has the real fee/VAT/net split, channel info,
-// and settlement status pulled straight from Xendit's Transactions API.
-// Rows created before that webhook existed simply won't have these
-// fields populated, so every field here is optional/nullable.
-type XenditBreakdown = {
-  fee_amount?: number | null;
-  vat_amount?: number | null;
-  net_amount?: number | null;
-  xendit_channel_code?: string | null;
-  xendit_channel_category?: string | null;
-  settlement_status?: string | null;
-  xendit_transaction_id?: string | null;
-  xendit_raw?: Record<string, any> | null;
-};
-
 // ── View / tab definitions ──────────────────────────────────────────────────
 // Underline-style tabs (same treatment as the Reports page's tab bar)
 // instead of the old segmented pill switch.
-type TxView = "topup" | "fare" | "transfers" | "payment";
+type TxView = "topup" | "fare" | "transfers";
 
 // ── Transaction type normalizer ────────────────────────────────────────────
 // The backend/db may store this as "Fare", "fare", "TopUp", "top_up",
@@ -141,30 +125,6 @@ function getPaymentMethodLogo(method?: string | null): string | null {
   const key = method.toLowerCase().trim();
   if (key === "gcash") return "/gcash.svg";
   return null;
-}
-
-// Pesos, always 2 decimals — used everywhere money is shown.
-function formatPeso(amount: number | null | undefined): string {
-  if (amount == null || Number.isNaN(Number(amount))) return "—";
-  return `₱${Math.abs(Number(amount)).toLocaleString("en-PH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function formatDateTime(value?: string | null): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" });
-}
-
-// "settled" / "pending" / "unsettled" / null → display label + color, same
-// pattern as statusColor/transferStatusColor below.
-function formatSettlementStatus(status?: string | null): string {
-  if (!status) return "—";
-  const key = status.toLowerCase().trim();
-  return key.charAt(0).toUpperCase() + key.slice(1);
 }
 
 // ── Receipt Modal ─────────────────────────────────────────────────────────────
@@ -481,150 +441,15 @@ function TransferModal({
   );
 }
 
-// ── Payment Detail Modal ────────────────────────────────────────────────────
-// The full Xendit-dashboard-style breakdown for one webhook-verified
-// top-up: transaction amount, fee, VAT, net amount, channel, and
-// settlement status. `tx.xendit_raw` is the enriched Transaction object
-// the webhook stored (see xendit-webhook-topup), so anything Xendit
-// exposes there can be read straight off it with a "—" fallback.
-
-function PaymentDetailModal({
-  tx,
-  onClose,
-  isDark,
-}: {
-  tx: (any & XenditBreakdown) | null;
-  onClose: () => void;
-  isDark: boolean;
-}) {
-  if (!tx) return null;
-
-  const raw = tx.xendit_raw ?? {};
-  const isSuccess = tx.status === "Success";
-  const isFailed = tx.status === "Failed";
-
-  const StatusIcon = isFailed ? XCircle : isSuccess ? CheckCircle2 : Clock;
-  const statusRingClass = isFailed
-    ? isDark ? "ring-red-900 bg-red-950/40 text-red-400" : "ring-red-100 bg-red-50 text-red-600"
-    : isDark ? "ring-emerald-900 bg-emerald-950/40 text-emerald-400" : "ring-emerald-100 bg-emerald-50 text-emerald-600";
-
-  const settlementBadge = formatSettlementStatus(tx.settlement_status);
-  const isSettled = (tx.settlement_status || "").toLowerCase() === "settled";
-
-  const breakdownRows = [
-    { label: "Transaction Amount", value: formatPeso(Number(tx.amount)) },
-    { label: "Transaction Fee", value: formatPeso(tx.fee_amount) },
-    { label: "Transaction VAT", value: formatPeso(tx.vat_amount) },
-    { label: "Net Amount", value: formatPeso(tx.net_amount), bold: true },
-  ];
-
-  const detailRows = [
-    { label: "Reference ID", value: tx.external_id || "—", mono: true },
-    { label: "Transaction ID", value: tx.xendit_transaction_id || raw.id || "—", mono: true },
-    { label: "Channel Category", value: tx.xendit_channel_category || raw.channel_category || "—" },
-    { label: "Channel", value: formatPaymentMethod(tx.xendit_channel_code || tx.payment_method) },
-    { label: "Created", value: formatDateTime(tx.timestamp || tx.created_at) },
-    { label: "Settlement Date", value: formatDateTime(raw.settlement_time ?? raw.settlement_date) },
-  ];
-
-  return (
-    <Dialog open={!!tx} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
-          isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
-        }`}
-      >
-        <VisuallyHidden>
-          <DialogTitle>Payment Details</DialogTitle>
-          <DialogDescription>
-            Xendit payment breakdown for transaction #{tx.id}, {formatPeso(Number(tx.amount))}, status {tx.status}.
-          </DialogDescription>
-        </VisuallyHidden>
-
-        <div className="h-1 w-full bg-gradient-to-r from-violet-500 to-fuchsia-400" />
-
-        <div className="px-5 pt-5 pb-6 space-y-5">
-          {/* Status + amount hero */}
-          <div className="flex flex-col items-center gap-2 pt-1">
-            <div className={`flex items-center justify-center w-12 h-12 rounded-full ring-2 ${statusRingClass}`}>
-              <StatusIcon className="w-5 h-5" />
-            </div>
-            <p className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              Payment {tx.status}
-            </p>
-            <p className={`text-4xl font-bold tabular-nums tracking-tight ${isDark ? "text-violet-400" : "text-violet-600"}`}>
-              {formatPeso(Number(tx.amount))}
-            </p>
-            <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 mt-1 ${
-              isSettled
-                ? isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
-                : isDark ? "text-amber-400 bg-amber-950/40 border-amber-900" : "text-amber-600 bg-amber-50 border-amber-100"
-            }`}>
-              {isSettled ? <BadgeCheck className="w-3 h-3" /> : <BadgeAlert className="w-3 h-3" />}
-              Settlement: {settlementBadge}
-            </span>
-          </div>
-
-          <div className={`border-t border-dashed ${isDark ? "border-slate-800" : "border-slate-200"}`} />
-
-          {/* Reference / channel details */}
-          <div className={`rounded-xl overflow-hidden border divide-y ${isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-100"}`}>
-            {detailRows.map(({ label, value, mono }) => (
-              <div key={label} className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isDark ? "bg-slate-950/60" : "bg-slate-50"}`}>
-                <span className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  {label}
-                </span>
-                <span className={`text-xs text-right truncate max-w-[60%] font-medium ${mono ? "font-mono" : ""} ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                  {value}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {/* Transaction breakdown — the actual fee/VAT/net split from
-              Xendit, never summed together */}
-          <div>
-            <p className={`text-[10px] font-semibold uppercase tracking-widest mb-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              Transaction Breakdown
-            </p>
-            <div className={`rounded-xl overflow-hidden border divide-y ${isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-100"}`}>
-              {breakdownRows.map(({ label, value, bold }) => (
-                <div key={label} className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isDark ? "bg-slate-950/60" : "bg-slate-50"}`}>
-                  <span className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                    {label}
-                  </span>
-                  <span className={`text-xs text-right ${bold ? "font-bold" : "font-medium"} ${
-                    bold
-                      ? isDark ? "text-violet-400" : "text-violet-600"
-                      : isDark ? "text-slate-300" : "text-slate-700"
-                  }`}>
-                    {value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <Button
-            onClick={onClose}
-            className="w-full text-white font-semibold uppercase text-[11px] tracking-widest bg-violet-600 hover:bg-violet-700 transition-colors cursor-pointer"
-          >
-            Close
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function TransactionsPage() {
   const { isDark } = useTheme();
 
-  // Four tabs now: Top-up, Fare, Transfer, and Payment — Payment surfaces
-  // the real Xendit breakdown (fee, VAT, net, channel, settlement) for
-  // every transaction the xendit-webhook-topup function has enriched.
+  // Three tabs now: Top-up, Fare, and Transfer — each shows its own full set
+  // of columns inline (no need to open the receipt modal to see payment
+  // method, transaction id, or route). Rendered as GCash-style underline
+  // tabs, same treatment as the Reports page tab bar.
   const [activeView, setActiveView] = useState<TxView>("topup");
 
   const [search, setSearch] = useState("");
@@ -647,12 +472,6 @@ export default function TransactionsPage() {
   const [transfersLastUpdated, setTransfersLastUpdated] = useState<Date | null>(null);
   const [newTransferRowId, setNewTransferRowId] = useState<number | null>(null);
   const prevTopTransferIdRef = useRef<number | null>(null);
-
-  // ── Payment tab state ────────────────────────────────────────────────────
-  const [paymentSearch, setPaymentSearch] = useState("");
-  const [paymentSettlementFilter, setPaymentSettlementFilter] = useState<string>("all");
-  const [paymentPage, setPaymentPage] = useState(1);
-  const [viewPayment, setViewPayment] = useState<any>(null);
 
   // ── Fetch fare_routes from Supabase once (same as dashboard) ──────────────
   useEffect(() => {
@@ -713,7 +532,6 @@ export default function TransactionsPage() {
 
   useEffect(() => { setPage(1); }, [search, statusFilter, activeView]);
   useEffect(() => { setTransferPage(1); }, [transferSearch, transferStatusFilter]);
-  useEffect(() => { setPaymentPage(1); }, [paymentSearch, paymentSettlementFilter]);
 
   const { data: transactions, isLoading, refetch: refetchTransactions } =
     useListTransactions(params, { query: { refetchOnWindowFocus: true } });
@@ -736,15 +554,6 @@ export default function TransactionsPage() {
     () => rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === "Fare"),
     [rawTransactionList],
   );
-  // Payment tab: any row the Xendit webhook has actually enriched — i.e.
-  // it has a real fee/net figure on it, not just a status. Rows created
-  // before xendit-webhook-topup existed (or synthetic/manual rows) simply
-  // won't show up here, which is the point — this tab is "verified by
-  // Xendit", not "every top-up".
-  const paymentList = useMemo(
-    () => rawTransactionList.filter((tx: any) => tx.fee_amount != null || tx.net_amount != null),
-    [rawTransactionList],
-  );
   const currentTypeList = activeView === "fare" ? fareList : topupList;
 
   const totalPages = Math.max(1, Math.ceil(currentTypeList.length / PAGE_SIZE));
@@ -753,7 +562,7 @@ export default function TransactionsPage() {
   const paginatedList = currentTypeList.slice(startIndex, startIndex + PAGE_SIZE);
 
   useEffect(() => {
-    if (activeView === "transfers" || activeView === "payment") return;
+    if (activeView === "transfers") return;
     if (currentTypeList.length === 0) return;
     const topId = currentTypeList[0]?.id;
     if (prevTopIdRef.current !== null && topId !== prevTopIdRef.current) {
@@ -799,32 +608,6 @@ export default function TransactionsPage() {
     setTransfersLastUpdated(new Date());
   }, [filteredTransferList]);
 
-  // ── Payment filtering/search — search by card UID/name/reference ID,
-  // filter by settlement status (Settled / Pending / everything). ────────
-  const filteredPaymentList = useMemo(() => {
-    let list = paymentList;
-    if (paymentSettlementFilter !== "all") {
-      list = list.filter(
-        (tx: any) => (tx.settlement_status || "").toLowerCase() === paymentSettlementFilter,
-      );
-    }
-    const q = paymentSearch.trim().toLowerCase();
-    if (q) {
-      list = list.filter((tx: any) => {
-        const haystack = [
-          tx.card_uid, tx.cardUid, tx.full_name, tx.fullName, tx.external_id,
-        ].filter(Boolean).join(" ").toLowerCase();
-        return haystack.includes(q);
-      });
-    }
-    return list;
-  }, [paymentList, paymentSettlementFilter, paymentSearch]);
-
-  const paymentTotalPages = Math.max(1, Math.ceil(filteredPaymentList.length / PAGE_SIZE));
-  const safePaymentPage = Math.min(paymentPage, paymentTotalPages);
-  const paymentStartIndex = (safePaymentPage - 1) * PAGE_SIZE;
-  const paginatedPaymentList = filteredPaymentList.slice(paymentStartIndex, paymentStartIndex + PAGE_SIZE);
-
   const statusColor = (status: string) => {
     if (isDark) {
       switch (status) {
@@ -857,23 +640,6 @@ export default function TransactionsPage() {
     }
   };
 
-  // Settlement is a separate axis from tx.status (a payment can be
-  // "Success" but still "pending" settlement), so it gets its own color
-  // scale — same visual language (emerald/amber/red) as the others.
-  const settlementColor = (settlementStatus?: string | null) => {
-    const key = (settlementStatus || "").toLowerCase();
-    if (isDark) {
-      if (key === "settled") return "bg-emerald-950/40 text-emerald-400 border-emerald-900";
-      if (key === "unsettled" || key === "failed") return "bg-red-950/40 text-red-400 border-red-900";
-      if (key) return "bg-amber-950/40 text-amber-400 border-amber-900";
-      return "bg-slate-800 text-slate-400 border-slate-700";
-    }
-    if (key === "settled") return "bg-emerald-50 text-emerald-600 border-emerald-200";
-    if (key === "unsettled" || key === "failed") return "bg-red-50 text-red-600 border-red-200";
-    if (key) return "bg-amber-50 text-amber-600 border-amber-200";
-    return "bg-slate-100 text-slate-500 border-slate-200";
-  };
-
   const formatAmount = (amount: number) =>
     Math.abs(amount).toLocaleString("en-PH", {
       minimumFractionDigits: 2, maximumFractionDigits: 2,
@@ -881,7 +647,6 @@ export default function TransactionsPage() {
 
   const isFareView = activeView === "fare";
   const isTransferView = activeView === "transfers";
-  const isPaymentView = activeView === "payment";
 
   // ── Tab definitions for the underline tab bar (same visual treatment as
   // REPORT_TABS on the Reports page: icon + label + border-b-2 indicator). ──
@@ -889,7 +654,6 @@ export default function TransactionsPage() {
     { key: "topup", label: "Top-up", icon: CreditCard, count: topupList.length },
     { key: "fare", label: "Fare", icon: Route, count: fareList.length },
     { key: "transfers", label: "Transfer", icon: ArrowRightLeft, count: transfers.length },
-    { key: "payment", label: "Payment", icon: ReceiptText, count: paymentList.length },
   ];
 
   return (
@@ -913,7 +677,7 @@ export default function TransactionsPage() {
             Transaction Logs
           </h2>
           <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Monitor all Top-ups, Fare deductions, Card Transfers, and Xendit Payments in real-time
+            Monitor all Top-ups, Fare deductions, and Card Transfers in real-time
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -921,7 +685,7 @@ export default function TransactionsPage() {
             <Zap className="text-blue-500" size={16} />
             <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
           </div>
-          {(isTransferView ? transfersLastUpdated : lastUpdated) && !isPaymentView && (
+          {(isTransferView ? transfersLastUpdated : lastUpdated) && (
             <span className={`text-[10px] font-mono pr-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
               Last sync: {(isTransferView ? transfersLastUpdated : lastUpdated)!.toLocaleTimeString()}
             </span>
@@ -929,9 +693,9 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* View switch: Top-up / Fare / Transfer / Payment — GCash-style flat
-          underline tabs (line indicator on the active tab, no pill/card
-          background), matching the tab bar on the Reports page. */}
+      {/* View switch: Top-up / Fare / Transfer — GCash-style flat underline
+          tabs (line indicator on the active tab, no pill/card background),
+          matching the tab bar on the Reports page. */}
       <div className={`flex items-center gap-6 overflow-x-auto border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
         {TX_TABS.map(({ key, label, icon: Icon, count }) => {
           const active = activeView === key;
@@ -956,7 +720,7 @@ export default function TransactionsPage() {
         })}
       </div>
 
-      {!isTransferView && !isPaymentView ? (
+      {!isTransferView ? (
       <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${isFareView ? "from-red-500 to-rose-400" : "from-emerald-500 to-cyan-400"}`} />
 
@@ -1149,7 +913,7 @@ export default function TransactionsPage() {
           )}
         </CardContent>
       </Card>
-      ) : isTransferView ? (
+      ) : (
       <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-indigo-400" />
 
@@ -1314,194 +1078,11 @@ export default function TransactionsPage() {
           )}
         </CardContent>
       </Card>
-      ) : (
-      // ── Payment tab: the real Xendit breakdown. Fee/VAT/Net/Channel/
-      // Settlement all come straight from what xendit-webhook-topup wrote
-      // to the DB — nothing here is computed or estimated client-side. ──
-      <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-violet-500 to-fuchsia-400" />
-
-        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-          <div className="flex flex-col lg:flex-row gap-4 items-center">
-            <div className="flex items-center gap-2 mr-2 shrink-0">
-              <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
-                isDark ? "text-violet-400 bg-violet-950/40 border-violet-900" : "text-violet-600 bg-violet-50 border-violet-100"
-              }`}>
-                <ReceiptText className="w-3 h-3" />
-                XENDIT VERIFIED
-              </span>
-            </div>
-            <div className="relative flex-1 w-full">
-              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-              <Input
-                placeholder="Search card UID, name, or reference ID..."
-                value={paymentSearch}
-                onChange={(e) => setPaymentSearch(e.target.value)}
-                className={`pl-10 font-medium text-sm focus-visible:ring-violet-500 ${
-                  isDark
-                    ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
-                    : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
-                }`}
-              />
-            </div>
-            <div className="flex gap-3 w-full lg:w-auto">
-              <Select value={paymentSettlementFilter} onValueChange={setPaymentSettlementFilter}>
-                <SelectTrigger className={`w-full lg:w-[170px] font-medium text-xs cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
-                  <SelectValue placeholder="Settlement" />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                  <SelectItem value="all" className="cursor-pointer">All Settlement</SelectItem>
-                  <SelectItem value="settled" className="cursor-pointer">Settled</SelectItem>
-                  <SelectItem value="pending" className="cursor-pointer">Pending</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4 flex flex-col overflow-hidden">
-          {isLoading ? (
-            <div className="space-y-4 pt-6">
-              {Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                <Skeleton key={i} className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
-              ))}
-            </div>
-          ) : (
-            <>
-              <div className="relative mt-6 flex-1 min-h-0 overflow-auto">
-                <Table>
-                  <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-                    <TableRow className="border-none hover:bg-transparent">
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Txn ID</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card UID</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Channel</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Amount</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fee</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>VAT</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Net Amount</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Settlement</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedPaymentList.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={10} className="text-center py-32">
-                          <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
-                            <ReceiptText size={48} className="mb-2" />
-                            <p className="text-xs font-semibold uppercase tracking-widest">No Xendit-verified payments yet</p>
-                            <p className="text-[11px] mt-1 max-w-xs">
-                              Rows show up here once xendit-webhook-topup records a real payment event.
-                            </p>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      paginatedPaymentList.map((tx: any) => {
-                        const paymentMethodLabel = formatPaymentMethod(tx.xendit_channel_code || tx.payment_method);
-                        const paymentMethodLogo = getPaymentMethodLogo(tx.xendit_channel_code || tx.payment_method);
-                        return (
-                          <TableRow
-                            key={tx.id}
-                            className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
-                          >
-                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                              #{tx.id}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs text-blue-500 font-semibold">
-                              {tx.card_uid || tx.cardUid}
-                            </TableCell>
-                            <TableCell className={`text-xs ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                              <div className="flex items-center gap-1.5">
-                                {paymentMethodLogo && (
-                                  <img src={paymentMethodLogo} alt="" className="h-4 w-auto max-w-[28px] object-contain shrink-0" />
-                                )}
-                                <span>{paymentMethodLabel}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell className={`text-sm font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                              {formatPeso(Number(tx.amount))}
-                            </TableCell>
-                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                              {formatPeso(tx.fee_amount)}
-                            </TableCell>
-                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                              {formatPeso(tx.vat_amount)}
-                            </TableCell>
-                            <TableCell className={`text-xs font-mono font-semibold ${isDark ? "text-violet-400" : "text-violet-600"}`}>
-                              {formatPeso(tx.net_amount)}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={`text-[10px] font-semibold ${settlementColor(tx.settlement_status)}`}>
-                                {formatSettlementStatus(tx.settlement_status)}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={`text-[10px] font-semibold ${statusColor(tx.status)}`}>
-                                {tx.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
-                                <Button
-                                  variant="ghost" size="icon"
-                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-violet-400 hover:text-violet-300 hover:bg-violet-950/40" : "text-violet-500 hover:text-violet-700 hover:bg-violet-50"}`}
-                                  onClick={() => setViewPayment(tx)}
-                                  title="View payment breakdown"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {/* Pagination */}
-              <div className={`flex items-center justify-between pt-4 border-t mt-2 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-                <span className={`text-xs font-mono uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  Showing{" "}
-                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                    {filteredPaymentList.length === 0 ? 0 : paymentStartIndex + 1}–{Math.min(paymentStartIndex + PAGE_SIZE, filteredPaymentList.length)}
-                  </span>{" "}
-                  of <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{filteredPaymentList.length}</span> records
-                </span>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" disabled={safePaymentPage <= 1}
-                    onClick={() => setPaymentPage((p) => Math.max(1, p - 1))}
-                    className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
-                      isDark ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
-                    }`}>
-                    <ChevronLeft className="w-3 h-3 mr-1" />Prev
-                  </Button>
-                  <span className={`text-xs font-semibold px-2 tabular-nums ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                    <span className="text-violet-500">{safePaymentPage}</span>
-                    <span className={isDark ? "text-slate-700" : "text-slate-300"}> / {paymentTotalPages}</span>
-                  </span>
-                  <Button variant="ghost" size="sm" disabled={safePaymentPage >= paymentTotalPages}
-                    onClick={() => setPaymentPage((p) => Math.min(paymentTotalPages, p + 1))}
-                    className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
-                      isDark ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
-                    }`}>
-                    Next<ChevronRight className="w-3 h-3 ml-1" />
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
       )}
 
-      {/* Receipt / Transfer / Payment Modals */}
+      {/* Receipt / Transfer Modals — still available if the admin wants the full receipt view */}
       <ReceiptModal tx={viewTx} routes={routes} onClose={() => setViewTx(null)} isDark={isDark} />
       <TransferModal transfer={viewTransfer} onClose={() => setViewTransfer(null)} isDark={isDark} />
-      <PaymentDetailModal tx={viewPayment} onClose={() => setViewPayment(null)} isDark={isDark} />
     </div>
   );
 }
