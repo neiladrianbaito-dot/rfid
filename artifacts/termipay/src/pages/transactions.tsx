@@ -63,6 +63,11 @@ type CardTransfer = {
   target: TransferCard | null;
 };
 
+// ── View / tab definitions ──────────────────────────────────────────────────
+// Underline-style tabs (same treatment as the Reports page's tab bar)
+// instead of the old segmented pill switch.
+type TxView = "topup" | "fare" | "transfers";
+
 // ── Transaction type normalizer ────────────────────────────────────────────
 // The backend/db may store this as "Fare", "fare", "TopUp", "top_up",
 // "Top Up", "TOP-UP", etc. This forces a single canonical label everywhere
@@ -438,15 +443,14 @@ function TransferModal({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
-
 export default function TransactionsPage() {
   const { isDark } = useTheme();
 
   // Three tabs now: Top-up, Fare, and Transfer — each shows its own full set
   // of columns inline (no need to open the receipt modal to see payment
-  // method, transaction id, or route).
-  const [activeView, setActiveView] = useState<"topup" | "fare" | "transfers">("topup");
+  // method, transaction id, or route). Rendered as GCash-style underline
+  // tabs, same treatment as the Reports page tab bar.
+  const [activeView, setActiveView] = useState<TxView>("topup");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -644,6 +648,14 @@ export default function TransactionsPage() {
   const isFareView = activeView === "fare";
   const isTransferView = activeView === "transfers";
 
+  // ── Tab definitions for the underline tab bar (same visual treatment as
+  // REPORT_TABS on the Reports page: icon + label + border-b-2 indicator). ──
+  const TX_TABS: { key: TxView; label: string; icon: typeof CreditCard; count: number }[] = [
+    { key: "topup", label: "Top-up", icon: CreditCard, count: topupList.length },
+    { key: "fare", label: "Fare", icon: Route, count: fareList.length },
+    { key: "transfers", label: "Transfer", icon: ArrowRightLeft, count: transfers.length },
+  ];
+
   return (
     <div className={`space-y-8 h-full min-h-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}>
       <style>{`
@@ -681,50 +693,31 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* View switch: Top-up / Fare / Transfer */}
-      <div className={`-mt-4 inline-flex self-start rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
-        <button
-          onClick={() => setActiveView("topup")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeView === "topup"
-              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          <CreditCard className="w-3.5 h-3.5" />
-          Top-up
-          <span className={`text-[10px] font-mono px-1.5 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
-            {topupList.length}
-          </span>
-        </button>
-        <button
-          onClick={() => setActiveView("fare")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeView === "fare"
-              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          <Route className="w-3.5 h-3.5" />
-          Fare
-          <span className={`text-[10px] font-mono px-1.5 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
-            {fareList.length}
-          </span>
-        </button>
-        <button
-          onClick={() => setActiveView("transfers")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeView === "transfers"
-              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          <ArrowRightLeft className="w-3.5 h-3.5" />
-          Transfer
-          <span className={`text-[10px] font-mono px-1.5 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
-            {transfers.length}
-          </span>
-        </button>
+      {/* View switch: Top-up / Fare / Transfer — GCash-style flat underline
+          tabs (line indicator on the active tab, no pill/card background),
+          matching the tab bar on the Reports page. */}
+      <div className={`flex items-center gap-6 overflow-x-auto border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+        {TX_TABS.map(({ key, label, icon: Icon, count }) => {
+          const active = activeView === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveView(key)}
+              data-testid={`button-tab-${key}`}
+              className={`relative flex items-center gap-1.5 pb-2.5 -mb-px whitespace-nowrap text-xs font-semibold transition-colors cursor-pointer border-b-2 ${
+                active
+                  ? isDark ? "text-blue-400 border-blue-400" : "text-blue-600 border-blue-600"
+                  : isDark ? "text-slate-500 border-transparent hover:text-slate-300" : "text-slate-400 border-transparent hover:text-slate-600"
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+              <span className={`text-[10px] font-mono px-1.5 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {!isTransferView ? (
