@@ -1,4 +1,5 @@
 export type UserRecord = {
+   id: number;     
   cardUid?: string;
   fullName?: string;
   email?: string | null;
