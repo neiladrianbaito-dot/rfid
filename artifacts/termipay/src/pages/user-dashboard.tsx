@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { User, Phone, Tag, ShieldCheck, LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home, Settings, ChevronRight, ArrowLeft, ArrowRight, List, Pencil, Check, X as XIcon, Sun, Moon, Link2, Unlink2, AlertTriangle, RotateCw } from "lucide-react";
+import {
+  User, Phone, Tag, ShieldCheck, LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home,
+  Settings, ChevronRight, ArrowLeft, ArrowRight, List, Pencil, Check, X as XIcon, Sun, Moon,
+  Link2, Unlink2, AlertTriangle, RotateCw, Route, ArrowRightLeft, XCircle, Clock, CheckCircle2,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { useCardData } from "@/hooks/use-card-data";
 import { useChangePassword } from "@/hooks/use-change-password";
 import { useLinkCard } from "@/hooks/use-link-card";
@@ -27,6 +33,199 @@ import { LinkReminderBanner } from "@/components/dashboard/link-reminder-banner"
 import { formatAmount, getInitials, normalizeApiBaseUrl } from "@/lib/dashboard-formatters";
 import { USER_AUTH_TOKEN_KEY, unlinkUserCard } from "@/lib/api";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
+import { supabase } from "@/lib/supabase";
+
+// ── Transaction type normalizer ─────────────────────────────────────────────
+// Same idea as the admin Transactions page: the DB may hand back "Fare",
+// "fare", "TopUp", "top_up", "Top Up", etc. This forces one canonical label
+// so the Top-up / Fare tabs split correctly no matter how the source data
+// is spelled/cased.
+type TxType = "Fare" | "Top-up";
+
+function normalizeTxType(type?: string | null): TxType {
+  const key = (type ?? "").toLowerCase().replace(/[\s_-]/g, "");
+  if (key === "fare") return "Fare";
+  return "Top-up";
+}
+
+// ── Card Balance Transfer types + helpers ───────────────────────────────────
+// Mirrors the admin Transactions page's card_balance_transfers handling,
+// scoped here to just the rows where THIS user's card is source or target.
+type TransferStatus = "pending" | "completed" | "failed";
+
+type TransferCard = {
+  id: number;
+  card_uid?: string | null;
+  cardUid?: string | null;
+  full_name?: string | null;
+  fullName?: string | null;
+};
+
+type CardTransfer = {
+  id: number;
+  source_card_id: number;
+  target_card_id: number;
+  amount: number;
+  reason: string;
+  source_balance_before: number | null;
+  target_balance_before: number | null;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+  source: TransferCard | null;
+  target: TransferCard | null;
+};
+
+function normalizeTransferStatus(status?: string | null): TransferStatus {
+  const key = (status ?? "").toLowerCase().trim();
+  if (key === "completed" || key === "complete" || key === "success") return "completed";
+  if (key === "failed" || key === "failure" || key === "error") return "failed";
+  return "pending";
+}
+
+function transferCardUid(card?: TransferCard | null): string {
+  return card?.card_uid || card?.cardUid || "—";
+}
+
+function transferCardName(card?: TransferCard | null): string {
+  return card?.full_name || card?.fullName || "Unknown";
+}
+
+function transferStatusColorClasses(status: TransferStatus, isDark: boolean): string {
+  if (isDark) {
+    switch (status) {
+      case "completed": return "bg-emerald-950/40 text-emerald-400 border-emerald-900";
+      case "failed":    return "bg-red-950/40 text-red-400 border-red-900";
+      default:          return "bg-amber-950/40 text-amber-400 border-amber-900";
+    }
+  }
+  switch (status) {
+    case "completed": return "bg-emerald-50 text-emerald-600 border-emerald-200";
+    case "failed":    return "bg-red-50 text-red-600 border-red-200";
+    default:          return "bg-amber-50 text-amber-600 border-amber-200";
+  }
+}
+
+// ── Transfer Detail Modal — receipt-style view of a single card_balance_
+// transfers row, shown when the user taps a row in the Transfer tab. ───────
+function TransferDetailModal({
+  transfer,
+  onClose,
+  isDark,
+}: {
+  transfer: CardTransfer | null;
+  onClose: () => void;
+  isDark: boolean;
+}) {
+  if (!transfer) return null;
+
+  const status = normalizeTransferStatus(transfer.status);
+  const amount = Math.abs(Number(transfer.amount)).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  const StatusIcon =
+    status === "failed" ? XCircle
+    : status === "pending" ? Clock
+    : CheckCircle2;
+
+  const statusRingClass = isDark
+    ? "ring-blue-900 bg-blue-950/40 text-blue-400"
+    : "ring-blue-100 bg-blue-50 text-blue-600";
+
+  return (
+    <Dialog open={!!transfer} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
+          isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+        }`}
+      >
+        <VisuallyHidden>
+          <DialogTitle>Card Balance Transfer</DialogTitle>
+          <DialogDescription>
+            Transfer #{transfer.id}, ₱{amount} from card {transferCardUid(transfer.source)} to card{" "}
+            {transferCardUid(transfer.target)}, status {transfer.status}.
+          </DialogDescription>
+        </VisuallyHidden>
+
+        <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-400" />
+
+        <div className="px-5 pt-5 pb-6 space-y-5">
+          <div className="flex flex-col items-center gap-2 pt-1">
+            <div className={`flex items-center justify-center w-12 h-12 rounded-full ring-2 ${statusRingClass}`}>
+              <StatusIcon className="w-5 h-5" />
+            </div>
+            <p className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              Card Balance Transfer
+            </p>
+            <p className={`text-4xl font-bold tabular-nums tracking-tight ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+              ₱{amount}
+            </p>
+          </div>
+
+          <div className={`flex items-center gap-2 rounded-xl border p-3 ${isDark ? "border-slate-800 bg-slate-950/60" : "border-slate-200 bg-slate-50"}`}>
+            <div className="flex-1 min-w-0">
+              <p className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>From</p>
+              <p className={`text-xs font-mono font-semibold truncate ${isDark ? "text-blue-400" : "text-blue-600"}`}>{transferCardUid(transfer.source)}</p>
+              <p className={`text-xs truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{transferCardName(transfer.source)}</p>
+            </div>
+            <ArrowRightLeft className={`w-4 h-4 shrink-0 ${isDark ? "text-slate-600" : "text-slate-300"}`} />
+            <div className="flex-1 min-w-0 text-right">
+              <p className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>To</p>
+              <p className={`text-xs font-mono font-semibold truncate ${isDark ? "text-blue-400" : "text-blue-600"}`}>{transferCardUid(transfer.target)}</p>
+              <p className={`text-xs truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{transferCardName(transfer.target)}</p>
+            </div>
+          </div>
+
+          <div className={`border-t border-dashed ${isDark ? "border-slate-800" : "border-slate-200"}`} />
+
+          <div className={`rounded-xl overflow-hidden border divide-y ${isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-100"}`}>
+            {[
+              { label: "Transfer ID", value: `#${transfer.id}`, mono: true },
+              {
+                label: "Requested",
+                value: new Date(transfer.created_at).toLocaleString("en-PH", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }),
+              },
+              ...(transfer.completed_at
+                ? [{
+                    label: "Completed",
+                    value: new Date(transfer.completed_at).toLocaleString("en-PH", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }),
+                  }]
+                : []),
+              { label: "Reason", value: transfer.reason || "—" },
+              { label: "Status", value: status.charAt(0).toUpperCase() + status.slice(1) },
+            ].map(({ label, value, mono }) => (
+              <div key={label} className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isDark ? "bg-slate-950/60" : "bg-slate-50"}`}>
+                <span className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  {label}
+                </span>
+                <span className={`text-xs text-right truncate max-w-[60%] font-medium ${mono ? "font-mono" : ""} ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                  {value}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <Button
+            onClick={onClose}
+            className="w-full text-white font-semibold uppercase text-[11px] tracking-widest bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer"
+          >
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type TxSubTab = "topup" | "fare" | "transfers";
 
 export default function PaymongoDashboardPage() {
   const [, setLocation] = useLocation();
@@ -65,6 +264,13 @@ export default function PaymongoDashboardPage() {
   const [unlinking, setUnlinking] = useState(false);
   const [slowLoadHint, setSlowLoadHint] = useState(false);
 
+  // 🆕 Transactions sub-tab: Top-up / Fare / Transfer — same pattern as the
+  // admin Transactions page, scoped to just this user's own card.
+  const [activeTxTab, setActiveTxTab] = useState<TxSubTab>("topup");
+  const [transfers, setTransfers] = useState<CardTransfer[]>([]);
+  const [transfersLoading, setTransfersLoading] = useState(true);
+  const [viewTransfer, setViewTransfer] = useState<CardTransfer | null>(null);
+
   useEffect(() => {
     const isBusy = authChecking || cardDataLoading;
     if (!isBusy) {
@@ -75,6 +281,56 @@ export default function PaymongoDashboardPage() {
     return () => clearTimeout(timer);
   }, [authChecking, cardDataLoading]);
 
+  // 🆕 Fetch this user's card_balance_transfers (sent OR received). Adjust
+  // the `users!card_balance_transfers_..._fkey` names below if your
+  // Supabase foreign keys are named differently, and adjust `user.id` if
+  // your `users` row's primary key field is named something else.
+  useEffect(() => {
+    if (!isLinked || !user?.id) {
+      setTransfers([]);
+      setTransfersLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const loadTransfers = async () => {
+      setTransfersLoading(true);
+      const { data, error: transfersError } = await supabase
+        .from("card_balance_transfers")
+        .select(`
+          id, source_card_id, target_card_id, amount, reason,
+          source_balance_before, target_balance_before, status,
+          created_at, completed_at,
+          source:users!card_balance_transfers_source_card_id_fkey(id, card_uid, full_name),
+          target:users!card_balance_transfers_target_card_id_fkey(id, card_uid, full_name)
+        `)
+        .or(`source_card_id.eq.${user.id},target_card_id.eq.${user.id}`)
+        .order("created_at", { ascending: false });
+      if (!cancelled && !transfersError && data) setTransfers(data as unknown as CardTransfer[]);
+      if (!cancelled) setTransfersLoading(false);
+    };
+    loadTransfers();
+
+    const channel = supabase
+      .channel(`user_card_balance_transfers_${user.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "card_balance_transfers" }, loadTransfers)
+      .subscribe();
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [isLinked, user?.id]);
+
+  // 🆕 Split this card's transactions into Top-up / Fare buckets, same as
+  // the admin page — memoized so the array reference stays stable.
+  const topupTransactions = useMemo(
+    () => transactions.filter((tx) => normalizeTxType(tx.type) === "Top-up"),
+    [transactions],
+  );
+  const fareTransactions = useMemo(
+    () => transactions.filter((tx) => normalizeTxType(tx.type) === "Fare"),
+    [transactions],
+  );
+  const currentTxList = activeTxTab === "fare" ? fareTransactions : topupTransactions;
 
   // ✅ Actual logout logic — only runs after user confirms
   const handleLogout = async () => {
@@ -163,6 +419,7 @@ export default function PaymongoDashboardPage() {
       <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
       <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} routes={routes} />
+      <TransferDetailModal transfer={viewTransfer} onClose={() => setViewTransfer(null)} isDark={isDark} />
       <style>{`${DASHBOARD_STYLES}
         /* 🔒 Locked-scale flip card — see LockedFlipCard component above.
            The design canvas itself never reflows; only the outer wrapper's
@@ -615,9 +872,48 @@ export default function PaymongoDashboardPage() {
         <div className="hidden md:block">
           <Card className={`backdrop-blur-md overflow-hidden ${isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"}`}>
             <CardHeader className={`py-3 border-b ${isDark ? "bg-slate-900/20 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-              <CardTitle className={`text-xs font-bold flex items-center gap-2 uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />Transactions History
-              </CardTitle>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <CardTitle className={`text-xs font-bold flex items-center gap-2 uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />Transactions History
+                </CardTitle>
+                {isLinked && (
+                  <div className={`inline-flex self-start sm:self-auto rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
+                    <button
+                      onClick={() => setActiveTxTab("topup")}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
+                        activeTxTab === "topup"
+                          ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+                          : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      <CreditCard className="w-3 h-3" />Top-up
+                      <span className={`text-[9px] font-mono px-1 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>{topupTransactions.length}</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTxTab("fare")}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
+                        activeTxTab === "fare"
+                          ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+                          : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      <Route className="w-3 h-3" />Fare
+                      <span className={`text-[9px] font-mono px-1 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>{fareTransactions.length}</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTxTab("transfers")}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
+                        activeTxTab === "transfers"
+                          ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+                          : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      <ArrowRightLeft className="w-3 h-3" />Transfer
+                      <span className={`text-[9px] font-mono px-1 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>{transfers.length}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               {!isLinked ? (
@@ -642,6 +938,75 @@ export default function PaymongoDashboardPage() {
                     </div>
                   ))}
                 </div>
+              ) : activeTxTab === "transfers" ? (
+                transfersLoading ? (
+                  <div className="p-4 space-y-3">
+                    {[0, 1, 2, 3].map((i) => (
+                      <SkeletonBar key={i} isDark={isDark} className="h-12 w-full rounded-lg" />
+                    ))}
+                  </div>
+                ) : transfers.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-14 gap-3">
+                    <ArrowRightLeft className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
+                    <p className={`text-xs italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>No card transfers yet.</p>
+                  </div>
+                ) : (
+                  <>
+                    <p className={`px-4 pt-2 pb-1 text-[10px] italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>Tap a row to view transfer details.</p>
+                    <div className="max-h-[400px] overflow-y-auto">
+                      <table className="w-full text-left table-fixed">
+                        <colgroup>
+                          <col style={{ width: "22%" }} /><col style={{ width: "22%" }} />
+                          <col style={{ width: "22%" }} /><col style={{ width: "16%" }} /><col style={{ width: "18%" }} />
+                        </colgroup>
+                        <thead className={isDark ? "bg-slate-950/50" : "bg-slate-50"}>
+                          <tr>
+                            {(["From", "To", "Timestamp", "Amount", "Status"] as const).map((h, i) => (
+                              <th key={h} className={`px-3 py-2.5 text-[9px] font-black uppercase whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"} ${
+                                i === 3 ? "text-right" : i === 4 ? "text-center" : ""}`}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-100"}>
+                          {transfers.map((t) => {
+                            const status = normalizeTransferStatus(t.status);
+                            return (
+                              <tr key={t.id} onClick={() => setViewTransfer(t)}
+                                className={`transition-colors cursor-pointer ${isDark ? "hover:bg-slate-800/30 active:bg-slate-800/50" : "hover:bg-slate-50 active:bg-slate-100"}`}>
+                                <td className="px-3 py-2.5">
+                                  <p className={`text-[10px] font-mono font-semibold ${isDark ? "text-blue-400" : "text-blue-600"}`}>{transferCardUid(t.source)}</p>
+                                  <p className={`text-[9px] leading-tight ${isDark ? "text-slate-500" : "text-slate-400"}`}>{transferCardName(t.source)}</p>
+                                </td>
+                                <td className="px-3 py-2.5">
+                                  <p className={`text-[10px] font-mono font-semibold ${isDark ? "text-blue-400" : "text-blue-600"}`}>{transferCardUid(t.target)}</p>
+                                  <p className={`text-[9px] leading-tight ${isDark ? "text-slate-500" : "text-slate-400"}`}>{transferCardName(t.target)}</p>
+                                </td>
+                                <td className="px-3 py-2.5">
+                                  <p className={`text-[10px] font-medium leading-tight whitespace-nowrap ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                    {new Date(t.created_at).toLocaleDateString()}
+                                  </p>
+                                  <p className={`text-[9px] font-mono leading-tight whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                                    {new Date(t.created_at).toLocaleTimeString()}
+                                  </p>
+                                </td>
+                                <td className="px-3 py-2.5 text-right">
+                                  <span className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+                                    ₱{Math.abs(Number(t.amount)).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-center">
+                                  <Badge variant="outline" className={`text-[9px] font-black tracking-widest uppercase py-0 whitespace-nowrap capitalize ${transferStatusColorClasses(status, isDark)}`}>
+                                    {status}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )
               ) : (
                 <>
                   <p className={`px-4 pt-2 pb-1 text-[10px] italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>Tap a row to view transaction details.</p>
@@ -660,9 +1025,9 @@ export default function PaymongoDashboardPage() {
                         </tr>
                       </thead>
                       <tbody className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-100"}>
-                        {transactions.length === 0 ? (
+                        {currentTxList.length === 0 ? (
                           <tr><td className={`p-12 text-center text-sm italic ${isDark ? "text-slate-600" : "text-slate-400"}`} colSpan={4}>No activity recorded.</td></tr>
-                        ) : transactions.map((tx) => (
+                        ) : currentTxList.map((tx) => (
                           <tr key={tx.id} onClick={() => handleTxClick(tx)}
                             className={`transition-colors cursor-pointer ${isDark ? "hover:bg-slate-800/30 active:bg-slate-800/50" : "hover:bg-slate-50 active:bg-slate-100"}`}>
                             <td className="px-3 py-2.5">
@@ -715,6 +1080,40 @@ export default function PaymongoDashboardPage() {
               <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />
               Transactions History
             </p>
+            {isLinked && (
+              <div className={`mt-2 inline-flex rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
+                <button
+                  onClick={() => setActiveTxTab("topup")}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
+                    activeTxTab === "topup"
+                      ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+                      : isDark ? "text-slate-400" : "text-slate-500"
+                  }`}
+                >
+                  <CreditCard className="w-3 h-3" />Top-up
+                </button>
+                <button
+                  onClick={() => setActiveTxTab("fare")}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
+                    activeTxTab === "fare"
+                      ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+                      : isDark ? "text-slate-400" : "text-slate-500"
+                  }`}
+                >
+                  <Route className="w-3 h-3" />Fare
+                </button>
+                <button
+                  onClick={() => setActiveTxTab("transfers")}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
+                    activeTxTab === "transfers"
+                      ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
+                      : isDark ? "text-slate-400" : "text-slate-500"
+                  }`}
+                >
+                  <ArrowRightLeft className="w-3 h-3" />Transfer
+                </button>
+              </div>
+            )}
           </div>
           <div className={`flex-1 overflow-y-auto overscroll-contain ${isDark ? "bg-[#020617]" : "bg-slate-50"}`}>
             {!isLinked ? (
@@ -739,14 +1138,64 @@ export default function PaymongoDashboardPage() {
                   </div>
                 ))}
               </div>
-            ) : transactions.length === 0 ? (
+            ) : activeTxTab === "transfers" ? (
+              transfersLoading ? (
+                <div className="p-4 space-y-4">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <SkeletonBar key={i} isDark={isDark} className="h-14 w-full rounded-lg" />
+                  ))}
+                </div>
+              ) : transfers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3">
+                  <ArrowRightLeft className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
+                  <p className={`text-xs italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>No card transfers yet.</p>
+                </div>
+              ) : (
+                <div className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-200 bg-white"}>
+                  {transfers.map((t) => {
+                    const status = normalizeTransferStatus(t.status);
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => setViewTransfer(t)}
+                        className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors cursor-pointer ${
+                          isDark ? "hover:bg-slate-800/30 active:bg-slate-800/50" : "hover:bg-slate-50 active:bg-slate-100"
+                        }`}
+                      >
+                        <div className={`h-9 w-9 rounded-full flex items-center justify-center border shrink-0 ${
+                          isDark ? "bg-blue-950/40 border-blue-900 text-blue-400" : "bg-blue-50 border-blue-100 text-blue-600"
+                        }`}>
+                          <ArrowRightLeft className="h-4 w-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs font-semibold truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                            {transferCardUid(t.source)} <span className="opacity-50">→</span> {transferCardUid(t.target)}
+                          </p>
+                          <p className={`text-[10px] mt-0.5 truncate ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                            {new Date(t.created_at).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-xs font-bold tabular-nums ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+                            ₱{Math.abs(Number(t.amount)).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                          </p>
+                          <Badge variant="outline" className={`mt-1 text-[9px] font-black uppercase capitalize ${transferStatusColorClasses(status, isDark)}`}>
+                            {status}
+                          </Badge>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            ) : currentTxList.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
                 <List className={`h-7 w-7 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
                 <p className={`text-xs italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>No transactions yet.</p>
               </div>
             ) : (
               <div className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-200 bg-white"}>
-                {transactions.map((tx) => (
+                {currentTxList.map((tx) => (
                   <MobileTxRow key={tx.id} tx={tx} onClick={() => handleTxClick(tx)} isDark={isDark} />
                 ))}
               </div>
