@@ -16,4 +16,7 @@ export interface Transaction {
   status: string;
   route_id?: number | null;        // ✅ dagdag
   payment_method?: string | null;  // ✅ dagdag
+  fee_amount?: number | null;
+  vat_amount?: number | null;
+  net_amount?: number | null;
 }

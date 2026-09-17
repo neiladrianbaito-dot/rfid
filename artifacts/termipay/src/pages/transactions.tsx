@@ -232,6 +232,13 @@ function ReceiptModal({
               { label: "Card UID", value: tx.card_uid || tx.cardUid || "—", mono: true, accent: isDark ? "text-blue-400" : "text-blue-600" },
               { label: "Full Name", value: tx.full_name || tx.fullName || "—", bold: true },
               { label: "Status", value: tx.status },
+              ...(!isFare
+                ? [
+                    { label: "Fee", value: formatNullableAmount(getFeeAmount(tx)), mono: true },
+                    { label: "VAT", value: formatNullableAmount(getVatAmount(tx)), mono: true },
+                    { label: "Net Amount", value: formatNullableAmount(getNetAmount(tx)), mono: true, bold: true },
+                  ]
+                : []),
             ].map(({ label, value, mono, accent, bold }) => (
               <div key={label} className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isDark ? "bg-slate-950/60" : "bg-slate-50"}`}>
                 <span className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
@@ -645,6 +652,40 @@ export default function TransactionsPage() {
       minimumFractionDigits: 2, maximumFractionDigits: 2,
     });
 
+  // Transaction financial fields come directly from public.transactions.
+  // Keep these helpers tolerant of either snake_case or camelCase API output.
+  const getFeeAmount = (tx: any): number | null => {
+    const value = tx?.fee_amount ?? tx?.feeAmount;
+    return value == null || value === "" ? null : Number(value);
+  };
+
+  const getVatAmount = (tx: any): number | null => {
+    const value = tx?.vat_amount ?? tx?.vatAmount;
+    return value == null || value === "" ? null : Number(value);
+  };
+
+  const getNetAmount = (tx: any): number | null => {
+    const value = tx?.net_amount ?? tx?.netAmount;
+    if (value != null && value !== "") return Number(value);
+
+    // Fallback only when the API does not provide net_amount but does provide
+    // the components. The database value remains the source of truth.
+    const amount = Number(tx?.amount);
+    const fee = getFeeAmount(tx);
+    const vat = getVatAmount(tx);
+
+    if (Number.isFinite(amount) && fee != null && vat != null) {
+      return amount - fee - vat;
+    }
+
+    return null;
+  };
+
+  const formatNullableAmount = (value: number | null) =>
+    value == null || !Number.isFinite(value)
+      ? "—"
+      : `₱${formatAmount(value)}`;
+
   const isFareView = activeView === "fare";
   const isTransferView = activeView === "transfers";
 
@@ -788,6 +829,9 @@ export default function TransactionsPage() {
                         <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Payment Method</TableHead>
                       )}
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Amount</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fee</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>VAT</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Net Amount</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
                     </TableRow>
@@ -795,7 +839,7 @@ export default function TransactionsPage() {
                   <TableBody>
                     {paginatedList.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-32">
+                        <TableCell colSpan={12} className="text-center py-32">
                           <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                             <History size={48} className="mb-2" />
                             <p className="text-xs font-semibold uppercase tracking-widest">No records found</p>
@@ -853,6 +897,23 @@ export default function TransactionsPage() {
                                 : isDark ? "text-emerald-400" : "text-emerald-600"
                             }`}>
                               {isFareView ? "−" : "+"}₱{formatAmount(Number(tx.amount))}
+                            </TableCell>
+                            <TableCell className={`text-xs font-medium tabular-nums ${
+                              isDark ? "text-slate-300" : "text-slate-700"
+                            }`}>
+                              {formatNullableAmount(getFeeAmount(tx))}
+                            </TableCell>
+                            <TableCell className={`text-xs font-medium tabular-nums ${
+                              isDark ? "text-slate-300" : "text-slate-700"
+                            }`}>
+                              {formatNullableAmount(getVatAmount(tx))}
+                            </TableCell>
+                            <TableCell className={`text-sm font-bold tabular-nums ${
+                              isFareView
+                                ? isDark ? "text-red-300" : "text-red-700"
+                                : isDark ? "text-cyan-400" : "text-cyan-700"
+                            }`}>
+                              {formatNullableAmount(getNetAmount(tx))}
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className={`text-[10px] font-semibold ${statusColor(tx.status)}`}>
