@@ -154,6 +154,50 @@ async function isNameAlreadyLinkedToAccount(fullName: string): Promise<boolean> 
   return extractRows<{ id: string }>(result).length > 0;
 }
 
+// ── SHARED: auto-unlink a card from whatever auth_users account has it
+// linked. Used by the manual admin "Unlink Card" endpoint below, AND
+// called automatically from users.ts whenever a card gets blocked,
+// deactivated, or reassigned/transferred to a different person. Exported
+// so other route files can import and call it directly. ─────────────────────
+
+export async function unlinkCardFromAnyAccount(
+  cardUidRaw: string,
+  actor: { username: string },
+  reason: string
+): Promise<{ unlinked: boolean; previousAccount?: { id: string; fullName: string; email: string } }> {
+  const cardUid = cardUidRaw.trim().toUpperCase();
+  if (!cardUid) return { unlinked: false };
+
+  await ensureLinkedCardUidColumn();
+
+  const existingRaw = await db.execute(sql`
+    select id, full_name, email from auth_users
+    where upper(trim(linked_card_uid)) = ${cardUid}
+    limit 1
+  `);
+  const existing = extractRows<{ id: string; full_name: string; email: string }>(existingRaw)[0];
+
+  if (!existing) return { unlinked: false };
+
+  await db.execute(sql`
+    update auth_users
+    set linked_card_uid = null, updated_at = now()
+    where id = ${existing.id}
+  `);
+
+  await logAudit({
+    user: actor.username,
+    action: "UPDATE",
+    entity: "User",
+    details: `${actor.username} auto-unlinked card ${cardUid} from account ${existing.email} (${existing.full_name}) — ${reason}`,
+  });
+
+  return {
+    unlinked: true,
+    previousAccount: { id: existing.id, fullName: existing.full_name, email: existing.email },
+  };
+}
+
 // ── SIGNUP ────────────────────────────────────────────────────────────────────
 
 router.post("/auth/signup", async (req, res): Promise<void> => {
@@ -631,6 +675,9 @@ router.post("/auth/user/link-card", async (req, res): Promise<void> => {
 // account it's linked to, so it becomes available to link to a new/other
 // account (e.g. after a card is reported lost, blocked, or reassigned).
 // Requires a valid admin token (staff or super_admin) — not user token.
+// Delegates to the shared unlinkCardFromAnyAccount() helper above, which
+// is also called automatically from users.ts whenever a card's status is
+// changed to Blocked/Inactive.
 
 router.post("/admin/users/unlink-card", async (req, res): Promise<void> => {
   try {
@@ -642,43 +689,23 @@ router.post("/admin/users/unlink-card", async (req, res): Promise<void> => {
     }
 
     const body = req.body as { cardUid?: string };
-    const cardUid = typeof body?.cardUid === "string" ? body.cardUid.trim().toUpperCase() : "";
+    const cardUid = typeof body?.cardUid === "string" ? body.cardUid.trim() : "";
     if (!cardUid) {
       res.status(400).json({ error: "cardUid is required" });
       return;
     }
 
-    await ensureLinkedCardUidColumn();
+    const result = await unlinkCardFromAnyAccount(cardUid, adminUser, "manual admin unlink");
 
-    const existingRaw = await db.execute(sql`
-      select id, full_name, email from auth_users
-      where upper(trim(linked_card_uid)) = ${cardUid}
-      limit 1
-    `);
-    const existing = extractRows<{ id: string; full_name: string; email: string }>(existingRaw)[0];
-
-    if (!existing) {
+    if (!result.unlinked) {
       res.status(404).json({ error: "No account is currently linked to this card" });
       return;
     }
 
-    await db.execute(sql`
-      update auth_users
-      set linked_card_uid = null, updated_at = now()
-      where id = ${existing.id}
-    `);
-
-    await logAudit({
-      user: adminUser.username,
-      action: "UPDATE",
-      entity: "User",
-      details: `${adminUser.username} unlinked card ${cardUid} from account ${existing.email} (${existing.full_name})`,
-    });
-
     res.json({
       success: true,
-      message: `Card ${cardUid} has been unlinked from ${existing.full_name}'s account.`,
-      previousAccount: { id: existing.id, fullName: existing.full_name, email: existing.email },
+      message: `Card ${cardUid.trim().toUpperCase()} has been unlinked from ${result.previousAccount!.fullName}'s account.`,
+      previousAccount: result.previousAccount,
     });
   } catch (error) {
     console.error("Admin unlink card error:", error);

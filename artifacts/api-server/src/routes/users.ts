@@ -15,6 +15,7 @@ import {
 } from "@workspace/api-zod";
 import { verifyAdminToken } from "../lib/admin-token";
 import { logAudit } from "../lib/audit-logger";
+import { unlinkCardFromAnyAccount } from "./auth"; // adjust path if your auth routes file has a different name/location
 
 const router: IRouter = Router();
 
@@ -349,6 +350,24 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
       return;
     }
 
+    // ➕ Auto-unlink: if this update just blocked or deactivated the card,
+    // strip it from whatever auth_users account currently has it linked
+    // so it becomes immediately available to relink to a different card.
+    // This must run BEFORE the email lookup below so the response
+    // reflects the unlink right away instead of showing stale data.
+    const statusChangedTo = parsed.data.status?.trim();
+    const shouldAutoUnlink =
+      statusChangedTo === "Blocked" || statusChangedTo === "Inactive";
+
+    if (shouldAutoUnlink) {
+      const actorUsername = getActorFromRequest(req.headers.authorization);
+      await unlinkCardFromAnyAccount(
+        userRow.cardUid,
+        { username: actorUsername },
+        `card status changed to "${statusChangedTo}"`
+      );
+    }
+
     const emailResult = await db.execute(sql`
       select email
       from auth_users
@@ -359,7 +378,7 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
       limit 1
     `);
     const emailRow = extractRows<{ email: string | null }>(emailResult)[0];
-    userRow.email = emailRow?.email ?? null;
+    userRow.email = emailRow?.email ?? null; // correctly null now if we just auto-unlinked above
 
     await logAudit({
       user: getActorFromRequest(req.headers.authorization),
