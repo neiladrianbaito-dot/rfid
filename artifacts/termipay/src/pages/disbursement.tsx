@@ -835,6 +835,7 @@ export default function DisbursementPage() {
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Xendit ID</TableHead>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
                   <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fee</TableHead>
+                  <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>VAT</TableHead>
                   <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Net Amount</TableHead>
                   <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-indigo-500">Amount</TableHead>
                 </TableRow>
@@ -873,6 +874,9 @@ export default function DisbursementPage() {
                     </TableCell>
                     <TableCell className={`text-right text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                       {row.xendit_fee_amount != null ? formatPeso(Number(row.xendit_fee_amount)) : "—"}
+                    </TableCell>
+                    <TableCell className={`text-right text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      {row.xendit_vat_amount != null ? formatPeso(Number(row.xendit_vat_amount)) : "—"}
                     </TableCell>
                     <TableCell className={`text-right text-xs font-mono ${isDark ? "text-slate-300" : "text-slate-600"}`}>
                       {row.xendit_net_amount != null ? formatPeso(Number(row.xendit_net_amount)) : "—"}
