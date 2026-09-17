@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { getUserByCardUid } from "@/lib/api";
-import type { UserRecord, TransactionRecord } from "@/lib/types";
+import type { UserRecord, TransactionRecord, CardTransfer } from "@/lib/types";
 
 export function useCardData(cardUid: string) {
   const [user, setUser] = useState<UserRecord | null>(null);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
+  const [transfers, setTransfers] = useState<CardTransfer[]>([]); // 🆕
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -21,11 +22,6 @@ export function useCardData(cardUid: string) {
     try {
       const payload = await getUserByCardUid(uid);
       const rawUser = payload.user || null;
-
-      // 🔍 TEMP DEBUG — remove once expirationDate/id are confirmed working.
-      // This prints exactly what the backend sent for this user, so we can
-      // see whether expiration_date / expirationDate and id are present at all.
-      console.log("[useCardData] raw user payload from backend:", rawUser);
 
       if (rawUser) {
         const newBalance = Number(rawUser.balance ?? 0);
@@ -43,11 +39,8 @@ export function useCardData(cardUid: string) {
         prevTxCountRef.current = newTxCount;
 
         setUser({
-          // 🔧 FIX: id was missing entirely, so user.id was always undefined
-          // downstream — anything that needed the numeric users.id primary
-          // key (e.g. querying card_balance_transfers by source/target
-          // card id) silently failed. Handles both camelCase (already
-          // mapped upstream) and snake_case (raw Postgres column name).
+          // 🔧 FIX: id was missing entirely — now the backend sends it,
+          // so this finally carries the real users.id primary key.
           id: rawUser.id ?? rawUser.user_id ?? null,
           cardUid: rawUser.cardUid ?? rawUser.card_uid,
           fullName: rawUser.fullName ?? rawUser.full_name,
@@ -56,24 +49,31 @@ export function useCardData(cardUid: string) {
           type: rawUser.type,
           balance: newBalance,
           status: rawUser.status ?? "Inactive",
-          // 🔧 FIX: this was missing entirely, so the dashboard's
-          // "Valid Until" field always fell back to "N/A" no matter what
-          // the API actually returned. Handles both camelCase (already
-          // mapped upstream) and snake_case (raw Postgres column name).
           expirationDate: rawUser.expirationDate ?? rawUser.expiration_date ?? null,
         });
       } else {
         setUser(null);
       }
 
-      // ✅ Fix: only update transactions if something actually changed
       const newTxs = (payload.transactions || []) as TransactionRecord[];
       setTransactions(prev => {
         if (
           prev.length === newTxs.length &&
           prev.every((t, i) => t.id === newTxs[i].id && t.amount === newTxs[i].amount)
-        ) return prev; // same reference = no re-render = no blink
+        ) return prev;
         return newTxs;
+      });
+
+      // 🆕 Transfers now come straight from the backend payload — no
+      // separate Supabase client call, no RLS dependency, no user.id
+      // guessing. Same "only update if changed" pattern as transactions.
+      const newTransfers = (payload.transfers || []) as CardTransfer[];
+      setTransfers(prev => {
+        if (
+          prev.length === newTransfers.length &&
+          prev.every((t, i) => t.id === newTransfers[i].id && t.status === newTransfers[i].status)
+        ) return prev;
+        return newTransfers;
       });
 
       setLastUpdated(new Date());
@@ -101,6 +101,11 @@ export function useCardData(cardUid: string) {
       .on("postgres_changes", { event: "*", schema: "public", table: "users" }, () => {
         void fetchCardData(cardUid, false);
       })
+      // 🆕 Also refetch on any card_balance_transfers change, so a new/
+      // updated transfer shows up live without a manual refresh.
+      .on("postgres_changes", { event: "*", schema: "public", table: "card_balance_transfers" }, () => {
+        void fetchCardData(cardUid, false);
+      })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
           console.log("[Realtime] User dashboard subscribed for card:", cardUid);
@@ -113,5 +118,5 @@ export function useCardData(cardUid: string) {
     return () => { supabase.removeChannel(channel); };
   }, [cardUid, fetchCardData]);
 
-  return { user, transactions, loading, error, lastUpdated, isPulsing };
+  return { user, transactions, transfers, loading, error, lastUpdated, isPulsing }; // 🆕 transfers added
 }

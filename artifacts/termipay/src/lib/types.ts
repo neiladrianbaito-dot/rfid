@@ -14,6 +14,21 @@ export type UserRecord = {
   expirationDate?: string | null;
 };
 
+export interface CardTransfer {
+  id: number;
+  source_card_id: number;
+  target_card_id: number;
+  amount: number;
+  reason: string | null;
+  source_balance_before: number | null;
+  target_balance_before: number | null;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+  source: { card_uid: string | null; full_name: string | null };
+  target: { card_uid: string | null; full_name: string | null };
+}
+
 export type TransactionRecord = {
   id: number;
   timestamp: string;
