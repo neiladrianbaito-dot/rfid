@@ -37,7 +37,12 @@ export type TransactionRecord = {
   amount: string | number;
   status: string;
   route_id?: number | null;
-  payment_method?: string | null; // ✅ dagdag ito
+  payment_method?: string | null;
+
+  // Top-up financial fields
+  fee_amount?: string | number | null;
+  vat_amount?: string | number | null;
+  net_amount?: string | number | null;
 };
 
 export type CardValidationState =
