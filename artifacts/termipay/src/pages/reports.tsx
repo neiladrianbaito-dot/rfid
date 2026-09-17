@@ -499,6 +499,18 @@ function safeSheetName(name: string): string {
   return name.replace(/[:\\/?*\[\]]/g, "-").slice(0, 31);
 }
 
+// 🆕 Report-tab definitions for the GCash-style underline tab bar, moved
+// to the very top of the page (right under the page header, above the
+// summary cards) instead of sitting between the cards and the tab
+// content below.
+type ReportTab = "chart" | "discount" | "log" | "routes";
+const REPORT_TABS: { key: ReportTab; label: string; icon: typeof PieChart }[] = [
+  { key: "chart", label: "Daily Revenue Breakdown", icon: PieChart },
+  { key: "discount", label: "Discount Collection Analytics", icon: Percent },
+  { key: "log", label: "Detailed Revenue Log", icon: FileText },
+  { key: "routes", label: "Route Performance", icon: RouteIcon },
+];
+
 export default function ReportsPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
@@ -519,7 +531,7 @@ export default function ReportsPage() {
   // switch on the Transactions page. The Year/Month/Day filter below
   // is now rendered inline in each tab's header row, next to the title,
   // and applies to whichever tab is active. ──
-  const [activeTab, setActiveTab] = useState<"chart" | "discount" | "log" | "routes">("chart");
+  const [activeTab, setActiveTab] = useState<ReportTab>("chart");
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
     query: {
@@ -1385,6 +1397,34 @@ export default function ReportsPage() {
         </div>
       </div>
 
+      {/* ══ TAB SWITCH — moved to the very top, right under the page header
+          and above the summary cards. GCash-style flat underline tabs
+          (line indicator on the active tab, no pill/card background)
+          instead of the old segmented pill control. Daily Revenue
+          Breakdown / Discount Collection Analytics / Detailed Revenue Log /
+          Route Performance — same one-tab-visible pattern as the
+          Top-up / Fare / Transfer switch on the Transactions page. ══ */}
+      <div className={`flex items-center gap-6 overflow-x-auto border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+        {REPORT_TABS.map(({ key, label, icon: Icon }) => {
+          const active = activeTab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              data-testid={`button-tab-${key}`}
+              className={`relative flex items-center gap-1.5 pb-2.5 -mb-px whitespace-nowrap text-xs font-semibold transition-colors cursor-pointer border-b-2 ${
+                active
+                  ? isDark ? "text-blue-400 border-blue-400" : "text-blue-600 border-blue-600"
+                  : isDark ? "text-slate-500 border-transparent hover:text-slate-300" : "text-slate-400 border-transparent hover:text-slate-600"
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* ══ SUMMARY CARDS ══ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -1421,62 +1461,6 @@ export default function ReportsPage() {
             </CardContent>
           </Card>
         ))}
-      </div>
-
-      {/* ══ TAB SWITCH — Daily Revenue Breakdown / Discount Collection Analytics /
-          Detailed Revenue Log / Route Performance, same one-tab-visible pattern
-          as the Top-up / Fare / Transfer switch on the Transactions page. The
-          Year/Month/Day filter now lives inline in each tab's header row,
-          next to the title. ══ */}
-      <div className={`inline-flex self-start rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
-        <button
-          onClick={() => setActiveTab("chart")}
-          data-testid="button-tab-chart"
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeTab === "chart"
-              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          <PieChart className="w-3.5 h-3.5" />
-          Daily Revenue Breakdown
-        </button>
-        <button
-          onClick={() => setActiveTab("discount")}
-          data-testid="button-tab-discount"
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeTab === "discount"
-              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          <Percent className="w-3.5 h-3.5" />
-          Discount Collection Analytics
-        </button>
-        <button
-          onClick={() => setActiveTab("log")}
-          data-testid="button-tab-log"
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeTab === "log"
-              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          <FileText className="w-3.5 h-3.5" />
-          Detailed Revenue Log
-        </button>
-        <button
-          onClick={() => setActiveTab("routes")}
-          data-testid="button-tab-routes"
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-            activeTab === "routes"
-              ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-              : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          <RouteIcon className="w-3.5 h-3.5" />
-          Route Performance
-        </button>
       </div>
 
       {/* ══ TAB CONTENT — only the active tab's card renders. Each card's
