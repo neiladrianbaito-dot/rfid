@@ -1,3 +1,4 @@
+```tsx
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   useListTransactions,
@@ -6,20 +7,44 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTheme } from "@/hooks/use-theme";
 import {
-  Search, Zap, History, ChevronLeft, ChevronRight,
-  Eye, CheckCircle2, XCircle, Clock, Route, CreditCard, ArrowLeftRight,
+  Search,
+  Zap,
+  History,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Route,
+  CreditCard,
+  ArrowLeftRight,
   ArrowRightLeft,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase";
@@ -60,30 +85,42 @@ type CardTransfer = {
   target: TransferCard | null;
 };
 
-// ── View / tab definitions ──────────────────────────────────────────────────
+// ── View / tab definitions ───────────────────────────────────────────────────
 
 type TxView = "topup" | "fare" | "transfers";
 
-// ── Transaction type normalizer ─────────────────────────────────────────────
+// ── Transaction type normalizer ──────────────────────────────────────────────
 
 type TxType = "Fare" | "Top-up";
 
 function normalizeTxType(type?: string | null): TxType {
   const key = (type ?? "").toLowerCase().replace(/[\s_-]/g, "");
+
   if (key === "fare") return "Fare";
+
   return "Top-up";
 }
 
-// ── Transfer status normalizer ───────────────────────────────────────────────
+// ── Transfer status normalizer ────────────────────────────────────────────────
 
-function normalizeTransferStatus(status?: string | null): TransferStatus {
+function normalizeTransferStatus(
+  status?: string | null
+): TransferStatus {
   const key = (status ?? "").toLowerCase().trim();
 
-  if (key === "completed" || key === "complete" || key === "success") {
+  if (
+    key === "completed" ||
+    key === "complete" ||
+    key === "success"
+  ) {
     return "completed";
   }
 
-  if (key === "failed" || key === "failure" || key === "error") {
+  if (
+    key === "failed" ||
+    key === "failure" ||
+    key === "error"
+  ) {
     return "failed";
   }
 
@@ -98,9 +135,11 @@ function fullNameOf(card?: TransferCard | null): string {
   return card?.full_name || card?.fullName || "Unknown";
 }
 
-// ── Payment method label map ─────────────────────────────────────────────────
+// ── Payment method label map ──────────────────────────────────────────────────
 
-function formatPaymentMethod(method?: string | null): string {
+function formatPaymentMethod(
+  method?: string | null
+): string {
   if (!method) return "—";
 
   const map: Record<string, string> = {
@@ -116,22 +155,30 @@ function formatPaymentMethod(method?: string | null): string {
 
   const key = method.toLowerCase().trim();
 
-  return map[key] ?? method.charAt(0).toUpperCase() + method.slice(1);
+  return (
+    map[key] ??
+    method.charAt(0).toUpperCase() +
+      method.slice(1)
+  );
 }
 
 // ── Payment method logo map ──────────────────────────────────────────────────
 
-function getPaymentMethodLogo(method?: string | null): string | null {
+function getPaymentMethodLogo(
+  method?: string | null
+): string | null {
   if (!method) return null;
 
   const key = method.toLowerCase().trim();
 
-  if (key === "gcash") return "/gcash.svg";
+  if (key === "gcash") {
+    return "/gcash.svg";
+  }
 
   return null;
 }
 
-// ── Transaction financial helpers ───────────────────────────────────────────
+// ── Transaction financial helpers ────────────────────────────────────────────
 
 function formatAmount(amount: number): string {
   return Math.abs(amount).toLocaleString("en-PH", {
@@ -141,7 +188,9 @@ function formatAmount(amount: number): string {
 }
 
 function getFeeAmount(tx: any): number | null {
-  const value = tx?.fee_amount ?? tx?.feeAmount;
+  const value =
+    tx?.fee_amount ??
+    tx?.feeAmount;
 
   if (value == null || value === "") {
     return null;
@@ -153,7 +202,9 @@ function getFeeAmount(tx: any): number | null {
 }
 
 function getVatAmount(tx: any): number | null {
-  const value = tx?.vat_amount ?? tx?.vatAmount;
+  const value =
+    tx?.vat_amount ??
+    tx?.vatAmount;
 
   if (value == null || value === "") {
     return null;
@@ -165,7 +216,9 @@ function getVatAmount(tx: any): number | null {
 }
 
 function getNetAmount(tx: any): number | null {
-  const value = tx?.net_amount ?? tx?.netAmount;
+  const value =
+    tx?.net_amount ??
+    tx?.netAmount;
 
   if (value != null && value !== "") {
     const n = Number(value);
@@ -177,15 +230,22 @@ function getNetAmount(tx: any): number | null {
   const fee = getFeeAmount(tx);
   const vat = getVatAmount(tx);
 
-  if (Number.isFinite(amount) && fee != null && vat != null) {
+  if (
+    Number.isFinite(amount) &&
+    fee != null &&
+    vat != null
+  ) {
     return amount - fee - vat;
   }
 
   return null;
 }
 
-function formatNullableAmount(value: number | null): string {
-  return value == null || !Number.isFinite(value)
+function formatNullableAmount(
+  value: number | null
+): string {
+  return value == null ||
+    !Number.isFinite(value)
     ? "—"
     : `₱${formatAmount(value)}`;
 }
@@ -205,9 +265,12 @@ function ReceiptModal({
 }) {
   if (!tx) return null;
 
-  const isFare = normalizeTxType(tx.type) === "Fare";
+  const isFare =
+    normalizeTxType(tx.type) === "Fare";
 
-  const amount = Math.abs(Number(tx.amount)).toLocaleString("en-PH", {
+  const amount = Math.abs(
+    Number(tx.amount)
+  ).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -217,17 +280,25 @@ function ReceiptModal({
   // Match route by route_id
   const matchedRoute =
     isFare && tx.route_id
-      ? routes.find((r) => r.id === tx.route_id) ?? null
+      ? routes.find(
+          (r) => r.id === tx.route_id
+        ) ?? null
       : null;
 
   // Payment method
-  const paymentMethodLabel = !isFare
-    ? formatPaymentMethod(tx.payment_method)
-    : null;
+  const paymentMethodLabel =
+    !isFare
+      ? formatPaymentMethod(
+          tx.payment_method
+        )
+      : null;
 
-  const paymentMethodLogo = !isFare
-    ? getPaymentMethodLogo(tx.payment_method)
-    : null;
+  const paymentMethodLogo =
+    !isFare
+      ? getPaymentMethodLogo(
+          tx.payment_method
+        )
+      : null;
 
   const StatusIcon =
     tx.status === "Failed"
@@ -264,7 +335,9 @@ function ReceiptModal({
   return (
     <Dialog
       open={!!tx}
-      onOpenChange={(open) => !open && onClose()}
+      onOpenChange={(open) =>
+        !open && onClose()
+      }
     >
       <DialogContent
         className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
@@ -273,15 +346,20 @@ function ReceiptModal({
             : "bg-white border-slate-200"
         }`}
       >
-
         {/* Accessibility */}
         <VisuallyHidden>
-          <DialogTitle>Transaction Receipt</DialogTitle>
+          <DialogTitle>
+            Transaction Receipt
+          </DialogTitle>
 
           <DialogDescription>
-            Details for transaction #{tx.id}, a{" "}
-            {isFare ? "fare deduction" : "balance top-up"} of ₱{amount},
-            status {tx.status}.
+            Details for transaction #
+            {tx.id}, a{" "}
+            {isFare
+              ? "fare deduction"
+              : "balance top-up"}{" "}
+            of ₱{amount}, status{" "}
+            {tx.status}.
           </DialogDescription>
         </VisuallyHidden>
 
@@ -308,13 +386,23 @@ function ReceiptModal({
                   : "text-slate-400"
               }`}
             >
-              {isFare ? "Fare Deduction" : "Balance Top-up"}
+              {isFare
+                ? "Fare Deduction"
+                : "Balance Top-up"}
             </p>
 
+            {/*
+              FIX:
+              Top-up = ₱20.00
+              Fare   = −₱20.00
+
+              The "+" sign has been removed
+              from Top-up transactions.
+            */}
             <p
               className={`text-4xl font-bold tabular-nums tracking-tight ${amountColor}`}
             >
-              {isFare ? "−" : "+"}₱{amount}
+              {isFare ? "−" : ""}₱{amount}
             </p>
 
           </div>
@@ -336,7 +424,6 @@ function ReceiptModal({
                 : "border-slate-200 divide-slate-100"
             }`}
           >
-
             {[
               {
                 label: "Transaction ID",
@@ -347,11 +434,15 @@ function ReceiptModal({
               {
                 label: "Timestamp",
                 value: new Date(
-                  tx.timestamp || tx.created_at
-                ).toLocaleString("en-PH", {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                }),
+                  tx.timestamp ||
+                    tx.created_at
+                ).toLocaleString(
+                  "en-PH",
+                  {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }
+                ),
               },
 
               {
@@ -384,25 +475,28 @@ function ReceiptModal({
                 ? [
                     {
                       label: "Fee",
-                      value: formatNullableAmount(
-                        getFeeAmount(tx)
-                      ),
+                      value:
+                        formatNullableAmount(
+                          getFeeAmount(tx)
+                        ),
                       mono: true,
                     },
 
                     {
                       label: "VAT",
-                      value: formatNullableAmount(
-                        getVatAmount(tx)
-                      ),
+                      value:
+                        formatNullableAmount(
+                          getVatAmount(tx)
+                        ),
                       mono: true,
                     },
 
                     {
                       label: "Net Amount",
-                      value: formatNullableAmount(
-                        getNetAmount(tx)
-                      ),
+                      value:
+                        formatNullableAmount(
+                          getNetAmount(tx)
+                        ),
                       mono: true,
                       bold: true,
                     },
@@ -436,7 +530,9 @@ function ReceiptModal({
 
                   <span
                     className={`text-xs text-right truncate max-w-[60%] ${
-                      mono ? "font-mono" : ""
+                      mono
+                        ? "font-mono"
+                        : ""
                     } ${
                       bold
                         ? "font-bold"
@@ -490,7 +586,9 @@ function ReceiptModal({
                       <ArrowLeftRight className="w-3 h-3 shrink-0 opacity-60" />
 
                       <span className="truncate">
-                        {matchedRoute.destination}
+                        {
+                          matchedRoute.destination
+                        }
                       </span>
                     </>
                   ) : (
@@ -538,7 +636,10 @@ function ReceiptModal({
                   {paymentMethodLogo && (
                     <img
                       src={paymentMethodLogo}
-                      alt={paymentMethodLabel ?? ""}
+                      alt={
+                        paymentMethodLabel ??
+                        ""
+                      }
                       className="h-7 sm:h-8 w-auto max-w-[44px] object-contain shrink-0"
                     />
                   )}
@@ -549,22 +650,9 @@ function ReceiptModal({
                 </span>
               </div>
             )}
-
           </div>
 
-          {/* ─────────────────────────────────────────────────────────────
-              Total line
-              
-              FIX:
-              Top-up:
-              "Amount credited" -> "Net Amount"
-              "+" removed
-              Displays fee/VAT-adjusted net amount
-
-              Fare:
-              "Amount deducted"
-              Keeps the negative sign
-          ───────────────────────────────────────────────────────────── */}
+          {/* Total line */}
           <div
             className={`border-t border-dashed pt-3 flex items-center justify-between ${
               isDark
@@ -589,7 +677,9 @@ function ReceiptModal({
             >
               {isFare
                 ? `−₱${amount}`
-                : formatNullableAmount(netAmount)}
+                : formatNullableAmount(
+                    netAmount
+                  )}
             </span>
           </div>
 
@@ -607,7 +697,7 @@ function ReceiptModal({
   );
 }
 
-// ── Transfer Detail Modal ─────────────────────────────────────────────────────
+// ── Transfer Detail Modal ────────────────────────────────────────────────────
 
 function TransferModal({
   transfer,
@@ -620,15 +710,17 @@ function TransferModal({
 }) {
   if (!transfer) return null;
 
-  const status = normalizeTransferStatus(transfer.status);
+  const status =
+    normalizeTransferStatus(
+      transfer.status
+    );
 
-  const amount = Math.abs(Number(transfer.amount)).toLocaleString(
-    "en-PH",
-    {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }
-  );
+  const amount = Math.abs(
+    Number(transfer.amount)
+  ).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
   const StatusIcon =
     status === "failed"
@@ -644,7 +736,9 @@ function TransferModal({
   return (
     <Dialog
       open={!!transfer}
-      onOpenChange={(open) => !open && onClose()}
+      onOpenChange={(open) =>
+        !open && onClose()
+      }
     >
       <DialogContent
         className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
@@ -653,16 +747,20 @@ function TransferModal({
             : "bg-white border-slate-200"
         }`}
       >
-
         <VisuallyHidden>
           <DialogTitle>
             Card Balance Transfer
           </DialogTitle>
 
           <DialogDescription>
-            Transfer #{transfer.id}, ₱{amount} from card{" "}
-            {cardUidOf(transfer.source)} to card{" "}
-            {cardUidOf(transfer.target)}, status{" "}
+            Transfer #{transfer.id}, ₱
+            {amount} from card{" "}
+            {cardUidOf(
+              transfer.source
+            )} to card{" "}
+            {cardUidOf(
+              transfer.target
+            )}, status{" "}
             {transfer.status}.
           </DialogDescription>
         </VisuallyHidden>
@@ -729,7 +827,9 @@ function TransferModal({
                     : "text-blue-600"
                 }`}
               >
-                {cardUidOf(transfer.source)}
+                {cardUidOf(
+                  transfer.source
+                )}
               </p>
 
               <p
@@ -739,7 +839,9 @@ function TransferModal({
                     : "text-slate-500"
                 }`}
               >
-                {fullNameOf(transfer.source)}
+                {fullNameOf(
+                  transfer.source
+                )}
               </p>
 
             </div>
@@ -771,7 +873,9 @@ function TransferModal({
                     : "text-blue-600"
                 }`}
               >
-                {cardUidOf(transfer.target)}
+                {cardUidOf(
+                  transfer.target
+                )}
               </p>
 
               <p
@@ -781,7 +885,9 @@ function TransferModal({
                     : "text-slate-500"
                 }`}
               >
-                {fullNameOf(transfer.target)}
+                {fullNameOf(
+                  transfer.target
+                )}
               </p>
 
             </div>
@@ -804,7 +910,6 @@ function TransferModal({
                 : "border-slate-200 divide-slate-100"
             }`}
           >
-
             {[
               {
                 label: "Transfer ID",
@@ -816,10 +921,13 @@ function TransferModal({
                 label: "Requested",
                 value: new Date(
                   transfer.created_at
-                ).toLocaleString("en-PH", {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                }),
+                ).toLocaleString(
+                  "en-PH",
+                  {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }
+                ),
               },
 
               ...(transfer.completed_at
@@ -828,42 +936,61 @@ function TransferModal({
                       label: "Completed",
                       value: new Date(
                         transfer.completed_at
-                      ).toLocaleString("en-PH", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      }),
+                      ).toLocaleString(
+                        "en-PH",
+                        {
+                          dateStyle:
+                            "medium",
+                          timeStyle:
+                            "short",
+                        }
+                      ),
                     },
                   ]
                 : []),
 
               {
                 label: "Reason",
-                value: transfer.reason || "—",
+                value:
+                  transfer.reason ||
+                  "—",
               },
 
-              ...(transfer.source_balance_before != null
+              ...(transfer.source_balance_before !=
+              null
                 ? [
                     {
-                      label: "Source balance before",
+                      label:
+                        "Source balance before",
                       value: `₱${Number(
                         transfer.source_balance_before
-                      ).toLocaleString("en-PH", {
-                        minimumFractionDigits: 2,
-                      })}`,
+                      ).toLocaleString(
+                        "en-PH",
+                        {
+                          minimumFractionDigits:
+                            2,
+                        }
+                      )}`,
                       mono: true,
                     },
                   ]
                 : []),
 
-              ...(transfer.target_balance_before != null
+              ...(transfer.target_balance_before !=
+              null
                 ? [
                     {
-                      label: "Target balance before",
+                      label:
+                        "Target balance before",
                       value: `₱${Number(
                         transfer.target_balance_before
-                      ).toLocaleString("en-PH", {
-                        minimumFractionDigits: 2,
-                      })}`,
+                      ).toLocaleString(
+                        "en-PH",
+                        {
+                          minimumFractionDigits:
+                            2,
+                        }
+                      )}`,
                       mono: true,
                     },
                   ]
@@ -872,42 +999,51 @@ function TransferModal({
               {
                 label: "Status",
                 value:
-                  status.charAt(0).toUpperCase() +
+                  status
+                    .charAt(0)
+                    .toUpperCase() +
                   status.slice(1),
               },
-            ].map(({ label, value, mono }) => (
-              <div
-                key={label}
-                className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
-                  isDark
-                    ? "bg-slate-950/60"
-                    : "bg-slate-50"
-                }`}
-              >
-                <span
-                  className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
+            ].map(
+              ({
+                label,
+                value,
+                mono,
+              }) => (
+                <div
+                  key={label}
+                  className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
                     isDark
-                      ? "text-slate-500"
-                      : "text-slate-400"
+                      ? "bg-slate-950/60"
+                      : "bg-slate-50"
                   }`}
                 >
-                  {label}
-                </span>
+                  <span
+                    className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
+                      isDark
+                        ? "text-slate-500"
+                        : "text-slate-400"
+                    }`}
+                  >
+                    {label}
+                  </span>
 
-                <span
-                  className={`text-xs text-right truncate max-w-[60%] font-medium ${
-                    mono ? "font-mono" : ""
-                  } ${
-                    isDark
-                      ? "text-slate-300"
-                      : "text-slate-700"
-                  }`}
-                >
-                  {value}
-                </span>
-              </div>
-            ))}
-
+                  <span
+                    className={`text-xs text-right truncate max-w-[60%] font-medium ${
+                      mono
+                        ? "font-mono"
+                        : ""
+                    } ${
+                      isDark
+                        ? "text-slate-300"
+                        : "text-slate-700"
+                    }`}
+                  >
+                    {value}
+                  </span>
+                </div>
+              )
+            )}
           </div>
 
           <Button
@@ -931,14 +1067,18 @@ export default function TransactionsPage() {
   const [activeView, setActiveView] =
     useState<TxView>("topup");
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch] =
+    useState("");
+
   const [statusFilter, setStatusFilter] =
     useState<string>("all");
 
   const [viewTx, setViewTx] =
     useState<any>(null);
 
-  const [page, setPage] = useState(1);
+  const [page, setPage] =
+    useState(1);
+
   const [routes, setRoutes] =
     useState<FareRoute[]>([]);
 
@@ -974,8 +1114,10 @@ export default function TransactionsPage() {
   const [transferSearch, setTransferSearch] =
     useState("");
 
-  const [transferStatusFilter, setTransferStatusFilter] =
-    useState<string>("all");
+  const [
+    transferStatusFilter,
+    setTransferStatusFilter,
+  ] = useState<string>("all");
 
   const [transferPage, setTransferPage] =
     useState(1);
@@ -983,8 +1125,10 @@ export default function TransactionsPage() {
   const [viewTransfer, setViewTransfer] =
     useState<CardTransfer | null>(null);
 
-  const [transfersLastUpdated, setTransfersLastUpdated] =
-    useState<Date | null>(null);
+  const [
+    transfersLastUpdated,
+    setTransfersLastUpdated,
+  ] = useState<Date | null>(null);
 
   const [newTransferRowId, setNewTransferRowId] =
     useState<number | null>(null);
@@ -996,83 +1140,125 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     const loadRoutes = async () => {
-      const { data, error } = await supabase
-        .from("fare_routes")
-        .select(
-          "id, origin, destination, fare_amount"
-        )
-        .order("id");
+      const { data, error } =
+        await supabase
+          .from("fare_routes")
+          .select(
+            "id, origin, destination, fare_amount"
+          )
+          .order("id");
 
       if (!error && data) {
-        setRoutes(data as FareRoute[]);
+        setRoutes(
+          data as FareRoute[]
+        );
       }
     };
 
     loadRoutes();
 
-    const channel = supabase
-      .channel("admin_fare_routes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "fare_routes",
-        },
-        loadRoutes
-      )
-      .subscribe();
+    const channel =
+      supabase
+        .channel(
+          "admin_fare_routes"
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "fare_routes",
+          },
+          loadRoutes
+        )
+        .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(
+        channel
+      );
     };
   }, []);
 
   // ── Fetch card_balance_transfers ──────────────────────────────────────────
 
   useEffect(() => {
-    const loadTransfers = async () => {
-      setTransfersLoading(true);
-
-      const { data, error } = await supabase
-        .from("card_balance_transfers")
-        .select(`
-          id, source_card_id, target_card_id, amount, reason,
-          source_balance_before, target_balance_before, status,
-          created_at, completed_at,
-          source:users!card_balance_transfers_source_card_id_fkey(id, card_uid, full_name),
-          target:users!card_balance_transfers_target_card_id_fkey(id, card_uid, full_name)
-        `)
-        .order("created_at", {
-          ascending: false,
-        });
-
-      if (!error && data) {
-        setTransfers(
-          data as unknown as CardTransfer[]
+    const loadTransfers =
+      async () => {
+        setTransfersLoading(
+          true
         );
-      }
 
-      setTransfersLoading(false);
-    };
+        const {
+          data,
+          error,
+        } = await supabase
+          .from(
+            "card_balance_transfers"
+          )
+          .select(`
+            id,
+            source_card_id,
+            target_card_id,
+            amount,
+            reason,
+            source_balance_before,
+            target_balance_before,
+            status,
+            created_at,
+            completed_at,
+            source:users!card_balance_transfers_source_card_id_fkey(
+              id,
+              card_uid,
+              full_name
+            ),
+            target:users!card_balance_transfers_target_card_id_fkey(
+              id,
+              card_uid,
+              full_name
+            )
+          `)
+          .order(
+            "created_at",
+            {
+              ascending:
+                false,
+            }
+          );
+
+        if (!error && data) {
+          setTransfers(
+            data as unknown as CardTransfer[]
+          );
+        }
+
+        setTransfersLoading(
+          false
+        );
+      };
 
     loadTransfers();
 
-    const channel = supabase
-      .channel("admin_card_balance_transfers")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "card_balance_transfers",
-        },
-        loadTransfers
-      )
-      .subscribe();
+    const channel =
+      supabase
+        .channel(
+          "admin_card_balance_transfers"
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "card_balance_transfers",
+          },
+          loadTransfers
+        )
+        .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(
+        channel
+      );
     };
   }, []);
 
@@ -1084,27 +1270,42 @@ export default function TransactionsPage() {
     params.search = search;
   }
 
-  if (statusFilter !== "all") {
-    params.status = statusFilter;
+  if (
+    statusFilter !== "all"
+  ) {
+    params.status =
+      statusFilter;
   }
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, activeView]);
+  }, [
+    search,
+    statusFilter,
+    activeView,
+  ]);
 
   useEffect(() => {
     setTransferPage(1);
-  }, [transferSearch, transferStatusFilter]);
+  }, [
+    transferSearch,
+    transferStatusFilter,
+  ]);
 
   const {
     data: transactions,
     isLoading,
-    refetch: refetchTransactions,
-  } = useListTransactions(params, {
-    query: {
-      refetchOnWindowFocus: true,
-    },
-  });
+    refetch:
+      refetchTransactions,
+  } = useListTransactions(
+    params,
+    {
+      query: {
+        refetchOnWindowFocus:
+          true,
+      },
+    }
+  );
 
   useRealtimeRefetch(
     ["transactions"],
@@ -1123,67 +1324,107 @@ export default function TransactionsPage() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadFinancialFields = async () => {
-      const ids = rawTransactionList
-        .map((tx: any) => tx?.id)
-        .filter((id: any) => id != null)
-        .map((id: any) => Number(id))
-        .filter((id: number) =>
-          Number.isFinite(id)
-        );
+    const loadFinancialFields =
+      async () => {
+        const ids =
+          rawTransactionList
+            .map(
+              (tx: any) =>
+                tx?.id
+            )
+            .filter(
+              (id: any) =>
+                id != null
+            )
+            .map(
+              (id: any) =>
+                Number(id)
+            )
+            .filter(
+              (id: number) =>
+                Number.isFinite(
+                  id
+                )
+            );
 
-      if (ids.length === 0) {
-        setFinancialById({});
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("transactions")
-        .select(
-          "id, fee_amount, vat_amount, net_amount"
-        )
-        .in("id", ids);
-
-      if (cancelled) return;
-
-      if (error) {
-        console.warn(
-          "Unable to load transaction fee/VAT/net fields:",
-          error.message
-        );
-        return;
-      }
-
-      const next: Record<
-        string,
-        {
-          fee_amount: number | null;
-          vat_amount: number | null;
-          net_amount: number | null;
+        if (ids.length === 0) {
+          setFinancialById(
+            {}
+          );
+          return;
         }
-      > = {};
 
-      for (const row of data ?? []) {
-        next[String(row.id)] = {
-          fee_amount:
-            row.fee_amount == null
-              ? null
-              : Number(row.fee_amount),
+        const {
+          data,
+          error,
+        } = await supabase
+          .from(
+            "transactions"
+          )
+          .select(
+            "id, fee_amount, vat_amount, net_amount"
+          )
+          .in("id", ids);
 
-          vat_amount:
-            row.vat_amount == null
-              ? null
-              : Number(row.vat_amount),
+        if (cancelled) return;
 
-          net_amount:
-            row.net_amount == null
-              ? null
-              : Number(row.net_amount),
-        };
-      }
+        if (error) {
+          console.warn(
+            "Unable to load transaction fee/VAT/net fields:",
+            error.message
+          );
+          return;
+        }
 
-      setFinancialById(next);
-    };
+        const next: Record<
+          string,
+          {
+            fee_amount:
+              | number
+              | null;
+            vat_amount:
+              | number
+              | null;
+            net_amount:
+              | number
+              | null;
+          }
+        > = {};
+
+        for (const row of data ??
+          []) {
+          next[String(row.id)] =
+            {
+              fee_amount:
+                row.fee_amount ==
+                null
+                  ? null
+                  : Number(
+                      row.fee_amount
+                    ),
+
+              vat_amount:
+                row.vat_amount ==
+                null
+                  ? null
+                  : Number(
+                      row.vat_amount
+                    ),
+
+              net_amount:
+                row.net_amount ==
+                null
+                  ? null
+                  : Number(
+                      row.net_amount
+                    ),
+            };
+        }
+
+        setFinancialById(
+          next
+        );
+      };
 
     loadFinancialFields();
 
@@ -1194,56 +1435,73 @@ export default function TransactionsPage() {
 
   // ── Split transactions by type ────────────────────────────────────────────
 
-  const topupList = useMemo(
-    () =>
-      rawTransactionList.filter(
-        (tx: any) =>
-          normalizeTxType(tx.type) === "Top-up"
-      ),
-    [rawTransactionList]
-  );
+  const topupList =
+    useMemo(
+      () =>
+        rawTransactionList.filter(
+          (tx: any) =>
+            normalizeTxType(
+              tx.type
+            ) === "Top-up"
+        ),
+      [rawTransactionList]
+    );
 
-  const fareList = useMemo(
-    () =>
-      rawTransactionList.filter(
-        (tx: any) =>
-          normalizeTxType(tx.type) === "Fare"
-      ),
-    [rawTransactionList]
-  );
+  const fareList =
+    useMemo(
+      () =>
+        rawTransactionList.filter(
+          (tx: any) =>
+            normalizeTxType(
+              tx.type
+            ) === "Fare"
+        ),
+      [rawTransactionList]
+    );
 
   const currentTypeList =
     activeView === "fare"
       ? fareList
       : topupList;
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(
-      currentTypeList.length / PAGE_SIZE
-    )
-  );
+  const totalPages =
+    Math.max(
+      1,
+      Math.ceil(
+        currentTypeList.length /
+          PAGE_SIZE
+      )
+    );
 
-  const safePage = Math.min(
-    page,
-    totalPages
-  );
+  const safePage =
+    Math.min(
+      page,
+      totalPages
+    );
 
   const startIndex =
-    (safePage - 1) * PAGE_SIZE;
+    (safePage - 1) *
+    PAGE_SIZE;
 
   const paginatedList =
     currentTypeList.slice(
       startIndex,
-      startIndex + PAGE_SIZE
+      startIndex +
+        PAGE_SIZE
     );
 
   useEffect(() => {
-    if (activeView === "transfers") {
+    if (
+      activeView ===
+      "transfers"
+    ) {
       return;
     }
 
-    if (currentTypeList.length === 0) {
+    if (
+      currentTypeList.length ===
+      0
+    ) {
       return;
     }
 
@@ -1251,20 +1509,26 @@ export default function TransactionsPage() {
       currentTypeList[0]?.id;
 
     if (
-      prevTopIdRef.current !== null &&
-      topId !== prevTopIdRef.current
+      prevTopIdRef.current !==
+        null &&
+      topId !==
+        prevTopIdRef.current
     ) {
       setNewRowId(topId);
 
       setTimeout(
-        () => setNewRowId(null),
+        () =>
+          setNewRowId(null),
         800
       );
     }
 
-    prevTopIdRef.current = topId;
+    prevTopIdRef.current =
+      topId;
 
-    setLastUpdated(new Date());
+    setLastUpdated(
+      new Date()
+    );
   }, [
     currentTypeList,
     activeView,
@@ -1272,79 +1536,104 @@ export default function TransactionsPage() {
 
   // ── Transfers filtering/search ────────────────────────────────────────────
 
-  const filteredTransferList = useMemo(() => {
-    let list = transfers;
+  const filteredTransferList =
+    useMemo(() => {
+      let list =
+        transfers;
 
-    if (
-      transferStatusFilter !== "all"
-    ) {
-      list = list.filter(
-        (t) =>
-          normalizeTransferStatus(
-            t.status
-          ) === transferStatusFilter
-      );
-    }
+      if (
+        transferStatusFilter !==
+        "all"
+      ) {
+        list =
+          list.filter(
+            (t) =>
+              normalizeTransferStatus(
+                t.status
+              ) ===
+              transferStatusFilter
+          );
+      }
 
-    const q =
-      transferSearch
-        .trim()
-        .toLowerCase();
-
-    if (q) {
-      list = list.filter((t) => {
-        const haystack = [
-          cardUidOf(t.source),
-          fullNameOf(t.source),
-          cardUidOf(t.target),
-          fullNameOf(t.target),
-        ]
-          .join(" ")
+      const q =
+        transferSearch
+          .trim()
           .toLowerCase();
 
-        return haystack.includes(q);
-      });
-    }
+      if (q) {
+        list =
+          list.filter(
+            (t) => {
+              const haystack =
+                [
+                  cardUidOf(
+                    t.source
+                  ),
+                  fullNameOf(
+                    t.source
+                  ),
+                  cardUidOf(
+                    t.target
+                  ),
+                  fullNameOf(
+                    t.target
+                  ),
+                ]
+                  .join(" ")
+                  .toLowerCase();
 
-    return list;
-  }, [
-    transfers,
-    transferStatusFilter,
-    transferSearch,
-  ]);
+              return haystack.includes(
+                q
+              );
+            }
+          );
+      }
 
-  const transferTotalPages = Math.max(
-    1,
-    Math.ceil(
-      filteredTransferList.length /
-        PAGE_SIZE
-    )
-  );
+      return list;
+    }, [
+      transfers,
+      transferStatusFilter,
+      transferSearch,
+    ]);
 
-  const safeTransferPage = Math.min(
-    transferPage,
-    transferTotalPages
-  );
+  const transferTotalPages =
+    Math.max(
+      1,
+      Math.ceil(
+        filteredTransferList.length /
+          PAGE_SIZE
+      )
+    );
+
+  const safeTransferPage =
+    Math.min(
+      transferPage,
+      transferTotalPages
+    );
 
   const transferStartIndex =
-    (safeTransferPage - 1) *
+    (safeTransferPage -
+      1) *
     PAGE_SIZE;
 
   const paginatedTransferList =
     filteredTransferList.slice(
       transferStartIndex,
-      transferStartIndex + PAGE_SIZE
+      transferStartIndex +
+        PAGE_SIZE
     );
 
   useEffect(() => {
     if (
-      filteredTransferList.length === 0
+      filteredTransferList.length ===
+      0
     ) {
       return;
     }
 
     const topId =
-      filteredTransferList[0]?.id;
+      filteredTransferList[0]
+        ?.id;
 
     if (
       prevTopTransferIdRef.current !==
@@ -1352,10 +1641,15 @@ export default function TransactionsPage() {
       topId !==
         prevTopTransferIdRef.current
     ) {
-      setNewTransferRowId(topId);
+      setNewTransferRowId(
+        topId
+      );
 
       setTimeout(
-        () => setNewTransferRowId(null),
+        () =>
+          setNewTransferRowId(
+            null
+          ),
         800
       );
     }
@@ -1366,7 +1660,9 @@ export default function TransactionsPage() {
     setTransfersLastUpdated(
       new Date()
     );
-  }, [filteredTransferList]);
+  }, [
+    filteredTransferList,
+  ]);
 
   // ── Status colors ─────────────────────────────────────────────────────────
 
@@ -1404,39 +1700,41 @@ export default function TransactionsPage() {
     }
   };
 
-  const transferStatusColor = (
-    status: TransferStatus
-  ) => {
-    if (isDark) {
+  const transferStatusColor =
+    (
+      status: TransferStatus
+    ) => {
+      if (isDark) {
+        switch (status) {
+          case "completed":
+            return "bg-emerald-950/40 text-emerald-400 border-emerald-900";
+
+          case "failed":
+            return "bg-red-950/40 text-red-400 border-red-900";
+
+          default:
+            return "bg-amber-950/40 text-amber-400 border-amber-900";
+        }
+      }
+
       switch (status) {
         case "completed":
-          return "bg-emerald-950/40 text-emerald-400 border-emerald-900";
+          return "bg-emerald-50 text-emerald-600 border-emerald-200";
 
         case "failed":
-          return "bg-red-950/40 text-red-400 border-red-900";
+          return "bg-red-50 text-red-600 border-red-200";
 
         default:
-          return "bg-amber-950/40 text-amber-400 border-amber-900";
+          return "bg-amber-50 text-amber-600 border-amber-200";
       }
-    }
-
-    switch (status) {
-      case "completed":
-        return "bg-emerald-50 text-emerald-600 border-emerald-200";
-
-      case "failed":
-        return "bg-red-50 text-red-600 border-red-200";
-
-      default:
-        return "bg-amber-50 text-amber-600 border-amber-200";
-    }
-  };
+    };
 
   const isFareView =
     activeView === "fare";
 
   const isTransferView =
-    activeView === "transfers";
+    activeView ===
+    "transfers";
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
 
@@ -1450,19 +1748,22 @@ export default function TransactionsPage() {
       key: "topup",
       label: "Top-up",
       icon: CreditCard,
-      count: topupList.length,
+      count:
+        topupList.length,
     },
     {
       key: "fare",
       label: "Fare",
       icon: Route,
-      count: fareList.length,
+      count:
+        fareList.length,
     },
     {
       key: "transfers",
       label: "Transfer",
       icon: ArrowRightLeft,
-      count: transfers.length,
+      count:
+        transfers.length,
     },
   ];
 
@@ -1474,12 +1775,19 @@ export default function TransactionsPage() {
           : "text-slate-800"
       }`}
     >
-
       <style>{`
         @keyframes row-pulse {
-          0%   { background-color: transparent; }
-          50%  { background-color: rgba(37,99,235,0.08); }
-          100% { background-color: transparent; }
+          0% {
+            background-color: transparent;
+          }
+
+          50% {
+            background-color: rgba(37,99,235,0.08);
+          }
+
+          100% {
+            background-color: transparent;
+          }
         }
 
         .row-pulse {
@@ -1487,8 +1795,13 @@ export default function TransactionsPage() {
         }
 
         @keyframes realtime-dot {
-          0%,100% { opacity:1; }
-          50% { opacity:0.2; }
+          0%,100% {
+            opacity: 1;
+          }
+
+          50% {
+            opacity: 0.2;
+          }
         }
 
         .realtime-dot {
@@ -1505,7 +1818,6 @@ export default function TransactionsPage() {
         }`}
       >
         <div>
-
           <h2
             className={`text-2xl font-bold tracking-tight flex items-center gap-3 ${
               isDark
@@ -1528,14 +1840,13 @@ export default function TransactionsPage() {
                 : "text-slate-500"
             }`}
           >
-            Monitor all Top-ups, Fare deductions,
-            and Card Transfers in real-time
+            Monitor all Top-ups, Fare
+            deductions, and Card Transfers
+            in real-time
           </p>
-
         </div>
 
         <div className="flex flex-col items-end gap-1">
-
           <div
             className={`flex items-center gap-2 px-4 py-2 border rounded-lg ${
               isDark
@@ -1577,7 +1888,6 @@ export default function TransactionsPage() {
               )!.toLocaleTimeString()}
             </span>
           )}
-
         </div>
       </div>
 
@@ -1603,7 +1913,9 @@ export default function TransactionsPage() {
               <button
                 key={key}
                 onClick={() =>
-                  setActiveView(key)
+                  setActiveView(
+                    key
+                  )
                 }
                 data-testid={`button-tab-${key}`}
                 className={`relative flex items-center gap-1.5 pb-2.5 -mb-px whitespace-nowrap text-xs font-semibold transition-colors cursor-pointer border-b-2 ${
@@ -1636,7 +1948,6 @@ export default function TransactionsPage() {
       </div>
 
       {!isTransferView ? (
-
         <Card
           className={`shadow-sm flex flex-col overflow-hidden relative ${
             isDark
@@ -1644,7 +1955,6 @@ export default function TransactionsPage() {
               : "bg-white border-slate-200"
           }`}
         >
-
           <div
             className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${
               isFareView
@@ -1661,9 +1971,7 @@ export default function TransactionsPage() {
             }`}
           >
             <div className="flex flex-col lg:flex-row gap-4 items-center">
-
               <div className="flex items-center gap-2 mr-2 shrink-0">
-
                 <span
                   className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
                     isDark
@@ -1674,11 +1982,9 @@ export default function TransactionsPage() {
                   <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
                   LIVE
                 </span>
-
               </div>
 
               <div className="relative flex-1 w-full">
-
                 <Search
                   className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${
                     isDark
@@ -1691,7 +1997,9 @@ export default function TransactionsPage() {
                   placeholder="Search card UID or name..."
                   value={search}
                   onChange={(e) =>
-                    setSearch(e.target.value)
+                    setSearch(
+                      e.target.value
+                    )
                   }
                   className={`pl-10 font-medium text-sm focus-visible:ring-blue-500 ${
                     isDark
@@ -1699,13 +2007,13 @@ export default function TransactionsPage() {
                       : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
                   }`}
                 />
-
               </div>
 
               <div className="flex gap-3 w-full lg:w-auto">
-
                 <Select
-                  value={statusFilter}
+                  value={
+                    statusFilter
+                  }
                   onValueChange={
                     setStatusFilter
                   }
@@ -1749,38 +2057,32 @@ export default function TransactionsPage() {
                     </SelectItem>
                   </SelectContent>
                 </Select>
-
               </div>
-
             </div>
           </CardHeader>
 
           <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4 flex flex-col overflow-hidden">
-
             {isLoading ? (
-
               <div className="space-y-4 pt-6">
                 {Array.from({
                   length: PAGE_SIZE,
-                }).map((_, i) => (
-                  <Skeleton
-                    key={i}
-                    className={`h-14 w-full rounded-lg ${
-                      isDark
-                        ? "bg-slate-800"
-                        : "bg-slate-100"
-                    }`}
-                  />
-                ))}
+                }).map(
+                  (_, i) => (
+                    <Skeleton
+                      key={i}
+                      className={`h-14 w-full rounded-lg ${
+                        isDark
+                          ? "bg-slate-800"
+                          : "bg-slate-100"
+                      }`}
+                    />
+                  )
+                )}
               </div>
-
             ) : (
-
               <>
                 <div className="relative mt-6 flex-1 min-h-0 overflow-auto">
-
                   <Table>
-
                     <TableHeader
                       className={`sticky top-0 z-10 border-b ${
                         isDark
@@ -1788,9 +2090,7 @@ export default function TransactionsPage() {
                           : "bg-white border-slate-200"
                       }`}
                     >
-
                       <TableRow className="border-none hover:bg-transparent">
-
                         <TableHead
                           className={`text-[11px] font-semibold uppercase tracking-wide ${
                             isDark
@@ -1928,17 +2228,13 @@ export default function TransactionsPage() {
                         >
                           Actions
                         </TableHead>
-
                       </TableRow>
-
                     </TableHeader>
 
                     <TableBody>
-
-                      {paginatedList.length === 0 ? (
-
+                      {paginatedList.length ===
+                      0 ? (
                         <TableRow>
-
                           <TableCell
                             colSpan={
                               isFareView
@@ -1964,14 +2260,10 @@ export default function TransactionsPage() {
                               </p>
                             </div>
                           </TableCell>
-
                         </TableRow>
-
                       ) : (
-
                         paginatedList.map(
                           (rawTx: any) => {
-
                             const tx = {
                               ...rawTx,
                               ...(financialById[
@@ -2007,7 +2299,9 @@ export default function TransactionsPage() {
 
                             return (
                               <TableRow
-                                key={tx.id}
+                                key={
+                                  tx.id
+                                }
                                 className={`transition-colors ${
                                   isDark
                                     ? "border-slate-800 hover:bg-slate-800/50"
@@ -2019,7 +2313,6 @@ export default function TransactionsPage() {
                                     : ""
                                 }`}
                               >
-
                                 <TableCell
                                   className={`text-xs font-mono ${
                                     isDark
@@ -2114,7 +2407,6 @@ export default function TransactionsPage() {
                                     }`}
                                   >
                                     <div className="flex items-center gap-1.5">
-
                                       {paymentMethodLogo && (
                                         <img
                                           src={
@@ -2130,7 +2422,6 @@ export default function TransactionsPage() {
                                           paymentMethodLabel
                                         }
                                       </span>
-
                                     </div>
                                   </TableCell>
                                 )}
@@ -2215,9 +2506,7 @@ export default function TransactionsPage() {
                                 </TableCell>
 
                                 <TableCell className="text-right">
-
                                   <div className="flex justify-end gap-1">
-
                                     <Button
                                       variant="ghost"
                                       size="icon"
@@ -2235,21 +2524,15 @@ export default function TransactionsPage() {
                                     >
                                       <Eye className="w-3.5 h-3.5" />
                                     </Button>
-
                                   </div>
-
                                 </TableCell>
-
                               </TableRow>
                             );
                           }
                         )
                       )}
-
                     </TableBody>
-
                   </Table>
-
                 </div>
 
                 {/* Pagination */}
@@ -2260,7 +2543,6 @@ export default function TransactionsPage() {
                       : "border-slate-100"
                   }`}
                 >
-
                   <span
                     className={`text-xs font-mono uppercase tracking-wide ${
                       isDark
@@ -2269,7 +2551,6 @@ export default function TransactionsPage() {
                     }`}
                   >
                     Showing{" "}
-
                     <span
                       className={`font-semibold ${
                         isDark
@@ -2280,7 +2561,8 @@ export default function TransactionsPage() {
                       {currentTypeList.length ===
                       0
                         ? 0
-                        : startIndex + 1}
+                        : startIndex +
+                          1}
                       –
                       {Math.min(
                         startIndex +
@@ -2288,9 +2570,7 @@ export default function TransactionsPage() {
                         currentTypeList.length
                       )}
                     </span>{" "}
-
                     of{" "}
-
                     <span
                       className={`font-semibold ${
                         isDark
@@ -2298,25 +2578,28 @@ export default function TransactionsPage() {
                           : "text-slate-600"
                       }`}
                     >
-                      {currentTypeList.length}
+                      {
+                        currentTypeList.length
+                      }
                     </span>{" "}
                     records
                   </span>
 
                   <div className="flex items-center gap-2">
-
                     <Button
                       variant="ghost"
                       size="sm"
                       disabled={
-                        safePage <= 1
+                        safePage <=
+                        1
                       }
                       onClick={() =>
-                        setPage((p) =>
-                          Math.max(
-                            1,
-                            p - 1
-                          )
+                        setPage(
+                          (p) =>
+                            Math.max(
+                              1,
+                              p - 1
+                            )
                         )
                       }
                       className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
@@ -2348,7 +2631,8 @@ export default function TransactionsPage() {
                         }
                       >
                         {" "}
-                        / {totalPages}
+                        /{" "}
+                        {totalPages}
                       </span>
                     </span>
 
@@ -2360,11 +2644,12 @@ export default function TransactionsPage() {
                         totalPages
                       }
                       onClick={() =>
-                        setPage((p) =>
-                          Math.min(
-                            totalPages,
-                            p + 1
-                          )
+                        setPage(
+                          (p) =>
+                            Math.min(
+                              totalPages,
+                              p + 1
+                            )
                         )
                       }
                       className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
@@ -2376,17 +2661,13 @@ export default function TransactionsPage() {
                       Next
                       <ChevronRight className="w-3 h-3 ml-1" />
                     </Button>
-
                   </div>
                 </div>
               </>
             )}
-
           </CardContent>
         </Card>
-
       ) : (
-
         <Card
           className={`shadow-sm flex flex-col overflow-hidden relative ${
             isDark
@@ -2394,7 +2675,6 @@ export default function TransactionsPage() {
               : "bg-white border-slate-200"
           }`}
         >
-
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-indigo-400" />
 
           <CardHeader
@@ -2405,9 +2685,7 @@ export default function TransactionsPage() {
             }`}
           >
             <div className="flex flex-col lg:flex-row gap-4 items-center">
-
               <div className="flex items-center gap-2 mr-2 shrink-0">
-
                 <span
                   className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
                     isDark
@@ -2418,11 +2696,9 @@ export default function TransactionsPage() {
                   <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
                   LIVE
                 </span>
-
               </div>
 
               <div className="relative flex-1 w-full">
-
                 <Search
                   className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${
                     isDark
@@ -2433,7 +2709,9 @@ export default function TransactionsPage() {
 
                 <Input
                   placeholder="Search source/target card UID or name..."
-                  value={transferSearch}
+                  value={
+                    transferSearch
+                  }
                   onChange={(e) =>
                     setTransferSearch(
                       e.target.value
@@ -2445,11 +2723,9 @@ export default function TransactionsPage() {
                       : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
                   }`}
                 />
-
               </div>
 
               <div className="flex gap-3 w-full lg:w-auto">
-
                 <Select
                   value={
                     transferStatusFilter
@@ -2504,41 +2780,32 @@ export default function TransactionsPage() {
                     </SelectItem>
                   </SelectContent>
                 </Select>
-
               </div>
-
             </div>
           </CardHeader>
 
           <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4 flex flex-col overflow-hidden">
-
             {transfersLoading ? (
-
               <div className="space-y-4 pt-6">
-
                 {Array.from({
                   length: PAGE_SIZE,
-                }).map((_, i) => (
-                  <Skeleton
-                    key={i}
-                    className={`h-14 w-full rounded-lg ${
-                      isDark
-                        ? "bg-slate-800"
-                        : "bg-slate-100"
-                    }`}
-                  />
-                ))}
-
+                }).map(
+                  (_, i) => (
+                    <Skeleton
+                      key={i}
+                      className={`h-14 w-full rounded-lg ${
+                        isDark
+                          ? "bg-slate-800"
+                          : "bg-slate-100"
+                      }`}
+                    />
+                  )
+                )}
               </div>
-
             ) : (
-
               <>
-
                 <div className="relative mt-6 flex-1 min-h-0 overflow-auto">
-
                   <Table>
-
                     <TableHeader
                       className={`sticky top-0 z-10 border-b ${
                         isDark
@@ -2546,9 +2813,7 @@ export default function TransactionsPage() {
                           : "bg-white border-slate-200"
                       }`}
                     >
-
                       <TableRow className="border-none hover:bg-transparent">
-
                         <TableHead
                           className={`text-[11px] font-semibold uppercase tracking-wide ${
                             isDark
@@ -2628,18 +2893,13 @@ export default function TransactionsPage() {
                         >
                           Actions
                         </TableHead>
-
                       </TableRow>
-
                     </TableHeader>
 
                     <TableBody>
-
                       {paginatedTransferList.length ===
                       0 ? (
-
                         <TableRow>
-
                           <TableCell
                             colSpan={8}
                             className="text-center py-32"
@@ -2661,11 +2921,8 @@ export default function TransactionsPage() {
                               </p>
                             </div>
                           </TableCell>
-
                         </TableRow>
-
                       ) : (
-
                         paginatedTransferList.map(
                           (t) => {
                             const status =
@@ -2675,7 +2932,9 @@ export default function TransactionsPage() {
 
                             return (
                               <TableRow
-                                key={t.id}
+                                key={
+                                  t.id
+                                }
                                 className={`transition-colors ${
                                   isDark
                                     ? "border-slate-800 hover:bg-slate-800/50"
@@ -2687,7 +2946,6 @@ export default function TransactionsPage() {
                                     : ""
                                 }`}
                               >
-
                                 <TableCell
                                   className={`text-xs font-mono ${
                                     isDark
@@ -2771,13 +3029,15 @@ export default function TransactionsPage() {
                                       ? "text-slate-400"
                                       : "text-slate-500"
                                   }`}
-                                  title={t.reason}
+                                  title={
+                                    t.reason
+                                  }
                                 >
-                                  {t.reason || "—"}
+                                  {t.reason ||
+                                    "—"}
                                 </TableCell>
 
                                 <TableCell>
-
                                   <Badge
                                     variant="outline"
                                     className={`text-[10px] font-semibold capitalize ${transferStatusColor(
@@ -2786,13 +3046,10 @@ export default function TransactionsPage() {
                                   >
                                     {status}
                                   </Badge>
-
                                 </TableCell>
 
                                 <TableCell className="text-right">
-
                                   <div className="flex justify-end gap-1">
-
                                     <Button
                                       variant="ghost"
                                       size="icon"
@@ -2810,21 +3067,15 @@ export default function TransactionsPage() {
                                     >
                                       <Eye className="w-3.5 h-3.5" />
                                     </Button>
-
                                   </div>
-
                                 </TableCell>
-
                               </TableRow>
                             );
                           }
                         )
                       )}
-
                     </TableBody>
-
                   </Table>
-
                 </div>
 
                 {/* Pagination */}
@@ -2835,7 +3086,6 @@ export default function TransactionsPage() {
                       : "border-slate-100"
                   }`}
                 >
-
                   <span
                     className={`text-xs font-mono uppercase tracking-wide ${
                       isDark
@@ -2844,7 +3094,6 @@ export default function TransactionsPage() {
                     }`}
                   >
                     Showing{" "}
-
                     <span
                       className={`font-semibold ${
                         isDark
@@ -2864,9 +3113,7 @@ export default function TransactionsPage() {
                         filteredTransferList.length
                       )}
                     </span>{" "}
-
                     of{" "}
-
                     <span
                       className={`font-semibold ${
                         isDark
@@ -2874,13 +3121,14 @@ export default function TransactionsPage() {
                           : "text-slate-600"
                       }`}
                     >
-                      {filteredTransferList.length}
+                      {
+                        filteredTransferList.length
+                      }
                     </span>{" "}
                     records
                   </span>
 
                   <div className="flex items-center gap-2">
-
                     <Button
                       variant="ghost"
                       size="sm"
@@ -2960,16 +3208,12 @@ export default function TransactionsPage() {
                       Next
                       <ChevronRight className="w-3 h-3 ml-1" />
                     </Button>
-
                   </div>
                 </div>
-
               </>
             )}
-
           </CardContent>
         </Card>
-
       )}
 
       {/* Receipt / Transfer Modals */}
@@ -2989,7 +3233,7 @@ export default function TransactionsPage() {
         }
         isDark={isDark}
       />
-
     </div>
   );
 }
+```
