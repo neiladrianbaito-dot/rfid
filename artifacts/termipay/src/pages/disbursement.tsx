@@ -16,8 +16,6 @@ import {
   ChevronDown,
   History,
   RefreshCw,
-  Filter,
-  RotateCcw,
   Landmark,
   Smartphone,
 } from "lucide-react";
@@ -724,98 +722,73 @@ export default function DisbursementPage() {
         </Card>
       </div>
 
-      {/* ══ FILTER + DISBURSE TRIGGER ══ */}
-      <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-600 via-blue-500 to-transparent" />
-        <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                <Wallet size={14} className="text-indigo-500" />
-                Select Period to Disburse
-              </CardTitle>
-            </div>
+      {/* ══ SELECT PERIOD TO DISBURSE — simplified, single row, no card/gradient styling ══ */}
+      <div className={`flex flex-wrap items-center gap-2 py-3 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+        <span className={`text-sm font-semibold whitespace-nowrap ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+          Select Period to Disburse:
+        </span>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Filter size={13} className={isDark ? "text-indigo-400" : "text-indigo-500"} />
+        <select
+          value={filterYear}
+          onChange={(e) => setFilterYear(e.target.value)}
+          data-testid="select-filter-year"
+          className={`h-8 rounded border px-2 text-xs ${isDark ? "bg-slate-950 border-slate-700 text-slate-200" : "bg-white border-slate-300 text-slate-700"}`}
+        >
+          <option value="all">Year</option>
+          {availableYears.map((y) => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
 
-              <select
-                value={filterYear}
-                onChange={(e) => setFilterYear(e.target.value)}
-                data-testid="select-filter-year"
-                className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-                }`}
-              >
-                <option value="all">Year</option>
-                {availableYears.map((y) => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
+        <select
+          value={filterMonth}
+          onChange={(e) => setFilterMonth(e.target.value)}
+          data-testid="select-filter-month"
+          className={`h-8 rounded border px-2 text-xs ${isDark ? "bg-slate-950 border-slate-700 text-slate-200" : "bg-white border-slate-300 text-slate-700"}`}
+        >
+          <option value="all">Month</option>
+          {MONTH_OPTIONS.map((m) => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </select>
 
-              <select
-                value={filterMonth}
-                onChange={(e) => setFilterMonth(e.target.value)}
-                data-testid="select-filter-month"
-                className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-                }`}
-              >
-                <option value="all">Month</option>
-                {MONTH_OPTIONS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
+        <select
+          value={filterDay}
+          onChange={(e) => setFilterDay(e.target.value)}
+          data-testid="select-filter-day"
+          className={`h-8 rounded border px-2 text-xs ${isDark ? "bg-slate-950 border-slate-700 text-slate-200" : "bg-white border-slate-300 text-slate-700"}`}
+        >
+          <option value="all">Day</option>
+          {dayOptions.map((d) => (
+            <option key={d.value} value={d.value}>{d.label}</option>
+          ))}
+        </select>
 
-              <select
-                value={filterDay}
-                onChange={(e) => setFilterDay(e.target.value)}
-                data-testid="select-filter-day"
-                className={`h-8 rounded-md border px-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                  isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-                }`}
-              >
-                <option value="all">Day</option>
-                {dayOptions.map((d) => (
-                  <option key={d.value} value={d.value}>{d.label}</option>
-                ))}
-              </select>
-
-              {isFilterActive && (
-                <button
-                  type="button"
-                  onClick={resetFilters}
-                  data-testid="button-reset-filters"
-                  className={`h-8 flex items-center gap-1 px-2.5 rounded-md text-xs font-semibold transition-colors ${
-                    isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-                  }`}
-                >
-                  <RotateCcw size={12} />
-                  Reset
-                </button>
-              )}
-
-              <div className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-semibold ${
-                isDark ? "bg-indigo-950/40 border-indigo-900 text-indigo-300" : "bg-indigo-50 border-indigo-100 text-indigo-700"
-              }`}>
-                {disburseAmountLabel}: {formatPeso(disburseAmount)}
-              </div>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-6">
-          <Button
-            onClick={openDisburseModal}
-            disabled={!disburseDateRange}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs px-6 h-9 cursor-pointer transition-colors duration-150 shadow-sm"
-            data-testid="button-disburse-revenue"
-            title={!disburseDateRange ? "Pumili ng Year sa filter para makapag-disburse" : undefined}
+        {isFilterActive && (
+          <button
+            type="button"
+            onClick={resetFilters}
+            data-testid="button-reset-filters"
+            className={`h-8 px-2 text-xs underline ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}
           >
-            <Wallet className="w-3.5 h-3.5 mr-2" />
-            Disburse {disburseAmountLabel}
-          </Button>
-        </CardContent>
-      </Card>
+            Reset
+          </button>
+        )}
+
+        <span className={`text-sm font-semibold ml-2 ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+          {disburseAmountLabel}: {formatPeso(disburseAmount)}
+        </span>
+
+        <Button
+          onClick={openDisburseModal}
+          disabled={!disburseDateRange}
+          className="ml-auto bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold h-8 px-4"
+          data-testid="button-disburse-revenue"
+          title={!disburseDateRange ? "Pumili ng Year sa filter para makapag-disburse" : undefined}
+        >
+          Disburse
+        </Button>
+      </div>
 
       {/* ══ DISBURSEMENT HISTORY — REAL data straight from the disbursements
           table (via list-disbursements), i.e. what actually went to Xendit ══ */}
