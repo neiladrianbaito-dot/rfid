@@ -227,6 +227,14 @@ function TransferDetailModal({
 
 type TxSubTab = "topup" | "fare" | "transfers";
 
+// 🆕 Shared tab definitions for the GCash-style underline tab bar, used by
+// both the desktop and mobile Transactions headers so the two stay in sync.
+const TX_TABS: { key: TxSubTab; label: string; icon: typeof CreditCard }[] = [
+  { key: "topup", label: "Top-up", icon: CreditCard },
+  { key: "fare", label: "Fare", icon: Route },
+  { key: "transfers", label: "Transfer", icon: ArrowRightLeft },
+];
+
 export default function PaymongoDashboardPage() {
   const [, setLocation] = useLocation();
   const { isDark, toggleTheme } = useTheme();
@@ -331,6 +339,13 @@ export default function PaymongoDashboardPage() {
     [transactions],
   );
   const currentTxList = activeTxTab === "fare" ? fareTransactions : topupTransactions;
+
+  // 🆕 Tab → count lookup for the line tab bar (desktop shows counts).
+  const txTabCounts: Record<TxSubTab, number> = {
+    topup: topupTransactions.length,
+    fare: fareTransactions.length,
+    transfers: transfers.length,
+  };
 
   // ✅ Actual logout logic — only runs after user confirms
   const handleLogout = async () => {
@@ -872,48 +887,37 @@ export default function PaymongoDashboardPage() {
         <div className="hidden md:block">
           <Card className={`backdrop-blur-md overflow-hidden ${isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"}`}>
             <CardHeader className={`py-3 border-b ${isDark ? "bg-slate-900/20 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <CardTitle className={`text-xs font-bold flex items-center gap-2 uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />Transactions History
-                </CardTitle>
-                {isLinked && (
-                  <div className={`inline-flex self-start sm:self-auto rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
-                    <button
-                      onClick={() => setActiveTxTab("topup")}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
-                        activeTxTab === "topup"
-                          ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-                          : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-                      }`}
-                    >
-                      <CreditCard className="w-3 h-3" />Top-up
-                      <span className={`text-[9px] font-mono px-1 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>{topupTransactions.length}</span>
-                    </button>
-                    <button
-                      onClick={() => setActiveTxTab("fare")}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
-                        activeTxTab === "fare"
-                          ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-                          : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-                      }`}
-                    >
-                      <Route className="w-3 h-3" />Fare
-                      <span className={`text-[9px] font-mono px-1 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>{fareTransactions.length}</span>
-                    </button>
-                    <button
-                      onClick={() => setActiveTxTab("transfers")}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
-                        activeTxTab === "transfers"
-                          ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-                          : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
-                      }`}
-                    >
-                      <ArrowRightLeft className="w-3 h-3" />Transfer
-                      <span className={`text-[9px] font-mono px-1 rounded ${isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"}`}>{transfers.length}</span>
-                    </button>
-                  </div>
-                )}
-              </div>
+              <CardTitle className={`text-xs font-bold flex items-center gap-2 uppercase tracking-widest mb-2.5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />Transactions History
+              </CardTitle>
+              {/* 🆕 GCash-style line tabs — flat underline instead of the old
+                  pill/segmented control. No background "card" per tab. */}
+              {isLinked && (
+                <div className={`flex items-center gap-6 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                  {TX_TABS.map(({ key, label, icon: Icon }) => {
+                    const active = activeTxTab === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setActiveTxTab(key)}
+                        className={`relative flex items-center gap-1.5 pb-2.5 -mb-px text-[11px] font-bold uppercase tracking-wide transition-colors cursor-pointer border-b-2 ${
+                          active
+                            ? isDark ? "text-emerald-400 border-emerald-400" : "text-emerald-600 border-emerald-600"
+                            : isDark ? "text-slate-500 border-transparent hover:text-slate-300" : "text-slate-400 border-transparent hover:text-slate-600"
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {label}
+                        <span className={`text-[9px] font-mono px-1 rounded ${
+                          active
+                            ? isDark ? "bg-emerald-500/15 text-emerald-400" : "bg-emerald-50 text-emerald-600"
+                            : isDark ? "bg-slate-800/70 text-slate-500" : "bg-slate-100 text-slate-400"
+                        }`}>{txTabCounts[key]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </CardHeader>
             <CardContent className="p-0">
               {!isLinked ? (
@@ -1075,43 +1079,32 @@ export default function PaymongoDashboardPage() {
           }
           style={{ top: `${headerHeight}px`, bottom: `${navHeight}px` }}
         >
-          <div className={`backdrop-blur-md px-4 py-2.5 border-b shrink-0 ${isDark ? "bg-[#020617]/95 border-slate-800/60" : "bg-white/95 border-slate-200"}`}>
-            <p className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+          <div className={`backdrop-blur-md border-b shrink-0 ${isDark ? "bg-[#020617]/95 border-slate-800/60" : "bg-white/95 border-slate-200"}`}>
+            <p className={`text-sm font-bold flex items-center gap-2 px-4 pt-2.5 ${isDark ? "text-white" : "text-slate-900"}`}>
               <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />
               Transactions History
             </p>
+            {/* 🆕 GCash-style line tabs — full-width, equally spaced, flat
+                underline indicator instead of the old rounded pill group. */}
             {isLinked && (
-              <div className={`mt-2 inline-flex rounded-lg border p-1 gap-1 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-100 border-slate-200"}`}>
-                <button
-                  onClick={() => setActiveTxTab("topup")}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
-                    activeTxTab === "topup"
-                      ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-                      : isDark ? "text-slate-400" : "text-slate-500"
-                  }`}
-                >
-                  <CreditCard className="w-3 h-3" />Top-up
-                </button>
-                <button
-                  onClick={() => setActiveTxTab("fare")}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
-                    activeTxTab === "fare"
-                      ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-                      : isDark ? "text-slate-400" : "text-slate-500"
-                  }`}
-                >
-                  <Route className="w-3 h-3" />Fare
-                </button>
-                <button
-                  onClick={() => setActiveTxTab("transfers")}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer ${
-                    activeTxTab === "transfers"
-                      ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-white text-slate-900 shadow-sm"
-                      : isDark ? "text-slate-400" : "text-slate-500"
-                  }`}
-                >
-                  <ArrowRightLeft className="w-3 h-3" />Transfer
-                </button>
+              <div className={`mt-2 flex items-stretch border-t ${isDark ? "border-slate-800/60" : "border-slate-100"}`}>
+                {TX_TABS.map(({ key, label, icon: Icon }) => {
+                  const active = activeTxTab === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setActiveTxTab(key)}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[11px] font-bold uppercase tracking-wide transition-colors cursor-pointer border-b-2 -mt-px ${
+                        active
+                          ? isDark ? "text-emerald-400 border-emerald-400" : "text-emerald-600 border-emerald-600"
+                          : isDark ? "text-slate-500 border-transparent" : "text-slate-400 border-transparent"
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
