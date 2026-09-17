@@ -10,29 +10,52 @@ import {
   Clock,
   Smartphone,
   SearchX,
+  Loader2,
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import { motion } from "framer-motion";
+import { createClient } from "@supabase/supabase-js";
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const DASHBOARD_URL = "https://rfid-termipay-sigma.vercel.app/user-dashboard";
 
+// Reuse your existing Supabase client instance instead of creating a new one
+// if you already have one exported elsewhere (e.g. "@/lib/supabase") — swap
+// this import out for that if so.
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
+
+interface TransactionBreakdown {
+  amount: number;
+  fee_amount: number | null;
+  vat_amount: number | null;
+  net_amount: number | null;
+  timestamp: string;
+}
+
+const MAX_POLL_ATTEMPTS = 6; // ~12 seconds of polling
+const POLL_INTERVAL_MS = 2000;
+
 export default function GCashPaymentSuccessPage() {
   const { isDark } = useTheme();
   const searchString = useSearch();
   const [, setLocation] = useLocation();
   const [copied, setCopied] = useState(false);
+  const [txn, setTxn] = useState<TransactionBreakdown | null>(null);
+  const [isLoadingTxn, setIsLoadingTxn] = useState(true);
 
   // Xendit success redirect naglalagay ng details bilang query params,
   // see create-topup edge function's successRedirectUrl.
   const params = new URLSearchParams(searchString);
   const referenceNo = params.get("reference");
   const amountParam = params.get("amount");
-  const amount = Math.abs(Number(amountParam) || 0);
+  const fallbackAmount = Math.abs(Number(amountParam) || 0);
   const paidAtParam = params.get("paidAt");
-  const paidAt = paidAtParam ? new Date(paidAtParam) : new Date();
+  const fallbackPaidAt = paidAtParam ? new Date(paidAtParam) : new Date();
 
   // ✅ Walang laman o invalid ang params (di galing sa Xendit / direct visit
   // sa URL na walang token) → hindi valid na payment confirmation ito.
@@ -41,13 +64,61 @@ export default function GCashPaymentSuccessPage() {
     referenceNo.trim().length > 0 &&
     !!amountParam &&
     !Number.isNaN(Number(amountParam)) &&
-    amount > 0;
+    fallbackAmount > 0;
 
   useEffect(() => {
     document.title = isValidPaymentData
       ? "Payment Successful — TermiPay"
       : "Page Not Found — TermiPay";
   }, [isValidPaymentData]);
+
+  // Fetch the authoritative fee/vat/net breakdown from Supabase, since the
+  // webhook (which inserts the row and computes these) may still be in
+  // flight when the browser lands here from Xendit's redirect. Poll a few
+  // times before giving up and just showing the gross amount.
+  useEffect(() => {
+    if (!isValidPaymentData || !referenceNo) {
+      setIsLoadingTxn(false);
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+
+    const fetchTxn = async () => {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("amount, fee_amount, vat_amount, net_amount, timestamp")
+        .eq("external_id", referenceNo)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Failed to fetch transaction breakdown:", error);
+      }
+
+      if (data) {
+        setTxn(data as TransactionBreakdown);
+        setIsLoadingTxn(false);
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < MAX_POLL_ATTEMPTS) {
+        setTimeout(fetchTxn, POLL_INTERVAL_MS);
+      } else {
+        // Webhook hasn't landed yet — fall back to showing gross amount only.
+        setIsLoadingTxn(false);
+      }
+    };
+
+    fetchTxn();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isValidPaymentData, referenceNo]);
 
   const handleCopy = async () => {
     try {
@@ -122,6 +193,15 @@ export default function GCashPaymentSuccessPage() {
     );
   }
 
+  // Prefer values fetched from Supabase (authoritative); fall back to the
+  // gross amount from the URL if the webhook hasn't landed yet.
+  const displayAmount = txn?.amount ?? fallbackAmount;
+  const feeAmount = txn?.fee_amount ?? null;
+  const vatAmount = txn?.vat_amount ?? null;
+  const netAmount = txn?.net_amount ?? null;
+  const displayPaidAt = txn?.timestamp ? new Date(txn.timestamp) : fallbackPaidAt;
+  const hasBreakdown = feeAmount !== null && vatAmount !== null && netAmount !== null;
+
   return (
     <div
       className={`min-h-screen flex items-center justify-center p-3 sm:p-4 transition-colors ${
@@ -192,12 +272,73 @@ export default function GCashPaymentSuccessPage() {
               >
                 <PhilippinePeso size={20} className="text-emerald-500 sm:hidden" strokeWidth={2.4} />
                 <PhilippinePeso size={22} className="text-emerald-500 hidden sm:block" strokeWidth={2.4} />
-                {formatPeso(amount).replace("₱", "")}
+                {formatPeso(displayAmount).replace("₱", "")}
               </span>
             </div>
 
             {/* Divider */}
             <div className={`h-px w-full mb-4 ${isDark ? "bg-slate-800" : "bg-slate-200"}`} />
+
+            {/* Fee / VAT / Net breakdown */}
+            {isLoadingTxn ? (
+              <div className="flex items-center justify-center gap-2 py-3 mb-1">
+                <Loader2 size={14} className={`animate-spin ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+                <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  Kinukuha ang transaction breakdown...
+                </span>
+              </div>
+            ) : hasBreakdown ? (
+              <div
+                className={`rounded-lg p-3 mb-4 space-y-2 ${
+                  isDark ? "bg-slate-800/50" : "bg-slate-50"
+                }`}
+              >
+                <p
+                  className={`text-[10px] font-semibold uppercase tracking-widest mb-1 ${
+                    isDark ? "text-slate-500" : "text-slate-400"
+                  }`}
+                >
+                  Transaction Breakdown
+                </p>
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs sm:text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Transaction Amount
+                  </span>
+                  <span className={`text-xs sm:text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                    {formatPeso(displayAmount)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs sm:text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Transaction Fee
+                  </span>
+                  <span className={`text-xs sm:text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                    {formatPeso(feeAmount as number)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs sm:text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Transaction VAT
+                  </span>
+                  <span className={`text-xs sm:text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                    {formatPeso(vatAmount as number)}
+                  </span>
+                </div>
+                <div className={`h-px w-full my-1 ${isDark ? "bg-slate-700" : "bg-slate-200"}`} />
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs sm:text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                    Net Amount Credited
+                  </span>
+                  <span className="text-xs sm:text-sm font-bold text-emerald-500">
+                    {formatPeso(netAmount as number)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <p className={`text-[11px] text-center mb-4 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                Available na ang fee at VAT breakdown sa iyong transaction history sa loob ng ilang minuto.
+              </p>
+            )}
 
             {/* Details list */}
             <div className="space-y-3">
@@ -220,7 +361,7 @@ export default function GCashPaymentSuccessPage() {
                   <Clock size={15} /> Date &amp; Time
                 </span>
                 <span className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                  {paidAt.toLocaleString("en-US", {
+                  {displayPaidAt.toLocaleString("en-US", {
                     month: "short",
                     day: "numeric",
                     hour: "numeric",
