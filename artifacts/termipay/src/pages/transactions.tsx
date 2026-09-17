@@ -1,8 +1,9 @@
-```tsx
-import { useState, useEffect, useRef, useMemo } from "react";
-import {
-  useListTransactions,
-} from "@workspace/api-client-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useListTransactions } from "@workspace/api-client-react";
+import { useTheme } from "@/hooks/use-theme";
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
+import { supabase } from "@/lib/supabase";
+
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,16 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useTheme } from "@/hooks/use-theme";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
+
 import {
   Search,
   Zap,
@@ -39,19 +49,12 @@ import {
   ArrowLeftRight,
   ArrowRightLeft,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
-import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
-import { supabase } from "@/lib/supabase";
 
 const PAGE_SIZE = 10;
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+/* -------------------------------------------------------------------------- */
+/* TYPES                                                                      */
+/* -------------------------------------------------------------------------- */
 
 type FareRoute = {
   id: number;
@@ -68,7 +71,10 @@ type TransferCard = {
   fullName?: string | null;
 };
 
-type TransferStatus = "pending" | "completed" | "failed";
+type TransferStatus =
+  | "pending"
+  | "completed"
+  | "failed";
 
 type CardTransfer = {
   id: number;
@@ -85,28 +91,39 @@ type CardTransfer = {
   target: TransferCard | null;
 };
 
-// ── View / tab definitions ───────────────────────────────────────────────────
+type TxView =
+  | "topup"
+  | "fare"
+  | "transfers";
 
-type TxView = "topup" | "fare" | "transfers";
+type TxType =
+  | "Fare"
+  | "Top-up";
 
-// ── Transaction type normalizer ──────────────────────────────────────────────
+/* -------------------------------------------------------------------------- */
+/* HELPERS                                                                    */
+/* -------------------------------------------------------------------------- */
 
-type TxType = "Fare" | "Top-up";
+function normalizeTxType(
+  type?: string | null
+): TxType {
+  const key = (type ?? "")
+    .toLowerCase()
+    .replace(/[\s_-]/g, "");
 
-function normalizeTxType(type?: string | null): TxType {
-  const key = (type ?? "").toLowerCase().replace(/[\s_-]/g, "");
-
-  if (key === "fare") return "Fare";
+  if (key === "fare") {
+    return "Fare";
+  }
 
   return "Top-up";
 }
 
-// ── Transfer status normalizer ────────────────────────────────────────────────
-
 function normalizeTransferStatus(
   status?: string | null
 ): TransferStatus {
-  const key = (status ?? "").toLowerCase().trim();
+  const key = (status ?? "")
+    .toLowerCase()
+    .trim();
 
   if (
     key === "completed" ||
@@ -127,108 +144,107 @@ function normalizeTransferStatus(
   return "pending";
 }
 
-function cardUidOf(card?: TransferCard | null): string {
-  return card?.card_uid || card?.cardUid || "—";
-}
-
-function fullNameOf(card?: TransferCard | null): string {
-  return card?.full_name || card?.fullName || "Unknown";
-}
-
-// ── Payment method label map ──────────────────────────────────────────────────
-
-function formatPaymentMethod(
-  method?: string | null
+function cardUidOf(
+  card?: TransferCard | null
 ): string {
-  if (!method) return "—";
-
-  const map: Record<string, string> = {
-    gcash: "GCash",
-    paymaya: "Maya",
-    card: "Card",
-    grab_pay: "GrabPay",
-    billease: "BillEase",
-    dob: "Online Banking",
-    dob_ubp: "UnionBank",
-    qrph: "QR Ph",
-  };
-
-  const key = method.toLowerCase().trim();
-
   return (
-    map[key] ??
-    method.charAt(0).toUpperCase() +
-      method.slice(1)
+    card?.card_uid ||
+    card?.cardUid ||
+    "—"
   );
 }
 
-// ── Payment method logo map ──────────────────────────────────────────────────
-
-function getPaymentMethodLogo(
-  method?: string | null
-): string | null {
-  if (!method) return null;
-
-  const key = method.toLowerCase().trim();
-
-  if (key === "gcash") {
-    return "/gcash.svg";
-  }
-
-  return null;
+function fullNameOf(
+  card?: TransferCard | null
+): string {
+  return (
+    card?.full_name ||
+    card?.fullName ||
+    "Unknown"
+  );
 }
 
-// ── Transaction financial helpers ────────────────────────────────────────────
-
-function formatAmount(amount: number): string {
-  return Math.abs(amount).toLocaleString("en-PH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+function formatAmount(
+  amount: number
+): string {
+  return Math.abs(amount).toLocaleString(
+    "en-PH",
+    {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }
+  );
 }
 
-function getFeeAmount(tx: any): number | null {
+function getFeeAmount(
+  tx: any
+): number | null {
   const value =
     tx?.fee_amount ??
     tx?.feeAmount;
 
-  if (value == null || value === "") {
+  if (
+    value == null ||
+    value === ""
+  ) {
     return null;
   }
 
   const n = Number(value);
 
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n)
+    ? n
+    : null;
 }
 
-function getVatAmount(tx: any): number | null {
+function getVatAmount(
+  tx: any
+): number | null {
   const value =
     tx?.vat_amount ??
     tx?.vatAmount;
 
-  if (value == null || value === "") {
+  if (
+    value == null ||
+    value === ""
+  ) {
     return null;
   }
 
   const n = Number(value);
 
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n)
+    ? n
+    : null;
 }
 
-function getNetAmount(tx: any): number | null {
+function getNetAmount(
+  tx: any
+): number | null {
   const value =
     tx?.net_amount ??
     tx?.netAmount;
 
-  if (value != null && value !== "") {
+  if (
+    value != null &&
+    value !== ""
+  ) {
     const n = Number(value);
 
-    return Number.isFinite(n) ? n : null;
+    return Number.isFinite(n)
+      ? n
+      : null;
   }
 
-  const amount = Number(tx?.amount);
-  const fee = getFeeAmount(tx);
-  const vat = getVatAmount(tx);
+  const amount = Number(
+    tx?.amount
+  );
+
+  const fee =
+    getFeeAmount(tx);
+
+  const vat =
+    getVatAmount(tx);
 
   if (
     Number.isFinite(amount) &&
@@ -241,6 +257,9 @@ function getNetAmount(tx: any): number | null {
   return null;
 }
 
+/* IMPORTANT:
+   Correct template literal syntax.
+*/
 function formatNullableAmount(
   value: number | null
 ): string {
@@ -250,7 +269,60 @@ function formatNullableAmount(
     : `₱${formatAmount(value)}`;
 }
 
-// ── Receipt Modal ─────────────────────────────────────────────────────────────
+function formatPaymentMethod(
+  method?: string | null
+): string {
+  if (!method) {
+    return "—";
+  }
+
+  const map: Record<
+    string,
+    string
+  > = {
+    gcash: "GCash",
+    paymaya: "Maya",
+    maya: "Maya",
+    card: "Card",
+    grab_pay: "GrabPay",
+    billease: "BillEase",
+    qrph: "QR Ph",
+  };
+
+  const key =
+    method
+      .toLowerCase()
+      .trim();
+
+  return (
+    map[key] ??
+    method.charAt(0).toUpperCase() +
+      method.slice(1)
+  );
+}
+
+function getPaymentMethodLogo(
+  method?: string | null
+): string | null {
+  if (!method) {
+    return null;
+  }
+
+  const key =
+    method
+      .toLowerCase()
+      .trim();
+
+  if (key === "gcash") {
+    return "/gcash.svg";
+  }
+
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* RECEIPT MODAL                                                              */
+/* -------------------------------------------------------------------------- */
 
 function ReceiptModal({
   tx,
@@ -263,29 +335,66 @@ function ReceiptModal({
   onClose: () => void;
   isDark: boolean;
 }) {
-  if (!tx) return null;
+  if (!tx) {
+    return null;
+  }
 
   const isFare =
-    normalizeTxType(tx.type) === "Fare";
+    normalizeTxType(tx.type) ===
+    "Fare";
 
-  const amount = Math.abs(
-    Number(tx.amount)
-  ).toLocaleString("en-PH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  /* Original transaction amount */
+  const originalAmountNumber =
+    Math.abs(
+      Number(tx.amount)
+    );
 
-  const netAmount = getNetAmount(tx);
+  const originalAmount =
+    originalAmountNumber.toLocaleString(
+      "en-PH",
+      {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }
+    );
 
-  // Match route by route_id
+  /* Net amount */
+  const netAmount =
+    getNetAmount(tx);
+
+  /*
+   * TOP-UP:
+   * Hero = NET AMOUNT
+   *
+   * Example:
+   * Original amount = ₱20.00
+   * Fee             = ₱0.60
+   * VAT             = ₱0.07
+   * Net             = ₱19.33
+   *
+   * Hero therefore shows:
+   * ₱19.33
+   *
+   * FARE:
+   * Hero keeps:
+   * −₱90.00
+   */
+  const heroAmount =
+    !isFare &&
+    netAmount != null
+      ? formatAmount(netAmount)
+      : originalAmount;
+
   const matchedRoute =
-    isFare && tx.route_id
+    isFare &&
+    tx.route_id
       ? routes.find(
-          (r) => r.id === tx.route_id
+          (route) =>
+            route.id ===
+            Number(tx.route_id)
         ) ?? null
       : null;
 
-  // Payment method
   const paymentMethodLabel =
     !isFare
       ? formatPaymentMethod(
@@ -307,37 +416,42 @@ function ReceiptModal({
         ? Clock
         : CheckCircle2;
 
-  // Ring/icon color follows TYPE theme
-  const statusRingClass = isFare
-    ? isDark
-      ? "ring-red-900 bg-red-950/40 text-red-400"
-      : "ring-red-100 bg-red-50 text-red-600"
-    : isDark
-      ? "ring-emerald-900 bg-emerald-950/40 text-emerald-400"
-      : "ring-emerald-100 bg-emerald-50 text-emerald-600";
+  const statusRingClass =
+    isFare
+      ? isDark
+        ? "ring-red-900 bg-red-950/40 text-red-400"
+        : "ring-red-100 bg-red-50 text-red-600"
+      : isDark
+        ? "ring-emerald-900 bg-emerald-950/40 text-emerald-400"
+        : "ring-emerald-100 bg-emerald-50 text-emerald-600";
 
-  const amountColor = isFare
-    ? isDark
-      ? "text-red-400"
-      : "text-red-600"
-    : isDark
-      ? "text-emerald-400"
-      : "text-emerald-600";
+  const amountColor =
+    isFare
+      ? isDark
+        ? "text-red-400"
+        : "text-red-600"
+      : isDark
+        ? "text-emerald-400"
+        : "text-emerald-600";
 
-  const accentColor = isFare
-    ? "from-red-500 to-rose-400"
-    : "from-emerald-500 to-cyan-400";
+  const accentColor =
+    isFare
+      ? "from-red-500 to-rose-400"
+      : "from-emerald-500 to-cyan-400";
 
-  const closeBg = isFare
-    ? "bg-red-600 hover:bg-red-700"
-    : "bg-emerald-600 hover:bg-emerald-700";
+  const closeBg =
+    isFare
+      ? "bg-red-600 hover:bg-red-700"
+      : "bg-emerald-600 hover:bg-emerald-700";
 
   return (
     <Dialog
       open={!!tx}
-      onOpenChange={(open) =>
-        !open && onClose()
-      }
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+        }
+      }}
     >
       <DialogContent
         className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
@@ -346,20 +460,14 @@ function ReceiptModal({
             : "bg-white border-slate-200"
         }`}
       >
-        {/* Accessibility */}
         <VisuallyHidden>
           <DialogTitle>
             Transaction Receipt
           </DialogTitle>
 
           <DialogDescription>
-            Details for transaction #
-            {tx.id}, a{" "}
-            {isFare
-              ? "fare deduction"
-              : "balance top-up"}{" "}
-            of ₱{amount}, status{" "}
-            {tx.status}.
+            Transaction #
+            {tx.id}
           </DialogDescription>
         </VisuallyHidden>
 
@@ -370,7 +478,10 @@ function ReceiptModal({
 
         <div className="px-5 pt-5 pb-6 space-y-5">
 
-          {/* Status + amount hero */}
+          {/* ---------------------------------------------------------------- */}
+          {/* HERO                                                             */}
+          {/* ---------------------------------------------------------------- */}
+
           <div className="flex flex-col items-center gap-2 pt-1">
 
             <div
@@ -391,23 +502,25 @@ function ReceiptModal({
                 : "Balance Top-up"}
             </p>
 
-            {/*
-              FIX:
-              Top-up = ₱20.00
-              Fare   = −₱20.00
+            {/* 
+              TOP-UP:
+              ₱19.33
 
-              The "+" sign has been removed
-              from Top-up transactions.
+              FARE:
+              −₱90.00
+
+              There is NO plus sign for top-up.
             */}
             <p
               className={`text-4xl font-bold tabular-nums tracking-tight ${amountColor}`}
             >
-              {isFare ? "−" : ""}₱{amount}
+              {isFare
+                ? `−₱${originalAmount}`
+                : `₱${heroAmount}`}
             </p>
-
           </div>
 
-          {/* Dashed divider */}
+          {/* Divider */}
           <div
             className={`border-t border-dashed ${
               isDark
@@ -416,7 +529,10 @@ function ReceiptModal({
             }`}
           />
 
-          {/* Detail rows */}
+          {/* ---------------------------------------------------------------- */}
+          {/* DETAILS                                                          */}
+          {/* ---------------------------------------------------------------- */}
+
           <div
             className={`rounded-xl overflow-hidden border divide-y ${
               isDark
@@ -424,94 +540,184 @@ function ReceiptModal({
                 : "border-slate-200 divide-slate-100"
             }`}
           >
-            {[
-              {
-                label: "Transaction ID",
-                value: `#${tx.id}`,
-                mono: true,
-              },
 
-              {
-                label: "Timestamp",
-                value: new Date(
+            {/* Transaction ID */}
+            <div
+              className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                isDark
+                  ? "bg-slate-950/60"
+                  : "bg-slate-50"
+              }`}
+            >
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-widest ${
+                  isDark
+                    ? "text-slate-500"
+                    : "text-slate-400"
+                }`}
+              >
+                Transaction ID
+              </span>
+
+              <span
+                className={`text-xs font-mono font-medium ${
+                  isDark
+                    ? "text-slate-300"
+                    : "text-slate-700"
+                }`}
+              >
+                #{tx.id}
+              </span>
+            </div>
+
+            {/* Timestamp */}
+            <div
+              className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                isDark
+                  ? "bg-slate-950/60"
+                  : "bg-slate-50"
+              }`}
+            >
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-widest ${
+                  isDark
+                    ? "text-slate-500"
+                    : "text-slate-400"
+                }`}
+              >
+                Timestamp
+              </span>
+
+              <span
+                className={`text-xs text-right font-medium ${
+                  isDark
+                    ? "text-slate-300"
+                    : "text-slate-700"
+                }`}
+              >
+                {new Date(
                   tx.timestamp ||
                     tx.created_at
                 ).toLocaleString(
                   "en-PH",
                   {
-                    dateStyle: "medium",
-                    timeStyle: "short",
+                    dateStyle:
+                      "medium",
+                    timeStyle:
+                      "short",
                   }
-                ),
-              },
+                )}
+              </span>
+            </div>
 
-              {
-                label: "Card UID",
-                value:
-                  tx.card_uid ||
+            {/* Card UID */}
+            <div
+              className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                isDark
+                  ? "bg-slate-950/60"
+                  : "bg-slate-50"
+              }`}
+            >
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-widest ${
+                  isDark
+                    ? "text-slate-500"
+                    : "text-slate-400"
+                }`}
+              >
+                Card UID
+              </span>
+
+              <span
+                className={`text-xs font-mono font-semibold ${
+                  isDark
+                    ? "text-blue-400"
+                    : "text-blue-600"
+                }`}
+              >
+                {tx.card_uid ||
                   tx.cardUid ||
-                  "—",
-                mono: true,
-                accent: isDark
-                  ? "text-blue-400"
-                  : "text-blue-600",
-              },
+                  "—"}
+              </span>
+            </div>
 
-              {
-                label: "Full Name",
-                value:
-                  tx.full_name ||
+            {/* Full Name */}
+            <div
+              className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                isDark
+                  ? "bg-slate-950/60"
+                  : "bg-slate-50"
+              }`}
+            >
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-widest ${
+                  isDark
+                    ? "text-slate-500"
+                    : "text-slate-400"
+                }`}
+              >
+                Full Name
+              </span>
+
+              <span
+                className={`text-xs font-bold text-right truncate max-w-[60%] ${
+                  isDark
+                    ? "text-slate-300"
+                    : "text-slate-700"
+                }`}
+              >
+                {tx.full_name ||
                   tx.fullName ||
-                  "—",
-                bold: true,
-              },
+                  "—"}
+              </span>
+            </div>
 
-              {
-                label: "Status",
-                value: tx.status,
-              },
+            {/* Status */}
+            <div
+              className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                isDark
+                  ? "bg-slate-950/60"
+                  : "bg-slate-50"
+              }`}
+            >
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-widest ${
+                  isDark
+                    ? "text-slate-500"
+                    : "text-slate-400"
+                }`}
+              >
+                Status
+              </span>
 
-              ...(!isFare
-                ? [
-                    {
-                      label: "Fee",
-                      value:
-                        formatNullableAmount(
-                          getFeeAmount(tx)
-                        ),
-                      mono: true,
-                    },
+              <span
+                className={`text-xs font-bold ${
+                  tx.status === "Failed"
+                    ? isDark
+                      ? "text-red-400"
+                      : "text-red-600"
+                    : tx.status ===
+                        "Pending"
+                      ? isDark
+                        ? "text-amber-400"
+                        : "text-amber-600"
+                      : isDark
+                        ? "text-emerald-400"
+                        : "text-emerald-600"
+                }`}
+              >
+                {tx.status}
+              </span>
+            </div>
 
-                    {
-                      label: "VAT",
-                      value:
-                        formatNullableAmount(
-                          getVatAmount(tx)
-                        ),
-                      mono: true,
-                    },
+            {/* ================================================================ */}
+            {/* TOP-UP FINANCIAL DETAILS                                        */}
+            {/* ================================================================ */}
 
-                    {
-                      label: "Net Amount",
-                      value:
-                        formatNullableAmount(
-                          getNetAmount(tx)
-                        ),
-                      mono: true,
-                      bold: true,
-                    },
-                  ]
-                : []),
-            ].map(
-              ({
-                label,
-                value,
-                mono,
-                accent,
-                bold,
-              }) => (
+            {!isFare && (
+              <>
+                {/* ORIGINAL AMOUNT */}
                 <div
-                  key={label}
                   className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
                     isDark
                       ? "bg-slate-950/60"
@@ -519,38 +725,125 @@ function ReceiptModal({
                   }`}
                 >
                   <span
-                    className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
+                    className={`text-[10px] font-semibold uppercase tracking-widest ${
                       isDark
                         ? "text-slate-500"
                         : "text-slate-400"
                     }`}
                   >
-                    {label}
+                    Amount
                   </span>
 
                   <span
-                    className={`text-xs text-right truncate max-w-[60%] ${
-                      mono
-                        ? "font-mono"
-                        : ""
-                    } ${
-                      bold
-                        ? "font-bold"
-                        : "font-medium"
-                    } ${
-                      accent ??
-                      (isDark
+                    className={`text-xs font-mono font-bold ${
+                      isDark
                         ? "text-slate-300"
-                        : "text-slate-700")
+                        : "text-slate-700"
                     }`}
                   >
-                    {value}
+                    ₱{originalAmount}
                   </span>
                 </div>
-              )
+
+                {/* FEE */}
+                <div
+                  className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                    isDark
+                      ? "bg-slate-950/60"
+                      : "bg-slate-50"
+                  }`}
+                >
+                  <span
+                    className={`text-[10px] font-semibold uppercase tracking-widest ${
+                      isDark
+                        ? "text-slate-500"
+                        : "text-slate-400"
+                    }`}
+                  >
+                    Fee
+                  </span>
+
+                  <span
+                    className={`text-xs font-mono font-medium ${
+                      isDark
+                        ? "text-slate-300"
+                        : "text-slate-700"
+                    }`}
+                  >
+                    {formatNullableAmount(
+                      getFeeAmount(tx)
+                    )}
+                  </span>
+                </div>
+
+                {/* VAT */}
+                <div
+                  className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                    isDark
+                      ? "bg-slate-950/60"
+                      : "bg-slate-50"
+                  }`}
+                >
+                  <span
+                    className={`text-[10px] font-semibold uppercase tracking-widest ${
+                      isDark
+                        ? "text-slate-500"
+                        : "text-slate-400"
+                    }`}
+                  >
+                    VAT
+                  </span>
+
+                  <span
+                    className={`text-xs font-mono font-medium ${
+                      isDark
+                        ? "text-slate-300"
+                        : "text-slate-700"
+                    }`}
+                  >
+                    {formatNullableAmount(
+                      getVatAmount(tx)
+                    )}
+                  </span>
+                </div>
+
+                {/* NET AMOUNT */}
+                <div
+                  className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                    isDark
+                      ? "bg-slate-950/60"
+                      : "bg-slate-50"
+                  }`}
+                >
+                  <span
+                    className={`text-[10px] font-semibold uppercase tracking-widest ${
+                      isDark
+                        ? "text-slate-500"
+                        : "text-slate-400"
+                    }`}
+                  >
+                    Net Amount
+                  </span>
+
+                  <span
+                    className={`text-xs font-mono font-bold ${
+                      isDark
+                        ? "text-emerald-400"
+                        : "text-emerald-600"
+                    }`}
+                  >
+                    {formatNullableAmount(
+                      netAmount
+                    )}
+                  </span>
+                </div>
+              </>
             )}
 
-            {/* Route — Fare only */}
+            {/* ================================================================ */}
+            {/* FARE ROUTE                                                      */}
+            {/* ================================================================ */}
+
             {isFare && (
               <div
                 className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
@@ -560,7 +853,7 @@ function ReceiptModal({
                 }`}
               >
                 <span
-                  className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
+                  className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest ${
                     isDark
                       ? "text-slate-500"
                       : "text-slate-400"
@@ -571,7 +864,7 @@ function ReceiptModal({
                 </span>
 
                 <span
-                  className={`text-xs font-medium text-right max-w-[60%] flex items-center justify-end gap-1 ${
+                  className={`text-xs text-right flex items-center justify-end gap-1 max-w-[60%] ${
                     isDark
                       ? "text-slate-300"
                       : "text-slate-700"
@@ -580,7 +873,9 @@ function ReceiptModal({
                   {matchedRoute ? (
                     <>
                       <span className="truncate">
-                        {matchedRoute.origin}
+                        {
+                          matchedRoute.origin
+                        }
                       </span>
 
                       <ArrowLeftRight className="w-3 h-3 shrink-0 opacity-60" />
@@ -592,21 +887,16 @@ function ReceiptModal({
                       </span>
                     </>
                   ) : (
-                    <span
-                      className={
-                        isDark
-                          ? "text-slate-600"
-                          : "text-slate-400"
-                      }
-                    >
-                      —
-                    </span>
+                    "—"
                   )}
                 </span>
               </div>
             )}
 
-            {/* Payment method — Top-up only */}
+            {/* ================================================================ */}
+            {/* PAYMENT METHOD                                                  */}
+            {/* ================================================================ */}
+
             {!isFare && (
               <div
                 className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
@@ -616,7 +906,7 @@ function ReceiptModal({
                 }`}
               >
                 <span
-                  className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
+                  className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest ${
                     isDark
                       ? "text-slate-500"
                       : "text-slate-400"
@@ -627,7 +917,7 @@ function ReceiptModal({
                 </span>
 
                 <span
-                  className={`flex items-center justify-end gap-1.5 text-xs font-medium text-right truncate max-w-[60%] ${
+                  className={`flex items-center justify-end gap-1.5 text-xs font-medium text-right max-w-[60%] ${
                     isDark
                       ? "text-slate-300"
                       : "text-slate-700"
@@ -635,7 +925,9 @@ function ReceiptModal({
                 >
                   {paymentMethodLogo && (
                     <img
-                      src={paymentMethodLogo}
+                      src={
+                        paymentMethodLogo
+                      }
                       alt={
                         paymentMethodLabel ??
                         ""
@@ -645,14 +937,19 @@ function ReceiptModal({
                   )}
 
                   <span className="truncate">
-                    {paymentMethodLabel}
+                    {
+                      paymentMethodLabel
+                    }
                   </span>
                 </span>
               </div>
             )}
           </div>
 
-          {/* Total line */}
+          {/* ---------------------------------------------------------------- */}
+          {/* BOTTOM TOTAL                                                     */}
+          {/* ---------------------------------------------------------------- */}
+
           <div
             className={`border-t border-dashed pt-3 flex items-center justify-between ${
               isDark
@@ -676,28 +973,29 @@ function ReceiptModal({
               className={`text-sm font-bold ${amountColor}`}
             >
               {isFare
-                ? `−₱${amount}`
+                ? `−₱${originalAmount}`
                 : formatNullableAmount(
                     netAmount
                   )}
             </span>
           </div>
 
-          {/* Close button */}
+          {/* Close */}
           <Button
             onClick={onClose}
             className={`w-full text-white font-semibold uppercase text-[11px] tracking-widest ${closeBg} transition-colors cursor-pointer`}
           >
             Close
           </Button>
-
         </div>
       </DialogContent>
     </Dialog>
   );
 }
 
-// ── Transfer Detail Modal ────────────────────────────────────────────────────
+/* -------------------------------------------------------------------------- */
+/* TRANSFER MODAL                                                             */
+/* -------------------------------------------------------------------------- */
 
 function TransferModal({
   transfer,
@@ -708,19 +1006,27 @@ function TransferModal({
   onClose: () => void;
   isDark: boolean;
 }) {
-  if (!transfer) return null;
+  if (!transfer) {
+    return null;
+  }
 
   const status =
     normalizeTransferStatus(
       transfer.status
     );
 
-  const amount = Math.abs(
-    Number(transfer.amount)
-  ).toLocaleString("en-PH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  const amount =
+    Math.abs(
+      Number(
+        transfer.amount
+      )
+    ).toLocaleString(
+      "en-PH",
+      {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }
+    );
 
   const StatusIcon =
     status === "failed"
@@ -729,16 +1035,14 @@ function TransferModal({
         ? Clock
         : CheckCircle2;
 
-  const statusRingClass = isDark
-    ? "ring-blue-900 bg-blue-950/40 text-blue-400"
-    : "ring-blue-100 bg-blue-50 text-blue-600";
-
   return (
     <Dialog
       open={!!transfer}
-      onOpenChange={(open) =>
-        !open && onClose()
-      }
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+        }
+      }}
     >
       <DialogContent
         className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
@@ -753,15 +1057,8 @@ function TransferModal({
           </DialogTitle>
 
           <DialogDescription>
-            Transfer #{transfer.id}, ₱
-            {amount} from card{" "}
-            {cardUidOf(
-              transfer.source
-            )} to card{" "}
-            {cardUidOf(
-              transfer.target
-            )}, status{" "}
-            {transfer.status}.
+            Transfer #
+            {transfer.id}
           </DialogDescription>
         </VisuallyHidden>
 
@@ -769,11 +1066,14 @@ function TransferModal({
 
         <div className="px-5 pt-5 pb-6 space-y-5">
 
-          {/* Status + amount hero */}
           <div className="flex flex-col items-center gap-2 pt-1">
 
             <div
-              className={`flex items-center justify-center w-12 h-12 rounded-full ring-2 ${statusRingClass}`}
+              className={`flex items-center justify-center w-12 h-12 rounded-full ring-2 ${
+                isDark
+                  ? "ring-blue-900 bg-blue-950/40 text-blue-400"
+                  : "ring-blue-100 bg-blue-50 text-blue-600"
+              }`}
             >
               <StatusIcon className="w-5 h-5" />
             </div>
@@ -797,10 +1097,8 @@ function TransferModal({
             >
               ₱{amount}
             </p>
-
           </div>
 
-          {/* From → To */}
           <div
             className={`flex items-center gap-2 rounded-xl border p-3 ${
               isDark
@@ -809,7 +1107,6 @@ function TransferModal({
             }`}
           >
             <div className="flex-1 min-w-0">
-
               <p
                 className={`text-[10px] font-semibold uppercase tracking-widest ${
                   isDark
@@ -843,7 +1140,6 @@ function TransferModal({
                   transfer.source
                 )}
               </p>
-
             </div>
 
             <ArrowRightLeft
@@ -855,7 +1151,6 @@ function TransferModal({
             />
 
             <div className="flex-1 min-w-0 text-right">
-
               <p
                 className={`text-[10px] font-semibold uppercase tracking-widest ${
                   isDark
@@ -889,11 +1184,9 @@ function TransferModal({
                   transfer.target
                 )}
               </p>
-
             </div>
           </div>
 
-          {/* Dashed divider */}
           <div
             className={`border-t border-dashed ${
               isDark
@@ -902,7 +1195,6 @@ function TransferModal({
             }`}
           />
 
-          {/* Detail rows */}
           <div
             className={`rounded-xl overflow-hidden border divide-y ${
               isDark
@@ -910,140 +1202,177 @@ function TransferModal({
                 : "border-slate-200 divide-slate-100"
             }`}
           >
-            {[
-              {
-                label: "Transfer ID",
-                value: `#${transfer.id}`,
-                mono: true,
-              },
+            <div
+              className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                isDark
+                  ? "bg-slate-950/60"
+                  : "bg-slate-50"
+              }`}
+            >
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-widest ${
+                  isDark
+                    ? "text-slate-500"
+                    : "text-slate-400"
+                }`}
+              >
+                Transfer ID
+              </span>
 
-              {
-                label: "Requested",
-                value: new Date(
+              <span
+                className={`text-xs font-mono font-medium ${
+                  isDark
+                    ? "text-slate-300"
+                    : "text-slate-700"
+                }`}
+              >
+                #{transfer.id}
+              </span>
+            </div>
+
+            <div
+              className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                isDark
+                  ? "bg-slate-950/60"
+                  : "bg-slate-50"
+              }`}
+            >
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-widest ${
+                  isDark
+                    ? "text-slate-500"
+                    : "text-slate-400"
+                }`}
+              >
+                Requested
+              </span>
+
+              <span
+                className={`text-xs text-right ${
+                  isDark
+                    ? "text-slate-300"
+                    : "text-slate-700"
+                }`}
+              >
+                {new Date(
                   transfer.created_at
                 ).toLocaleString(
                   "en-PH",
                   {
-                    dateStyle: "medium",
-                    timeStyle: "short",
+                    dateStyle:
+                      "medium",
+                    timeStyle:
+                      "short",
                   }
-                ),
-              },
+                )}
+              </span>
+            </div>
 
-              ...(transfer.completed_at
-                ? [
-                    {
-                      label: "Completed",
-                      value: new Date(
-                        transfer.completed_at
-                      ).toLocaleString(
-                        "en-PH",
-                        {
-                          dateStyle:
-                            "medium",
-                          timeStyle:
-                            "short",
-                        }
-                      ),
-                    },
-                  ]
-                : []),
-
-              {
-                label: "Reason",
-                value:
-                  transfer.reason ||
-                  "—",
-              },
-
-              ...(transfer.source_balance_before !=
-              null
-                ? [
-                    {
-                      label:
-                        "Source balance before",
-                      value: `₱${Number(
-                        transfer.source_balance_before
-                      ).toLocaleString(
-                        "en-PH",
-                        {
-                          minimumFractionDigits:
-                            2,
-                        }
-                      )}`,
-                      mono: true,
-                    },
-                  ]
-                : []),
-
-              ...(transfer.target_balance_before !=
-              null
-                ? [
-                    {
-                      label:
-                        "Target balance before",
-                      value: `₱${Number(
-                        transfer.target_balance_before
-                      ).toLocaleString(
-                        "en-PH",
-                        {
-                          minimumFractionDigits:
-                            2,
-                        }
-                      )}`,
-                      mono: true,
-                    },
-                  ]
-                : []),
-
-              {
-                label: "Status",
-                value:
-                  status
-                    .charAt(0)
-                    .toUpperCase() +
-                  status.slice(1),
-              },
-            ].map(
-              ({
-                label,
-                value,
-                mono,
-              }) => (
-                <div
-                  key={label}
-                  className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+            {transfer.completed_at && (
+              <div
+                className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                  isDark
+                    ? "bg-slate-950/60"
+                    : "bg-slate-50"
+                }`}
+              >
+                <span
+                  className={`text-[10px] font-semibold uppercase tracking-widest ${
                     isDark
-                      ? "bg-slate-950/60"
-                      : "bg-slate-50"
+                      ? "text-slate-500"
+                      : "text-slate-400"
                   }`}
                 >
-                  <span
-                    className={`text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
-                      isDark
-                        ? "text-slate-500"
-                        : "text-slate-400"
-                    }`}
-                  >
-                    {label}
-                  </span>
+                  Completed
+                </span>
 
-                  <span
-                    className={`text-xs text-right truncate max-w-[60%] font-medium ${
-                      mono
-                        ? "font-mono"
-                        : ""
-                    } ${
-                      isDark
-                        ? "text-slate-300"
-                        : "text-slate-700"
-                    }`}
-                  >
-                    {value}
-                  </span>
-                </div>
-              )
+                <span
+                  className={`text-xs text-right ${
+                    isDark
+                      ? "text-slate-300"
+                      : "text-slate-700"
+                  }`}
+                >
+                  {new Date(
+                    transfer.completed_at
+                  ).toLocaleString(
+                    "en-PH",
+                    {
+                      dateStyle:
+                        "medium",
+                      timeStyle:
+                        "short",
+                    }
+                  )}
+                </span>
+              </div>
             )}
+
+            <div
+              className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                isDark
+                  ? "bg-slate-950/60"
+                  : "bg-slate-50"
+              }`}
+            >
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-widest ${
+                  isDark
+                    ? "text-slate-500"
+                    : "text-slate-400"
+                }`}
+              >
+                Reason
+              </span>
+
+              <span
+                className={`text-xs text-right max-w-[60%] truncate ${
+                  isDark
+                    ? "text-slate-300"
+                    : "text-slate-700"
+                }`}
+              >
+                {transfer.reason ||
+                  "—"}
+              </span>
+            </div>
+
+            <div
+              className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                isDark
+                  ? "bg-slate-950/60"
+                  : "bg-slate-50"
+              }`}
+            >
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-widest ${
+                  isDark
+                    ? "text-slate-500"
+                    : "text-slate-400"
+                }`}
+              >
+                Status
+              </span>
+
+              <span
+                className={`text-xs font-bold capitalize ${
+                  status === "completed"
+                    ? isDark
+                      ? "text-emerald-400"
+                      : "text-emerald-600"
+                    : status ===
+                        "failed"
+                      ? isDark
+                        ? "text-red-400"
+                        : "text-red-600"
+                      : isDark
+                        ? "text-amber-400"
+                        : "text-amber-600"
+                }`}
+              >
+                {status}
+              </span>
+            </div>
           </div>
 
           <Button
@@ -1052,108 +1381,177 @@ function TransferModal({
           >
             Close
           </Button>
-
         </div>
       </DialogContent>
     </Dialog>
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
+/* -------------------------------------------------------------------------- */
+/* MAIN PAGE                                                                  */
+/* -------------------------------------------------------------------------- */
 
 export default function TransactionsPage() {
-  const { isDark } = useTheme();
+  const { isDark } =
+    useTheme();
 
-  const [activeView, setActiveView] =
-    useState<TxView>("topup");
+  const [
+    activeView,
+    setActiveView,
+  ] = useState<TxView>(
+    "topup"
+  );
 
-  const [search, setSearch] =
-    useState("");
+  const [
+    search,
+    setSearch,
+  ] = useState("");
 
-  const [statusFilter, setStatusFilter] =
-    useState<string>("all");
+  const [
+    statusFilter,
+    setStatusFilter,
+  ] = useState("all");
 
-  const [viewTx, setViewTx] =
-    useState<any>(null);
+  const [
+    viewTx,
+    setViewTx,
+  ] = useState<any>(null);
 
-  const [page, setPage] =
-    useState(1);
+  const [
+    page,
+    setPage,
+  ] = useState(1);
 
-  const [routes, setRoutes] =
-    useState<FareRoute[]>([]);
+  const [
+    routes,
+    setRoutes,
+  ] = useState<FareRoute[]>([]);
 
-  const [financialById, setFinancialById] =
-    useState<
-      Record<
-        string,
-        {
-          fee_amount: number | null;
-          vat_amount: number | null;
-          net_amount: number | null;
-        }
-      >
-    >({});
+  const [
+    financialById,
+    setFinancialById,
+  ] = useState<
+    Record<
+      string,
+      {
+        fee_amount:
+          | number
+          | null;
+        vat_amount:
+          | number
+          | null;
+        net_amount:
+          | number
+          | null;
+      }
+    >
+  >({});
 
-  const [lastUpdated, setLastUpdated] =
-    useState<Date | null>(null);
+  const [
+    lastUpdated,
+    setLastUpdated,
+  ] = useState<Date | null>(
+    null
+  );
 
-  const [newRowId, setNewRowId] =
-    useState<number | null>(null);
+  const [
+    newRowId,
+    setNewRowId,
+  ] = useState<number | null>(
+    null
+  );
 
   const prevTopIdRef =
-    useRef<number | null>(null);
+    useRef<number | null>(
+      null
+    );
 
-  // ── Transfers state ───────────────────────────────────────────────────────
+  /* ------------------------------------------------------------------------ */
+  /* TRANSFERS                                                                */
+  /* ------------------------------------------------------------------------ */
 
-  const [transfers, setTransfers] =
-    useState<CardTransfer[]>([]);
+  const [
+    transfers,
+    setTransfers,
+  ] = useState<
+    CardTransfer[]
+  >([]);
 
-  const [transfersLoading, setTransfersLoading] =
-    useState(true);
+  const [
+    transfersLoading,
+    setTransfersLoading,
+  ] = useState(true);
 
-  const [transferSearch, setTransferSearch] =
-    useState("");
+  const [
+    transferSearch,
+    setTransferSearch,
+  ] = useState("");
 
   const [
     transferStatusFilter,
     setTransferStatusFilter,
-  ] = useState<string>("all");
+  ] = useState("all");
 
-  const [transferPage, setTransferPage] =
-    useState(1);
+  const [
+    transferPage,
+    setTransferPage,
+  ] = useState(1);
 
-  const [viewTransfer, setViewTransfer] =
-    useState<CardTransfer | null>(null);
+  const [
+    viewTransfer,
+    setViewTransfer,
+  ] =
+    useState<CardTransfer | null>(
+      null
+    );
 
   const [
     transfersLastUpdated,
     setTransfersLastUpdated,
-  ] = useState<Date | null>(null);
+  ] =
+    useState<Date | null>(
+      null
+    );
 
-  const [newTransferRowId, setNewTransferRowId] =
-    useState<number | null>(null);
+  const [
+    newTransferRowId,
+    setNewTransferRowId,
+  ] =
+    useState<number | null>(
+      null
+    );
 
   const prevTopTransferIdRef =
-    useRef<number | null>(null);
+    useRef<number | null>(
+      null
+    );
 
-  // ── Fetch fare_routes from Supabase ───────────────────────────────────────
+  /* ------------------------------------------------------------------------ */
+  /* ROUTES                                                                   */
+  /* ------------------------------------------------------------------------ */
 
   useEffect(() => {
-    const loadRoutes = async () => {
-      const { data, error } =
-        await supabase
+    const loadRoutes =
+      async () => {
+        const {
+          data,
+          error,
+        } = await supabase
           .from("fare_routes")
           .select(
             "id, origin, destination, fare_amount"
           )
           .order("id");
 
-      if (!error && data) {
-        setRoutes(
-          data as FareRoute[]
-        );
-      }
-    };
+        if (
+          !error &&
+          data
+        ) {
+          setRoutes(
+            data as FareRoute[]
+          );
+        }
+      };
 
     loadRoutes();
 
@@ -1180,7 +1578,9 @@ export default function TransactionsPage() {
     };
   }, []);
 
-  // ── Fetch card_balance_transfers ──────────────────────────────────────────
+  /* ------------------------------------------------------------------------ */
+  /* TRANSFERS LOAD                                                           */
+  /* ------------------------------------------------------------------------ */
 
   useEffect(() => {
     const loadTransfers =
@@ -1226,7 +1626,10 @@ export default function TransactionsPage() {
             }
           );
 
-        if (!error && data) {
+        if (
+          !error &&
+          data
+        ) {
           setTransfers(
             data as unknown as CardTransfer[]
           );
@@ -1249,7 +1652,8 @@ export default function TransactionsPage() {
           {
             event: "*",
             schema: "public",
-            table: "card_balance_transfers",
+            table:
+              "card_balance_transfers",
           },
           loadTransfers
         )
@@ -1262,16 +1666,20 @@ export default function TransactionsPage() {
     };
   }, []);
 
-  // ── Transactions query ────────────────────────────────────────────────────
+  /* ------------------------------------------------------------------------ */
+  /* TRANSACTIONS                                                              */
+  /* ------------------------------------------------------------------------ */
 
   const params: any = {};
 
   if (search) {
-    params.search = search;
+    params.search =
+      search;
   }
 
   if (
-    statusFilter !== "all"
+    statusFilter !==
+    "all"
   ) {
     params.status =
       statusFilter;
@@ -1315,14 +1723,19 @@ export default function TransactionsPage() {
   );
 
   const rawTransactionList =
-    Array.isArray(transactions)
+    Array.isArray(
+      transactions
+    )
       ? transactions
       : [];
 
-  // ── Load financial fields directly from Supabase ──────────────────────────
+  /* ------------------------------------------------------------------------ */
+  /* FINANCIAL DATA                                                           */
+  /* ------------------------------------------------------------------------ */
 
   useEffect(() => {
-    let cancelled = false;
+    let cancelled =
+      false;
 
     const loadFinancialFields =
       async () => {
@@ -1347,7 +1760,10 @@ export default function TransactionsPage() {
                 )
             );
 
-        if (ids.length === 0) {
+        if (
+          ids.length ===
+          0
+        ) {
           setFinancialById(
             {}
           );
@@ -1364,9 +1780,16 @@ export default function TransactionsPage() {
           .select(
             "id, fee_amount, vat_amount, net_amount"
           )
-          .in("id", ids);
+          .in(
+            "id",
+            ids
+          );
 
-        if (cancelled) return;
+        if (
+          cancelled
+        ) {
+          return;
+        }
 
         if (error) {
           console.warn(
@@ -1391,34 +1814,37 @@ export default function TransactionsPage() {
           }
         > = {};
 
-        for (const row of data ??
-          []) {
-          next[String(row.id)] =
-            {
-              fee_amount:
-                row.fee_amount ==
-                null
-                  ? null
-                  : Number(
-                      row.fee_amount
-                    ),
+        for (
+          const row of
+          data ?? []
+        ) {
+          next[
+            String(row.id)
+          ] = {
+            fee_amount:
+              row.fee_amount ==
+              null
+                ? null
+                : Number(
+                    row.fee_amount
+                  ),
 
-              vat_amount:
-                row.vat_amount ==
-                null
-                  ? null
-                  : Number(
-                      row.vat_amount
-                    ),
+            vat_amount:
+              row.vat_amount ==
+              null
+                ? null
+                : Number(
+                    row.vat_amount
+                  ),
 
-              net_amount:
-                row.net_amount ==
-                null
-                  ? null
-                  : Number(
-                      row.net_amount
-                    ),
-            };
+            net_amount:
+              row.net_amount ==
+              null
+                ? null
+                : Number(
+                    row.net_amount
+                  ),
+          };
         }
 
         setFinancialById(
@@ -1429,11 +1855,16 @@ export default function TransactionsPage() {
     loadFinancialFields();
 
     return () => {
-      cancelled = true;
+      cancelled =
+        true;
     };
-  }, [transactions]);
+  }, [
+    transactions,
+  ]);
 
-  // ── Split transactions by type ────────────────────────────────────────────
+  /* ------------------------------------------------------------------------ */
+  /* SPLIT LISTS                                                              */
+  /* ------------------------------------------------------------------------ */
 
   const topupList =
     useMemo(
@@ -1442,9 +1873,12 @@ export default function TransactionsPage() {
           (tx: any) =>
             normalizeTxType(
               tx.type
-            ) === "Top-up"
+            ) ===
+            "Top-up"
         ),
-      [rawTransactionList]
+      [
+        rawTransactionList,
+      ]
     );
 
   const fareList =
@@ -1454,13 +1888,17 @@ export default function TransactionsPage() {
           (tx: any) =>
             normalizeTxType(
               tx.type
-            ) === "Fare"
+            ) ===
+            "Fare"
         ),
-      [rawTransactionList]
+      [
+        rawTransactionList,
+      ]
     );
 
   const currentTypeList =
-    activeView === "fare"
+    activeView ===
+    "fare"
       ? fareList
       : topupList;
 
@@ -1490,6 +1928,10 @@ export default function TransactionsPage() {
         PAGE_SIZE
     );
 
+  /* ------------------------------------------------------------------------ */
+  /* REALTIME ROW                                                              */
+  /* ------------------------------------------------------------------------ */
+
   useEffect(() => {
     if (
       activeView ===
@@ -1514,11 +1956,15 @@ export default function TransactionsPage() {
       topId !==
         prevTopIdRef.current
     ) {
-      setNewRowId(topId);
+      setNewRowId(
+        topId
+      );
 
       setTimeout(
         () =>
-          setNewRowId(null),
+          setNewRowId(
+            null
+          ),
         800
       );
     }
@@ -1534,7 +1980,9 @@ export default function TransactionsPage() {
     activeView,
   ]);
 
-  // ── Transfers filtering/search ────────────────────────────────────────────
+  /* ------------------------------------------------------------------------ */
+  /* TRANSFER FILTER                                                          */
+  /* ------------------------------------------------------------------------ */
 
   const filteredTransferList =
     useMemo(() => {
@@ -1547,9 +1995,9 @@ export default function TransactionsPage() {
       ) {
         list =
           list.filter(
-            (t) =>
+            (transfer) =>
               normalizeTransferStatus(
-                t.status
+                transfer.status
               ) ===
               transferStatusFilter
           );
@@ -1563,20 +2011,20 @@ export default function TransactionsPage() {
       if (q) {
         list =
           list.filter(
-            (t) => {
+            (transfer) => {
               const haystack =
                 [
                   cardUidOf(
-                    t.source
+                    transfer.source
                   ),
                   fullNameOf(
-                    t.source
+                    transfer.source
                   ),
                   cardUidOf(
-                    t.target
+                    transfer.target
                   ),
                   fullNameOf(
-                    t.target
+                    transfer.target
                   ),
                 ]
                   .join(" ")
@@ -1664,7 +2112,9 @@ export default function TransactionsPage() {
     filteredTransferList,
   ]);
 
-  // ── Status colors ─────────────────────────────────────────────────────────
+  /* ------------------------------------------------------------------------ */
+  /* COLORS                                                                    */
+  /* ------------------------------------------------------------------------ */
 
   const statusColor = (
     status: string
@@ -1730,13 +2180,12 @@ export default function TransactionsPage() {
     };
 
   const isFareView =
-    activeView === "fare";
+    activeView ===
+    "fare";
 
   const isTransferView =
     activeView ===
     "transfers";
-
-  // ── Tabs ──────────────────────────────────────────────────────────────────
 
   const TX_TABS: {
     key: TxView;
@@ -1766,6 +2215,10 @@ export default function TransactionsPage() {
         transfers.length,
     },
   ];
+
+  /* ------------------------------------------------------------------------ */
+  /* PAGE                                                                      */
+  /* ------------------------------------------------------------------------ */
 
   return (
     <div
@@ -1809,7 +2262,7 @@ export default function TransactionsPage() {
         }
       `}</style>
 
-      {/* Header */}
+      {/* HEADER */}
       <div
         className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6 ${
           isDark
@@ -1840,9 +2293,10 @@ export default function TransactionsPage() {
                 : "text-slate-500"
             }`}
           >
-            Monitor all Top-ups, Fare
-            deductions, and Card Transfers
-            in real-time
+            Monitor all Top-ups,
+            Fare deductions, and
+            Card Transfers in
+            real-time
           </p>
         </div>
 
@@ -1891,7 +2345,7 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* View switch */}
+      {/* TABS */}
       <div
         className={`flex items-center gap-6 overflow-x-auto border-b ${
           isDark
@@ -1907,7 +2361,8 @@ export default function TransactionsPage() {
             count,
           }) => {
             const active =
-              activeView === key;
+              activeView ===
+              key;
 
             return (
               <button
@@ -1917,7 +2372,6 @@ export default function TransactionsPage() {
                     key
                   )
                 }
-                data-testid={`button-tab-${key}`}
                 className={`relative flex items-center gap-1.5 pb-2.5 -mb-px whitespace-nowrap text-xs font-semibold transition-colors cursor-pointer border-b-2 ${
                   active
                     ? isDark
@@ -1947,6 +2401,10 @@ export default function TransactionsPage() {
         )}
       </div>
 
+      {/* ==================================================================== */}
+      {/* TRANSACTIONS                                                          */}
+      {/* ==================================================================== */}
+
       {!isTransferView ? (
         <Card
           className={`shadow-sm flex flex-col overflow-hidden relative ${
@@ -1971,6 +2429,7 @@ export default function TransactionsPage() {
             }`}
           >
             <div className="flex flex-col lg:flex-row gap-4 items-center">
+
               <div className="flex items-center gap-2 mr-2 shrink-0">
                 <span
                   className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
@@ -1995,7 +2454,9 @@ export default function TransactionsPage() {
 
                 <Input
                   placeholder="Search card UID or name..."
-                  value={search}
+                  value={
+                    search
+                  }
                   onChange={(e) =>
                     setSearch(
                       e.target.value
@@ -2065,7 +2526,8 @@ export default function TransactionsPage() {
             {isLoading ? (
               <div className="space-y-4 pt-6">
                 {Array.from({
-                  length: PAGE_SIZE,
+                  length:
+                    PAGE_SIZE,
                 }).map(
                   (_, i) => (
                     <Skeleton
@@ -2091,141 +2553,64 @@ export default function TransactionsPage() {
                       }`}
                     >
                       <TableRow className="border-none hover:bg-transparent">
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                           Txn ID
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                           Timestamp
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                           Card UID
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                           Full Name
                         </TableHead>
 
                         {isFareView ? (
                           <>
-                            <TableHead
-                              className={`text-[11px] font-semibold uppercase tracking-wide ${
-                                isDark
-                                  ? "text-slate-500"
-                                  : "text-slate-400"
-                              }`}
-                            >
+                            <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                               Origin
                             </TableHead>
 
-                            <TableHead
-                              className={`text-[11px] font-semibold uppercase tracking-wide ${
-                                isDark
-                                  ? "text-slate-500"
-                                  : "text-slate-400"
-                              }`}
-                            >
+                            <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                               Destination
                             </TableHead>
                           </>
                         ) : (
-                          <TableHead
-                            className={`text-[11px] font-semibold uppercase tracking-wide ${
-                              isDark
-                                ? "text-slate-500"
-                                : "text-slate-400"
-                            }`}
-                          >
+                          <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                             Payment Method
                           </TableHead>
                         )}
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                           Amount
                         </TableHead>
 
                         {!isFareView && (
                           <>
-                            <TableHead
-                              className={`text-[11px] font-semibold uppercase tracking-wide ${
-                                isDark
-                                  ? "text-slate-500"
-                                  : "text-slate-400"
-                              }`}
-                            >
+                            <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                               Fee
                             </TableHead>
 
-                            <TableHead
-                              className={`text-[11px] font-semibold uppercase tracking-wide ${
-                                isDark
-                                  ? "text-slate-500"
-                                  : "text-slate-400"
-                              }`}
-                            >
+                            <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                               VAT
                             </TableHead>
 
-                            <TableHead
-                              className={`text-[11px] font-semibold uppercase tracking-wide ${
-                                isDark
-                                  ? "text-slate-500"
-                                  : "text-slate-400"
-                              }`}
-                            >
+                            <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                               Net Amount
                             </TableHead>
                           </>
                         )}
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide">
                           Status
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide text-right ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-right">
                           Actions
                         </TableHead>
                       </TableRow>
@@ -2263,24 +2648,33 @@ export default function TransactionsPage() {
                         </TableRow>
                       ) : (
                         paginatedList.map(
-                          (rawTx: any) => {
-                            const tx = {
-                              ...rawTx,
-                              ...(financialById[
-                                String(
-                                  rawTx?.id
-                                )
-                              ] ?? {}),
-                            };
+                          (
+                            rawTx: any
+                          ) => {
+                            const tx =
+                              {
+                                ...rawTx,
+                                ...(financialById[
+                                  String(
+                                    rawTx?.id
+                                  )
+                                ] ??
+                                  {}),
+                              };
 
                             const matchedRoute =
                               isFareView &&
                               tx.route_id
                                 ? routes.find(
-                                    (r) =>
-                                      r.id ===
-                                      tx.route_id
-                                  ) ?? null
+                                    (
+                                      route
+                                    ) =>
+                                      route.id ===
+                                      Number(
+                                        tx.route_id
+                                      )
+                                  ) ??
+                                  null
                                 : null;
 
                             const paymentMethodLabel =
@@ -2313,23 +2707,11 @@ export default function TransactionsPage() {
                                     : ""
                                 }`}
                               >
-                                <TableCell
-                                  className={`text-xs font-mono ${
-                                    isDark
-                                      ? "text-slate-500"
-                                      : "text-slate-400"
-                                  }`}
-                                >
+                                <TableCell className="text-xs font-mono">
                                   #{tx.id}
                                 </TableCell>
 
-                                <TableCell
-                                  className={`text-xs font-mono ${
-                                    isDark
-                                      ? "text-slate-500"
-                                      : "text-slate-400"
-                                  }`}
-                                >
+                                <TableCell className="text-xs font-mono">
                                   {new Date(
                                     tx.timestamp ||
                                       tx.created_at
@@ -2338,74 +2720,32 @@ export default function TransactionsPage() {
 
                                 <TableCell className="font-mono text-xs text-blue-500 font-semibold">
                                   {tx.card_uid ||
-                                    tx.cardUid}
+                                    tx.cardUid ||
+                                    "—"}
                                 </TableCell>
 
-                                <TableCell
-                                  className={`text-sm font-medium ${
-                                    isDark
-                                      ? "text-slate-200"
-                                      : "text-slate-800"
-                                  }`}
-                                >
+                                <TableCell className="text-sm font-medium">
                                   {tx.full_name ||
-                                    tx.fullName}
+                                    tx.fullName ||
+                                    "—"}
                                 </TableCell>
 
                                 {isFareView ? (
                                   <>
-                                    <TableCell
-                                      className={`text-xs ${
-                                        isDark
-                                          ? "text-slate-300"
-                                          : "text-slate-700"
-                                      }`}
-                                    >
+                                    <TableCell className="text-xs">
                                       {matchedRoute
                                         ? matchedRoute.origin
-                                        : (
-                                          <span
-                                            className={
-                                              isDark
-                                                ? "text-slate-600"
-                                                : "text-slate-400"
-                                            }
-                                          >
-                                            —
-                                          </span>
-                                        )}
+                                        : "—"}
                                     </TableCell>
 
-                                    <TableCell
-                                      className={`text-xs ${
-                                        isDark
-                                          ? "text-slate-300"
-                                          : "text-slate-700"
-                                      }`}
-                                    >
+                                    <TableCell className="text-xs">
                                       {matchedRoute
                                         ? matchedRoute.destination
-                                        : (
-                                          <span
-                                            className={
-                                              isDark
-                                                ? "text-slate-600"
-                                                : "text-slate-400"
-                                            }
-                                          >
-                                            —
-                                          </span>
-                                        )}
+                                        : "—"}
                                     </TableCell>
                                   </>
                                 ) : (
-                                  <TableCell
-                                    className={`text-xs ${
-                                      isDark
-                                        ? "text-slate-300"
-                                        : "text-slate-700"
-                                    }`}
-                                  >
+                                  <TableCell className="text-xs">
                                     <div className="flex items-center gap-1.5">
                                       {paymentMethodLogo && (
                                         <img
@@ -2450,13 +2790,7 @@ export default function TransactionsPage() {
 
                                 {!isFareView && (
                                   <>
-                                    <TableCell
-                                      className={`text-xs font-medium tabular-nums ${
-                                        isDark
-                                          ? "text-slate-300"
-                                          : "text-slate-700"
-                                      }`}
-                                    >
+                                    <TableCell className="text-xs font-medium tabular-nums">
                                       {formatNullableAmount(
                                         getFeeAmount(
                                           tx
@@ -2464,13 +2798,7 @@ export default function TransactionsPage() {
                                       )}
                                     </TableCell>
 
-                                    <TableCell
-                                      className={`text-xs font-medium tabular-nums ${
-                                        isDark
-                                          ? "text-slate-300"
-                                          : "text-slate-700"
-                                      }`}
-                                    >
+                                    <TableCell className="text-xs font-medium tabular-nums">
                                       {formatNullableAmount(
                                         getVatAmount(
                                           tx
@@ -2478,13 +2806,7 @@ export default function TransactionsPage() {
                                       )}
                                     </TableCell>
 
-                                    <TableCell
-                                      className={`text-sm font-bold tabular-nums ${
-                                        isDark
-                                          ? "text-cyan-400"
-                                          : "text-cyan-700"
-                                      }`}
-                                    >
+                                    <TableCell className="text-sm font-bold tabular-nums">
                                       {formatNullableAmount(
                                         getNetAmount(
                                           tx
@@ -2506,25 +2828,19 @@ export default function TransactionsPage() {
                                 </TableCell>
 
                                 <TableCell className="text-right">
-                                  <div className="flex justify-end gap-1">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className={`h-8 w-8 cursor-pointer ${
-                                        isDark
-                                          ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40"
-                                          : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"
-                                      }`}
-                                      onClick={() =>
-                                        setViewTx(
-                                          tx
-                                        )
-                                      }
-                                      title="View receipt"
-                                    >
-                                      <Eye className="w-3.5 h-3.5" />
-                                    </Button>
-                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 cursor-pointer text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                    onClick={() =>
+                                      setViewTx(
+                                        tx
+                                      )
+                                    }
+                                    title="View receipt"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </Button>
                                 </TableCell>
                               </TableRow>
                             );
@@ -2543,46 +2859,23 @@ export default function TransactionsPage() {
                       : "border-slate-100"
                   }`}
                 >
-                  <span
-                    className={`text-xs font-mono uppercase tracking-wide ${
-                      isDark
-                        ? "text-slate-500"
-                        : "text-slate-400"
-                    }`}
-                  >
+                  <span className="text-xs font-mono">
                     Showing{" "}
-                    <span
-                      className={`font-semibold ${
-                        isDark
-                          ? "text-slate-300"
-                          : "text-slate-600"
-                      }`}
-                    >
-                      {currentTypeList.length ===
-                      0
-                        ? 0
-                        : startIndex +
-                          1}
-                      –
-                      {Math.min(
-                        startIndex +
-                          PAGE_SIZE,
-                        currentTypeList.length
-                      )}
-                    </span>{" "}
+                    {currentTypeList.length ===
+                    0
+                      ? 0
+                      : startIndex +
+                        1}
+                    –
+                    {Math.min(
+                      startIndex +
+                        PAGE_SIZE,
+                      currentTypeList.length
+                    )}{" "}
                     of{" "}
-                    <span
-                      className={`font-semibold ${
-                        isDark
-                          ? "text-slate-300"
-                          : "text-slate-600"
-                      }`}
-                    >
-                      {
-                        currentTypeList.length
-                      }
-                    </span>{" "}
-                    records
+                    {
+                      currentTypeList.length
+                    }
                   </span>
 
                   <div className="flex items-center gap-2">
@@ -2602,38 +2895,20 @@ export default function TransactionsPage() {
                             )
                         )
                       }
-                      className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
-                        isDark
-                          ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800"
-                          : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
-                      }`}
+                      className="h-8 px-3 text-xs border cursor-pointer"
                     >
                       <ChevronLeft className="w-3 h-3 mr-1" />
                       Prev
                     </Button>
 
-                    <span
-                      className={`text-xs font-semibold px-2 tabular-nums ${
-                        isDark
-                          ? "text-slate-500"
-                          : "text-slate-500"
-                      }`}
-                    >
+                    <span className="text-xs font-semibold px-2 tabular-nums">
                       <span className="text-blue-500">
                         {safePage}
                       </span>
 
-                      <span
-                        className={
-                          isDark
-                            ? "text-slate-700"
-                            : "text-slate-300"
-                        }
-                      >
-                        {" "}
-                        /{" "}
-                        {totalPages}
-                      </span>
+                      {" / "}
+
+                      {totalPages}
                     </span>
 
                     <Button
@@ -2652,11 +2927,7 @@ export default function TransactionsPage() {
                             )
                         )
                       }
-                      className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
-                        isDark
-                          ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800"
-                          : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
-                      }`}
+                      className="h-8 px-3 text-xs border cursor-pointer"
                     >
                       Next
                       <ChevronRight className="w-3 h-3 ml-1" />
@@ -2668,6 +2939,10 @@ export default function TransactionsPage() {
           </CardContent>
         </Card>
       ) : (
+        /* ================================================================== */
+        /* TRANSFERS TABLE                                                    */
+        /* ================================================================== */
+
         <Card
           className={`shadow-sm flex flex-col overflow-hidden relative ${
             isDark
@@ -2685,6 +2960,7 @@ export default function TransactionsPage() {
             }`}
           >
             <div className="flex flex-col lg:flex-row gap-4 items-center">
+
               <div className="flex items-center gap-2 mr-2 shrink-0">
                 <span
                   className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
@@ -2717,70 +2993,40 @@ export default function TransactionsPage() {
                       e.target.value
                     )
                   }
-                  className={`pl-10 font-medium text-sm focus-visible:ring-blue-500 ${
-                    isDark
-                      ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
-                      : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
-                  }`}
+                  className="pl-10 text-sm"
                 />
               </div>
 
-              <div className="flex gap-3 w-full lg:w-auto">
-                <Select
-                  value={
-                    transferStatusFilter
-                  }
-                  onValueChange={
-                    setTransferStatusFilter
-                  }
-                >
-                  <SelectTrigger
-                    className={`w-full lg:w-[150px] font-medium text-xs cursor-pointer ${
-                      isDark
-                        ? "bg-slate-950 border-slate-800 text-slate-300"
-                        : "bg-white border-slate-200 text-slate-600"
-                    }`}
-                  >
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
+              <Select
+                value={
+                  transferStatusFilter
+                }
+                onValueChange={
+                  setTransferStatusFilter
+                }
+              >
+                <SelectTrigger className="w-full lg:w-[150px] text-xs">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
 
-                  <SelectContent
-                    className={
-                      isDark
-                        ? "bg-slate-900 border-slate-800 text-slate-300"
-                        : "bg-white border-slate-200 text-slate-600"
-                    }
-                  >
-                    <SelectItem
-                      value="all"
-                      className="cursor-pointer"
-                    >
-                      All Status
-                    </SelectItem>
+                <SelectContent>
+                  <SelectItem value="all">
+                    All Status
+                  </SelectItem>
 
-                    <SelectItem
-                      value="pending"
-                      className="cursor-pointer"
-                    >
-                      Pending
-                    </SelectItem>
+                  <SelectItem value="pending">
+                    Pending
+                  </SelectItem>
 
-                    <SelectItem
-                      value="completed"
-                      className="cursor-pointer"
-                    >
-                      Completed
-                    </SelectItem>
+                  <SelectItem value="completed">
+                    Completed
+                  </SelectItem>
 
-                    <SelectItem
-                      value="failed"
-                      className="cursor-pointer"
-                    >
-                      Failed
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                  <SelectItem value="failed">
+                    Failed
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </CardHeader>
 
@@ -2788,16 +3034,13 @@ export default function TransactionsPage() {
             {transfersLoading ? (
               <div className="space-y-4 pt-6">
                 {Array.from({
-                  length: PAGE_SIZE,
+                  length:
+                    PAGE_SIZE,
                 }).map(
                   (_, i) => (
                     <Skeleton
                       key={i}
-                      className={`h-14 w-full rounded-lg ${
-                        isDark
-                          ? "bg-slate-800"
-                          : "bg-slate-100"
-                      }`}
+                      className="h-14 w-full rounded-lg"
                     />
                   )
                 )}
@@ -2806,91 +3049,37 @@ export default function TransactionsPage() {
               <>
                 <div className="relative mt-6 flex-1 min-h-0 overflow-auto">
                   <Table>
-                    <TableHeader
-                      className={`sticky top-0 z-10 border-b ${
-                        isDark
-                          ? "bg-slate-900 border-slate-800"
-                          : "bg-white border-slate-200"
-                      }`}
-                    >
-                      <TableRow className="border-none hover:bg-transparent">
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>
                           Transfer ID
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead>
                           Timestamp
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
-                          From (Card UID)
+                        <TableHead>
+                          From
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
-                          To (Card UID)
+                        <TableHead>
+                          To
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead>
                           Amount
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead>
                           Reason
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead>
                           Status
                         </TableHead>
 
-                        <TableHead
-                          className={`text-[11px] font-semibold uppercase tracking-wide text-right ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
+                        <TableHead className="text-right">
                           Actions
                         </TableHead>
                       </TableRow>
@@ -2904,86 +3093,61 @@ export default function TransactionsPage() {
                             colSpan={8}
                             className="text-center py-32"
                           >
-                            <div
-                              className={`flex flex-col items-center ${
-                                isDark
-                                  ? "text-slate-700"
-                                  : "text-slate-300"
-                              }`}
-                            >
-                              <ArrowRightLeft
-                                size={48}
-                                className="mb-2"
-                              />
+                            <ArrowRightLeft
+                              size={48}
+                              className="mx-auto mb-2 opacity-30"
+                            />
 
-                              <p className="text-xs font-semibold uppercase tracking-widest">
-                                No transfers found
-                              </p>
-                            </div>
+                            <p className="text-xs font-semibold uppercase tracking-widest">
+                              No transfers found
+                            </p>
                           </TableCell>
                         </TableRow>
                       ) : (
                         paginatedTransferList.map(
-                          (t) => {
+                          (
+                            transfer
+                          ) => {
                             const status =
                               normalizeTransferStatus(
-                                t.status
+                                transfer.status
                               );
 
                             return (
                               <TableRow
                                 key={
-                                  t.id
+                                  transfer.id
                                 }
-                                className={`transition-colors ${
-                                  isDark
-                                    ? "border-slate-800 hover:bg-slate-800/50"
-                                    : "border-slate-100 hover:bg-slate-50"
-                                } ${
+                                className={
                                   newTransferRowId ===
-                                  t.id
+                                  transfer.id
                                     ? "row-pulse"
                                     : ""
-                                }`}
+                                }
                               >
-                                <TableCell
-                                  className={`text-xs font-mono ${
-                                    isDark
-                                      ? "text-slate-500"
-                                      : "text-slate-400"
-                                  }`}
-                                >
-                                  #{t.id}
+                                <TableCell className="font-mono text-xs">
+                                  #
+                                  {
+                                    transfer.id
+                                  }
                                 </TableCell>
 
-                                <TableCell
-                                  className={`text-xs font-mono ${
-                                    isDark
-                                      ? "text-slate-500"
-                                      : "text-slate-400"
-                                  }`}
-                                >
+                                <TableCell className="text-xs font-mono">
                                   {new Date(
-                                    t.created_at
+                                    transfer.created_at
                                   ).toLocaleString()}
                                 </TableCell>
 
                                 <TableCell>
                                   <div className="font-mono text-xs text-blue-500 font-semibold">
                                     {cardUidOf(
-                                      t.source
+                                      transfer.source
                                     )}
                                   </div>
 
-                                  <div
-                                    className={`text-[11px] ${
-                                      isDark
-                                        ? "text-slate-500"
-                                        : "text-slate-400"
-                                    }`}
-                                  >
+                                  <div className="text-[11px] opacity-60">
                                     {fullNameOf(
-                                      t.source
+                                      transfer.source
                                     )}
                                   </div>
                                 </TableCell>
@@ -2991,49 +3155,28 @@ export default function TransactionsPage() {
                                 <TableCell>
                                   <div className="font-mono text-xs text-blue-500 font-semibold">
                                     {cardUidOf(
-                                      t.target
+                                      transfer.target
                                     )}
                                   </div>
 
-                                  <div
-                                    className={`text-[11px] ${
-                                      isDark
-                                        ? "text-slate-500"
-                                        : "text-slate-400"
-                                    }`}
-                                  >
+                                  <div className="text-[11px] opacity-60">
                                     {fullNameOf(
-                                      t.target
+                                      transfer.target
                                     )}
                                   </div>
                                 </TableCell>
 
-                                <TableCell
-                                  className={`text-sm font-semibold ${
-                                    isDark
-                                      ? "text-blue-400"
-                                      : "text-blue-600"
-                                  }`}
-                                >
+                                <TableCell className="text-sm font-semibold text-blue-500">
                                   ₱
                                   {formatAmount(
                                     Number(
-                                      t.amount
+                                      transfer.amount
                                     )
                                   )}
                                 </TableCell>
 
-                                <TableCell
-                                  className={`text-xs max-w-[180px] truncate ${
-                                    isDark
-                                      ? "text-slate-400"
-                                      : "text-slate-500"
-                                  }`}
-                                  title={
-                                    t.reason
-                                  }
-                                >
-                                  {t.reason ||
+                                <TableCell className="text-xs max-w-[180px] truncate">
+                                  {transfer.reason ||
                                     "—"}
                                 </TableCell>
 
@@ -3049,25 +3192,18 @@ export default function TransactionsPage() {
                                 </TableCell>
 
                                 <TableCell className="text-right">
-                                  <div className="flex justify-end gap-1">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className={`h-8 w-8 cursor-pointer ${
-                                        isDark
-                                          ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40"
-                                          : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"
-                                      }`}
-                                      onClick={() =>
-                                        setViewTransfer(
-                                          t
-                                        )
-                                      }
-                                      title="View transfer details"
-                                    >
-                                      <Eye className="w-3.5 h-3.5" />
-                                    </Button>
-                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 cursor-pointer text-blue-500"
+                                    onClick={() =>
+                                      setViewTransfer(
+                                        transfer
+                                      )
+                                    }
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </Button>
                                 </TableCell>
                               </TableRow>
                             );
@@ -3078,54 +3214,24 @@ export default function TransactionsPage() {
                   </Table>
                 </div>
 
-                {/* Pagination */}
-                <div
-                  className={`flex items-center justify-between pt-4 border-t mt-2 ${
-                    isDark
-                      ? "border-slate-800"
-                      : "border-slate-100"
-                  }`}
-                >
-                  <span
-                    className={`text-xs font-mono uppercase tracking-wide ${
-                      isDark
-                        ? "text-slate-500"
-                        : "text-slate-400"
-                    }`}
-                  >
+                <div className="flex items-center justify-between pt-4 border-t mt-2">
+                  <span className="text-xs font-mono">
                     Showing{" "}
-                    <span
-                      className={`font-semibold ${
-                        isDark
-                          ? "text-slate-300"
-                          : "text-slate-600"
-                      }`}
-                    >
-                      {filteredTransferList.length ===
-                      0
-                        ? 0
-                        : transferStartIndex +
-                          1}
-                      –
-                      {Math.min(
-                        transferStartIndex +
-                          PAGE_SIZE,
-                        filteredTransferList.length
-                      )}
-                    </span>{" "}
+                    {filteredTransferList.length ===
+                    0
+                      ? 0
+                      : transferStartIndex +
+                        1}
+                    –
+                    {Math.min(
+                      transferStartIndex +
+                        PAGE_SIZE,
+                      filteredTransferList.length
+                    )}{" "}
                     of{" "}
-                    <span
-                      className={`font-semibold ${
-                        isDark
-                          ? "text-slate-300"
-                          : "text-slate-600"
-                      }`}
-                    >
-                      {
-                        filteredTransferList.length
-                      }
-                    </span>{" "}
-                    records
+                    {
+                      filteredTransferList.length
+                    }
                   </span>
 
                   <div className="flex items-center gap-2">
@@ -3145,42 +3251,18 @@ export default function TransactionsPage() {
                             )
                         )
                       }
-                      className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
-                        isDark
-                          ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800"
-                          : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
-                      }`}
+                      className="h-8 px-3 text-xs border cursor-pointer"
                     >
                       <ChevronLeft className="w-3 h-3 mr-1" />
                       Prev
                     </Button>
 
-                    <span
-                      className={`text-xs font-semibold px-2 tabular-nums ${
-                        isDark
-                          ? "text-slate-500"
-                          : "text-slate-500"
-                      }`}
-                    >
-                      <span className="text-blue-500">
-                        {
-                          safeTransferPage
-                        }
-                      </span>
-
-                      <span
-                        className={
-                          isDark
-                            ? "text-slate-700"
-                            : "text-slate-300"
-                        }
-                      >
-                        {" "}
-                        /{" "}
-                        {
-                          transferTotalPages
-                        }
-                      </span>
+                    <span className="text-xs font-semibold px-2">
+                      {safeTransferPage}{" "}
+                      /{" "}
+                      {
+                        transferTotalPages
+                      }
                     </span>
 
                     <Button
@@ -3199,11 +3281,7 @@ export default function TransactionsPage() {
                             )
                         )
                       }
-                      className={`h-8 px-3 text-xs font-medium disabled:opacity-30 border cursor-pointer disabled:cursor-not-allowed ${
-                        isDark
-                          ? "text-slate-400 hover:text-white hover:bg-slate-800 border-slate-800"
-                          : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
-                      }`}
+                      className="h-8 px-3 text-xs border cursor-pointer"
                     >
                       Next
                       <ChevronRight className="w-3 h-3 ml-1" />
@@ -3216,7 +3294,7 @@ export default function TransactionsPage() {
         </Card>
       )}
 
-      {/* Receipt / Transfer Modals */}
+      {/* MODALS */}
       <ReceiptModal
         tx={viewTx}
         routes={routes}
@@ -3227,13 +3305,16 @@ export default function TransactionsPage() {
       />
 
       <TransferModal
-        transfer={viewTransfer}
+        transfer={
+          viewTransfer
+        }
         onClose={() =>
-          setViewTransfer(null)
+          setViewTransfer(
+            null
+          )
         }
         isDark={isDark}
       />
     </div>
   );
 }
-```
