@@ -453,9 +453,10 @@ function TransferModal({
 export default function TransactionsPage() {
   const { isDark } = useTheme();
 
-  // Three tabs now: Top-up, Fare, and Transfer — each shows its own full set
-  // of columns inline (no need to open the receipt modal to see payment
-  // method, transaction id, or route). Rendered as GCash-style underline
+  // Three tabs now: Top-up, Fare, and Transfer. Fee/VAT/Net Amount
+  // are shown only on the Top-up tab. Fare shows route details instead.
+  // Transaction ID and other details remain available in the receipt modal.
+  // Rendered as GCash-style underline
   // tabs, same treatment as the Reports page tab bar.
   const [activeView, setActiveView] = useState<TxView>("topup");
 
@@ -829,9 +830,13 @@ export default function TransactionsPage() {
                         <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Payment Method</TableHead>
                       )}
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Amount</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fee</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>VAT</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Net Amount</TableHead>
+                      {!isFareView && (
+                        <>
+                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fee</TableHead>
+                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>VAT</TableHead>
+                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Net Amount</TableHead>
+                        </>
+                      )}
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
                     </TableRow>
@@ -839,7 +844,7 @@ export default function TransactionsPage() {
                   <TableBody>
                     {paginatedList.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={12} className="text-center py-32">
+                        <TableCell colSpan={isFareView ? 9 : 11} className="text-center py-32">
                           <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                             <History size={48} className="mb-2" />
                             <p className="text-xs font-semibold uppercase tracking-widest">No records found</p>
@@ -898,23 +903,25 @@ export default function TransactionsPage() {
                             }`}>
                               {isFareView ? "−" : "+"}₱{formatAmount(Number(tx.amount))}
                             </TableCell>
-                            <TableCell className={`text-xs font-medium tabular-nums ${
-                              isDark ? "text-slate-300" : "text-slate-700"
-                            }`}>
-                              {formatNullableAmount(getFeeAmount(tx))}
-                            </TableCell>
-                            <TableCell className={`text-xs font-medium tabular-nums ${
-                              isDark ? "text-slate-300" : "text-slate-700"
-                            }`}>
-                              {formatNullableAmount(getVatAmount(tx))}
-                            </TableCell>
-                            <TableCell className={`text-sm font-bold tabular-nums ${
-                              isFareView
-                                ? isDark ? "text-red-300" : "text-red-700"
-                                : isDark ? "text-cyan-400" : "text-cyan-700"
-                            }`}>
-                              {formatNullableAmount(getNetAmount(tx))}
-                            </TableCell>
+                            {!isFareView && (
+                              <>
+                                <TableCell className={`text-xs font-medium tabular-nums ${
+                                  isDark ? "text-slate-300" : "text-slate-700"
+                                }`}>
+                                  {formatNullableAmount(getFeeAmount(tx))}
+                                </TableCell>
+                                <TableCell className={`text-xs font-medium tabular-nums ${
+                                  isDark ? "text-slate-300" : "text-slate-700"
+                                }`}>
+                                  {formatNullableAmount(getVatAmount(tx))}
+                                </TableCell>
+                                <TableCell className={`text-sm font-bold tabular-nums ${
+                                  isDark ? "text-cyan-400" : "text-cyan-700"
+                                }`}>
+                                  {formatNullableAmount(getNetAmount(tx))}
+                                </TableCell>
+                              </>
+                            )}
                             <TableCell>
                               <Badge variant="outline" className={`text-[10px] font-semibold ${statusColor(tx.status)}`}>
                                 {tx.status}
