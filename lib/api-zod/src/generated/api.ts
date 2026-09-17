@@ -121,22 +121,31 @@ export const ListTransactionsQueryParams = zod.object({
 
 // ✅ FIXED: id is now string to support 13-digit BIGINT
 export const ListTransactionsResponseItem = zod.object({
+  // BIGINT must stay as string so large PostgreSQL IDs are safe in JavaScript
   id: zod.coerce.string(),
+
   timestamp: zod.coerce.date(),
+
   cardUid: zod.string(),
   fullName: zod.string(),
+
   type: zod.string(),
+
   amount: zod.number(),
+
   status: zod.string(),
 
   payment_method: zod.string().nullable().optional(),
+
   route_id: zod.coerce.number().nullable().optional(),
 
   // Top-up financial fields
+  // These must be NULL for Fare transactions.
   fee_amount: zod.coerce.number().nullable().optional(),
   vat_amount: zod.coerce.number().nullable().optional(),
   net_amount: zod.coerce.number().nullable().optional(),
 });
+
 export const ListTransactionsResponse = zod.array(ListTransactionsResponseItem);
 
 export const CreateTransactionBody = zod.object({

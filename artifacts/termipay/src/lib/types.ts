@@ -30,21 +30,21 @@ export interface CardTransfer {
 }
 
 export type TransactionRecord = {
-  id: number;
+  id: string;
   timestamp: string;
   cardUid?: string;
+  fullName?: string;
   type: string;
   amount: string | number;
   status: string;
   route_id?: number | null;
   payment_method?: string | null;
 
-  // Top-up financial fields
+  // Top-up only
   fee_amount?: string | number | null;
   vat_amount?: string | number | null;
   net_amount?: string | number | null;
 };
-
 export type CardValidationState =
   | { status: "idle" }
   | { status: "checking" }
