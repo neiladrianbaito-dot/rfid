@@ -128,8 +128,14 @@ export const ListTransactionsResponseItem = zod.object({
   type: zod.string(),
   amount: zod.number(),
   status: zod.string(),
+
   payment_method: zod.string().nullable().optional(),
- route_id: zod.coerce.number().nullable().optional(),
+  route_id: zod.coerce.number().nullable().optional(),
+
+  // Top-up financial fields
+  fee_amount: zod.coerce.number().nullable().optional(),
+  vat_amount: zod.coerce.number().nullable().optional(),
+  net_amount: zod.coerce.number().nullable().optional(),
 });
 export const ListTransactionsResponse = zod.array(ListTransactionsResponseItem);
 
