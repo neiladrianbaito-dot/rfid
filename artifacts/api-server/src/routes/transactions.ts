@@ -24,18 +24,23 @@ router.get("/transactions", async (req, res): Promise<void> => {
   if (typeFilter) conditions.push(eq(transactionsTable.type, typeFilter));
   if (statusFilter) conditions.push(eq(transactionsTable.status, statusFilter));
 
-const rows = await db
-  .select({
-    id: sql<string>`${transactionsTable.id}::text`.as("id"),
-    timestamp: transactionsTable.timestamp,
-    cardUid: transactionsTable.cardUid,
-    fullName: sql<string>`COALESCE(${usersTable.fullName}, 'Unknown')`.as("full_name"),
-    type: transactionsTable.type,
-    amount: transactionsTable.amount,
-    status: transactionsTable.status,
-    payment_method: transactionsTable.payment_method,
-    route_id: transactionsTable.routeId, // ✅ DAGDAG ITO
-  })
+  const rows = await db
+    .select({
+      id: sql<string>`${transactionsTable.id}::text`.as("id"),
+      timestamp: transactionsTable.timestamp,
+      cardUid: transactionsTable.cardUid,
+      fullName: sql<string>`COALESCE(${usersTable.fullName}, 'Unknown')`.as("full_name"),
+      type: transactionsTable.type,
+      amount: transactionsTable.amount,
+      // ✅ dagdag — para makita na ng UI ang breakdown nang hindi
+      // na kailangan ng hiwalay na query
+      feeAmount: transactionsTable.feeAmount,
+      vatAmount: transactionsTable.vatAmount,
+      netAmount: transactionsTable.netAmount,
+      status: transactionsTable.status,
+      payment_method: transactionsTable.payment_method,
+      route_id: transactionsTable.routeId,
+    })
     .from(transactionsTable)
     .leftJoin(usersTable, eq(transactionsTable.cardUid, usersTable.cardUid))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -44,6 +49,9 @@ const rows = await db
   let result = rows.map((r) => ({
     ...r,
     amount: Number(r.amount),
+    feeAmount: r.feeAmount !== null ? Number(r.feeAmount) : null,
+    vatAmount: r.vatAmount !== null ? Number(r.vatAmount) : null,
+    netAmount: r.netAmount !== null ? Number(r.netAmount) : null,
   }));
 
   if (search) {
@@ -59,6 +67,18 @@ const rows = await db
 });
 
 // --- POST TRANSACTION ---
+// ✅ FIXED: this route now ONLY inserts the row. It used to also
+// manually add/subtract `amount` (the GROSS amount) from
+// usersTable.balance right here — that ran on top of the DB's
+// own trg_handle_topup_balance_update AFTER INSERT trigger,
+// which credits net_amount. Result: every top-up was credited
+// TWICE (once gross by Express, once net by the trigger), which
+// is why balances looked inflated/wrong compared to what the
+// history table showed.
+//
+// The DB triggers (compute_topup_fees + handle_topup_balance_update)
+// are now the ONLY place balance math happens. Express just reads
+// back the row (with fees) that the DB computed.
 router.post("/transactions", async (req, res): Promise<void> => {
   const parsed = CreateTransactionBody.safeParse(req.body);
   if (!parsed.success) {
@@ -69,46 +89,31 @@ router.post("/transactions", async (req, res): Promise<void> => {
   const { cardUid, type, amount, status } = parsed.data;
 
   try {
-    const txResult = await db.transaction(async (tx) => {
-      const [newTx] = await tx
-        .insert(transactionsTable)
-        .values({
-          cardUid,
-          type,
-          amount: String(amount),
-          status,
-        })
-        .returning({
-          // ✅ FIXED: Cast id to text on insert returning
-          id: sql<string>`${transactionsTable.id}::text`,
-          timestamp: transactionsTable.timestamp,
-          cardUid: transactionsTable.cardUid,
-          type: transactionsTable.type,
-          amount: transactionsTable.amount,
-          status: transactionsTable.status,
-          payment_method: transactionsTable.payment_method, // ✅ dagdag
-        });
+    const [newTx] = await db
+      .insert(transactionsTable)
+      .values({
+        cardUid,
+        type,
+        amount: String(amount),
+        status,
+      })
+      .returning({
+        id: sql<string>`${transactionsTable.id}::text`,
+        timestamp: transactionsTable.timestamp,
+        cardUid: transactionsTable.cardUid,
+        type: transactionsTable.type,
+        amount: transactionsTable.amount,
+        feeAmount: transactionsTable.feeAmount,
+        vatAmount: transactionsTable.vatAmount,
+        netAmount: transactionsTable.netAmount,
+        status: transactionsTable.status,
+        payment_method: transactionsTable.payment_method,
+      });
 
-      if (status === "Success") {
-        if (type === "Top-up") {
-          await tx
-            .update(usersTable)
-            .set({
-              balance: sql`CAST(${usersTable.balance} AS NUMERIC) + CAST(${String(amount)} AS NUMERIC)`,
-              gcashLoadedTotal: sql`CAST(${usersTable.gcashLoadedTotal} AS NUMERIC) + CAST(${String(amount)} AS NUMERIC)`,
-            })
-            .where(eq(usersTable.cardUid, cardUid));
-        } else if (type === "Fare") {
-          await tx
-            .update(usersTable)
-            .set({
-              balance: sql`CAST(${usersTable.balance} AS NUMERIC) - CAST(${String(amount)} AS NUMERIC)`,
-            })
-            .where(eq(usersTable.cardUid, cardUid));
-        }
-      }
-      return newTx;
-    });
+    // No manual balance update here anymore — trg_compute_topup_fees
+    // (BEFORE INSERT) and trg_handle_topup_balance_update (AFTER
+    // INSERT) already handled fee computation and crediting inside
+    // the same INSERT statement, atomically.
 
     const [user] = await db
       .select()
@@ -116,13 +121,16 @@ router.post("/transactions", async (req, res): Promise<void> => {
       .where(eq(usersTable.cardUid, cardUid));
 
     res.status(201).json({
-      id: txResult.id, // ✅ already string
-      timestamp: txResult.timestamp,
-      cardUid: txResult.cardUid,
+      id: newTx.id,
+      timestamp: newTx.timestamp,
+      cardUid: newTx.cardUid,
       fullName: user?.fullName || "Unknown",
-      type: txResult.type,
-      amount: Number(txResult.amount),
-      status: txResult.status,
+      type: newTx.type,
+      amount: Number(newTx.amount),
+      feeAmount: newTx.feeAmount !== null ? Number(newTx.feeAmount) : null,
+      vatAmount: newTx.vatAmount !== null ? Number(newTx.vatAmount) : null,
+      netAmount: newTx.netAmount !== null ? Number(newTx.netAmount) : null,
+      status: newTx.status,
     });
   } catch (error) {
     console.error("POST Transaction Error:", error);
@@ -131,8 +139,15 @@ router.post("/transactions", async (req, res): Promise<void> => {
 });
 
 // --- PATCH TRANSACTION ---
+// ✅ FIXED: no more manual "reverse OLD effect / apply NEW effect"
+// balance math here. That logic used gross `amount` too, so an
+// edited top-up would double-count against the trigger-based
+// system the same way POST did. Balance reversal + reapplication
+// on UPDATE is now handled entirely by
+// trg_handle_transaction_update_reversal (see fix_transactions_triggers.sql)
+// using net_amount, which the BEFORE UPDATE fee trigger recomputes
+// in the same statement.
 router.patch("/transactions/:id", async (req, res): Promise<void> => {
-  // ✅ FIXED: id is string now, no need to coerce to number
   const params = UpdateTransactionParams.safeParse({
     id: req.params.id,
   });
@@ -160,96 +175,60 @@ router.patch("/transactions/:id", async (req, res): Promise<void> => {
   }
 
   try {
-    const patchResult = await db.transaction(async (tx) => {
-      const [oldTx] = await tx
-        .select()
-        .from(transactionsTable)
-        // ✅ FIXED: Cast string id back to bigint for DB query
-        .where(eq(transactionsTable.id, sql`${params.data.id}::bigint`));
-      if (!oldTx) throw new Error("TX_NOT_FOUND");
+    const updateData: Record<string, any> = {};
+    if (parsed.data.type !== undefined) updateData.type = parsed.data.type;
+    if (parsed.data.amount !== undefined) updateData.amount = String(parsed.data.amount);
+    if (parsed.data.status !== undefined) updateData.status = parsed.data.status;
 
-      const updateData: Record<string, any> = {};
-      if (parsed.data.type !== undefined) updateData.type = parsed.data.type;
-      if (parsed.data.amount !== undefined) updateData.amount = String(parsed.data.amount);
-      if (parsed.data.status !== undefined) updateData.status = parsed.data.status;
+    const [updated] = await db
+      .update(transactionsTable)
+      .set(updateData)
+      .where(eq(transactionsTable.id, sql`${params.data.id}::bigint`))
+      .returning({
+        id: sql<string>`${transactionsTable.id}::text`,
+        timestamp: transactionsTable.timestamp,
+        cardUid: transactionsTable.cardUid,
+        type: transactionsTable.type,
+        amount: transactionsTable.amount,
+        feeAmount: transactionsTable.feeAmount,
+        vatAmount: transactionsTable.vatAmount,
+        netAmount: transactionsTable.netAmount,
+        status: transactionsTable.status,
+      });
 
-      const [newTx] = await tx
-        .update(transactionsTable)
-        .set(updateData)
-        .where(eq(transactionsTable.id, sql`${params.data.id}::bigint`))
-        .returning({
-          // ✅ FIXED: Cast id to text on returning
-          id: sql<string>`${transactionsTable.id}::text`,
-          timestamp: transactionsTable.timestamp,
-          cardUid: transactionsTable.cardUid,
-          type: transactionsTable.type,
-          amount: transactionsTable.amount,
-          status: transactionsTable.status,
-        });
-
-      // 1. Reverse OLD effect
-      if (oldTx.status === "Success") {
-        if (oldTx.type === "Fare") {
-          await tx.update(usersTable)
-            .set({ balance: sql`CAST(${usersTable.balance} AS NUMERIC) + CAST(${oldTx.amount} AS NUMERIC)` })
-            .where(eq(usersTable.cardUid, oldTx.cardUid));
-        } else if (oldTx.type === "Top-up") {
-          await tx.update(usersTable)
-            .set({
-              balance: sql`CAST(${usersTable.balance} AS NUMERIC) - CAST(${oldTx.amount} AS NUMERIC)`,
-              gcashLoadedTotal: sql`CAST(${usersTable.gcashLoadedTotal} AS NUMERIC) - CAST(${oldTx.amount} AS NUMERIC)`,
-            })
-            .where(eq(usersTable.cardUid, oldTx.cardUid));
-        }
-      }
-
-      // 2. Apply NEW effect
-      if (newTx.status === "Success") {
-        if (newTx.type === "Fare") {
-          await tx.update(usersTable)
-            .set({ balance: sql`CAST(${usersTable.balance} AS NUMERIC) - CAST(${newTx.amount} AS NUMERIC)` })
-            .where(eq(usersTable.cardUid, newTx.cardUid));
-        } else if (newTx.type === "Top-up") {
-          await tx.update(usersTable)
-            .set({
-              balance: sql`CAST(${usersTable.balance} AS NUMERIC) + CAST(${newTx.amount} AS NUMERIC)`,
-              gcashLoadedTotal: sql`CAST(${usersTable.gcashLoadedTotal} AS NUMERIC) + CAST(${newTx.amount} AS NUMERIC)`,
-            })
-            .where(eq(usersTable.cardUid, newTx.cardUid));
-        }
-      }
-      return newTx;
-    });
+    if (!updated) {
+      res.status(404).json({ error: "Transaction not found" });
+      return;
+    }
 
     const [user] = await db
       .select()
       .from(usersTable)
-      .where(eq(usersTable.cardUid, patchResult.cardUid));
+      .where(eq(usersTable.cardUid, updated.cardUid));
 
     res.json(
       UpdateTransactionResponse.parse({
-        id: patchResult.id, // ✅ already string
-        timestamp: patchResult.timestamp,
-        cardUid: patchResult.cardUid,
+        id: updated.id,
+        timestamp: updated.timestamp,
+        cardUid: updated.cardUid,
         fullName: user?.fullName || "Unknown",
-        type: patchResult.type,
-        amount: Number(patchResult.amount),
-        status: patchResult.status,
+        type: updated.type,
+        amount: Number(updated.amount),
+        status: updated.status,
       }),
     );
   } catch (error) {
-    if (error instanceof Error && error.message === "TX_NOT_FOUND") {
-      res.status(404).json({ error: "Transaction not found" });
-      return;
-    }
     console.error("PATCH Transaction Error:", error);
     res.status(500).json({ error: "Update failed" });
   }
 });
 
 // --- DELETE TRANSACTION ---
+// ✅ FIXED: no more manual balance reversal here — that used gross
+// `amount` too, duplicating trg_handle_transaction_delete_reversal
+// (which correctly reverses net_amount for top-ups). Express now
+// just deletes; the DB handles reversal atomically via the trigger.
 router.delete("/transactions/:id", async (req, res): Promise<void> => {
-  // ✅ FIXED: id is string now
   const params = DeleteTransactionParams.safeParse({
     id: req.params.id,
   });
@@ -259,35 +238,10 @@ router.delete("/transactions/:id", async (req, res): Promise<void> => {
   }
 
   try {
-    const deleted = await db.transaction(async (tx) => {
-      const [txToDelete] = await tx
-        .select()
-        .from(transactionsTable)
-        // ✅ FIXED: Cast string id back to bigint for DB query
-        .where(eq(transactionsTable.id, sql`${params.data.id}::bigint`));
-      if (!txToDelete) return false;
-
-      if (txToDelete.status === "Success") {
-        if (txToDelete.type === "Fare") {
-          await tx.update(usersTable)
-            .set({ balance: sql`CAST(${usersTable.balance} AS NUMERIC) + CAST(${txToDelete.amount} AS NUMERIC)` })
-            .where(eq(usersTable.cardUid, txToDelete.cardUid));
-        } else if (txToDelete.type === "Top-up") {
-          await tx.update(usersTable)
-            .set({
-              balance: sql`CAST(${usersTable.balance} AS NUMERIC) - CAST(${txToDelete.amount} AS NUMERIC)`,
-              gcashLoadedTotal: sql`CAST(${usersTable.gcashLoadedTotal} AS NUMERIC) - CAST(${txToDelete.amount} AS NUMERIC)`,
-            })
-            .where(eq(usersTable.cardUid, txToDelete.cardUid));
-        }
-      }
-
-      await tx
-        .delete(transactionsTable)
-        // ✅ FIXED: Cast string id back to bigint for DB query
-        .where(eq(transactionsTable.id, sql`${params.data.id}::bigint`));
-      return true;
-    });
+    const [deleted] = await db
+      .delete(transactionsTable)
+      .where(eq(transactionsTable.id, sql`${params.data.id}::bigint`))
+      .returning({ id: transactionsTable.id });
 
     if (!deleted) {
       res.status(404).json({ error: "Transaction not found" });
