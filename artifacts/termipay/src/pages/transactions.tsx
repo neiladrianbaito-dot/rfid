@@ -127,6 +127,52 @@ function getPaymentMethodLogo(method?: string | null): string | null {
   return null;
 }
 
+// ── Transaction financial helpers ───────────────────────────────────────────
+// These are module-level because both the table and ReceiptModal use them.
+function formatAmount(amount: number): string {
+  return Math.abs(amount).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function getFeeAmount(tx: any): number | null {
+  const value = tx?.fee_amount ?? tx?.feeAmount;
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getVatAmount(tx: any): number | null {
+  const value = tx?.vat_amount ?? tx?.vatAmount;
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getNetAmount(tx: any): number | null {
+  const value = tx?.net_amount ?? tx?.netAmount;
+  if (value != null && value !== "") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  const amount = Number(tx?.amount);
+  const fee = getFeeAmount(tx);
+  const vat = getVatAmount(tx);
+
+  if (Number.isFinite(amount) && fee != null && vat != null) {
+    return amount - fee - vat;
+  }
+  return null;
+}
+
+function formatNullableAmount(value: number | null): string {
+  return value == null || !Number.isFinite(value)
+    ? "—"
+    : `₱${formatAmount(value)}`;
+}
+
 // ── Receipt Modal ─────────────────────────────────────────────────────────────
 
 function ReceiptModal({
@@ -453,10 +499,9 @@ function TransferModal({
 export default function TransactionsPage() {
   const { isDark } = useTheme();
 
-  // Three tabs now: Top-up, Fare, and Transfer. Fee/VAT/Net Amount
-  // are shown only on the Top-up tab. Fare shows route details instead.
-  // Transaction ID and other details remain available in the receipt modal.
-  // Rendered as GCash-style underline
+  // Three tabs now: Top-up, Fare, and Transfer — each shows its own full set
+  // of columns inline (no need to open the receipt modal to see payment
+  // method, transaction id, or route). Rendered as GCash-style underline
   // tabs, same treatment as the Reports page tab bar.
   const [activeView, setActiveView] = useState<TxView>("topup");
 
@@ -465,6 +510,15 @@ export default function TransactionsPage() {
   const [viewTx, setViewTx] = useState<any>(null);
   const [page, setPage] = useState(1);
   const [routes, setRoutes] = useState<FareRoute[]>([]);
+
+  // Financial fields are loaded directly from public.transactions as a safety
+  // net in case the generated API client has not yet been regenerated with
+  // fee_amount / vat_amount / net_amount. These values are DB values.
+  const [financialById, setFinancialById] = useState<Record<string, {
+    fee_amount: number | null;
+    vat_amount: number | null;
+    net_amount: number | null;
+  }>>({});
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [newRowId, setNewRowId] = useState<number | null>(null);
@@ -547,6 +601,57 @@ export default function TransactionsPage() {
   useRealtimeRefetch(["transactions"], () => { refetchTransactions(); });
 
   const rawTransactionList = Array.isArray(transactions) ? transactions : [];
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadFinancialFields = async () => {
+      const ids = rawTransactionList
+        .map((tx: any) => tx?.id)
+        .filter((id: any) => id != null)
+        .map((id: any) => Number(id))
+        .filter((id: number) => Number.isFinite(id));
+
+      if (ids.length === 0) {
+        setFinancialById({});
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("id, fee_amount, vat_amount, net_amount")
+        .in("id", ids);
+
+      if (cancelled) return;
+
+      if (error) {
+        console.warn("Unable to load transaction fee/VAT/net fields:", error.message);
+        return;
+      }
+
+      const next: Record<string, {
+        fee_amount: number | null;
+        vat_amount: number | null;
+        net_amount: number | null;
+      }> = {};
+
+      for (const row of data ?? []) {
+        next[String(row.id)] = {
+          fee_amount: row.fee_amount == null ? null : Number(row.fee_amount),
+          vat_amount: row.vat_amount == null ? null : Number(row.vat_amount),
+          net_amount: row.net_amount == null ? null : Number(row.net_amount),
+        };
+      }
+
+      setFinancialById(next);
+    };
+
+    loadFinancialFields();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [transactions]);
 
   // Split once into the two type-based tabs. Memoized so these arrays keep
   // the same reference across re-renders when nothing relevant changed —
@@ -647,45 +752,6 @@ export default function TransactionsPage() {
       default:          return "bg-amber-50 text-amber-600 border-amber-200";
     }
   };
-
-  const formatAmount = (amount: number) =>
-    Math.abs(amount).toLocaleString("en-PH", {
-      minimumFractionDigits: 2, maximumFractionDigits: 2,
-    });
-
-  // Transaction financial fields come directly from public.transactions.
-  // Keep these helpers tolerant of either snake_case or camelCase API output.
-  const getFeeAmount = (tx: any): number | null => {
-    const value = tx?.fee_amount ?? tx?.feeAmount;
-    return value == null || value === "" ? null : Number(value);
-  };
-
-  const getVatAmount = (tx: any): number | null => {
-    const value = tx?.vat_amount ?? tx?.vatAmount;
-    return value == null || value === "" ? null : Number(value);
-  };
-
-  const getNetAmount = (tx: any): number | null => {
-    const value = tx?.net_amount ?? tx?.netAmount;
-    if (value != null && value !== "") return Number(value);
-
-    // Fallback only when the API does not provide net_amount but does provide
-    // the components. The database value remains the source of truth.
-    const amount = Number(tx?.amount);
-    const fee = getFeeAmount(tx);
-    const vat = getVatAmount(tx);
-
-    if (Number.isFinite(amount) && fee != null && vat != null) {
-      return amount - fee - vat;
-    }
-
-    return null;
-  };
-
-  const formatNullableAmount = (value: number | null) =>
-    value == null || !Number.isFinite(value)
-      ? "—"
-      : `₱${formatAmount(value)}`;
 
   const isFareView = activeView === "fare";
   const isTransferView = activeView === "transfers";
@@ -852,7 +918,8 @@ export default function TransactionsPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      paginatedList.map((tx: any) => {
+                      paginatedList.map((rawTx: any) => {
+                        const tx = { ...rawTx, ...(financialById[String(rawTx?.id)] ?? {}) };
                         const matchedRoute = isFareView && tx.route_id
                           ? routes.find((r) => r.id === tx.route_id) ?? null
                           : null;
