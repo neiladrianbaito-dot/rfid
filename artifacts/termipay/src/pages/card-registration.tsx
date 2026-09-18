@@ -6,6 +6,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -144,6 +145,7 @@ const INITIAL_FORM = {
   dob: "",
   contactNumber: "",
   type: "Regular",
+  streetAddress: "",
   regionCode: "",
   regionName: "",
   provinceCode: "",
@@ -514,6 +516,7 @@ export default function CardRegistrationPage() {
           contactNumber: form.contactNumber,
           type: form.type,
           address: {
+            streetAddress: form.streetAddress.trim() || null,
             region: form.regionName,
             regionCode: form.regionCode,
             province: form.provinceName || null,
@@ -929,6 +932,26 @@ export default function CardRegistrationPage() {
                 <div className={`flex items-center gap-2 text-xs font-bold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   <MapPin size={14} className="text-blue-500" />
                   Address
+                </div>
+
+                {/* Detailed address — house no. / street / purok / subdivision */}
+                <div className="space-y-2">
+                  <Label htmlFor="streetAddress" className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                    House No. / Street / Purok / Subdivision
+                    <span className={`ml-2 font-normal ${isDark ? "text-slate-500" : "text-slate-400"}`}>(optional)</span>
+                  </Label>
+                  <Textarea
+                    id="streetAddress"
+                    rows={2}
+                    className={`resize-none focus-visible:ring-blue-500 ${
+                      isDark
+                        ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600"
+                        : "bg-white border-slate-200 text-slate-900 placeholder:text-slate-400"
+                    }`}
+                    placeholder="e.g. Blk 4 Lot 12, Purok Mabini, Sitio Malaya"
+                    value={form.streetAddress}
+                    onChange={(e) => setForm((f) => ({ ...f, streetAddress: e.target.value }))}
+                  />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
