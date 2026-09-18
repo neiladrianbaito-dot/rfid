@@ -434,6 +434,12 @@ export default function UserManagementPage() {
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
+    const editLabelCls = `text-[11px] font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`;
+  const editHeadingCls = `text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`;
+  const editInputCls = `h-9 text-sm ${isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"}`;
+  const editTriggerCls = `h-9 w-full text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`;
+  const editContentCls = isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700";
+ 
 
   useEffect(() => {
     let cancelled = false;
@@ -831,6 +837,8 @@ export default function UserManagementPage() {
     setRenewUser(null);
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
   };
+
+  
 
   // ✅ Opens the transfer-balance dialog for a given user (the lost/stolen card).
   // 🚫➕ GUARD: a card with zero balance has nothing to transfer.
@@ -1543,246 +1551,306 @@ export default function UserManagementPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Dialog */}
+      
+// ═══════════════════════════════════════════════════════════════════════
+// STEP 2 — Replace the WHOLE existing block from
+//            {/* Edit Dialog */}
+//          down to (but NOT including)
+//            {/* ✅ Renew Confirmation Dialog ... */}
+//          with everything below.
+// ═══════════════════════════════════════════════════════════════════════
+ 
+      {/* Edit Dialog — responsive: 2 columns on md+ so nothing needs scrolling.
+          Below md it stacks; the body only scrolls as a last-resort fallback
+          when the screen is physically too short (e.g. small phones). */}
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className={`sm:max-w-xl [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
-          <DialogHeader>
+        <DialogContent
+          className={`flex flex-col gap-3 w-[95vw] sm:max-w-4xl max-h-[96dvh] p-4 sm:p-5 overflow-hidden [&>button]:cursor-pointer ${
+            isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+          }`}
+        >
+          <DialogHeader className="flex-none">
             <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
               <Pencil size={18} /> Update User
             </DialogTitle>
           </DialogHeader>
-
-          <div className="grid grid-cols-2 gap-4 py-4 max-h-[65vh] overflow-y-auto pr-1">
-            {/* Personal Information */}
-            <div className="col-span-2">
-              <h3 className={`text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>Personal Information</h3>
-            </div>
-
-            <div className="space-y-2 col-span-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Full Name</Label>
-              <Input
-                value={editForm.fullName}
-                onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
-                className={`text-sm font-medium ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Date of Birth</Label>
-              <Input
-                type="date"
-                value={editForm.dateOfBirth}
-                onChange={(e) => setEditForm({ ...editForm, dateOfBirth: e.target.value })}
-                className={`text-sm ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                <Phone size={10} /> Contact Number
-              </Label>
-              <Input
-                value={editForm.contactNumber}
-                onChange={(e) => setEditForm({ ...editForm, contactNumber: e.target.value })}
-                className={`text-sm font-mono ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
-              />
-            </div>
-
-            {/* ID IMAGE — editable for Student / Senior / PWD */}
-            {String(editForm.type).toLowerCase() !== "regular" && (
-              <div className="col-span-2 space-y-3 pt-2">
-                <h3 className={`text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>ID Verification</h3>
-                <div className={`rounded-xl border p-4 ${isDark ? "border-slate-800 bg-slate-950/60" : "border-slate-200 bg-slate-50"}`}>
-                  <div className="flex flex-col sm:flex-row gap-4 items-start">
-                    <div className="relative shrink-0">
-                      {(editIdImagePreview || editUser?.idImagePath || editUser?.id_image_path) ? (
-                        <>
-                          <img
-                            src={editIdImagePreview || editUser?.idImagePath || editUser?.id_image_path}
-                            alt="Current ID"
-                            className="h-40 w-64 rounded-lg border object-cover"
-                          />
-                          {editIdImagePreview && (
-                            <button type="button" onClick={clearEditImage} disabled={isUploadingEditImage || updateMutation.isPending} className={`absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm ${isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
-                              <X className="h-4 w-4" />
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <div className={`flex h-40 w-64 items-center justify-center rounded-lg border-2 border-dashed ${isDark ? "border-slate-700 text-slate-500" : "border-slate-300 text-slate-400"}`}>
-                          <div className="text-center"><CreditCard className="mx-auto mb-2 h-8 w-8 opacity-50" /><span className="text-xs">No ID image uploaded</span></div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 space-y-2">
-                      <p className="text-sm font-medium">{editForm.type} ID Image</p>
-                      <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Upload a replacement ID image. JPG, PNG, or WEBP up to 5 MB.</p>
-                      <input ref={editFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleEditImageSelect} disabled={isUploadingEditImage || updateMutation.isPending} />
-                      <Button type="button" variant="outline" onClick={() => editFileInputRef.current?.click()} disabled={isUploadingEditImage || updateMutation.isPending} className="gap-2">
-                        {isUploadingEditImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                        {editIdImageFile ? "Change Image" : "Upload / Change ID Image"}
-                      </Button>
-                      {editIdImageFile && <div className={`rounded-md px-3 py-2 text-xs ${isDark ? "bg-slate-800 text-slate-300" : "bg-white text-slate-600"}`}>{editIdImageFile.name} • {(editIdImageFile.size / 1024 / 1024).toFixed(2)} MB</div>}
-                    </div>
+ 
+          {/* Body — no fixed max-h; it just takes the space available. */}
+          <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+              {/* ───────── Personal Information ───────── */}
+              <section className="space-y-3 min-w-0">
+                <h3 className={editHeadingCls}>Personal Information</h3>
+ 
+                <div className="space-y-1.5 min-w-0">
+                  <Label className={editLabelCls}>Full Name</Label>
+                  <Input
+                    value={editForm.fullName}
+                    onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
+                    className={`${editInputCls} font-medium`}
+                  />
+                </div>
+ 
+                <div className="space-y-1.5 min-w-0">
+                  <Label className={editLabelCls}>Date of Birth</Label>
+                  <Input
+                    type="date"
+                    value={editForm.dateOfBirth}
+                    onChange={(e) => setEditForm({ ...editForm, dateOfBirth: e.target.value })}
+                    className={editInputCls}
+                  />
+                </div>
+ 
+                <div className="space-y-1.5 min-w-0">
+                  <Label className={`${editLabelCls} flex items-center gap-1`}>
+                    <Phone size={10} /> Contact Number
+                  </Label>
+                  <Input
+                    value={editForm.contactNumber}
+                    onChange={(e) => setEditForm({ ...editForm, contactNumber: e.target.value })}
+                    className={`${editInputCls} font-mono`}
+                  />
+                </div>
+              </section>
+ 
+              {/* ───────── Address ───────── */}
+              <section className="space-y-3 min-w-0">
+                <h3 className={editHeadingCls}>Address</h3>
+ 
+                <div className="grid grid-cols-6 gap-3">
+                  <div className="space-y-1.5 col-span-4 min-w-0">
+                    <Label className={editLabelCls}>Street Address</Label>
+                    <Input
+                      value={editForm.streetAddress}
+                      onChange={(e) => setEditForm({ ...editForm, streetAddress: e.target.value })}
+                      placeholder="Enter street address"
+                      className={editInputCls}
+                    />
+                  </div>
+ 
+                  <div className="space-y-1.5 col-span-2 min-w-0">
+                    <Label className={editLabelCls}>ZIP Code</Label>
+                    <Input
+                      value={editForm.zipCode}
+                      onChange={(e) => setEditForm({ ...editForm, zipCode: e.target.value.replace(/[^0-9]/g, "").slice(0, 4) })}
+                      inputMode="numeric"
+                      maxLength={4}
+                      placeholder="ZIP"
+                      className={`${editInputCls} font-mono`}
+                    />
+                  </div>
+ 
+                  <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
+                    <Label className={editLabelCls}>Region</Label>
+                    <Select
+                      value={editForm.regionCode || undefined}
+                      onValueChange={(code) => {
+                        const selected = REGION_OPTIONS.find((r) => r.code === code);
+                        setEditForm({
+                          ...editForm,
+                          regionCode: code,
+                          regionName: selected?.name || "",
+                          provinceCode: "",
+                          provinceName: "",
+                          cityCode: "",
+                          cityName: "",
+                          barangayCode: "",
+                          barangayName: "",
+                        });
+                        setProvinceOptions([]);
+                        setCityOptions([]);
+                        setBarangayOptions([]);
+                      }}
+                    >
+                      <SelectTrigger className={editTriggerCls}>
+                        <SelectValue placeholder="Select region" />
+                      </SelectTrigger>
+                      <SelectContent className={editContentCls}>
+                        {REGION_OPTIONS.map((region) => (
+                          <SelectItem key={region.code} value={region.code} className="cursor-pointer">
+                            {region.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+ 
+                  <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
+                    <Label className={editLabelCls}>Province</Label>
+                    <Select
+                      value={editForm.provinceCode || undefined}
+                      disabled={!editForm.regionCode || isLoadingAddressOptions}
+                      onValueChange={(code) => {
+                        const selected = provinceOptions.find((p) => p.code === code);
+                        setEditForm({
+                          ...editForm,
+                          provinceCode: code,
+                          provinceName: selected?.name || "",
+                          cityCode: "",
+                          cityName: "",
+                          barangayCode: "",
+                          barangayName: "",
+                        });
+                        setCityOptions([]);
+                        setBarangayOptions([]);
+                      }}
+                    >
+                      <SelectTrigger className={editTriggerCls}>
+                        <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select province"} />
+                      </SelectTrigger>
+                      <SelectContent className={editContentCls}>
+                        {provinceOptions.map((province) => (
+                          <SelectItem key={province.code} value={province.code} className="cursor-pointer">
+                            {province.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+ 
+                  <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
+                    <Label className={editLabelCls}>City / Municipality</Label>
+                    <Select
+                      value={editForm.cityCode || undefined}
+                      disabled={!editForm.provinceCode || isLoadingAddressOptions}
+                      onValueChange={(code) => {
+                        const selected = cityOptions.find((c) => c.code === code);
+                        setEditForm({
+                          ...editForm,
+                          cityCode: code,
+                          cityName: selected?.name || "",
+                          barangayCode: "",
+                          barangayName: "",
+                        });
+                        setBarangayOptions([]);
+                      }}
+                    >
+                      <SelectTrigger className={editTriggerCls}>
+                        <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select city"} />
+                      </SelectTrigger>
+                      <SelectContent className={editContentCls}>
+                        {cityOptions.map((city) => (
+                          <SelectItem key={city.code} value={city.code} className="cursor-pointer">
+                            {city.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+ 
+                  <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
+                    <Label className={editLabelCls}>Barangay</Label>
+                    <Select
+                      value={editForm.barangayCode || undefined}
+                      disabled={!editForm.cityCode || isLoadingAddressOptions}
+                      onValueChange={(code) => {
+                        const selected = barangayOptions.find((b) => b.code === code);
+                        setEditForm({
+                          ...editForm,
+                          barangayCode: code,
+                          barangayName: selected?.name || "",
+                        });
+                      }}
+                    >
+                      <SelectTrigger className={editTriggerCls}>
+                        <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select barangay"} />
+                      </SelectTrigger>
+                      <SelectContent className={editContentCls}>
+                        {barangayOptions.map((barangay) => (
+                          <SelectItem key={barangay.code} value={barangay.code} className="cursor-pointer">
+                            {barangay.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* Address */}
-            <div className="col-span-2 pt-2">
-              <h3 className={`text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>Address</h3>
-            </div>
-
-            <div className="space-y-2 col-span-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Street Address</Label>
-              <Input
-                value={editForm.streetAddress}
-                onChange={(e) => setEditForm({ ...editForm, streetAddress: e.target.value })}
-                placeholder="Enter street address"
-                className={`text-sm ${isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"}`}
-              />
-            </div>
-
-            <div className="space-y-2 col-span-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Region</Label>
-              <Select
-                value={editForm.regionCode || undefined}
-                onValueChange={(code) => {
-                  const selected = REGION_OPTIONS.find((r) => r.code === code);
-                  setEditForm({
-                    ...editForm,
-                    regionCode: code,
-                    regionName: selected?.name || "",
-                    provinceCode: "",
-                    provinceName: "",
-                    cityCode: "",
-                    cityName: "",
-                    barangayCode: "",
-                    barangayName: "",
-                  });
-                  setProvinceOptions([]);
-                  setCityOptions([]);
-                  setBarangayOptions([]);
-                }}
-              >
-                <SelectTrigger className={`text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
-                  <SelectValue placeholder="Select region" />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                  {REGION_OPTIONS.map((region) => (
-                    <SelectItem key={region.code} value={region.code} className="cursor-pointer">
-                      {region.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Province</Label>
-              <Select
-                value={editForm.provinceCode || undefined}
-                disabled={!editForm.regionCode || isLoadingAddressOptions}
-                onValueChange={(code) => {
-                  const selected = provinceOptions.find((p) => p.code === code);
-                  setEditForm({
-                    ...editForm,
-                    provinceCode: code,
-                    provinceName: selected?.name || "",
-                    cityCode: "",
-                    cityName: "",
-                    barangayCode: "",
-                    barangayName: "",
-                  });
-                  setCityOptions([]);
-                  setBarangayOptions([]);
-                }}
-              >
-                <SelectTrigger className={`text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
-                  <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select province"} />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                  {provinceOptions.map((province) => (
-                    <SelectItem key={province.code} value={province.code} className="cursor-pointer">
-                      {province.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>City / Municipality</Label>
-              <Select
-                value={editForm.cityCode || undefined}
-                disabled={!editForm.provinceCode || isLoadingAddressOptions}
-                onValueChange={(code) => {
-                  const selected = cityOptions.find((c) => c.code === code);
-                  setEditForm({
-                    ...editForm,
-                    cityCode: code,
-                    cityName: selected?.name || "",
-                    barangayCode: "",
-                    barangayName: "",
-                  });
-                  setBarangayOptions([]);
-                }}
-              >
-                <SelectTrigger className={`text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
-                  <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select city / municipality"} />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                  {cityOptions.map((city) => (
-                    <SelectItem key={city.code} value={city.code} className="cursor-pointer">
-                      {city.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Barangay</Label>
-              <Select
-                value={editForm.barangayCode || undefined}
-                disabled={!editForm.cityCode || isLoadingAddressOptions}
-                onValueChange={(code) => {
-                  const selected = barangayOptions.find((b) => b.code === code);
-                  setEditForm({
-                    ...editForm,
-                    barangayCode: code,
-                    barangayName: selected?.name || "",
-                  });
-                }}
-              >
-                <SelectTrigger className={`text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
-                  <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select barangay"} />
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                  {barangayOptions.map((barangay) => (
-                    <SelectItem key={barangay.code} value={barangay.code} className="cursor-pointer">
-                      {barangay.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>ZIP Code</Label>
-              <Input
-                value={editForm.zipCode}
-                onChange={(e) => setEditForm({ ...editForm, zipCode: e.target.value.replace(/[^0-9]/g, "").slice(0, 4) })}
-                inputMode="numeric"
-                maxLength={4}
-                placeholder="ZIP Code"
-                className={`text-sm font-mono ${isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"}`}
-              />
+              </section>
+ 
+              {/* ───────── ID Verification (Student / Senior / PWD only) ─────────
+                  Full-width horizontal strip: image on the left, upload
+                  controls on the right. Image height scales with the viewport
+                  (clamp) and uses object-contain so the WHOLE ID is always
+                  visible — never cropped, never overflowing. */}
+              {String(editForm.type).toLowerCase() !== "regular" && (
+                <section className="space-y-2 min-w-0 md:col-span-2">
+                  <h3 className={editHeadingCls}>ID Verification</h3>
+                  <div className={`rounded-xl border p-3 ${isDark ? "border-slate-800 bg-slate-950/60" : "border-slate-200 bg-slate-50"}`}>
+                    <div className="flex flex-col sm:flex-row gap-4 items-center">
+                      <div className="relative shrink-0 w-full sm:w-56">
+                        {(editIdImagePreview || editUser?.idImagePath || editUser?.id_image_path) ? (
+                          <>
+                            <img
+                              src={editIdImagePreview || editUser?.idImagePath || editUser?.id_image_path}
+                              alt="Current ID"
+                              className={`w-full h-[clamp(96px,18dvh,144px)] rounded-lg border object-contain ${isDark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"}`}
+                            />
+                            {editIdImagePreview && (
+                              <button
+                                type="button"
+                                onClick={clearEditImage}
+                                disabled={isUploadingEditImage || updateMutation.isPending}
+                                aria-label="Remove selected image"
+                                className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border shadow-sm cursor-pointer ${isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700"}`}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <div className={`flex w-full h-[clamp(96px,18dvh,144px)] items-center justify-center rounded-lg border-2 border-dashed ${isDark ? "border-slate-700 text-slate-500" : "border-slate-300 text-slate-400"}`}>
+                            <div className="text-center">
+                              <CreditCard className="mx-auto mb-1 h-6 w-6 opacity-50" />
+                              <span className="text-xs">No ID image uploaded</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+ 
+                      <div className="flex-1 min-w-0 w-full space-y-2">
+                        <div>
+                          <p className="text-sm font-medium">{editForm.type} ID Image</p>
+                          <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                            Upload a replacement ID image. JPG, PNG, or WEBP up to 5 MB.
+                          </p>
+                        </div>
+ 
+                        <input
+                          ref={editFileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleEditImageSelect}
+                          disabled={isUploadingEditImage || updateMutation.isPending}
+                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => editFileInputRef.current?.click()}
+                            disabled={isUploadingEditImage || updateMutation.isPending}
+                            className="h-9 gap-2 cursor-pointer"
+                          >
+                            {isUploadingEditImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                            {editIdImageFile ? "Change Image" : "Upload / Change ID Image"}
+                          </Button>
+ 
+                          {editIdImageFile && (
+                            <div className={`min-w-0 max-w-full truncate rounded-md px-3 py-1.5 text-xs ${isDark ? "bg-slate-800 text-slate-300" : "bg-white text-slate-600 border border-slate-200"}`}>
+                              {editIdImageFile.name} • {(editIdImageFile.size / 1024 / 1024).toFixed(2)} MB
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              )}
             </div>
           </div>
-
-          <DialogFooter className="gap-2">
+ 
+          <DialogFooter className="flex-none gap-2">
             <Button
               variant="ghost"
               onClick={() => setEditUser(null)}
