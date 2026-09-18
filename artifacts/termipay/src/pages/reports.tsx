@@ -183,6 +183,39 @@ function fullNameOf(card?: { full_name?: string | null; fullName?: string | null
   return card?.full_name || card?.fullName || "Unknown";
 }
 
+// ➕ Fee / VAT / Net amount extraction for Top-up transactions — mirrors
+// the exact same logic used on the Transactions page's receipt modal, so
+// the Excel export's Fee / VAT / Net Amount columns always match what's
+// shown on-screen there.
+function getFeeAmount(tx: any): number | null {
+  const value = tx?.fee_amount ?? tx?.feeAmount;
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getVatAmount(tx: any): number | null {
+  const value = tx?.vat_amount ?? tx?.vatAmount;
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getNetAmount(tx: any): number | null {
+  const value = tx?.net_amount ?? tx?.netAmount;
+  if (value != null && value !== "") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  const amount = Number(tx?.amount);
+  const fee = getFeeAmount(tx);
+  const vat = getVatAmount(tx);
+  if (Number.isFinite(amount) && fee != null && vat != null) {
+    return amount - fee - vat;
+  }
+  return null;
+}
+
 // ── date-filter helpers ──
 const MONTH_OPTIONS = [
   { value: "01", label: "January" },
@@ -573,6 +606,16 @@ export default function ReportsPage() {
     };
   }, []);
 
+  // ── 🆕 per-transaction fee_amount / vat_amount / net_amount, fetched
+  // the same way the Transactions page does (these columns aren't part
+  // of the main useListTransactions() response). Merged onto the
+  // transaction list below (enrichedTxList) so the Top-up Excel export
+  // tab can show Fee / VAT / Net Amount columns, exactly like the
+  // Transactions page's receipt modal already does on-screen. ──
+  const [financialById, setFinancialById] = useState<
+    Record<string, { fee_amount: number | null; vat_amount: number | null; net_amount: number | null }>
+  >({});
+
   useRealtimeRefetch(["transactions", "fare_routes", "users"], () => {
     refetchReport();
     refetchTransactions();
@@ -596,6 +639,54 @@ export default function ReportsPage() {
   const txList = React.useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
   const userList = React.useMemo(() => (Array.isArray(users) ? users : []), [users]);
   const routeList = React.useMemo(() => (Array.isArray(routes) ? routes : []), [routes]);
+
+  // ── 🆕 fetch fee_amount / vat_amount / net_amount for every currently
+  // loaded transaction, keyed by id. ──
+  useEffect(() => {
+    let cancelled = false;
+    const loadFinancialFields = async () => {
+      const ids = txList
+        .map((tx: any) => tx?.id)
+        .filter((id: any) => id != null)
+        .map((id: any) => Number(id))
+        .filter((id: number) => Number.isFinite(id));
+      if (ids.length === 0) {
+        setFinancialById({});
+        return;
+      }
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("id, fee_amount, vat_amount, net_amount")
+        .in("id", ids);
+      if (cancelled) return;
+      if (error) {
+        console.warn("Unable to load transaction fee/VAT/net fields:", error.message);
+        return;
+      }
+      const next: Record<string, { fee_amount: number | null; vat_amount: number | null; net_amount: number | null }> = {};
+      for (const row of data ?? []) {
+        next[String(row.id)] = {
+          fee_amount: row.fee_amount == null ? null : Number(row.fee_amount),
+          vat_amount: row.vat_amount == null ? null : Number(row.vat_amount),
+          net_amount: row.net_amount == null ? null : Number(row.net_amount),
+        };
+      }
+      setFinancialById(next);
+    };
+    loadFinancialFields();
+    return () => {
+      cancelled = true;
+    };
+  }, [txList]);
+
+  // ── 🆕 txList with fee_amount / vat_amount / net_amount merged in.
+  // filteredTxList (below) is built from THIS instead of the raw
+  // txList, so filteredFareList / filteredTopupList — and therefore the
+  // Excel export — automatically carry the financial fields too. ──
+  const enrichedTxList = React.useMemo(
+    () => txList.map((tx: any) => ({ ...tx, ...(financialById[String(tx.id)] ?? {}) })),
+    [txList, financialById]
+  );
 
   // ── route_id -> "Origin → Destination" lookup, used to turn the raw
   // routeId on each Fare transaction into a readable route name for the
@@ -811,10 +902,12 @@ export default function ReportsPage() {
 
   // ── filtered transactions (drives the Fare / Top-up export tabs) —
   // unaffected by the calendar fill-in above, since exports should only
-  // ever list actual transaction records, not empty calendar days. ──
+  // ever list actual transaction records, not empty calendar days.
+  // 🆕 Now built from enrichedTxList (txList + fee/vat/net merged in)
+  // so filteredFareList / filteredTopupList carry those fields too. ──
   const filteredTxList = React.useMemo(() => {
-    if (!isFilterActive) return txList;
-    return txList.filter((tx: any) => {
+    if (!isFilterActive) return enrichedTxList;
+    return enrichedTxList.filter((tx: any) => {
       const parts = getTxDateParts(tx);
       if (!parts) return false;
       if (filterYear !== "all" && parts.year !== filterYear) return false;
@@ -822,7 +915,7 @@ export default function ReportsPage() {
       if (filterDay !== "all" && parts.day !== filterDay) return false;
       return true;
     });
-  }, [txList, filterYear, filterMonth, filterDay, isFilterActive]);
+  }, [enrichedTxList, filterYear, filterMonth, filterDay, isFilterActive]);
 
   // Split the filtered transaction list into Fare / Top-up, same rule the
   // Transactions page tabs use.
@@ -1087,7 +1180,10 @@ export default function ReportsPage() {
   // Performance tabs on this page. Discount Analytics and Route Daily now
   // both pull from the FULL zero-filled calendar range (same data the
   // on-screen charts use) instead of only the days that happen to have a
-  // transaction, so no date gets silently dropped from the export. ──
+  // transaction, so no date gets silently dropped from the export.
+  // 🆕 Top-up now also gets Fee / VAT / Net Amount columns, sourced from
+  // filteredTopupList (which now carries fee_amount/vat_amount/net_amount
+  // thanks to enrichedTxList above), matching the Transactions page. ──
   const handleExportExcelLogs = async () => {
     const XLSXStyle = await import("xlsx-js-style" as any);
     const { utils, writeFile } = XLSXStyle;
@@ -1125,21 +1221,46 @@ export default function ReportsPage() {
       return map[key] || { font: "1E293B", fill: "F8FAFC" };
     };
 
-    const txColumns = (signPrefix: string): SheetColumn[] => [
-      { header: "Timestamp", width: 26, get: (tx) => {
-        const ts = tx.timestamp || tx.created_at;
-        return ts ? new Date(ts).toLocaleString("en-PH") : "";
-      }},
-      { header: "Card UID", width: 18, get: (tx) => tx.card_uid || tx.cardUid || "" },
-      { header: "Full Name", width: 24, get: (tx) => tx.full_name || tx.fullName || "" },
-      { header: "Amount (PHP)", width: 18, get: (tx) =>
-        Math.abs(Number(tx.amount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      },
-      { header: "Signed Amount", width: 16, get: (tx) =>
-        `${signPrefix}${Math.abs(Number(tx.amount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      },
-      { header: "Status", width: 14, get: (tx) => tx.status || "" },
-    ];
+    // 🆕 `includeFinancials` adds Fee (PHP) / VAT (PHP) / Net Amount (PHP)
+    // columns between "Signed Amount" and "Status" — used for the Top-up
+    // tab only (Fare rows don't carry fee/VAT data, same as the
+    // Transactions page which only shows these for non-Fare rows).
+    const txColumns = (signPrefix: string, includeFinancials: boolean = false): SheetColumn[] => {
+      const columns: SheetColumn[] = [
+        { header: "Timestamp", width: 26, get: (tx) => {
+          const ts = tx.timestamp || tx.created_at;
+          return ts ? new Date(ts).toLocaleString("en-PH") : "";
+        }},
+        { header: "Card UID", width: 18, get: (tx) => tx.card_uid || tx.cardUid || "" },
+        { header: "Full Name", width: 24, get: (tx) => tx.full_name || tx.fullName || "" },
+        { header: "Amount (PHP)", width: 18, get: (tx) =>
+          Math.abs(Number(tx.amount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        },
+        { header: "Signed Amount", width: 16, get: (tx) =>
+          `${signPrefix}${Math.abs(Number(tx.amount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        },
+      ];
+
+      if (includeFinancials) {
+        columns.push(
+          { header: "Fee (PHP)", width: 16, get: (tx) => {
+            const v = getFeeAmount(tx);
+            return v == null ? "—" : v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          }},
+          { header: "VAT (PHP)", width: 16, get: (tx) => {
+            const v = getVatAmount(tx);
+            return v == null ? "—" : v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          }},
+          { header: "Net Amount (PHP)", width: 18, get: (tx) => {
+            const v = getNetAmount(tx);
+            return v == null ? "—" : v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          }},
+        );
+      }
+
+      columns.push({ header: "Status", width: 14, get: (tx) => tx.status || "" });
+      return columns;
+    };
 
     const transferColumns: SheetColumn[] = [
       { header: "Timestamp", width: 26, get: (t) => new Date(t.created_at).toLocaleString("en-PH") },
@@ -1234,6 +1355,11 @@ export default function ReportsPage() {
       },
     });
 
+    // 🆕 Top-up sheet now passes `true` to txColumns to include the
+    // Fee (PHP) / VAT (PHP) / Net Amount (PHP) columns, and the Status
+    // column moves from index 5 to index 8 to match the new layout:
+    // Timestamp(0) Card UID(1) Full Name(2) Amount(3) Signed Amount(4)
+    // Fee(5) VAT(6) Net Amount(7) Status(8).
     const topupSheet = buildSingleSheet(utils, {
       generatedAt,
       adminName,
@@ -1241,9 +1367,9 @@ export default function ReportsPage() {
       block: {
         title: `TOP-UP — BALANCE LOGS (${filteredTopupList.length})`,
         bandColor: "047857",
-        columns: txColumns("+"),
+        columns: txColumns("+", true),
         rows: filteredTopupList,
-        statusColIndex: 5,
+        statusColIndex: 8,
         statusColorFor,
       },
     });
