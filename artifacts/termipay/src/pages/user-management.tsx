@@ -1516,7 +1516,7 @@ export default function UserManagementPage() {
             );
           })()}
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className={`gap-3 px-7 py-5 border-t ${isDark ? "border-slate-800" : "border-slate-200"}`}>
             <Button
               variant="ghost"
               onClick={() => setPreviewUser(null)}
@@ -1545,14 +1545,14 @@ export default function UserManagementPage() {
 
       {/* Edit Dialog */}
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className={`sm:max-w-xl [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+        <DialogContent className={`w-[96vw] max-w-6xl max-h-[94vh] overflow-hidden p-0 [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
           <DialogHeader>
             <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
               <Pencil size={18} /> Update User
             </DialogTitle>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-4 py-4 max-h-[65vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 gap-6 px-7 py-6 max-h-[76vh] overflow-y-auto pr-3">
             {/* Personal Information */}
             <div className="col-span-2">
               <h3 className={`text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>Personal Information</h3>
@@ -1600,7 +1600,7 @@ export default function UserManagementPage() {
                           <img
                             src={editIdImagePreview || editUser?.idImagePath || editUser?.id_image_path}
                             alt="Current ID"
-                            className="h-40 w-64 rounded-lg border object-cover"
+                            className="h-48 w-80 rounded-lg border object-cover"
                           />
                           {editIdImagePreview && (
                             <button type="button" onClick={clearEditImage} disabled={isUploadingEditImage || updateMutation.isPending} className={`absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm ${isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
@@ -1609,7 +1609,7 @@ export default function UserManagementPage() {
                           )}
                         </>
                       ) : (
-                        <div className={`flex h-40 w-64 items-center justify-center rounded-lg border-2 border-dashed ${isDark ? "border-slate-700 text-slate-500" : "border-slate-300 text-slate-400"}`}>
+                        <div className={`flex h-48 w-80 items-center justify-center rounded-lg border-2 border-dashed ${isDark ? "border-slate-700 text-slate-500" : "border-slate-300 text-slate-400"}`}>
                           <div className="text-center"><CreditCard className="mx-auto mb-2 h-8 w-8 opacity-50" /><span className="text-xs">No ID image uploaded</span></div>
                         </div>
                       )}
