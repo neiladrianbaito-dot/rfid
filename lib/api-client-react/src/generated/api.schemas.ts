@@ -4,6 +4,9 @@
  * Api
  * TermiPay Admin Console API
  * OpenAPI spec version: 0.1.0
+ *
+ * Kept in sync with the zod schemas in api.schemas.ts (the MANUALLY PATCHED
+ * one) and with formatUser() in routes/users.ts.
  */
 export interface HealthStatus {
   status: string;
@@ -29,10 +32,25 @@ export interface User {
   cardUid: string;
   fullName: string;
   contactNumber: string;
+  type: string;
   balance: number;
-  gcashLoadedTotal: number;
   status: string;
   createdAt: string;
+  email?: string | null;
+  expirationDate?: string | null;
+  dateOfBirth?: string | null;
+  streetAddress?: string | null;
+  zipCode?: string | null;
+  regionCode?: string | null;
+  regionName?: string | null;
+  provinceCode?: string | null;
+  provinceName?: string | null;
+  cityCode?: string | null;
+  cityName?: string | null;
+  barangayCode?: string | null;
+  barangayName?: string | null;
+  fullAddress?: string | null;
+  idImagePath?: string | null;
 }
 
 export interface CreateUserBody {
@@ -40,6 +58,20 @@ export interface CreateUserBody {
   fullName: string;
   contactNumber: string;
   initialBalance: number;
+  type?: string;
+  dateOfBirth?: string | null;
+  streetAddress?: string | null;
+  zipCode?: string | null;
+  regionCode?: string | null;
+  regionName?: string | null;
+  provinceCode?: string | null;
+  provinceName?: string | null;
+  cityCode?: string | null;
+  cityName?: string | null;
+  barangayCode?: string | null;
+  barangayName?: string | null;
+  fullAddress?: string | null;
+  idImagePath?: string | null;
 }
 
 export interface UpdateUserBody {
@@ -47,6 +79,20 @@ export interface UpdateUserBody {
   contactNumber?: string;
   balance?: number;
   status?: string;
+  type?: string;
+  dateOfBirth?: string | null;
+  streetAddress?: string | null;
+  zipCode?: string | null;
+  regionCode?: string | null;
+  regionName?: string | null;
+  provinceCode?: string | null;
+  provinceName?: string | null;
+  cityCode?: string | null;
+  cityName?: string | null;
+  barangayCode?: string | null;
+  barangayName?: string | null;
+  fullAddress?: string | null;
+  idImagePath?: string | null;
 }
 
 export interface Transaction {
