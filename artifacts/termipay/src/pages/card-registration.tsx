@@ -4,14 +4,41 @@ import {
   useListRecentUsers,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/lib/supabase";
-
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
 import {
   CreditCard,
   Plus,
   Cpu,
   ShieldCheck,
-  Zap,
   CheckCircle2,
   UserRound,
   MapPin,
@@ -21,17 +48,6 @@ import {
   Loader2,
   CalendarDays,
 } from "lucide-react";
-
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-
 import {
   Select,
   SelectContent,
@@ -39,21 +55,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { motion, AnimatePresence } from "framer-motion";
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-
-import { useTheme } from "@/components/theme-provider";
-import { useToast } from "@/hooks/use-toast";
-
+// ============================================================================
+// PSGC API
+// ============================================================================
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
-
-const ID_IMAGE_BUCKET = "id-verifications";
-const MAX_ID_IMAGE_SIZE = 5 * 1024 * 1024;
 
 interface PsgcOption {
   code: string;
@@ -64,72 +72,194 @@ function normalizePsgc(rows: any[]): PsgcOption[] {
   if (!Array.isArray(rows)) return [];
 
   return rows
-    .map((row) => ({
-      code: String(row?.code ?? ""),
-      name: String(row?.name ?? ""),
+    .map((r) => ({
+      code: r.code,
+      name: r.name ?? r.regionName ?? r.provinceName ?? "",
     }))
-    .filter((row) => row.code && row.name);
+    .filter((r) => r.code && r.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function fetchPsgc(path: string): Promise<PsgcOption[]> {
-  const response = await fetch(`${PSGC_BASE_URL}${path}`);
+  const res = await fetch(`${PSGC_BASE_URL}${path}`);
 
-  if (!response.ok) {
-    throw new Error(`Failed to load PSGC data: ${response.status}`);
+  if (!res.ok) {
+    throw new Error(`PSGC request failed (${res.status})`);
   }
 
-  const data = await response.json();
-
-  return normalizePsgc(data);
+  return normalizePsgc(await res.json());
 }
 
+// ============================================================================
+// CARD TYPE COLORS
+// ============================================================================
+function getTypeBadgeStyle(
+  type: string | null | undefined,
+  isDark: boolean
+) {
+  const t = (type || "Regular").toLowerCase();
+
+  switch (t) {
+    case "student":
+      return isDark
+        ? "border-blue-900 text-blue-400 bg-blue-950/40"
+        : "border-blue-200 text-blue-600 bg-blue-50";
+
+    case "senior":
+      return isDark
+        ? "border-yellow-900 text-yellow-400 bg-yellow-950/40"
+        : "border-yellow-300 text-yellow-700 bg-yellow-50";
+
+    case "pwd":
+      return isDark
+        ? "border-emerald-900 text-emerald-400 bg-emerald-950/40"
+        : "border-emerald-200 text-emerald-600 bg-emerald-50";
+
+    case "regular":
+    default:
+      return isDark
+        ? "border-red-900 text-red-400 bg-red-950/40"
+        : "border-red-200 text-red-600 bg-red-50";
+  }
+}
+
+function getTypeDotColor(type: string | null | undefined) {
+  const t = (type || "Regular").toLowerCase();
+
+  switch (t) {
+    case "student":
+      return "bg-blue-500";
+
+    case "senior":
+      return "bg-yellow-500";
+
+    case "pwd":
+      return "bg-emerald-500";
+
+    case "regular":
+    default:
+      return "bg-red-500";
+  }
+}
+
+// ============================================================================
+// SUCCESS TOAST
+// ============================================================================
+function SuccessTitle({ text }: { text: string }) {
+  return (
+    <span className="flex items-center gap-2">
+      <CheckCircle2
+        className="w-4 h-4 text-emerald-500 flex-shrink-0"
+        strokeWidth={2.5}
+      />
+      {text}
+    </span>
+  );
+}
+
+// ============================================================================
+// AGE
+// ============================================================================
+function calculateAge(dobString: string): number | null {
+  if (!dobString) return null;
+
+  const dob = new Date(dobString);
+
+  if (Number.isNaN(dob.getTime())) {
+    return null;
+  }
+
+  const today = new Date();
+
+  let age = today.getFullYear() - dob.getFullYear();
+
+  const m = today.getMonth() - dob.getMonth();
+
+  if (
+    m < 0 ||
+    (m === 0 && today.getDate() < dob.getDate())
+  ) {
+    age--;
+  }
+
+  return age >= 0 ? age : null;
+}
+
+// ============================================================================
+// BASE64
+// ============================================================================
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      resolve(reader.result as string);
+    };
+
+    reader.onerror = () => {
+      reject(new Error("Failed to read file"));
+    };
+
+    reader.readAsDataURL(file);
+  });
+}
+
+// ============================================================================
+// INITIAL FORM
+// ============================================================================
 const INITIAL_FORM = {
   cardUid: "",
   fullName: "",
   dob: "",
   contactNumber: "",
   type: "Regular",
-
   streetAddress: "",
-  zipCode: "",
-
   regionCode: "",
   regionName: "",
-
   provinceCode: "",
   provinceName: "",
-
   cityCode: "",
   cityName: "",
-
   barangayCode: "",
   barangayName: "",
 };
 
-function SuccessTitle({ text }: { text: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <CheckCircle2 className="h-5 w-5" />
-      <span>{text}</span>
-    </div>
-  );
-}
-
+// ============================================================================
+// PAGE
+// ============================================================================
 export default function CardRegistrationPage() {
-  const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { theme } = useTheme();
+  const queryClient = useQueryClient();
 
-  const isDark = theme === "dark";
-
+  // ==========================================================================
+  // MODAL
+  // ==========================================================================
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSubmittingImage, setIsSubmittingImage] = useState(false);
 
+  // ==========================================================================
+  // FORM
+  // ==========================================================================
   const [form, setForm] = useState(INITIAL_FORM);
 
+  // ==========================================================================
+  // VALIDATION
+  // ==========================================================================
+  const [contactError, setContactError] = useState("");
+  const [cardUidError, setCardUidError] = useState("");
+  const [dobError, setDobError] = useState("");
+  const [idImageError, setIdImageError] = useState("");
+
+  // ==========================================================================
+  // ID IMAGE
+  // ==========================================================================
   const [idImageFile, setIdImageFile] = useState<File | null>(null);
   const [idImagePreview, setIdImagePreview] = useState<string | null>(null);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ==========================================================================
+  // PSGC
+  // ==========================================================================
   const [regions, setRegions] = useState<PsgcOption[]>([]);
   const [provinces, setProvinces] = useState<PsgcOption[]>([]);
   const [cities, setCities] = useState<PsgcOption[]>([]);
@@ -140,30 +270,471 @@ export default function CardRegistrationPage() {
   const [loadingCities, setLoadingCities] = useState(false);
   const [loadingBarangays, setLoadingBarangays] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [regionHasNoProvinces, setRegionHasNoProvinces] =
+    useState(false);
 
+  // ==========================================================================
+  // REALTIME
+  // ==========================================================================
+  const [isPulsing, setIsPulsing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const prevCountRef = useRef<number>(0);
+
+  // ==========================================================================
+  // IMPORTANT:
+  // KEEP OLD FETCH STRUCTURE
+  // ==========================================================================
   const {
-    data: recentUsersData,
-    isLoading: isLoadingRecentUsers,
+    data: recentUsers,
+    isLoading,
+    refetch: refetchRecentUsers,
   } = useListRecentUsers({
     query: {
-      staleTime: 30_000,
+      refetchOnWindowFocus: true,
     },
   });
 
-  const recentUsers =
-    (recentUsersData as any)?.users ??
-    (recentUsersData as any)?.data ??
-    [];
+  // ==========================================================================
+  // REALTIME REFRESH
+  // ==========================================================================
+  useRealtimeRefetch(["users"], () => {
+    refetchRecentUsers();
+  });
 
+  // ==========================================================================
+  // DETECT TABLE UPDATE
+  // ==========================================================================
+  useEffect(() => {
+    if (!recentUsers) return;
+
+    const count = Array.isArray(recentUsers)
+      ? recentUsers.length
+      : 0;
+
+    if (
+      prevCountRef.current !== 0 &&
+      count !== prevCountRef.current
+    ) {
+      setIsPulsing(true);
+
+      const timer = setTimeout(() => {
+        setIsPulsing(false);
+      }, 800);
+
+      return () => clearTimeout(timer);
+    }
+
+    prevCountRef.current = count;
+    setLastUpdated(new Date());
+  }, [recentUsers]);
+
+  // ==========================================================================
+  // LOAD REGIONS
+  // ==========================================================================
+  useEffect(() => {
+    if (!isModalOpen || regions.length > 0) {
+      return;
+    }
+
+    setLoadingRegions(true);
+
+    fetchPsgc("/regions/")
+      .then(setRegions)
+      .catch(() =>
+        toast({
+          title: "Failed to load regions",
+          description:
+            "Check your internet connection.",
+          variant: "destructive",
+        })
+      )
+      .finally(() => {
+        setLoadingRegions(false);
+      });
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isModalOpen]);
+
+  // ==========================================================================
+  // REGION CHANGE
+  // ==========================================================================
+  const handleRegionChange = useCallback(
+    (code: string) => {
+      const region = regions.find(
+        (r) => r.code === code
+      );
+
+      setForm((f) => ({
+        ...f,
+        regionCode: code,
+        regionName: region?.name ?? "",
+        provinceCode: "",
+        provinceName: "",
+        cityCode: "",
+        cityName: "",
+        barangayCode: "",
+        barangayName: "",
+      }));
+
+      setProvinces([]);
+      setCities([]);
+      setBarangays([]);
+      setRegionHasNoProvinces(false);
+
+      if (!code) return;
+
+      setLoadingProvinces(true);
+
+      fetchPsgc(`/regions/${code}/provinces/`)
+        .then(async (data) => {
+          if (data.length > 0) {
+            setProvinces(data);
+            return;
+          }
+
+          setRegionHasNoProvinces(true);
+          setLoadingCities(true);
+
+          try {
+            const cityData = await fetchPsgc(
+              `/regions/${code}/cities-municipalities/`
+            );
+
+            setCities(cityData);
+          } finally {
+            setLoadingCities(false);
+          }
+        })
+        .catch(() =>
+          toast({
+            title: "Failed to load provinces",
+            variant: "destructive",
+          })
+        )
+        .finally(() => {
+          setLoadingProvinces(false);
+        });
+    },
+    [regions, toast]
+  );
+
+  // ==========================================================================
+  // PROVINCE CHANGE
+  // ==========================================================================
+  const handleProvinceChange = useCallback(
+    (code: string) => {
+      const province = provinces.find(
+        (p) => p.code === code
+      );
+
+      setForm((f) => ({
+        ...f,
+        provinceCode: code,
+        provinceName: province?.name ?? "",
+        cityCode: "",
+        cityName: "",
+        barangayCode: "",
+        barangayName: "",
+      }));
+
+      setCities([]);
+      setBarangays([]);
+
+      if (!code) return;
+
+      setLoadingCities(true);
+
+      fetchPsgc(
+        `/provinces/${code}/cities-municipalities/`
+      )
+        .then(setCities)
+        .catch(() =>
+          toast({
+            title:
+              "Failed to load cities/municipalities",
+            variant: "destructive",
+          })
+        )
+        .finally(() => {
+          setLoadingCities(false);
+        });
+    },
+    [provinces, toast]
+  );
+
+  // ==========================================================================
+  // CITY CHANGE
+  // ==========================================================================
+  const handleCityChange = useCallback(
+    (code: string) => {
+      const city = cities.find(
+        (c) => c.code === code
+      );
+
+      setForm((f) => ({
+        ...f,
+        cityCode: code,
+        cityName: city?.name ?? "",
+        barangayCode: "",
+        barangayName: "",
+      }));
+
+      setBarangays([]);
+
+      if (!code) return;
+
+      setLoadingBarangays(true);
+
+      fetchPsgc(
+        `/cities-municipalities/${code}/barangays/`
+      )
+        .then(setBarangays)
+        .catch(() =>
+          toast({
+            title: "Failed to load barangays",
+            variant: "destructive",
+          })
+        )
+        .finally(() => {
+          setLoadingBarangays(false);
+        });
+    },
+    [cities, toast]
+  );
+
+  // ==========================================================================
+  // BARANGAY CHANGE
+  // ==========================================================================
+  const handleBarangayChange = useCallback(
+    (code: string) => {
+      const barangay = barangays.find(
+        (b) => b.code === code
+      );
+
+      setForm((f) => ({
+        ...f,
+        barangayCode: code,
+        barangayName: barangay?.name ?? "",
+      }));
+    },
+    [barangays]
+  );
+
+  // ==========================================================================
+  // CARD UID
+  // ==========================================================================
+  const handleCardUidChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const alphanumeric = e.target.value
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+
+    if (alphanumeric.length > 8) {
+      return;
+    }
+
+    setForm((f) => ({
+      ...f,
+      cardUid: alphanumeric,
+    }));
+
+    if (alphanumeric.length === 8) {
+      setCardUidError("");
+    } else if (alphanumeric.length > 0) {
+      setCardUidError(
+        `${8 - alphanumeric.length} character${
+          8 - alphanumeric.length !== 1 ? "s" : ""
+        } remaining`
+      );
+    } else {
+      setCardUidError("");
+    }
+  };
+
+  // ==========================================================================
+  // CONTACT
+  // ==========================================================================
+  const handleContactChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const digits = e.target.value.replace(/\D/g, "");
+
+    if (digits.length > 11) {
+      return;
+    }
+
+    setForm((f) => ({
+      ...f,
+      contactNumber: digits,
+    }));
+
+    if (digits.length === 11) {
+      setContactError("");
+    } else if (digits.length > 0) {
+      setContactError(
+        `${11 - digits.length} digit${
+          11 - digits.length !== 1 ? "s" : ""
+        } remaining`
+      );
+    } else {
+      setContactError("");
+    }
+  };
+
+  // ==========================================================================
+  // DOB
+  // ==========================================================================
+  const handleDobChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = e.target.value;
+
+    setForm((f) => ({
+      ...f,
+      dob: value,
+    }));
+
+    if (!value) {
+      setDobError("");
+      return;
+    }
+
+    const age = calculateAge(value);
+
+    if (
+      age === null ||
+      new Date(value) > new Date()
+    ) {
+      setDobError("Enter a valid birth date");
+    } else if (age > 120) {
+      setDobError(
+        "Please check the birth date"
+      );
+    } else {
+      setDobError("");
+    }
+  };
+
+  // ==========================================================================
+  // IMAGE SELECT
+  // ==========================================================================
+  const handleImageSelect = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setIdImageError(
+        "Please upload an image file"
+      );
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setIdImageError(
+        "Image must be under 5MB"
+      );
+      return;
+    }
+
+    setIdImageError("");
+    setIdImageFile(file);
+
+    setIdImagePreview((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev);
+      }
+
+      return URL.createObjectURL(file);
+    });
+  };
+
+  // ==========================================================================
+  // CLEAR IMAGE
+  // ==========================================================================
+  const clearImage = () => {
+    setIdImageFile(null);
+
+    setIdImagePreview((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev);
+      }
+
+      return null;
+    });
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // ==========================================================================
+  // CLEANUP PREVIEW
+  // ==========================================================================
+  useEffect(() => {
+    return () => {
+      if (idImagePreview) {
+        URL.revokeObjectURL(idImagePreview);
+      }
+    };
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ==========================================================================
+  // RESET FORM
+  // ==========================================================================
+  const resetForm = () => {
+    setForm(INITIAL_FORM);
+
+    setContactError("");
+    setCardUidError("");
+    setDobError("");
+    setIdImageError("");
+
+    clearImage();
+
+    setProvinces([]);
+    setCities([]);
+    setBarangays([]);
+
+    setRegionHasNoProvinces(false);
+  };
+
+  // ==========================================================================
+  // CLOSE MODAL
+  // ==========================================================================
+  const closeModal = () => {
+    setIsModalOpen(false);
+    resetForm();
+  };
+
+  // ==========================================================================
+  // SUBMITTING IMAGE
+  // ==========================================================================
+  const [isSubmittingImage, setIsSubmittingImage] =
+    useState(false);
+
+  // ==========================================================================
+  // CREATE USER
+  // ==========================================================================
   const createMutation = useCreateUser({
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries();
 
         toast({
-          title: <SuccessTitle text="Card Registered Successfully" />,
+          title: (
+            <SuccessTitle text="Card Registered Successfully" />
+          ),
         });
+
+        // Immediately refresh the old table
+        refetchRecentUsers();
 
         closeModal();
       },
@@ -171,8 +742,7 @@ export default function CardRegistrationPage() {
       onError: (error: any) => {
         const status =
           error?.response?.status ??
-          error?.status ??
-          error?.response?.data?.status;
+          error?.status;
 
         const message: string =
           error?.response?.data?.message ??
@@ -180,601 +750,87 @@ export default function CardRegistrationPage() {
           error?.message ??
           "";
 
-        if (status === 409) {
+        const isDuplicate =
+          status === 409 ||
+          message
+            .toLowerCase()
+            .includes("already exist") ||
+          message
+            .toLowerCase()
+            .includes("duplicate") ||
+          message
+            .toLowerCase()
+            .includes("unique") ||
+          message
+            .toLowerCase()
+            .includes("conflict");
+
+        if (isDuplicate) {
           toast({
-            title: "Card Already Registered",
-            description:
-              message ||
-              "This RFID card UID is already registered.",
+            title: "Duplicate Card UID",
+            description: `"${form.cardUid}" is already registered. Please use a different card.`,
             variant: "destructive",
           });
-
-          return;
-        }
-
-        if (status === 400) {
+        } else {
           toast({
-            title: "Invalid Registration",
+            title: "Failed to register card",
             description:
               message ||
-              "Please check the information you entered.",
+              "Unable to register the card. Please try again.",
             variant: "destructive",
           });
-
-          return;
         }
-
-        toast({
-          title: "Registration Failed",
-          description:
-            message ||
-            "Unable to register the card. Please try again.",
-          variant: "destructive",
-        });
       },
     },
   });
 
-  const isSubmitting =
-    createMutation.isPending || isSubmittingImage;
-
-  const requiresIdImage = form.type !== "Regular";
-
-  /*
-   * LOAD REGIONS
-   */
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRegions() {
-      try {
-        setLoadingRegions(true);
-
-        const data = await fetchPsgc("/regions/");
-
-        if (!cancelled) {
-          setRegions(data);
-        }
-      } catch (error) {
-        console.error("Failed to load regions:", error);
-
-        if (!cancelled) {
-          toast({
-            title: "Unable to Load Regions",
-            description:
-              "The Philippine address list could not be loaded.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingRegions(false);
-        }
-      }
-    }
-
-    loadRegions();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [toast]);
-
-  /*
-   * LOAD PROVINCES
-   */
-  useEffect(() => {
-    if (!form.regionCode) {
-      setProvinces([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadProvinces() {
-      try {
-        setLoadingProvinces(true);
-
-        const data = await fetchPsgc(
-          `/regions/${form.regionCode}/provinces/`
-        );
-
-        if (!cancelled) {
-          setProvinces(data);
-        }
-      } catch (error) {
-        console.error("Failed to load provinces:", error);
-
-        if (!cancelled) {
-          setProvinces([]);
-
-          toast({
-            title: "Unable to Load Provinces",
-            description:
-              "Please try selecting the region again.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingProvinces(false);
-        }
-      }
-    }
-
-    loadProvinces();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [form.regionCode, toast]);
-
-  /*
-   * LOAD CITIES / MUNICIPALITIES
-   */
-  useEffect(() => {
-    if (!form.provinceCode) {
-      setCities([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadCities() {
-      try {
-        setLoadingCities(true);
-
-        const data = await fetchPsgc(
-          `/provinces/${form.provinceCode}/cities-municipalities/`
-        );
-
-        if (!cancelled) {
-          setCities(data);
-        }
-      } catch (error) {
-        console.error("Failed to load cities:", error);
-
-        if (!cancelled) {
-          setCities([]);
-
-          toast({
-            title: "Unable to Load Cities",
-            description:
-              "Please try selecting the province again.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingCities(false);
-        }
-      }
-    }
-
-    loadCities();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [form.provinceCode, toast]);
-
-  /*
-   * LOAD BARANGAYS
-   */
-  useEffect(() => {
-    if (!form.cityCode) {
-      setBarangays([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadBarangays() {
-      try {
-        setLoadingBarangays(true);
-
-        const data = await fetchPsgc(
-          `/cities-municipalities/${form.cityCode}/barangays/`
-        );
-
-        if (!cancelled) {
-          setBarangays(data);
-        }
-      } catch (error) {
-        console.error("Failed to load barangays:", error);
-
-        if (!cancelled) {
-          setBarangays([]);
-
-          toast({
-            title: "Unable to Load Barangays",
-            description:
-              "Please try selecting the city/municipality again.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingBarangays(false);
-        }
-      }
-    }
-
-    loadBarangays();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [form.cityCode, toast]);
-
-  /*
-   * OPEN MODAL
-   */
-  const openModal = useCallback(() => {
-    setForm(INITIAL_FORM);
-
-    setIdImageFile(null);
-    setIdImagePreview(null);
-
-    setProvinces([]);
-    setCities([]);
-    setBarangays([]);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-
-    setIsModalOpen(true);
-  }, []);
-
-  /*
-   * CLOSE MODAL
-   */
-  const closeModal = useCallback(() => {
-    if (idImagePreview) {
-      URL.revokeObjectURL(idImagePreview);
-    }
-
-    setIsModalOpen(false);
-
-    setForm(INITIAL_FORM);
-
-    setIdImageFile(null);
-    setIdImagePreview(null);
-
-    setProvinces([]);
-    setCities([]);
-    setBarangays([]);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  }, [idImagePreview]);
-
-  /*
-   * FORM FIELD UPDATE
-   */
-  function updateForm(
-    field: keyof typeof INITIAL_FORM,
-    value: string
-  ) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
-  }
-
-  /*
-   * REGION CHANGE
-   */
-  function handleRegionChange(value: string) {
-    const selected = regions.find(
-      (region) => region.code === value
-    );
-
-    setForm((current) => ({
-      ...current,
-
-      regionCode: value,
-      regionName: selected?.name ?? "",
-
-      provinceCode: "",
-      provinceName: "",
-
-      cityCode: "",
-      cityName: "",
-
-      barangayCode: "",
-      barangayName: "",
-    }));
-
-    setCities([]);
-    setBarangays([]);
-  }
-
-  /*
-   * PROVINCE CHANGE
-   */
-  function handleProvinceChange(value: string) {
-    const selected = provinces.find(
-      (province) => province.code === value
-    );
-
-    setForm((current) => ({
-      ...current,
-
-      provinceCode: value,
-      provinceName: selected?.name ?? "",
-
-      cityCode: "",
-      cityName: "",
-
-      barangayCode: "",
-      barangayName: "",
-    }));
-
-    setBarangays([]);
-  }
-
-  /*
-   * CITY CHANGE
-   */
-  function handleCityChange(value: string) {
-    const selected = cities.find(
-      (city) => city.code === value
-    );
-
-    setForm((current) => ({
-      ...current,
-
-      cityCode: value,
-      cityName: selected?.name ?? "",
-
-      barangayCode: "",
-      barangayName: "",
-    }));
-  }
-
-  /*
-   * BARANGAY CHANGE
-   */
-  function handleBarangayChange(value: string) {
-    const selected = barangays.find(
-      (barangay) => barangay.code === value
-    );
-
-    setForm((current) => ({
-      ...current,
-
-      barangayCode: value,
-      barangayName: selected?.name ?? "",
-    }));
-  }
-
-  /*
-   * IMAGE SELECT
-   */
-  function handleImageSelect(
-    event: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    if (!file.type.startsWith("image/")) {
-      toast({
-        title: "Invalid File",
-        description:
-          "Please select an image file.",
-        variant: "destructive",
-      });
-
-      event.target.value = "";
-      return;
-    }
-
-    if (file.size > MAX_ID_IMAGE_SIZE) {
-      toast({
-        title: "Image Too Large",
-        description:
-          "The ID image must be 5 MB or smaller.",
-        variant: "destructive",
-      });
-
-      event.target.value = "";
-      return;
-    }
-
-    if (idImagePreview) {
-      URL.revokeObjectURL(idImagePreview);
-    }
-
-    const previewUrl = URL.createObjectURL(file);
-
-    setIdImageFile(file);
-    setIdImagePreview(previewUrl);
-  }
-
-  /*
-   * CLEAR IMAGE
-   */
-  function clearImage() {
-    if (idImagePreview) {
-      URL.revokeObjectURL(idImagePreview);
-    }
-
-    setIdImageFile(null);
-    setIdImagePreview(null);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  }
-
-  /*
-   * UPLOAD IMAGE DIRECTLY TO SUPABASE STORAGE
-   */
-  async function uploadIdImage(): Promise<{
-    path: string;
-    publicUrl: string;
-  } | null> {
-    if (!idImageFile) {
-      return null;
-    }
-
-    const safeUid = form.cardUid
-      .trim()
-      .replace(/[^a-zA-Z0-9_-]/g, "");
-
-    if (!safeUid) {
-      throw new Error(
-        "Invalid RFID card UID."
+  // ==========================================================================
+  // FORM CONDITIONS
+  // ==========================================================================
+  const requiresIdImage =
+    form.type !== "Regular";
+
+  const age = calculateAge(form.dob);
+
+  const isFormInvalid =
+    !!contactError ||
+    !!cardUidError ||
+    !!dobError ||
+    form.cardUid.length !== 8 ||
+    form.contactNumber.length !== 11 ||
+    !form.fullName.trim() ||
+    !form.dob ||
+    !form.regionCode ||
+    !form.cityCode ||
+    !form.barangayCode ||
+    (requiresIdImage && !idImageFile);
+
+  // ==========================================================================
+  // SUBMIT
+  // ==========================================================================
+  const handleSubmit = async (
+    e: React.FormEvent
+  ) => {
+    e.preventDefault();
+
+    if (form.cardUid.length !== 8) {
+      setCardUidError(
+        "Card UID must be exactly 8 characters"
       );
-    }
-
-    const extension =
-      idImageFile.name
-        .split(".")
-        .pop()
-        ?.toLowerCase()
-        .replace(/[^a-z0-9]/g, "") || "jpg";
-
-    const fileName = `${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2, 10)}.${extension}`;
-
-    const filePath = `${safeUid}/${fileName}`;
-
-    const {
-      error: uploadError,
-    } = await supabase.storage
-      .from(ID_IMAGE_BUCKET)
-      .upload(filePath, idImageFile, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: idImageFile.type,
-      });
-
-    if (uploadError) {
-      throw new Error(
-        uploadError.message ||
-          "Failed to upload ID image to Supabase Storage."
-      );
-    }
-
-    const {
-      data: publicUrlData,
-    } = supabase.storage
-      .from(ID_IMAGE_BUCKET)
-      .getPublicUrl(filePath);
-
-    if (!publicUrlData?.publicUrl) {
-      await supabase.storage
-        .from(ID_IMAGE_BUCKET)
-        .remove([filePath]);
-
-      throw new Error(
-        "ID image was uploaded, but its public URL could not be generated."
-      );
-    }
-
-    return {
-      path: filePath,
-      publicUrl: publicUrlData.publicUrl,
-    };
-  }
-
-  /*
-   * SUBMIT
-   */
-  async function handleSubmit(
-    event: React.FormEvent<HTMLFormElement>
-  ) {
-    event.preventDefault();
-
-    if (isSubmitting) {
       return;
     }
 
-    /*
-     * BASIC VALIDATION
-     */
-    if (!form.cardUid.trim()) {
-      toast({
-        title: "Card UID Required",
-        description:
-          "Please enter the RFID card UID.",
-        variant: "destructive",
-      });
-
-      return;
-    }
-
-    if (!form.fullName.trim()) {
-      toast({
-        title: "Full Name Required",
-        description:
-          "Please enter the card holder's full name.",
-        variant: "destructive",
-      });
-
+    if (form.contactNumber.length !== 11) {
+      setContactError(
+        "Contact number must be exactly 11 digits"
+      );
       return;
     }
 
     if (!form.dob) {
-      toast({
-        title: "Date of Birth Required",
-        description:
-          "Please select the date of birth.",
-        variant: "destructive",
-      });
-
-      return;
-    }
-
-    if (!form.contactNumber.trim()) {
-      toast({
-        title: "Contact Number Required",
-        description:
-          "Please enter the contact number.",
-        variant: "destructive",
-      });
-
-      return;
-    }
-
-    if (!form.regionCode) {
-      toast({
-        title: "Region Required",
-        description:
-          "Please select the region.",
-        variant: "destructive",
-      });
-
-      return;
-    }
-
-    if (!form.cityCode) {
-      toast({
-        title: "City/Municipality Required",
-        description:
-          "Please select the city or municipality.",
-        variant: "destructive",
-      });
-
-      return;
-    }
-
-    if (!form.barangayCode) {
-      toast({
-        title: "Barangay Required",
-        description:
-          "Please select the barangay.",
-        variant: "destructive",
-      });
-
+      setDobError(
+        "Date of birth is required"
+      );
       return;
     }
 
@@ -782,1108 +838,1101 @@ export default function CardRegistrationPage() {
       requiresIdImage &&
       !idImageFile
     ) {
-      toast({
-        title: "ID Image Required",
-        description:
-          `${form.type} registration requires an ID image.`,
-        variant: "destructive",
-      });
-
+      setIdImageError(
+        `Upload the ${form.type} ID for verification`
+      );
       return;
     }
-
-    let uploadedImagePath: string | null = null;
 
     try {
       setIsSubmittingImage(true);
 
-      /*
-       * IMAGE IS UPLOADED DIRECTLY TO SUPABASE.
-       * IT IS NOT CONVERTED TO BASE64.
-       */
-      const uploadedImage =
-        await uploadIdImage();
+      const idImageBase64 = idImageFile
+        ? await fileToBase64(idImageFile)
+        : null;
 
-      uploadedImagePath =
-        uploadedImage?.path ?? null;
-
-      /*
-       * ONLY THE SUPABASE URL IS SENT TO RENDER.
-       */
-      const idImagePath =
-        uploadedImage?.publicUrl ?? null;
-
-      const fullAddress = [
-        form.streetAddress.trim(),
-        form.barangayName,
-        form.cityName,
-        form.provinceName,
-        form.regionName &&
-        form.zipCode
-          ? `${form.regionName} ${form.zipCode}`
-          : form.regionName ||
-            form.zipCode,
-      ]
-        .filter(Boolean)
-        .join(", ");
-
-      /*
-       * REGISTER USER
-       */
-      await createMutation.mutateAsync({
+      createMutation.mutate({
         data: {
-          cardUid:
-            form.cardUid
-              .trim()
-              .toUpperCase(),
+          cardUid: form.cardUid,
+          fullName: form.fullName.trim(),
+          dateOfBirth: form.dob,
+          age,
+          contactNumber: form.contactNumber,
+          type: form.type,
 
-          fullName:
-            form.fullName.trim(),
+          address: {
+            streetAddress:
+              form.streetAddress.trim() ||
+              null,
 
-          dateOfBirth:
-            form.dob,
+            region: form.regionName,
+            regionCode: form.regionCode,
 
-          contactNumber:
-            form.contactNumber.trim(),
+            province:
+              form.provinceName || null,
 
-          type:
-            form.type,
+            provinceCode:
+              form.provinceCode || null,
 
-          streetAddress:
-            form.streetAddress.trim() ||
-            null,
+            city: form.cityName,
+            cityCode: form.cityCode,
 
-          zipCode:
-            form.zipCode.trim() ||
-            null,
+            barangay:
+              form.barangayName,
 
-          regionCode:
-            form.regionCode,
+            barangayCode:
+              form.barangayCode,
+          },
 
-          regionName:
-            form.regionName,
-
-          provinceCode:
-            form.provinceCode ||
-            null,
-
-          provinceName:
-            form.provinceName ||
-            null,
-
-          cityCode:
-            form.cityCode,
-
-          cityName:
-            form.cityName,
-
-          barangayCode:
-            form.barangayCode,
-
-          barangayName:
-            form.barangayName,
-
-          fullAddress,
-
-          /*
-           * SUPABASE PUBLIC URL
-           * NOT BASE64
-           */
-          idImagePath,
+          idImage: idImageBase64,
 
           initialBalance: 0,
         },
       });
-    } catch (error: any) {
-      console.error(
-        "Card registration error:",
-        error
-      );
-
-      /*
-       * REMOVE ORPHAN IMAGE IF API REGISTRATION FAILS
-       */
-      if (uploadedImagePath) {
-        try {
-          await supabase.storage
-            .from(ID_IMAGE_BUCKET)
-            .remove([
-              uploadedImagePath,
-            ]);
-        } catch (cleanupError) {
-          console.error(
-            "Failed to remove orphan ID image:",
-            cleanupError
-          );
-        }
-      }
-
-      const message =
-        error?.response?.data?.message ??
-        error?.response?.data?.error ??
-        error?.message ??
-        "Unable to register the card.";
-
-      if (!error?.response) {
-        toast({
-          title:
-            "Registration Failed",
-          description: message,
-          variant:
-            "destructive",
-        });
-      }
+    } catch {
+      toast({
+        title: "Failed to process ID image",
+        variant: "destructive",
+      });
     } finally {
       setIsSubmittingImage(false);
     }
-  }
+  };
 
+  const isSubmitting =
+    createMutation.isPending ||
+    isSubmittingImage;
+
+  // ==========================================================================
+  // DISPLAY
+  // ==========================================================================
   return (
-    <div className="space-y-6">
-      {/* PAGE HEADER */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div
+      className={`space-y-8 ${
+        "text-slate-800"
+      }`}
+      data-testid="card-registration-page"
+    >
+      <style>{`
+        @keyframes row-pulse {
+          0% {
+            background-color: transparent;
+          }
+
+          50% {
+            background-color: rgba(37,99,235,0.08);
+          }
+
+          100% {
+            background-color: transparent;
+          }
+        }
+
+        .row-pulse {
+          animation: row-pulse 0.8s ease-in-out;
+        }
+
+        @keyframes realtime-dot {
+          0%, 100% {
+            opacity: 1;
+          }
+
+          50% {
+            opacity: 0.2;
+          }
+        }
+
+        .realtime-dot {
+          animation: realtime-dot 1s ease-in-out infinite;
+        }
+      `}</style>
+
+      {/* ================================================================== */}
+      {/* HEADER                                                             */}
+      {/* ================================================================== */}
+
+      <div
+        className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6 border-slate-200"
+      >
         <div>
-          <div className="flex items-center gap-3">
-            <div
-              className={`flex h-11 w-11 items-center justify-center rounded-xl ${
-                isDark
-                  ? "bg-cyan-500/10 text-cyan-400"
-                  : "bg-cyan-50 text-cyan-600"
-              }`}
-            >
-              <CreditCard className="h-6 w-6" />
-            </div>
+          <h2
+            className="text-2xl font-bold tracking-tight flex items-center gap-3 text-slate-900"
+          >
+            <Cpu
+              className="text-blue-500"
+              size={26}
+            />
 
-            <div>
-              <h1
-                className={`text-2xl font-bold tracking-tight ${
-                  isDark
-                    ? "text-white"
-                    : "text-slate-900"
-                }`}
-              >
-                Card Registration
-              </h1>
+            Card Registration
+          </h2>
 
-              <p
-                className={`text-sm ${
-                  isDark
-                    ? "text-slate-400"
-                    : "text-slate-500"
-                }`}
-              >
-                Register RFID cards and card holder information
-              </p>
-            </div>
-          </div>
+          <p className="text-sm mt-1 text-slate-500">
+            Register new RFID cards for transit
+          </p>
         </div>
 
-        <Button
-          onClick={openModal}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Register New Card
-        </Button>
+        <div className="flex items-center gap-3">
+          <div
+            className="flex items-center gap-2 px-4 py-2 border rounded-lg bg-blue-50 border-blue-100"
+          >
+            <ShieldCheck
+              className="text-blue-500"
+              size={16}
+            />
+
+            <span className="text-xs font-semibold text-blue-700">
+              System Link Active
+            </span>
+          </div>
+
+          <Button
+            onClick={() =>
+              setIsModalOpen(true)
+            }
+            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add New
+          </Button>
+        </div>
       </div>
 
-      {/* INFO CARDS */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center gap-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                  isDark
-                    ? "bg-cyan-500/10 text-cyan-400"
-                    : "bg-cyan-50 text-cyan-600"
-                }`}
-              >
-                <Cpu className="h-5 w-5" />
-              </div>
+      {/* ================================================================== */}
+      {/* OLD WORKING HISTORY TABLE                                         */}
+      {/* ================================================================== */}
 
-              <div>
-                <p
-                  className={`text-xs ${
-                    isDark
-                      ? "text-slate-400"
-                      : "text-slate-500"
-                  }`}
-                >
-                  RFID
-                </p>
-
-                <p className="font-semibold">
-                  Contactless
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center gap-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                  isDark
-                    ? "bg-emerald-500/10 text-emerald-400"
-                    : "bg-emerald-50 text-emerald-600"
-                }`}
-              >
-                <ShieldCheck className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p
-                  className={`text-xs ${
-                    isDark
-                      ? "text-slate-400"
-                      : "text-slate-500"
-                  }`}
-                >
-                  Security
-                </p>
-
-                <p className="font-semibold">
-                  Verified Cards
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center gap-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                  isDark
-                    ? "bg-violet-500/10 text-violet-400"
-                    : "bg-violet-50 text-violet-600"
-                }`}
-              >
-                <Zap className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p
-                  className={`text-xs ${
-                    isDark
-                      ? "text-slate-400"
-                      : "text-slate-500"
-                  }`}
-                >
-                  Processing
-                </p>
-
-                <p className="font-semibold">
-                  Fast Registration
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center gap-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                  isDark
-                    ? "bg-amber-500/10 text-amber-400"
-                    : "bg-amber-50 text-amber-600"
-                }`}
-              >
-                <IdCard className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p
-                  className={`text-xs ${
-                    isDark
-                      ? "text-slate-400"
-                      : "text-slate-500"
-                  }`}
-                >
-                  ID Verification
-                </p>
-
-                <p className="font-semibold">
-                  Student / Senior / PWD
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* RECENT USERS */}
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            Recently Registered Cards
-          </CardTitle>
-        </CardHeader>
-
-        <CardContent>
-          {isLoadingRecentUsers ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </div>
-          ) : recentUsers.length === 0 ? (
-            <div
-              className={`py-12 text-center ${
-                isDark
-                  ? "text-slate-400"
-                  : "text-slate-500"
-              }`}
-            >
-              No registered cards yet.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[800px]">
-                <thead>
-                  <tr
-                    className={`border-b text-left text-xs uppercase tracking-wider ${
-                      isDark
-                        ? "border-slate-800 text-slate-400"
-                        : "border-slate-200 text-slate-500"
-                    }`}
-                  >
-                    <th className="px-4 py-3">
-                      Card
-                    </th>
-
-                    <th className="px-4 py-3">
-                      Full Name
-                    </th>
-
-                    <th className="px-4 py-3">
-                      Contact
-                    </th>
-
-                    <th className="px-4 py-3">
-                      Type
-                    </th>
-
-                    <th className="px-4 py-3">
-                      Balance
-                    </th>
-
-                    <th className="px-4 py-3">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {recentUsers.map(
-                    (user: any) => (
-                      <tr
-                        key={user.id}
-                        className={`border-b last:border-0 ${
-                          isDark
-                            ? "border-slate-800"
-                            : "border-slate-100"
-                        }`}
-                      >
-                        {/* CARD */}
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2">
-                            <CreditCard className="h-4 w-4 text-cyan-500" />
-
-                            <span className="font-mono text-sm font-medium">
-                              {user.cardUid ||
-                                user.card_uid ||
-                                "N/A"}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* FULL NAME */}
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2">
-                            <UserRound className="h-4 w-4 opacity-50" />
-
-                            <span className="font-medium">
-                              {user.fullName ||
-                                user.full_name ||
-                                "N/A"}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* CONTACT */}
-                        <td className="px-4 py-4 text-sm">
-                          {user.contactNumber ||
-                            user.contact_number ||
-                            "N/A"}
-                        </td>
-
-                        {/* TYPE */}
-                        <td className="px-4 py-4">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                              (
-                                user.type ||
-                                "Regular"
-                              ) === "Student"
-                                ? isDark
-                                  ? "bg-blue-500/10 text-blue-400"
-                                  : "bg-blue-50 text-blue-700"
-                                : (
-                                    user.type ||
-                                    "Regular"
-                                  ) === "Senior"
-                                ? isDark
-                                  ? "bg-yellow-500/10 text-yellow-400"
-                                  : "bg-yellow-50 text-yellow-700"
-                                : (
-                                    user.type ||
-                                    "Regular"
-                                  ) === "PWD"
-                                ? isDark
-                                  ? "bg-emerald-500/10 text-emerald-400"
-                                  : "bg-emerald-50 text-emerald-700"
-                                : isDark
-                                ? "bg-slate-500/10 text-slate-300"
-                                : "bg-slate-100 text-slate-700"
-                            }`}
-                          >
-                            {user.type ||
-                              "Regular"}
-                          </span>
-                        </td>
-
-                        {/* BALANCE */}
-                        <td className="px-4 py-4 font-semibold">
-                          ₱
-                          {Number(
-                            user.balance ?? 0
-                          ).toFixed(2)}
-                        </td>
-
-                        {/* STATUS */}
-                        <td className="px-4 py-4">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                              (
-                                user.status ||
-                                "Active"
-                              ) === "Active"
-                                ? isDark
-                                  ? "bg-emerald-500/10 text-emerald-400"
-                                  : "bg-emerald-50 text-emerald-700"
-                                : isDark
-                                ? "bg-red-500/10 text-red-400"
-                                : "bg-red-50 text-red-700"
-                            }`}
-                          >
-                            {user.status ||
-                              "Active"}
-                          </span>
-                        </td>
-                      </tr>
-                    )
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* REGISTRATION MODAL */}
-      <Dialog
-        open={isModalOpen}
-        onOpenChange={(open) => {
-          if (!open && !isSubmitting) {
-            closeModal();
-          }
+      <motion.div
+        initial={{
+          opacity: 0,
+          y: 12,
+        }}
+        animate={{
+          opacity: 1,
+          y: 0,
         }}
       >
+        <Card className="shadow-sm bg-white border-slate-200">
+          <CardHeader
+            className="flex flex-row items-center justify-between border-b border-slate-100"
+          >
+            <div>
+              <CardTitle
+                className="text-sm font-bold flex items-center gap-2 text-slate-700"
+              >
+                Recently Registered
+
+                <span
+                  className="flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ml-2 text-emerald-600 bg-emerald-50 border-emerald-100"
+                >
+                  <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+
+                  LIVE
+                </span>
+              </CardTitle>
+
+              <CardDescription
+                className="text-xs flex items-center gap-2 mt-1 text-slate-500"
+              >
+                Last 5 registered cards
+
+                {lastUpdated && (
+                  <span className="text-slate-400">
+                    ·{" "}
+                    {lastUpdated.toLocaleTimeString()}
+                  </span>
+                )}
+              </CardDescription>
+            </div>
+          </CardHeader>
+
+          <CardContent className="pt-6">
+            {isLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3, 4, 5].map(
+                  (i) => (
+                    <Skeleton
+                      key={i}
+                      className="h-14 w-full rounded-lg bg-slate-100"
+                    />
+                  )
+                )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className="border-b hover:bg-transparent border-slate-200">
+                    <TableRow className="border-none hover:bg-transparent">
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Card UID
+                      </TableHead>
+
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Full Name
+                      </TableHead>
+
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Type
+                      </TableHead>
+
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Contact
+                      </TableHead>
+
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Balance
+                      </TableHead>
+
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-right text-slate-400">
+                        Status
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+
+                  <TableBody>
+                    {Array.isArray(
+                      recentUsers
+                    ) &&
+                    recentUsers.length > 0 ? (
+                      recentUsers.map(
+                        (
+                          user,
+                          index
+                        ) => (
+                          <TableRow
+                            key={user.id}
+                            className={`transition-colors group border-slate-100 hover:bg-slate-50 ${
+                              isPulsing &&
+                              index === 0
+                                ? "row-pulse"
+                                : ""
+                            }`}
+                          >
+                            {/* CARD UID */}
+                            <TableCell className="font-mono text-xs text-blue-500 font-semibold">
+                              {user.cardUid}
+                            </TableCell>
+
+                            {/* FULL NAME */}
+                            <TableCell className="text-sm font-medium text-slate-800">
+                              {user.fullName}
+                            </TableCell>
+
+                            {/* TYPE */}
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] font-semibold flex items-center gap-1 w-fit ${getTypeBadgeStyle(
+                                  user.type,
+                                  false
+                                )}`}
+                              >
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full inline-block ${getTypeDotColor(
+                                    user.type
+                                  )}`}
+                                />
+
+                                {user.type ||
+                                  "Regular"}
+                              </Badge>
+                            </TableCell>
+
+                            {/* CONTACT */}
+                            <TableCell className="text-xs font-mono text-slate-500">
+                              {user.contactNumber}
+                            </TableCell>
+
+                            {/* BALANCE */}
+                            <TableCell className="text-sm font-semibold text-emerald-500">
+                              ₱
+                              {Number(
+                                user.balance ||
+                                  0
+                              ).toFixed(2)}
+                            </TableCell>
+
+                            {/* STATUS */}
+                            <TableCell className="text-right">
+                              <Badge
+                                className={`${
+                                  user.status ===
+                                  "Active"
+                                    ? "bg-emerald-50 text-emerald-600 border-emerald-200"
+                                    : "bg-red-50 text-red-600 border-red-200"
+                                } text-[10px] font-semibold px-2 py-0.5 border`}
+                              >
+                                {user.status}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      )
+                    ) : (
+                      <TableRow>
+                        <TableCell
+                          colSpan={6}
+                          className="text-center py-20"
+                        >
+                          <div className="flex flex-col items-center text-slate-300">
+                            <Plus
+                              size={48}
+                              className="mb-2"
+                            />
+
+                            <p className="text-xs font-semibold uppercase tracking-widest">
+                              No cards registered yet
+                            </p>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* ================================================================== */}
+      {/* REGISTRATION MODAL                                                 */}
+      {/* ================================================================== */}
+
+      <Dialog
+        open={isModalOpen}
+        onOpenChange={(open) =>
+          open
+            ? setIsModalOpen(true)
+            : closeModal()
+        }
+      >
         <DialogContent
-          className={`max-h-[92vh] overflow-y-auto sm:max-w-4xl ${
-            isDark
-              ? "border-slate-800 bg-slate-950"
-              : "bg-white"
-          }`}
+          className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0 bg-white border-slate-200"
         >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CreditCard className="h-5 w-5 text-cyan-500" />
+          {/* HEADER */}
+          <div className="relative shrink-0">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
 
-              Register New RFID Card
-            </DialogTitle>
-          </DialogHeader>
+            <DialogHeader className="px-6 pt-6 pb-4">
+              <DialogTitle
+                className="text-lg font-bold flex items-center gap-2 text-slate-900"
+              >
+                <CreditCard
+                  className="text-blue-500"
+                  size={20}
+                />
 
+                Register New Card
+              </DialogTitle>
+
+              <DialogDescription className="text-xs text-slate-500">
+                Fill in the cardholder's personal
+                details, address, and ID verification.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          {/* FORM */}
           <form
             onSubmit={handleSubmit}
-            className="space-y-6"
+            className="flex flex-col flex-1 min-h-0"
           >
-            {/* CARD INFORMATION */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-cyan-500" />
+            <div className="flex-1 overflow-y-auto px-6 py-2 space-y-8">
 
-                <h3 className="font-semibold">
-                  Card Information
-                </h3>
-              </div>
+              {/* ========================================================== */}
+              {/* CARD DETAILS                                                */}
+              {/* ========================================================== */}
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    RFID Card UID
-                  </label>
-
-                  <Input
-                    value={form.cardUid}
-                    onChange={(event) =>
-                      updateForm(
-                        "cardUid",
-                        event.target.value
-                          .toUpperCase()
-                          .replace(
-                            /[^A-Z0-9_-]/g,
-                            ""
-                          )
-                      )
-                    }
-                    placeholder="e.g. 99B603A6"
-                    disabled={isSubmitting}
-                    maxLength={32}
+              <section className="space-y-4">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <IdCard
+                    size={14}
+                    className="text-blue-500"
                   />
+
+                  Card Details
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Card Type
-                  </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
-                  <Select
-                    value={form.type}
-                    onValueChange={(value) =>
-                      updateForm(
-                        "type",
-                        value
-                      )
-                    }
-                    disabled={isSubmitting}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                  {/* CARD UID */}
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="cardUid"
+                      className="text-xs font-semibold text-slate-600"
+                    >
+                      Card UID
 
-                    <SelectContent>
-                      <SelectItem value="Regular">
-                        Regular
-                      </SelectItem>
+                      <span className="ml-2 font-normal text-slate-400">
+                        (8 characters)
+                      </span>
+                    </Label>
 
-                      <SelectItem value="Student">
-                        Student
-                      </SelectItem>
-
-                      <SelectItem value="Senior">
-                        Senior
-                      </SelectItem>
-
-                      <SelectItem value="PWD">
-                        PWD
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-
-            {/* PERSONAL INFORMATION */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <UserRound className="h-4 w-4 text-cyan-500" />
-
-                <h3 className="font-semibold">
-                  Personal Information
-                </h3>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <label className="text-sm font-medium">
-                    Full Name
-                  </label>
-
-                  <Input
-                    value={form.fullName}
-                    onChange={(event) =>
-                      updateForm(
-                        "fullName",
-                        event.target.value
-                      )
-                    }
-                    placeholder="Enter full name"
-                    disabled={isSubmitting}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Date of Birth
-                  </label>
-
-                  <div className="relative">
-                    <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50" />
-
-                    <Input
-                      type="date"
-                      value={form.dob}
-                      onChange={(event) =>
-                        updateForm(
-                          "dob",
-                          event.target.value
-                        )
-                      }
-                      className="pl-10"
-                      disabled={isSubmitting}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Contact Number
-                  </label>
-
-                  <Input
-                    value={form.contactNumber}
-                    onChange={(event) =>
-                      updateForm(
-                        "contactNumber",
-                        event.target.value
-                      )
-                    }
-                    placeholder="09XXXXXXXXX"
-                    disabled={isSubmitting}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* ADDRESS */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-cyan-500" />
-
-                <h3 className="font-semibold">
-                  Address
-                </h3>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <label className="text-sm font-medium">
-                    Street Address
-                  </label>
-
-                  <Input
-                    value={form.streetAddress}
-                    onChange={(event) =>
-                      updateForm(
-                        "streetAddress",
-                        event.target.value
-                      )
-                    }
-                    placeholder="House number, street, sitio"
-                    disabled={isSubmitting}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Region
-                  </label>
-
-                  <Select
-                    value={form.regionCode}
-                    onValueChange={
-                      handleRegionChange
-                    }
-                    disabled={
-                      isSubmitting ||
-                      loadingRegions
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingRegions
-                            ? "Loading regions..."
-                            : "Select region"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent>
-                      {regions.map(
-                        (region) => (
-                          <SelectItem
-                            key={region.code}
-                            value={region.code}
-                          >
-                            {region.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Province
-                  </label>
-
-                  <Select
-                    value={form.provinceCode}
-                    onValueChange={
-                      handleProvinceChange
-                    }
-                    disabled={
-                      isSubmitting ||
-                      !form.regionCode ||
-                      loadingProvinces
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingProvinces
-                            ? "Loading provinces..."
-                            : "Select province"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent>
-                      {provinces.map(
-                        (province) => (
-                          <SelectItem
-                            key={province.code}
-                            value={province.code}
-                          >
-                            {province.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    City / Municipality
-                  </label>
-
-                  <Select
-                    value={form.cityCode}
-                    onValueChange={
-                      handleCityChange
-                    }
-                    disabled={
-                      isSubmitting ||
-                      !form.provinceCode ||
-                      loadingCities
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingCities
-                            ? "Loading cities..."
-                            : "Select city / municipality"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent>
-                      {cities.map(
-                        (city) => (
-                          <SelectItem
-                            key={city.code}
-                            value={city.code}
-                          >
-                            {city.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Barangay
-                  </label>
-
-                  <Select
-                    value={form.barangayCode}
-                    onValueChange={
-                      handleBarangayChange
-                    }
-                    disabled={
-                      isSubmitting ||
-                      !form.cityCode ||
-                      loadingBarangays
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingBarangays
-                            ? "Loading barangays..."
-                            : "Select barangay"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent>
-                      {barangays.map(
-                        (barangay) => (
-                          <SelectItem
-                            key={barangay.code}
-                            value={barangay.code}
-                          >
-                            {barangay.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    ZIP Code
-                  </label>
-
-                  <Input
-                    value={form.zipCode}
-                    onChange={(event) =>
-                      updateForm(
-                        "zipCode",
-                        event.target.value.replace(
-                          /\D/g,
-                          ""
-                        )
-                      )
-                    }
-                    placeholder="6710"
-                    maxLength={10}
-                    disabled={isSubmitting}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* ID IMAGE */}
-            {requiresIdImage && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <IdCard className="h-4 w-4 text-cyan-500" />
-
-                  <h3 className="font-semibold">
-                    ID Verification
-                  </h3>
-                </div>
-
-                <div
-                  className={`rounded-xl border p-4 ${
-                    isDark
-                      ? "border-slate-800 bg-slate-900/40"
-                      : "border-slate-200 bg-slate-50"
-                  }`}
-                >
-                  <div className="flex flex-col gap-4 sm:flex-row">
-                    {idImagePreview ? (
-                      <div className="relative">
-                        <img
-                          src={idImagePreview}
-                          alt="ID preview"
-                          className="h-40 w-64 rounded-lg border object-cover"
-                        />
-
-                        <button
-                          type="button"
-                          onClick={clearImage}
-                          disabled={isSubmitting}
-                          className={`absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm ${
-                            isDark
-                              ? "border-slate-700 bg-slate-900 text-white"
-                              : "border-slate-200 bg-white text-slate-700"
-                          }`}
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          fileInputRef.current?.click()
-                        }
-                        disabled={isSubmitting}
-                        className={`flex h-40 w-full max-w-md flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
-                          isDark
-                            ? "border-slate-700 hover:border-cyan-500 hover:bg-slate-900"
-                            : "border-slate-300 hover:border-cyan-500 hover:bg-white"
+                    <div className="relative">
+                      <Input
+                        id="cardUid"
+                        className={`font-mono pr-14 bg-white text-slate-900 ${
+                          cardUidError
+                            ? "border-red-400 focus-visible:ring-red-400"
+                            : form.cardUid.length ===
+                              8
+                            ? "border-emerald-400 focus-visible:ring-emerald-400"
+                            : "border-slate-200 focus-visible:ring-blue-500"
                         }`}
-                      >
-                        <Upload className="mb-2 h-8 w-8 opacity-50" />
+                        placeholder="e.g. A1B2C3D4"
+                        value={form.cardUid}
+                        onChange={
+                          handleCardUidChange
+                        }
+                        required
+                      />
 
-                        <span className="text-sm font-medium">
-                          Upload ID Image
-                        </span>
-
-                        <span className="mt-1 text-xs opacity-60">
-                          JPG, PNG, WEBP up to 5 MB
-                        </span>
-                      </button>
-                    )}
-
-                    <div className="flex-1 space-y-2">
-                      <p className="text-sm font-medium">
-                        {form.type} ID
-                      </p>
-
-                      <p
-                        className={`text-sm ${
-                          isDark
-                            ? "text-slate-400"
-                            : "text-slate-500"
-                        }`}
-                      >
-                        Upload a clear image of the valid
-                        identification document for the
-                        selected card type.
-                      </p>
-
-                      <p
-                        className={`text-xs ${
-                          isDark
-                            ? "text-slate-500"
+                      <span
+                        className={`absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold tabular-nums ${
+                          form.cardUid.length ===
+                          8
+                            ? "text-emerald-500"
                             : "text-slate-400"
                         }`}
                       >
-                        The image will be uploaded directly
-                        to Supabase Storage. It will not be
-                        sent as Base64 to the API server.
-                      </p>
+                        {form.cardUid.length}/8
+                      </span>
+                    </div>
 
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={
-                          handleImageSelect
-                        }
-                        disabled={isSubmitting}
+                    {cardUidError && (
+                      <p className="text-xs font-medium text-red-500">
+                        {cardUidError}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* TYPE */}
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="type"
+                      className="text-xs font-semibold text-slate-600"
+                    >
+                      User Type
+                    </Label>
+
+                    <Select
+                      value={form.type}
+                      onValueChange={(v) =>
+                        setForm((f) => ({
+                          ...f,
+                          type: v,
+                        }))
+                      }
+                    >
+                      <SelectTrigger className="font-medium text-sm cursor-pointer bg-white border-slate-200 text-slate-700">
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(
+                              form.type
+                            )}`}
+                          />
+
+                          <SelectValue placeholder="Select type" />
+                        </span>
+                      </SelectTrigger>
+
+                      <SelectContent className="bg-white border-slate-200 text-slate-700">
+                        <SelectItem
+                          value="Regular"
+                          className="cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+                            Regular
+                          </span>
+                        </SelectItem>
+
+                        <SelectItem
+                          value="Student"
+                          className="cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                            Student
+                          </span>
+                        </SelectItem>
+
+                        <SelectItem
+                          value="Senior"
+                          className="cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-yellow-500 inline-block" />
+                            Senior
+                          </span>
+                        </SelectItem>
+
+                        <SelectItem
+                          value="PWD"
+                          className="cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                            PWD
+                          </span>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* ======================================================== */}
+                {/* ID UPLOAD                                                 */}
+                {/* ======================================================== */}
+
+                <AnimatePresence>
+                  {requiresIdImage && (
+                    <motion.div
+                      initial={{
+                        opacity: 0,
+                        height: 0,
+                      }}
+                      animate={{
+                        opacity: 1,
+                        height: "auto",
+                      }}
+                      exit={{
+                        opacity: 0,
+                        height: 0,
+                      }}
+                      className="overflow-hidden"
+                    >
+                      <div className="space-y-2 pt-1">
+                        <Label className="text-xs font-semibold text-slate-600">
+                          {form.type} ID
+
+                          <span className="ml-2 font-normal text-slate-400">
+                            (upload for verification)
+                          </span>
+                        </Label>
+
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={
+                            handleImageSelect
+                          }
+                          className="hidden"
+                          id="idImage"
+                        />
+
+                        {!idImagePreview ? (
+                          <label
+                            htmlFor="idImage"
+                            className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl py-8 cursor-pointer transition-colors ${
+                              idImageError
+                                ? "border-red-400"
+                                : "border-slate-200 hover:border-blue-300 hover:bg-blue-50/40"
+                            }`}
+                          >
+                            <Upload
+                              size={20}
+                              className="text-blue-500"
+                            />
+
+                            <span className="text-xs font-semibold text-slate-600">
+                              Click to upload{" "}
+                              {form.type} ID
+                            </span>
+
+                            <span className="text-[11px] text-slate-400">
+                              PNG or JPG, up to 5MB
+                            </span>
+                          </label>
+                        ) : (
+                          <div className="relative flex items-center gap-3 p-3 border rounded-xl bg-white border-slate-200">
+                            <img
+                              src={
+                                idImagePreview
+                              }
+                              alt="ID preview"
+                              className="h-16 w-24 object-cover rounded-lg border border-slate-200/30"
+                            />
+
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold truncate text-slate-700">
+                                {
+                                  idImageFile?.name
+                                }
+                              </p>
+
+                              <p className="text-[11px] text-slate-400">
+                                {idImageFile
+                                  ? `${(
+                                      idImageFile.size /
+                                      1024
+                                    ).toFixed(
+                                      0
+                                    )} KB`
+                                  : ""}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={
+                                clearImage
+                              }
+                              className="p-1.5 rounded-full cursor-pointer transition-colors hover:bg-slate-100 text-slate-500"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        )}
+
+                        {idImageError && (
+                          <p className="text-xs font-medium text-red-500">
+                            {idImageError}
+                          </p>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </section>
+
+              {/* ========================================================== */}
+              {/* PERSONAL INFORMATION                                       */}
+              {/* ========================================================== */}
+
+              <section className="space-y-4">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <UserRound
+                    size={14}
+                    className="text-blue-500"
+                  />
+
+                  Personal Information
+                </div>
+
+                {/* FULL NAME */}
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="fullName"
+                    className="text-xs font-semibold text-slate-600"
+                  >
+                    Full Name
+                  </Label>
+
+                  <Input
+                    id="fullName"
+                    className="focus-visible:ring-blue-500 bg-white border-slate-200 text-slate-900 placeholder:text-slate-400"
+                    placeholder="Enter full name"
+                    value={form.fullName}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        fullName:
+                          e.target.value,
+                      }))
+                    }
+                    required
+                  />
+                </div>
+
+                {/* DOB + AGE */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="dob"
+                      className="text-xs font-semibold flex items-center gap-1.5 text-slate-600"
+                    >
+                      <CalendarDays
+                        size={12}
                       />
 
-                      {idImageFile && (
-                        <div
-                          className={`rounded-md px-3 py-2 text-xs ${
-                            isDark
-                              ? "bg-slate-800 text-slate-300"
-                              : "bg-white text-slate-600"
-                          }`}
-                        >
-                          {idImageFile.name}
-                          {" • "}
-                          {(
-                            idImageFile.size /
-                            1024 /
-                            1024
-                          ).toFixed(2)}
-                          {" MB"}
-                        </div>
-                      )}
+                      Date of Birth
+                    </Label>
 
-                      {!idImageFile && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() =>
-                            fileInputRef.current?.click()
-                          }
-                          disabled={isSubmitting}
-                          className="gap-2"
-                        >
-                          <Upload className="h-4 w-4" />
-                          Choose Image
-                        </Button>
-                      )}
+                    <Input
+                      id="dob"
+                      type="date"
+                      max={
+                        new Date()
+                          .toISOString()
+                          .split("T")[0]
+                      }
+                      className={`${
+                        dobError
+                          ? "border-red-400 focus-visible:ring-red-400"
+                          : "bg-white border-slate-200 text-slate-900"
+                      }`}
+                      value={form.dob}
+                      onChange={
+                        handleDobChange
+                      }
+                      required
+                    />
 
-                      {idImageFile && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() =>
-                            fileInputRef.current?.click()
-                          }
-                          disabled={isSubmitting}
-                          className="gap-2"
-                        >
-                          <Upload className="h-4 w-4" />
-                          Change Image
-                        </Button>
-                      )}
+                    {dobError && (
+                      <p className="text-xs font-medium text-red-500">
+                        {dobError}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-600">
+                      Age
+                    </Label>
+
+                    <div className="flex items-center h-10 px-3 rounded-md border text-sm font-semibold bg-slate-50 border-slate-200 text-slate-600">
+                      {age !== null
+                        ? `${age} years old`
+                        : "— select date of birth"}
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
 
-            {/* BUTTONS */}
-            <div
-              className={`flex flex-col-reverse gap-3 border-t pt-5 sm:flex-row sm:justify-end ${
-                isDark
-                  ? "border-slate-800"
-                  : "border-slate-200"
-              }`}
-            >
+                {/* CONTACT */}
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="contactNumber"
+                    className="text-xs font-semibold text-slate-600"
+                  >
+                    Contact Number
+
+                    <span className="ml-2 font-normal text-slate-400">
+                      (11 digits)
+                    </span>
+                  </Label>
+
+                  <div className="relative">
+                    <Input
+                      id="contactNumber"
+                      inputMode="numeric"
+                      className={`font-mono pr-14 bg-white text-slate-900 ${
+                        contactError
+                          ? "border-red-400 focus-visible:ring-red-400"
+                          : form.contactNumber
+                                .length ===
+                              11
+                          ? "border-emerald-400 focus-visible:ring-emerald-400"
+                          : "border-slate-200 focus-visible:ring-blue-500"
+                      }`}
+                      placeholder="09XXXXXXXXX"
+                      value={
+                        form.contactNumber
+                      }
+                      onChange={
+                        handleContactChange
+                      }
+                      required
+                    />
+
+                    <span
+                      className={`absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold tabular-nums ${
+                        form.contactNumber
+                          .length === 11
+                          ? "text-emerald-500"
+                          : "text-slate-400"
+                      }`}
+                    >
+                      {
+                        form.contactNumber
+                          .length
+                      }
+                      /11
+                    </span>
+                  </div>
+
+                  {contactError && (
+                    <p className="text-xs font-medium text-red-500">
+                      {contactError}
+                    </p>
+                  )}
+                </div>
+              </section>
+
+              {/* ========================================================== */}
+              {/* ADDRESS                                                     */}
+              {/* ========================================================== */}
+
+              <section className="space-y-4 pb-2">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <MapPin
+                    size={14}
+                    className="text-blue-500"
+                  />
+
+                  Address
+                </div>
+
+                {/* STREET */}
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="streetAddress"
+                    className="text-xs font-semibold text-slate-600"
+                  >
+                    House No. / Street / Purok /
+                    Subdivision
+
+                    <span className="ml-2 font-normal text-slate-400">
+                      (optional)
+                    </span>
+                  </Label>
+
+                  <Textarea
+                    id="streetAddress"
+                    rows={2}
+                    className="resize-none focus-visible:ring-blue-500 bg-white border-slate-200 text-slate-900 placeholder:text-slate-400"
+                    placeholder="e.g. Blk 4 Lot 12, Purok Mabini, Sitio Malaya"
+                    value={
+                      form.streetAddress
+                    }
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        streetAddress:
+                          e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                  {/* REGION */}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-600">
+                      Region
+                    </Label>
+
+                    <Select
+                      value={
+                        form.regionCode
+                      }
+                      onValueChange={
+                        handleRegionChange
+                      }
+                      disabled={
+                        loadingRegions
+                      }
+                    >
+                      <SelectTrigger className="text-sm cursor-pointer bg-white border-slate-200 text-slate-700">
+                        <SelectValue
+                          placeholder={
+                            loadingRegions
+                              ? "Loading regions..."
+                              : "Select region"
+                          }
+                        />
+                      </SelectTrigger>
+
+                      <SelectContent className="max-h-64 bg-white border-slate-200 text-slate-700">
+                        {regions.map(
+                          (r) => (
+                            <SelectItem
+                              key={
+                                r.code
+                              }
+                              value={
+                                r.code
+                              }
+                              className="cursor-pointer"
+                            >
+                              {r.name}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* PROVINCE */}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-600">
+                      Province
+                    </Label>
+
+                    <Select
+                      value={
+                        form.provinceCode
+                      }
+                      onValueChange={
+                        handleProvinceChange
+                      }
+                      disabled={
+                        !form.regionCode ||
+                        loadingProvinces ||
+                        regionHasNoProvinces
+                      }
+                    >
+                      <SelectTrigger className="text-sm cursor-pointer bg-white border-slate-200 text-slate-700">
+                        <SelectValue
+                          placeholder={
+                            regionHasNoProvinces
+                              ? "N/A for this region"
+                              : loadingProvinces
+                              ? "Loading provinces..."
+                              : !form.regionCode
+                              ? "Select region first"
+                              : "Select province"
+                          }
+                        />
+                      </SelectTrigger>
+
+                      <SelectContent className="max-h-64 bg-white border-slate-200 text-slate-700">
+                        {provinces.map(
+                          (p) => (
+                            <SelectItem
+                              key={
+                                p.code
+                              }
+                              value={
+                                p.code
+                              }
+                              className="cursor-pointer"
+                            >
+                              {p.name}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* CITY */}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-600">
+                      City / Municipality
+                    </Label>
+
+                    <Select
+                      value={
+                        form.cityCode
+                      }
+                      onValueChange={
+                        handleCityChange
+                      }
+                      disabled={
+                        loadingCities ||
+                        (!regionHasNoProvinces &&
+                          !form.provinceCode) ||
+                        (regionHasNoProvinces &&
+                          !form.regionCode)
+                      }
+                    >
+                      <SelectTrigger className="text-sm cursor-pointer bg-white border-slate-200 text-slate-700">
+                        <SelectValue
+                          placeholder={
+                            loadingCities
+                              ? "Loading cities..."
+                              : "Select city/municipality"
+                          }
+                        />
+                      </SelectTrigger>
+
+                      <SelectContent className="max-h-64 bg-white border-slate-200 text-slate-700">
+                        {cities.map(
+                          (c) => (
+                            <SelectItem
+                              key={
+                                c.code
+                              }
+                              value={
+                                c.code
+                              }
+                              className="cursor-pointer"
+                            >
+                              {c.name}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* BARANGAY */}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-slate-600">
+                      Barangay
+                    </Label>
+
+                    <Select
+                      value={
+                        form.barangayCode
+                      }
+                      onValueChange={
+                        handleBarangayChange
+                      }
+                      disabled={
+                        !form.cityCode ||
+                        loadingBarangays
+                      }
+                    >
+                      <SelectTrigger className="text-sm cursor-pointer bg-white border-slate-200 text-slate-700">
+                        <SelectValue
+                          placeholder={
+                            loadingBarangays
+                              ? "Loading barangays..."
+                              : "Select barangay"
+                          }
+                        />
+                      </SelectTrigger>
+
+                      <SelectContent className="max-h-64 bg-white border-slate-200 text-slate-700">
+                        {barangays.map(
+                          (b) => (
+                            <SelectItem
+                              key={
+                                b.code
+                              }
+                              value={
+                                b.code
+                              }
+                              className="cursor-pointer"
+                            >
+                              {b.name}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            {/* ================================================================= */}
+            {/* FOOTER                                                            */}
+            {/* ================================================================= */}
+
+            <DialogFooter className="px-6 py-4 border-t shrink-0 border-slate-100">
               <Button
                 type="button"
                 variant="outline"
                 onClick={closeModal}
-                disabled={isSubmitting}
+                className="cursor-pointer"
               >
                 Cancel
               </Button>
 
               <Button
                 type="submit"
-                disabled={isSubmitting}
-                className="gap-2"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm transition-all active:scale-95 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={
+                  isSubmitting ||
+                  isFormInvalid
+                }
               >
                 {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-
-                    {isSubmittingImage
-                      ? "Uploading ID..."
-                      : "Registering..."}
-                  </>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
-                  <>
-                    <CheckCircle2 className="h-4 w-4" />
-                    Register Card
-                  </>
+                  <CreditCard className="w-4 h-4 mr-2" />
                 )}
+
+                {isSubmitting
+                  ? "Registering..."
+                  : "Register Card"}
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
