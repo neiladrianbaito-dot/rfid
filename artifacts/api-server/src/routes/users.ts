@@ -110,12 +110,18 @@ async function getUsersColumns(): Promise<Set<string>> {
   if (cachedUserColumns !== null) return cachedUserColumns;
 
   const namesToCheck = ["type", ...OPTIONAL_USER_COLUMNS.map((c) => c.col)];
+
+  // FIX: `any(${namesToCheck})` spreads the array into individual bound
+  // params — `any(($1, $2, ..., $14))` — which Postgres parses as a row
+  // constructor, not an array, and throws 42809 ("op ANY/ALL (array)
+  // requires array on right side"). Use `in (...)` with the values
+  // comma-joined via sql.join instead.
   const result = await db.execute(sql`
     select column_name
     from information_schema.columns
     where table_schema = 'public'
       and table_name = 'users'
-      and column_name = any(${namesToCheck})
+      and column_name in (${sql.join(namesToCheck.map((n) => sql`${n}`), sql`, `)})
   `);
   cachedUserColumns = new Set(
     extractRows<{ column_name: string }>(result).map((r) => r.column_name),
