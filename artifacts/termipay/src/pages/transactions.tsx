@@ -219,6 +219,14 @@ function formatNullableAmount(
     ? "—"
     : `₱${formatAmount(value)}`;
 }
+function formatNetAmountWithSign(
+  value: number | null
+): string {
+  return value == null ||
+    !Number.isFinite(value)
+    ? "—"
+    : `+₱${formatAmount(value)}`;
+}
 function formatPaymentMethod(
   method?: string | null
 ): string {
@@ -408,7 +416,7 @@ function ReceiptModal({
             >
               {isFare
                 ? `−₱${originalAmount}`
-                : `₱${heroAmount}`}
+                : `+₱${heroAmount}`}
             </p>
           </div>
           {}
@@ -613,8 +621,8 @@ function ReceiptModal({
                   <span
                     className={`text-xs font-mono font-bold ${
                       isDark
-                        ? "text-slate-300"
-                        : "text-slate-700"
+                        ? "text-slate-200"
+                        : "text-slate-900"
                     }`}
                   >
                     ₱{originalAmount}
@@ -702,7 +710,7 @@ function ReceiptModal({
                         : "text-emerald-600"
                     }`}
                   >
-                    {formatNullableAmount(
+                    {formatNetAmountWithSign(
                       netAmount
                     )}
                   </span>
@@ -832,7 +840,7 @@ function ReceiptModal({
             >
               {isFare
                 ? `−₱${originalAmount}`
-                : formatNullableAmount(
+                : formatNetAmountWithSign(
                     netAmount
                   )}
             </span>
@@ -2418,13 +2426,11 @@ export default function TransactionsPage() {
                                         ? "text-red-400"
                                         : "text-red-600"
                                       : isDark
-                                        ? "text-emerald-400"
-                                        : "text-emerald-600"
+                                        ? "text-slate-200"
+                                        : "text-slate-800"
                                   }`}
                                 >
-                                  {isFareView
-                                    ? "−"
-                                    : "+"}
+                                  {isFareView && "−"}
                                   ₱
                                   {formatAmount(
                                     Number(
@@ -2448,8 +2454,14 @@ export default function TransactionsPage() {
                                         )
                                       )}
                                     </TableCell>
-                                    <TableCell className="text-sm font-bold tabular-nums">
-                                      {formatNullableAmount(
+                                    <TableCell
+                                      className={`text-sm font-bold tabular-nums ${
+                                        isDark
+                                          ? "text-emerald-400"
+                                          : "text-emerald-600"
+                                      }`}
+                                    >
+                                      {formatNetAmountWithSign(
                                         getNetAmount(
                                           tx
                                         )
