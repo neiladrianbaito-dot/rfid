@@ -40,6 +40,9 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
+// ✅ NEW: Supabase client — adjust this import path to wherever your client is
+// initialized (e.g. `createClient(...)` from `@supabase/supabase-js`).
+import { supabase } from "@/lib/supabase";
 
 // ============================================================================
 // 🗺️ PSGC API — community-hosted Philippine Standard Geographic Code API
@@ -48,6 +51,10 @@ import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 // Docs / source: https://psgc.gitlab.io/api/
 // ============================================================================
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
+
+// ✅ NEW: Supabase Storage bucket name for uploaded ID images.
+// Palitan kung iba ang pangalan ng bucket mo sa Supabase Dashboard.
+const ID_IMAGE_BUCKET = "id-images";
 
 interface PsgcOption {
   code: string;
@@ -130,13 +137,42 @@ function calculateAge(dobString: string): number | null {
   return age >= 0 ? age : null;
 }
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsDataURL(file);
-  });
+// ✅ NEW: Uploads the selected ID image file directly to Supabase Storage and
+// returns its public URL. This replaces the old fileToBase64() approach,
+// which stored the entire image as a base64 string inside the `users` row
+// and would have bloated the table over time.
+//
+// Requirements on the Supabase side:
+//  1. A storage bucket named `ID_IMAGE_BUCKET` must exist.
+//  2. The bucket (or its RLS policies) must allow INSERT from the role your
+//     frontend uses (anon/authenticated) so this upload can succeed.
+//  3. If the bucket is public, `getPublicUrl` below returns a URL anyone with
+//     the link can view. For sensitive IDs (Student/Senior/PWD), consider a
+//     private bucket + `createSignedUrl` instead — ask if you want that
+//     version, the swap is small.
+async function uploadIdImageToStorage(file: File, cardUid: string): Promise<string> {
+  const fileExt = file.name.split(".").pop() || "jpg";
+  const safeExt = fileExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const fileName = `${cardUid}-${Date.now()}.${safeExt}`;
+  const filePath = `id-images/${fileName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(ID_IMAGE_BUCKET)
+    .upload(filePath, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+
+  if (uploadError) {
+    throw new Error(`Failed to upload ID image: ${uploadError.message}`);
+  }
+
+  const { data } = supabase.storage.from(ID_IMAGE_BUCKET).getPublicUrl(filePath);
+  if (!data?.publicUrl) {
+    throw new Error("Failed to resolve uploaded image URL");
+  }
+  return data.publicUrl;
 }
 
 const INITIAL_FORM = {
@@ -440,7 +476,10 @@ export default function CardRegistrationPage() {
     resetForm();
   };
 
-  const [isSubmittingImage, setIsSubmittingImage] = useState(false);
+  // ✅ Renamed from isSubmittingImage → isUploadingImage since this now
+  // reflects a real network upload to Supabase Storage, not a local
+  // base64 read.
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const createMutation = useCreateUser({
     mutation: {
@@ -530,8 +569,15 @@ export default function CardRegistrationPage() {
     }
 
     try {
-      setIsSubmittingImage(true);
-      const idImageBase64 = idImageFile ? await fileToBase64(idImageFile) : null;
+      setIsUploadingImage(true);
+
+      // ✅ FIXED: image now goes straight to Supabase Storage from the
+      // browser, and only the resulting public URL is sent to the backend
+      // as `idImagePath`. This replaces the old base64-into-the-row
+      // approach that used to bloat the `users` table.
+      const idImageUrl = idImageFile
+        ? await uploadIdImageToStorage(idImageFile, form.cardUid)
+        : null;
 
       createMutation.mutate({
         data: {
@@ -551,21 +597,22 @@ export default function CardRegistrationPage() {
           barangayCode: form.barangayCode,
           barangayName: form.barangayName,
           fullAddress,
-          // TODO: upload idImageFile to your storage bucket first (see add_registration_fields.sql
-          // note on id_image_path) and send the returned path/URL as `idImagePath` instead of base64.
-          // Sending raw base64 here works as a stopgap but will bloat the users table.
-          idImagePath: idImageBase64,
+          idImagePath: idImageUrl, // 👈 storage URL, not base64
           initialBalance: 0, // default value dahil required pa rin ito sa backend
         },
       });
-    } catch {
-      toast({ title: "Failed to process ID image", variant: "destructive" });
+    } catch (err: any) {
+      toast({
+        title: "Failed to upload ID image",
+        description: err?.message || "Please try again.",
+        variant: "destructive",
+      });
     } finally {
-      setIsSubmittingImage(false);
+      setIsUploadingImage(false);
     }
   };
 
-  const isSubmitting = createMutation.isPending || isSubmittingImage;
+  const isSubmitting = createMutation.isPending || isUploadingImage;
 
   return (
     <div className={`space-y-8 ${isDark ? "text-slate-200" : "text-slate-800"}`} data-testid="card-registration-page">
@@ -1119,7 +1166,7 @@ export default function CardRegistrationPage() {
                 ) : (
                   <CreditCard className="w-4 h-4 mr-2" />
                 )}
-                {isSubmitting ? "Registering..." : "Register Card"}
+                {isSubmitting ? (isUploadingImage ? "Uploading ID..." : "Registering...") : "Register Card"}
               </Button>
             </DialogFooter>
           </form>
