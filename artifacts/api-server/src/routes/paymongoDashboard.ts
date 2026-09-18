@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, sql } from "drizzle-orm";
-import { db, transactionsTable } from "@workspace/db";
+import { sql } from "drizzle-orm";
+import { db } from "@workspace/db";
 import { verifyUserToken } from "../lib/user-token";
 
 const router: IRouter = Router();
@@ -79,12 +79,47 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
       return;
     }
 
-    const txRows = await db
-      .select()
-      .from(transactionsTable)
-      .where(eq(transactionsTable.cardUid, cardUid))
-      .orderBy(desc(transactionsTable.timestamp))
-      .limit(100);
+    // 🔧 FIX: switched from the Drizzle `.select().from(transactionsTable)`
+    // query to explicit raw SQL so fee_amount / vat_amount / net_amount are
+    // guaranteed to come back even if the Drizzle schema object for
+    // transactionsTable doesn't declare those columns. This is what the
+    // user dashboard's Top-up Fee/VAT/Net columns and receipt modal need —
+    // without this, the frontend was trying (and failing, due to RLS) to
+    // fetch those fields directly from Supabase on its own.
+    type TxRow = {
+      id: number;
+      timestamp: string;
+      cardUid: string;
+      type: string;
+      amount: string;
+      status: string;
+      routeId: number | null;
+      paymentMethod: string | null;
+      feeAmount: string | null;
+      vatAmount: string | null;
+      netAmount: string | null;
+    };
+
+    const txResult = await db.execute(sql`
+      select
+        t.id,
+        t.timestamp,
+        t.card_uid       as "cardUid",
+        t.type,
+        t.amount,
+        t.status,
+        t.route_id       as "routeId",
+        t.payment_method as "paymentMethod",
+        t.fee_amount     as "feeAmount",
+        t.vat_amount     as "vatAmount",
+        t.net_amount     as "netAmount"
+      from transactions t
+      where t.card_uid = ${cardUid}
+      order by t.timestamp desc
+      limit 100
+    `);
+
+    const txRows = extractRows<TxRow>(txResult);
 
     // 🆕 Fetch card_balance_transfers where this user's card is either the
     // source or the target, joining `users` twice to pull each side's
@@ -148,14 +183,20 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
         expirationDate: user.expirationDate ?? null,
       },
       transactions: txRows.map((tx) => ({
-        id:        tx.id,
-        timestamp: tx.timestamp,
-        cardUid:   tx.cardUid,
-        type:      tx.type,
-        amount:    Number(tx.amount ?? 0),
-        status:    tx.status,
-        route_id:  tx.routeId ?? tx.route_id ?? null,
-        payment_method: tx.paymentMethod ?? tx.payment_method ?? null,
+        id:             tx.id,
+        timestamp:      tx.timestamp,
+        cardUid:        tx.cardUid,
+        type:           tx.type,
+        amount:         Number(tx.amount ?? 0),
+        status:         tx.status,
+        route_id:       tx.routeId ?? null,
+        payment_method: tx.paymentMethod ?? null,
+        // 🆕 Fee / VAT / Net amount — now included so the frontend can
+        // render the Top-up breakdown without a separate direct Supabase
+        // query (which was silently failing due to RLS).
+        fee_amount:     tx.feeAmount != null ? Number(tx.feeAmount) : null,
+        vat_amount:     tx.vatAmount != null ? Number(tx.vatAmount) : null,
+        net_amount:     tx.netAmount != null ? Number(tx.netAmount) : null,
       })),
       // 🆕 Shaped to match what the frontend's CardTransfer type expects:
       // nested `source` / `target` objects with card_uid + full_name.
