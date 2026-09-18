@@ -372,6 +372,13 @@ type SheetColumn = {
   header: string;
   width: number;
   get: (row: any, idx: number) => string;
+  // ➕ Optional grand-total for this column, computed across every row on
+  // the sheet. When present, buildSingleSheet renders one extra "TOTAL"
+  // row at the bottom so the admin can see sums at a glance instead of
+  // having to add them up in Excel. Columns without a `total` show a
+  // blank cell on that row (except column 0, which shows the "TOTAL"
+  // label itself when no other column claims it).
+  total?: (rows: any[]) => string;
 };
 
 // Excel column letters, supports > 26 columns (AA, AB, ...) even though no
@@ -416,7 +423,11 @@ function buildSingleSheet(
 
   const HEADER_ROWS = 6; // 0:title 1:subtitle 2:meta 3:blank 4:band 5:column headers
   const dataRowsCount = Math.max(1, b.rows.length);
-  const totalRows = HEADER_ROWS + dataRowsCount;
+  // ➕ Only add the extra TOTALS row when there's real data AND at least
+  // one column actually defines a total() — an empty "No records" sheet
+  // has nothing to sum.
+  const hasTotals = b.rows.length > 0 && b.columns.some((c) => !!c.total);
+  const totalRows = HEADER_ROWS + dataRowsCount + (hasTotals ? 1 : 0);
 
   const grid: any[][] = Array.from({ length: totalRows }, () => Array(totalCols).fill(""));
   const styles: { ref: string; style: any }[] = [];
@@ -512,6 +523,25 @@ function buildSingleSheet(
         setStyle(r, ci, style);
       });
     });
+  }
+
+  // ── 🆕 TOTALS row — one bold, dark banner row right after the last
+  // data row, summing every column that defines a total(). The first
+  // column falls back to the "TOTAL" label itself if it doesn't have its
+  // own total() (e.g. a Date/Timestamp/Card UID column). ──
+  if (hasTotals) {
+    const r = HEADER_ROWS + b.rows.length;
+    b.columns.forEach((c, ci) => {
+      const val = c.total ? c.total(b.rows) : ci === 0 ? "TOTAL" : "";
+      grid[r][ci] = val;
+      setStyle(r, ci, {
+        font: { bold: true, sz: 10, color: { rgb: "FFFFFF" }, name: "Calibri" },
+        fill: { fgColor: { rgb: "0F172A" }, patternType: "solid" },
+        alignment: { horizontal: ci === 0 ? "left" : "right", vertical: "center" },
+        border: MEDIUM_BORDER,
+      });
+    });
+    rowHeights[r] = 22;
   }
 
   const worksheet = utils.aoa_to_sheet(grid);
@@ -1225,6 +1255,17 @@ export default function ReportsPage() {
     // columns between "Signed Amount" and "Status" — used for the Top-up
     // tab only (Fare rows don't carry fee/VAT data, same as the
     // Transactions page which only shows these for non-Fare rows).
+    // ➕ shared "sum a numeric getter across every row" helper, used by
+    // the total() functions below (Fee/VAT/Net can be null on some rows,
+    // so nulls are treated as 0 for the sum).
+    const sumFormatted = (rows: any[], getter: (tx: any) => number | null) => {
+      const sum = rows.reduce((s, tx) => {
+        const v = getter(tx);
+        return s + (v == null ? 0 : v);
+      }, 0);
+      return sum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
     const txColumns = (signPrefix: string, includeFinancials: boolean = false): SheetColumn[] => {
       const columns: SheetColumn[] = [
         { header: "Timestamp", width: 26, get: (tx) => {
@@ -1234,10 +1275,12 @@ export default function ReportsPage() {
         { header: "Card UID", width: 18, get: (tx) => tx.card_uid || tx.cardUid || "" },
         { header: "Full Name", width: 24, get: (tx) => tx.full_name || tx.fullName || "" },
         { header: "Amount (PHP)", width: 18, get: (tx) =>
-          Math.abs(Number(tx.amount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          Math.abs(Number(tx.amount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+          total: (rows) => sumFormatted(rows, (tx) => Math.abs(Number(tx.amount) || 0)),
         },
         { header: "Signed Amount", width: 16, get: (tx) =>
-          `${signPrefix}${Math.abs(Number(tx.amount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          `${signPrefix}${Math.abs(Number(tx.amount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          total: (rows) => `${signPrefix}${sumFormatted(rows, (tx) => Math.abs(Number(tx.amount) || 0))}`,
         },
       ];
 
@@ -1246,19 +1289,26 @@ export default function ReportsPage() {
           { header: "Fee (PHP)", width: 16, get: (tx) => {
             const v = getFeeAmount(tx);
             return v == null ? "—" : v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          }},
+          }, total: (rows) => sumFormatted(rows, getFeeAmount) },
           { header: "VAT (PHP)", width: 16, get: (tx) => {
             const v = getVatAmount(tx);
             return v == null ? "—" : v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          }},
+          }, total: (rows) => sumFormatted(rows, getVatAmount) },
           { header: "Net Amount (PHP)", width: 18, get: (tx) => {
             const v = getNetAmount(tx);
             return v == null ? "—" : v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          }},
+          }, total: (rows) => sumFormatted(rows, getNetAmount) },
         );
       }
 
-      columns.push({ header: "Status", width: 14, get: (tx) => tx.status || "" });
+      columns.push({
+        header: "Status",
+        width: 14,
+        get: (tx) => tx.status || "",
+        // ➕ Status has no numeric sum, so its "total" doubles as a
+        // record count — e.g. "128 records" — instead of sitting blank.
+        total: (rows) => `${rows.length} record${rows.length === 1 ? "" : "s"}`,
+      });
       return columns;
     };
 
@@ -1269,13 +1319,17 @@ export default function ReportsPage() {
       { header: "To (Card UID)", width: 18, get: (t) => cardUidOf(t.target) },
       { header: "To Name", width: 22, get: (t) => fullNameOf(t.target) },
       { header: "Amount (PHP)", width: 16, get: (t) =>
-        Math.abs(Number(t.amount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        Math.abs(Number(t.amount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        total: (rows) => {
+          const sum = rows.reduce((s: number, t: any) => s + Math.abs(Number(t.amount) || 0), 0);
+          return sum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
       },
       { header: "Reason", width: 24, get: (t) => t.reason || "" },
       { header: "Status", width: 14, get: (t) => {
         const s = normalizeTransferStatus(t.status);
         return s.charAt(0).toUpperCase() + s.slice(1);
-      }},
+      }, total: (rows) => `${rows.length} record${rows.length === 1 ? "" : "s"}` },
     ];
 
     const peso2 = (n: number) =>
@@ -1291,17 +1345,31 @@ export default function ReportsPage() {
       { header: "Date", width: 16, get: (d) =>
         new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
       },
-      { header: "Total Collected (PHP)", width: 20, get: (d) => peso2(d.total) },
-      { header: "Regular (PHP)", width: 16, get: (d) => peso2(d.regular) },
-      { header: "Student (PHP)", width: 16, get: (d) => peso2(d.student) },
-      { header: "Senior (PHP)", width: 16, get: (d) => peso2(d.senior) },
-      { header: "PWD (PHP)", width: 16, get: (d) => peso2(d.pwd) },
-      { header: "Discounted Total (PHP)", width: 20, get: (d) => peso2(d.student + d.senior + d.pwd) },
+      { header: "Total Collected (PHP)", width: 20, get: (d) => peso2(d.total),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.total, 0)) },
+      { header: "Regular (PHP)", width: 16, get: (d) => peso2(d.regular),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.regular, 0)) },
+      { header: "Student (PHP)", width: 16, get: (d) => peso2(d.student),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.student, 0)) },
+      { header: "Senior (PHP)", width: 16, get: (d) => peso2(d.senior),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.senior, 0)) },
+      { header: "PWD (PHP)", width: 16, get: (d) => peso2(d.pwd),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.pwd, 0)) },
+      { header: "Discounted Total (PHP)", width: 20, get: (d) => peso2(d.student + d.senior + d.pwd),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.student + d.senior + d.pwd, 0)) },
       { header: "Discounted Share", width: 16, get: (d) =>
-        d.total > 0 ? `${(((d.student + d.senior + d.pwd) / d.total) * 100).toFixed(1)}%` : "0.0%"
+        d.total > 0 ? `${(((d.student + d.senior + d.pwd) / d.total) * 100).toFixed(1)}%` : "0.0%",
+        // ➕ overall share = total discounted / total collected across
+        // the whole period, not an average of the daily percentages.
+        total: (rows) => {
+          const totalAll = rows.reduce((s: number, d: any) => s + d.total, 0);
+          const totalDisc = rows.reduce((s: number, d: any) => s + d.student + d.senior + d.pwd, 0);
+          return totalAll > 0 ? `${((totalDisc / totalAll) * 100).toFixed(1)}%` : "0.0%";
+        },
       },
       { header: "Revenue Lost to 20% Discount (PHP)", width: 24, get: (d) =>
-        peso2((d.student + d.senior + d.pwd) * LOST_REVENUE_MULTIPLIER)
+        peso2((d.student + d.senior + d.pwd) * LOST_REVENUE_MULTIPLIER),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + (d.student + d.senior + d.pwd) * LOST_REVENUE_MULTIPLIER, 0)),
       },
     ];
 
@@ -1311,11 +1379,17 @@ export default function ReportsPage() {
     const routeSummaryColumns: SheetColumn[] = [
       { header: "Rank", width: 8, get: (_r: any, idx: number) => String(idx + 1) },
       { header: "Route", width: 30, get: (r: any) => r.name },
-      { header: "Total Rides", width: 14, get: (r: any) => r.totalRides.toLocaleString("en-US") },
-      { header: "Daily Avg Rides", width: 16, get: (r: any) => r.avgRidesPerDay.toFixed(1) },
-      { header: "Total Revenue (PHP)", width: 20, get: (r: any) => peso2(r.totalRevenue) },
-      { header: "Daily Avg Revenue (PHP)", width: 22, get: (r: any) => peso2(r.avgRevenuePerDay) },
-      { header: "Share of Rides", width: 16, get: (r: any) => `${r.sharePct.toFixed(1)}%` },
+      { header: "Total Rides", width: 14, get: (r: any) => r.totalRides.toLocaleString("en-US"),
+        total: (rows) => rows.reduce((s: number, r: any) => s + r.totalRides, 0).toLocaleString("en-US") },
+      { header: "Daily Avg Rides", width: 16, get: (r: any) => r.avgRidesPerDay.toFixed(1),
+        total: (rows) => rows.reduce((s: number, r: any) => s + r.avgRidesPerDay, 0).toFixed(1) },
+      { header: "Total Revenue (PHP)", width: 20, get: (r: any) => peso2(r.totalRevenue),
+        total: (rows) => peso2(rows.reduce((s: number, r: any) => s + r.totalRevenue, 0)) },
+      { header: "Daily Avg Revenue (PHP)", width: 22, get: (r: any) => peso2(r.avgRevenuePerDay),
+        total: (rows) => peso2(rows.reduce((s: number, r: any) => s + r.avgRevenuePerDay, 0)) },
+      { header: "Share of Rides", width: 16, get: (r: any) => `${r.sharePct.toFixed(1)}%`,
+        // ➕ every route's share adds up to ~100% of routed rides.
+        total: (rows) => `${rows.reduce((s: number, r: any) => s + r.sharePct, 0).toFixed(1)}%` },
     ];
 
     // ── 🆕 Route Performance — Daily Ridership. One row per date across
@@ -1331,6 +1405,8 @@ export default function ReportsPage() {
         header: r.name,
         width: 20,
         get: (row: any) => String(row.counts.get(r.routeId)?.count ?? 0),
+        total: (rows) =>
+          String(rows.reduce((s: number, row: any) => s + (row.counts.get(r.routeId)?.count ?? 0), 0)),
       })),
     ];
     const routeDailyRows = routePeriodDates.map((date) => ({
