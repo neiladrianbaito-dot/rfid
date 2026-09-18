@@ -146,6 +146,7 @@ const INITIAL_FORM = {
   contactNumber: "",
   type: "Regular",
   streetAddress: "",
+  zipCode: "",
   regionCode: "",
   regionName: "",
   provinceCode: "",
@@ -172,6 +173,7 @@ export default function CardRegistrationPage() {
   const [cardUidError, setCardUidError] = useState("");
   const [dobError, setDobError] = useState("");
   const [idImageError, setIdImageError] = useState("");
+  const [zipCodeError, setZipCodeError] = useState("");
 
   // ✅ ID image upload (required for Student / Senior / PWD)
   const [idImageFile, setIdImageFile] = useState<File | null>(null);
@@ -375,6 +377,14 @@ export default function CardRegistrationPage() {
     }
   };
 
+  // ✅ Zip code handler — digits only, max 4 (PH zip codes are 4 digits)
+  const handleZipCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const digits = e.target.value.replace(/\D/g, "");
+    if (digits.length > 4) return;
+    setForm((f) => ({ ...f, zipCode: digits }));
+    setZipCodeError(digits.length > 0 && digits.length < 4 ? `${4 - digits.length} digit${4 - digits.length !== 1 ? "s" : ""} remaining` : "");
+  };
+
   // ✅ ID image handlers (proof for Student / Senior / PWD discount types)
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -417,6 +427,7 @@ export default function CardRegistrationPage() {
     setCardUidError("");
     setDobError("");
     setIdImageError("");
+    setZipCodeError("");
     clearImage();
     setProvinces([]);
     setCities([]);
@@ -469,11 +480,26 @@ export default function CardRegistrationPage() {
   const requiresIdImage = form.type !== "Regular";
   const age = calculateAge(form.dob);
 
+  // ✅ Total / complete address — built smallest → largest so it reads naturally
+  // (House/Street, Barangay, City/Municipality, Province, Region ZipCode).
+  // Ito ang naka-record na buong address string, hiwalay pa rin sa mga individual
+  // PSGC fields (para may structured data AND readable address sa isang tingin).
+  const fullAddress = [
+    form.streetAddress.trim(),
+    form.barangayName,
+    form.cityName,
+    form.provinceName,
+    form.regionName && form.zipCode ? `${form.regionName} ${form.zipCode}` : form.regionName || form.zipCode,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
   // ✅ Disable submit if there are validation errors or required fields are incomplete
   const isFormInvalid =
     !!contactError ||
     !!cardUidError ||
     !!dobError ||
+    !!zipCodeError ||
     form.cardUid.length !== 8 ||
     form.contactNumber.length !== 11 ||
     !form.fullName.trim() ||
@@ -516,7 +542,9 @@ export default function CardRegistrationPage() {
           contactNumber: form.contactNumber,
           type: form.type,
           address: {
+            fullAddress,
             streetAddress: form.streetAddress.trim() || null,
+            zipCode: form.zipCode || null,
             region: form.regionName,
             regionCode: form.regionCode,
             province: form.provinceName || null,
@@ -948,7 +976,7 @@ export default function CardRegistrationPage() {
                         ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600"
                         : "bg-white border-slate-200 text-slate-900 placeholder:text-slate-400"
                     }`}
-                    placeholder="e.g. Blk 4 Lot 12, Purok Mabini, Sitio Malaya"
+                    placeholder="e.g. House No. 123, Rizal Street, Purok 2"
                     value={form.streetAddress}
                     onChange={(e) => setForm((f) => ({ ...f, streetAddress: e.target.value }))}
                   />
@@ -1032,7 +1060,42 @@ export default function CardRegistrationPage() {
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {/* Zip Code */}
+                  <div className="space-y-2">
+                    <Label htmlFor="zipCode" className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                      Zip Code
+                      <span className={`ml-2 font-normal ${isDark ? "text-slate-500" : "text-slate-400"}`}>(optional)</span>
+                    </Label>
+                    <Input
+                      id="zipCode"
+                      inputMode="numeric"
+                      className={`font-mono ${isDark ? "bg-slate-950 text-white" : "bg-white text-slate-900"} ${
+                        zipCodeError
+                          ? "border-red-400 focus-visible:ring-red-400"
+                          : isDark
+                          ? "border-slate-800 focus-visible:ring-blue-500"
+                          : "border-slate-200 focus-visible:ring-blue-500"
+                      }`}
+                      placeholder="e.g. 6710"
+                      value={form.zipCode}
+                      onChange={handleZipCodeChange}
+                    />
+                    {zipCodeError && <p className="text-xs font-medium text-red-500">{zipCodeError}</p>}
+                  </div>
                 </div>
+
+                {/* Complete address preview — this is the full string that gets recorded */}
+                {fullAddress && (
+                  <div className={`space-y-1.5 pt-1`}>
+                    <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>Complete Address</Label>
+                    <div className={`text-sm px-3 py-2.5 rounded-lg border leading-relaxed ${
+                      isDark ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-600"
+                    }`}>
+                      {fullAddress}
+                    </div>
+                  </div>
+                )}
               </section>
             </div>
 
