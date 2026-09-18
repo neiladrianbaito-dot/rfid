@@ -43,6 +43,29 @@ const STATUS_FILTERS = ["All", "Active", "Inactive", "Blocked", "Expired"] as co
 // ➕ Reasons a card would need a balance transfer (lost/stolen/damaged replacement)
 const TRANSFER_REASONS = ["Lost Card", "Stolen Card", "Damaged Card", "Other"] as const;
 
+const PSGC_API = "https://psgc.gitlab.io/api";
+
+const REGION_OPTIONS = [
+  { code: "010000000", name: "Ilocos Region" },
+  { code: "020000000", name: "Cagayan Valley" },
+  { code: "030000000", name: "Central Luzon" },
+  { code: "040000000", name: "CALABARZON" },
+  { code: "170000000", name: "MIMAROPA Region" },
+  { code: "050000000", name: "Bicol Region" },
+  { code: "060000000", name: "Western Visayas" },
+  { code: "070000000", name: "Central Visayas" },
+  { code: "080000000", name: "Eastern Visayas" },
+  { code: "090000000", name: "Zamboanga Peninsula" },
+  { code: "100000000", name: "Northern Mindanao" },
+  { code: "110000000", name: "Davao Region" },
+  { code: "120000000", name: "SOCCSKSARGEN" },
+  { code: "130000000", name: "NCR" },
+  { code: "140000000", name: "CAR" },
+  { code: "160000000", name: "Caraga" },
+  { code: "150000000", name: "BARMM" },
+] as const;
+
+
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -373,7 +396,18 @@ export default function UserManagementPage() {
 
   const [editForm, setEditForm] = useState({
     fullName: "",
+    dateOfBirth: "",
     contactNumber: "",
+    streetAddress: "",
+    regionCode: "",
+    regionName: "",
+    provinceCode: "",
+    provinceName: "",
+    cityCode: "",
+    cityName: "",
+    barangayCode: "",
+    barangayName: "",
+    zipCode: "",
     balance: "",
     status: "",
     type: "",
@@ -381,6 +415,10 @@ export default function UserManagementPage() {
   // Snapshot of the form's values at the moment Edit was opened — used to
   // detect whether the user has actually changed anything before allowing Save.
   const [originalForm, setOriginalForm] = useState(editForm);
+  const [provinceOptions, setProvinceOptions] = useState<any[]>([]);
+  const [cityOptions, setCityOptions] = useState<any[]>([]);
+  const [barangayOptions, setBarangayOptions] = useState<any[]>([]);
+  const [isLoadingAddressOptions, setIsLoadingAddressOptions] = useState(false);
   const [page, setPage] = useState(1);
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -389,6 +427,113 @@ export default function UserManagementPage() {
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadProvinces = async () => {
+      if (!editUser || !editForm.regionCode) {
+        setProvinceOptions([]);
+        return;
+      }
+
+      setIsLoadingAddressOptions(true);
+      try {
+        const response = await fetch(`${PSGC_API}/regions/${editForm.regionCode}/provinces/`);
+        if (!response.ok) throw new Error("Failed to load provinces");
+        const data = await response.json();
+        if (!cancelled) setProvinceOptions(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Load provinces error:", error);
+        if (!cancelled) setProvinceOptions([]);
+      } finally {
+        if (!cancelled) setIsLoadingAddressOptions(false);
+      }
+    };
+
+    loadProvinces();
+    return () => { cancelled = true; };
+  }, [editUser, editForm.regionCode]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCities = async () => {
+      if (!editUser || !editForm.provinceCode) {
+        setCityOptions([]);
+        return;
+      }
+
+      setIsLoadingAddressOptions(true);
+      try {
+        const response = await fetch(`${PSGC_API}/provinces/${editForm.provinceCode}/cities-municipalities/`);
+        if (!response.ok) throw new Error("Failed to load cities/municipalities");
+        const data = await response.json();
+        if (!cancelled) setCityOptions(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Load cities/municipalities error:", error);
+        if (!cancelled) setCityOptions([]);
+      } finally {
+        if (!cancelled) setIsLoadingAddressOptions(false);
+      }
+    };
+
+    loadCities();
+    return () => { cancelled = true; };
+  }, [editUser, editForm.provinceCode]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadBarangays = async () => {
+      if (!editUser || !editForm.cityCode) {
+        setBarangayOptions([]);
+        return;
+      }
+
+      setIsLoadingAddressOptions(true);
+      try {
+        const response = await fetch(`${PSGC_API}/cities-municipalities/${editForm.cityCode}/barangays/`);
+        if (!response.ok) throw new Error("Failed to load barangays");
+        const data = await response.json();
+        if (!cancelled) setBarangayOptions(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Load barangays error:", error);
+        if (!cancelled) setBarangayOptions([]);
+      } finally {
+        if (!cancelled) setIsLoadingAddressOptions(false);
+      }
+    };
+
+    loadBarangays();
+    return () => { cancelled = true; };
+  }, [editUser, editForm.cityCode]);
+
+  useEffect(() => {
+    if (!editUser) {
+      setProvinceOptions([]);
+      setCityOptions([]);
+      setBarangayOptions([]);
+      return;
+    }
+
+    const currentProvince = editForm.provinceCode || editForm.provinceName;
+    const currentCity = editForm.cityCode || editForm.cityName;
+    const currentBarangay = editForm.barangayCode || editForm.barangayName;
+
+    setProvinceOptions((items) => {
+      if (!currentProvince || items.some((item) => item.code === editForm.provinceCode)) return items;
+      return [{ code: editForm.provinceCode || editForm.provinceName, name: editForm.provinceName || editForm.provinceCode }, ...items];
+    });
+    setCityOptions((items) => {
+      if (!currentCity || items.some((item) => item.code === editForm.cityCode)) return items;
+      return [{ code: editForm.cityCode || editForm.cityName, name: editForm.cityName || editForm.cityCode }, ...items];
+    });
+    setBarangayOptions((items) => {
+      if (!currentBarangay || items.some((item) => item.code === editForm.barangayCode)) return items;
+      return [{ code: editForm.barangayCode || editForm.barangayName, name: editForm.barangayName || editForm.barangayCode }, ...items];
+    });
+  }, [editUser]);
 
   useEffect(() => {
     setPage(1);
@@ -471,31 +616,80 @@ export default function UserManagementPage() {
 
   const openEdit = (user: any) => {
     setEditUser(user);
+
     const initial = {
-      fullName: user.fullName,
-      contactNumber: user.contactNumber,
+      fullName: user.fullName || "",
+      dateOfBirth: user.dateOfBirth ? String(user.dateOfBirth).slice(0, 10) : "",
+      contactNumber: user.contactNumber || "",
+      streetAddress: user.streetAddress || "",
+      regionCode: user.regionCode || "",
+      regionName: user.regionName || "",
+      provinceCode: user.provinceCode || "",
+      provinceName: user.provinceName || "",
+      cityCode: user.cityCode || "",
+      cityName: user.cityName || "",
+      barangayCode: user.barangayCode || "",
+      barangayName: user.barangayName || "",
+      zipCode: user.zipCode || "",
       balance: String(user.balance || 0),
-      status: user.status,
+      status: user.status || "",
       type: user.type || "Regular",
     };
+
     setEditForm(initial);
     setOriginalForm(initial);
+    setProvinceOptions([]);
+    setCityOptions([]);
+    setBarangayOptions([]);
   };
 
-  // True only if at least one field actually differs from what it was when
-  // the dialog opened. Balance is read-only in this form so it never
-  // contributes a "change" — comparing it would falsely enable Save.
   const hasChanges =
     editForm.fullName !== originalForm.fullName ||
-    editForm.contactNumber !== originalForm.contactNumber;
+    editForm.dateOfBirth !== originalForm.dateOfBirth ||
+    editForm.contactNumber !== originalForm.contactNumber ||
+    editForm.streetAddress !== originalForm.streetAddress ||
+    editForm.regionCode !== originalForm.regionCode ||
+    editForm.regionName !== originalForm.regionName ||
+    editForm.provinceCode !== originalForm.provinceCode ||
+    editForm.provinceName !== originalForm.provinceName ||
+    editForm.cityCode !== originalForm.cityCode ||
+    editForm.cityName !== originalForm.cityName ||
+    editForm.barangayCode !== originalForm.barangayCode ||
+    editForm.barangayName !== originalForm.barangayName ||
+    editForm.zipCode !== originalForm.zipCode;
 
   const handleUpdate = () => {
     if (!editUser || !hasChanges) return;
+
+    const fullAddress = [
+      editForm.streetAddress,
+      editForm.barangayName,
+      editForm.cityName,
+      editForm.provinceName,
+      editForm.regionName,
+      editForm.zipCode,
+    ]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(", ");
+
     updateMutation.mutate({
       id: editUser.id,
       data: {
-        fullName: editForm.fullName,
-        contactNumber: editForm.contactNumber,
+        fullName: editForm.fullName.trim(),
+        contactNumber: editForm.contactNumber.trim(),
+        dateOfBirth: editForm.dateOfBirth || undefined,
+        streetAddress: editForm.streetAddress.trim() || undefined,
+        regionCode: editForm.regionCode || undefined,
+        regionName: editForm.regionName.trim() || undefined,
+        provinceCode: editForm.provinceCode || undefined,
+        provinceName: editForm.provinceName.trim() || undefined,
+        cityCode: editForm.cityCode || undefined,
+        cityName: editForm.cityName.trim() || undefined,
+        barangayCode: editForm.barangayCode || undefined,
+        barangayName: editForm.barangayName.trim() || undefined,
+        zipCode: editForm.zipCode.trim() || undefined,
+        fullAddress: fullAddress || undefined,
       },
     });
   };
@@ -1276,15 +1470,19 @@ export default function UserManagementPage() {
 
       {/* Edit Dialog */}
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className={`sm:max-w-lg [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+        <DialogContent className={`sm:max-w-xl [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
           <DialogHeader>
             <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
               <Pencil size={18} /> Update User
             </DialogTitle>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-4 py-4">
-            {/* Full Name */}
+          <div className="grid grid-cols-2 gap-4 py-4 max-h-[65vh] overflow-y-auto pr-1">
+            {/* Personal Information */}
+            <div className="col-span-2">
+              <h3 className={`text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>Personal Information</h3>
+            </div>
+
             <div className="space-y-2 col-span-2">
               <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Full Name</Label>
               <Input
@@ -1294,8 +1492,17 @@ export default function UserManagementPage() {
               />
             </div>
 
-            {/* Contact Number — directly below Full Name */}
-            <div className="space-y-2 col-span-2">
+            <div className="space-y-2">
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Date of Birth</Label>
+              <Input
+                type="date"
+                value={editForm.dateOfBirth}
+                onChange={(e) => setEditForm({ ...editForm, dateOfBirth: e.target.value })}
+                className={`text-sm ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
+              />
+            </div>
+
+            <div className="space-y-2">
               <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 <Phone size={10} /> Contact Number
               </Label>
@@ -1306,65 +1513,155 @@ export default function UserManagementPage() {
               />
             </div>
 
-            {/* Card Type — fetched from the selected user's record and read-only */}
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Card Type (read-only)</Label>
-              <div
-                className={`h-10 w-full rounded-md border px-3 flex items-center text-sm font-medium cursor-not-allowed ${
-                  isDark ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                }`}
-              >
-                <span className={`w-2 h-2 rounded-full inline-block mr-2 ${getTypeDotColor(editUser?.type)}`} />
-                {editUser?.type || "Regular"}
-              </div>
+            {/* Address */}
+            <div className="col-span-2 pt-2">
+              <h3 className={`text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>Address</h3>
             </div>
 
-            {/* Account Status — fetched from the selected user's record and read-only */}
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Account Status (read-only)</Label>
-              <div
-                className={`h-10 w-full rounded-md border px-3 flex items-center text-sm font-medium cursor-not-allowed ${
-                  isDark ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                }`}
-              >
-                <span className={`w-2 h-2 rounded-full inline-block mr-2 ${getStatusDotColor(editUser?.status || "")}`} />
-                {editUser?.status || "Unknown"}
-              </div>
-            </div>
-
-            {/* Linked Account — fetched from the selected user's record and read-only */}
             <div className="space-y-2 col-span-2">
-              <Label
-                className="text-xs font-semibold flex items-center gap-1"
-                style={{ color: normalizeEmail(editUser?.email) ? (isDark ? "#60a5fa" : "#2563eb") : (isDark ? "#64748b" : "#94a3b8") }}
-              >
-                <LinkIcon size={10} />
-                {normalizeEmail(editUser?.email) ? "Linked Account Email (read-only)" : "Linked Account (read-only)"}
-              </Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Street Address</Label>
               <Input
-                disabled
-                value={normalizeEmail(editUser?.email) ?? "No account linked to this card"}
-                className={`font-mono text-xs cursor-not-allowed ${
-                  isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"
-                } ${
-                  normalizeEmail(editUser?.email)
-                    ? isDark ? "text-blue-400" : "text-blue-600"
-                    : isDark ? "text-slate-500 italic" : "text-slate-400 italic"
-                }`}
+                value={editForm.streetAddress}
+                onChange={(e) => setEditForm({ ...editForm, streetAddress: e.target.value })}
+                placeholder="Enter street address"
+                className={`text-sm ${isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"}`}
               />
             </div>
 
-            {/* Balance — fetched from the selected user's record and read-only */}
             <div className="space-y-2 col-span-2">
-              <Label className={`text-xs font-semibold flex items-center gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                <Wallet size={10} /> Balance (read-only)
-              </Label>
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Region</Label>
+              <Select
+                value={editForm.regionCode || undefined}
+                onValueChange={(code) => {
+                  const selected = REGION_OPTIONS.find((r) => r.code === code);
+                  setEditForm({
+                    ...editForm,
+                    regionCode: code,
+                    regionName: selected?.name || "",
+                    provinceCode: "",
+                    provinceName: "",
+                    cityCode: "",
+                    cityName: "",
+                    barangayCode: "",
+                    barangayName: "",
+                  });
+                  setProvinceOptions([]);
+                  setCityOptions([]);
+                  setBarangayOptions([]);
+                }}
+              >
+                <SelectTrigger className={`text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
+                  <SelectValue placeholder="Select region" />
+                </SelectTrigger>
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+                  {REGION_OPTIONS.map((region) => (
+                    <SelectItem key={region.code} value={region.code} className="cursor-pointer">
+                      {region.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Province</Label>
+              <Select
+                value={editForm.provinceCode || undefined}
+                disabled={!editForm.regionCode || isLoadingAddressOptions}
+                onValueChange={(code) => {
+                  const selected = provinceOptions.find((p) => p.code === code);
+                  setEditForm({
+                    ...editForm,
+                    provinceCode: code,
+                    provinceName: selected?.name || "",
+                    cityCode: "",
+                    cityName: "",
+                    barangayCode: "",
+                    barangayName: "",
+                  });
+                  setCityOptions([]);
+                  setBarangayOptions([]);
+                }}
+              >
+                <SelectTrigger className={`text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
+                  <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select province"} />
+                </SelectTrigger>
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+                  {provinceOptions.map((province) => (
+                    <SelectItem key={province.code} value={province.code} className="cursor-pointer">
+                      {province.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>City / Municipality</Label>
+              <Select
+                value={editForm.cityCode || undefined}
+                disabled={!editForm.provinceCode || isLoadingAddressOptions}
+                onValueChange={(code) => {
+                  const selected = cityOptions.find((c) => c.code === code);
+                  setEditForm({
+                    ...editForm,
+                    cityCode: code,
+                    cityName: selected?.name || "",
+                    barangayCode: "",
+                    barangayName: "",
+                  });
+                  setBarangayOptions([]);
+                }}
+              >
+                <SelectTrigger className={`text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
+                  <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select city / municipality"} />
+                </SelectTrigger>
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+                  {cityOptions.map((city) => (
+                    <SelectItem key={city.code} value={city.code} className="cursor-pointer">
+                      {city.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Barangay</Label>
+              <Select
+                value={editForm.barangayCode || undefined}
+                disabled={!editForm.cityCode || isLoadingAddressOptions}
+                onValueChange={(code) => {
+                  const selected = barangayOptions.find((b) => b.code === code);
+                  setEditForm({
+                    ...editForm,
+                    barangayCode: code,
+                    barangayName: selected?.name || "",
+                  });
+                }}
+              >
+                <SelectTrigger className={`text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`}>
+                  <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select barangay"} />
+                </SelectTrigger>
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+                  {barangayOptions.map((barangay) => (
+                    <SelectItem key={barangay.code} value={barangay.code} className="cursor-pointer">
+                      {barangay.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>ZIP Code</Label>
               <Input
-                disabled
-                value={formatPeso(parseFloat(editUser?.balance ?? editForm.balance) || 0)}
-                className={`font-semibold text-sm font-mono cursor-not-allowed ${
-                  isDark ? "bg-slate-950/60 border-slate-800 text-emerald-400" : "bg-slate-50 border-slate-200 text-emerald-600"
-                }`}
+                value={editForm.zipCode}
+                onChange={(e) => setEditForm({ ...editForm, zipCode: e.target.value.replace(/[^0-9]/g, "").slice(0, 4) })}
+                inputMode="numeric"
+                maxLength={4}
+                placeholder="ZIP Code"
+                className={`text-sm font-mono ${isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"}`}
               />
             </div>
           </div>
