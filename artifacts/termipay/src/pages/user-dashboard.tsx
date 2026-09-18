@@ -95,6 +95,26 @@ function formatNullableAmount(value: number | null): string {
       })}`;
 }
 
+// 🆕 Net Amount with a "+" sign, green-colored elsewhere — mirrors the
+// admin Transactions page's formatNetAmountWithSign.
+function formatNetAmountWithSign(value: number | null): string {
+  return value == null || !Number.isFinite(value)
+    ? "—"
+    : `+₱${value.toLocaleString("en-PH", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+}
+
+// 🆕 Plain (no +/−) peso amount — used for the Top-up "Amount" column now
+// that the sign lives on Net Amount instead.
+function formatPlainAmount(amount: number): string {
+  return `₱${Math.abs(Number(amount)).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 // ── Card Balance Transfer types + helpers ───────────────────────────────────
 // Mirrors the admin Transactions page's card_balance_transfers handling,
 // scoped here to just the rows where THIS user's card is source or target.
@@ -1170,8 +1190,8 @@ export default function PaymongoDashboardPage() {
                             </td>
                             <td className="px-3 py-2.5 text-right">
                               <span className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${
-                                tx.type === "Fare" ? (isDark ? "text-red-400" : "text-red-600") : (isDark ? "text-emerald-400" : "text-emerald-600")}`}>
-                                {formatAmount(tx.type, tx.amount)}
+                                tx.type === "Fare" ? (isDark ? "text-red-400" : "text-red-600") : (isDark ? "text-slate-200" : "text-slate-800")}`}>
+                                {tx.type === "Fare" ? formatAmount(tx.type, tx.amount) : formatPlainAmount(tx.amount)}
                               </span>
                             </td>
                             {activeTxTab === "topup" && (
@@ -1188,7 +1208,7 @@ export default function PaymongoDashboardPage() {
                                 </td>
                                 <td className="px-3 py-2.5 text-right">
                                   <span className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                                    {formatNullableAmount(getNetAmount(tx))}
+                                    {formatNetAmountWithSign(getNetAmount(tx))}
                                   </span>
                                 </td>
                               </>
