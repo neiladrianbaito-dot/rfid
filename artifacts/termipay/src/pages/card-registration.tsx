@@ -537,24 +537,24 @@ export default function CardRegistrationPage() {
         data: {
           cardUid: form.cardUid,
           fullName: form.fullName.trim(),
-          dateOfBirth: form.dob,
-          age,
+          dateOfBirth: form.dob, // age is derived from this on read — not stored separately, it would go stale
           contactNumber: form.contactNumber,
           type: form.type,
-          address: {
-            fullAddress,
-            streetAddress: form.streetAddress.trim() || null,
-            zipCode: form.zipCode || null,
-            region: form.regionName,
-            regionCode: form.regionCode,
-            province: form.provinceName || null,
-            provinceCode: form.provinceCode || null,
-            city: form.cityName,
-            cityCode: form.cityCode,
-            barangay: form.barangayName,
-            barangayCode: form.barangayCode,
-          },
-          idImage: idImageBase64, // base64 data URI — swap for an upload endpoint / presigned URL if your backend expects a file upload instead
+          streetAddress: form.streetAddress.trim() || null,
+          zipCode: form.zipCode || null,
+          regionCode: form.regionCode,
+          regionName: form.regionName,
+          provinceCode: form.provinceCode || null,
+          provinceName: form.provinceName || null,
+          cityCode: form.cityCode,
+          cityName: form.cityName,
+          barangayCode: form.barangayCode,
+          barangayName: form.barangayName,
+          fullAddress,
+          // TODO: upload idImageFile to your storage bucket first (see add_registration_fields.sql
+          // note on id_image_path) and send the returned path/URL as `idImagePath` instead of base64.
+          // Sending raw base64 here works as a stopgap but will bloat the users table.
+          idImagePath: idImageBase64,
           initialBalance: 0, // default value dahil required pa rin ito sa backend
         },
       });

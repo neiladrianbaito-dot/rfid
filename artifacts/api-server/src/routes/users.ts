@@ -19,7 +19,40 @@ import { unlinkCardFromAnyAccount } from "./auth"; // adjust path if your auth r
 
 const router: IRouter = Router();
 
-let usersHasTypeColumn: boolean | null = null;
+// ============================================================================
+// ⚠️ IMPORTANT — companion change needed outside this file:
+// CreateUserBody / UpdateUserBody / GetUserResponse / ListUsersResponse /
+// ListRecentUsersResponse in @workspace/api-zod must also declare the new
+// optional fields below (dateOfBirth, streetAddress, zipCode, regionCode,
+// regionName, provinceCode, provinceName, cityCode, cityName, barangayCode,
+// barangayName, fullAddress, idImagePath) or Zod will silently strip them
+// from parsed.data / from the response, even though this route reads and
+// writes them correctly. `.parse()` drops unknown keys by default instead
+// of throwing, so this failure mode is silent — test it after wiring both
+// sides up.
+// ============================================================================
+
+// Column name (snake_case in DB) <-> body/response field name (camelCase)
+// for every field that may or may not exist yet, same spirit as the
+// existing `type` column detection below. Add/remove entries here once
+// you've run add_registration_fields.sql and don't need the fallback anymore.
+const OPTIONAL_USER_COLUMNS = [
+  { col: "date_of_birth", field: "dateOfBirth" },
+  { col: "street_address", field: "streetAddress" },
+  { col: "zip_code", field: "zipCode" },
+  { col: "region_code", field: "regionCode" },
+  { col: "region_name", field: "regionName" },
+  { col: "province_code", field: "provinceCode" },
+  { col: "province_name", field: "provinceName" },
+  { col: "city_code", field: "cityCode" },
+  { col: "city_name", field: "cityName" },
+  { col: "barangay_code", field: "barangayCode" },
+  { col: "barangay_name", field: "barangayName" },
+  { col: "full_address", field: "fullAddress" },
+  { col: "id_image_path", field: "idImagePath" },
+] as const;
+
+let cachedUserColumns: Set<string> | null = null;
 
 type UserRow = {
   id: number;
@@ -32,6 +65,19 @@ type UserRow = {
   createdAt: Date | string;
   expirationDate: Date | string | null;
   email: string | null;
+  dateOfBirth?: string | null;
+  streetAddress?: string | null;
+  zipCode?: string | null;
+  regionCode?: string | null;
+  regionName?: string | null;
+  provinceCode?: string | null;
+  provinceName?: string | null;
+  cityCode?: string | null;
+  cityName?: string | null;
+  barangayCode?: string | null;
+  barangayName?: string | null;
+  fullAddress?: string | null;
+  idImagePath?: string | null;
 };
 
 function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
@@ -57,22 +103,39 @@ function getActorFromRequest(authorization?: string): string {
   return adminUser?.username ?? "unknown";
 }
 
-async function detectUsersColumns(): Promise<{ hasType: boolean }> {
-  if (usersHasTypeColumn !== null) {
-    return { hasType: usersHasTypeColumn };
-  }
+// ── Detect which optional columns actually exist on `users` right now ──────
+// Cached after the first call (per server process), same pattern as the
+// original `usersHasTypeColumn` flag, just generalized to a whole Set.
+async function getUsersColumns(): Promise<Set<string>> {
+  if (cachedUserColumns !== null) return cachedUserColumns;
+
+  const namesToCheck = ["type", ...OPTIONAL_USER_COLUMNS.map((c) => c.col)];
   const result = await db.execute(sql`
     select column_name
     from information_schema.columns
     where table_schema = 'public'
       and table_name = 'users'
-      and column_name in ('type')
+      and column_name = any(${namesToCheck})
   `);
-  const columns = new Set(
+  cachedUserColumns = new Set(
     extractRows<{ column_name: string }>(result).map((r) => r.column_name),
   );
-  usersHasTypeColumn = columns.has("type");
-  return { hasType: usersHasTypeColumn };
+  return cachedUserColumns;
+}
+
+async function detectUsersColumns(): Promise<{ hasType: boolean; columns: Set<string> }> {
+  const columns = await getUsersColumns();
+  return { hasType: columns.has("type"), columns };
+}
+
+// Builds the `, u.col as "field"` (or `, null as "field"`) fragments for
+// every optional column, so every SELECT stays correct whether or not
+// add_registration_fields.sql has been run yet.
+function buildOptionalSelectFragment(columns: Set<string>) {
+  const parts = OPTIONAL_USER_COLUMNS.map(({ col, field }) =>
+    columns.has(col) ? sql.raw(`, u.${col} as "${field}"`) : sql.raw(`, null as "${field}"`),
+  );
+  return sql.join(parts, sql``);
 }
 
 function formatUser(u: UserRow) {
@@ -91,6 +154,19 @@ function formatUser(u: UserRow) {
     createdAt: new Date(u.createdAt),
     expirationDate: u.expirationDate ? new Date(u.expirationDate) : null,
     email,
+    dateOfBirth: u.dateOfBirth ?? null,
+    streetAddress: u.streetAddress ?? null,
+    zipCode: u.zipCode ?? null,
+    regionCode: u.regionCode ?? null,
+    regionName: u.regionName ?? null,
+    provinceCode: u.provinceCode ?? null,
+    provinceName: u.provinceName ?? null,
+    cityCode: u.cityCode ?? null,
+    cityName: u.cityName ?? null,
+    barangayCode: u.barangayCode ?? null,
+    barangayName: u.barangayName ?? null,
+    fullAddress: u.fullAddress ?? null,
+    idImagePath: u.idImagePath ?? null,
   };
 }
 
@@ -119,7 +195,7 @@ const EMAIL_JOIN = sql`
 // ── GET /users/recent ──────────────────────────────────────────────────────────
 router.get("/users/recent", async (_req, res): Promise<void> => {
   try {
-    const { hasType } = await detectUsersColumns();
+    const { hasType, columns } = await detectUsersColumns();
     const result = await db.execute(sql`
       select
         u.id,
@@ -130,7 +206,8 @@ router.get("/users/recent", async (_req, res): Promise<void> => {
         u.balance,
         u.status,
         u.created_at     as "createdAt",
-        u.expiration_date as "expirationDate",
+        u.expiration_date as "expirationDate"
+        ${buildOptionalSelectFragment(columns)},
         a.email          as "email"
       from users u
       ${EMAIL_JOIN}
@@ -148,7 +225,7 @@ router.get("/users/recent", async (_req, res): Promise<void> => {
 // ── GET /users ─────────────────────────────────────────────────────────────────
 router.get("/users", async (req, res): Promise<void> => {
   try {
-    const { hasType } = await detectUsersColumns();
+    const { hasType, columns } = await detectUsersColumns();
     const params = ListUsersQueryParams.safeParse(req.query);
     const search = (params.success ? params.data.search : undefined)?.trim();
     const hasSearch = !!search;
@@ -164,7 +241,8 @@ router.get("/users", async (req, res): Promise<void> => {
         u.balance,
         u.status,
         u.created_at     as "createdAt",
-        u.expiration_date as "expirationDate",
+        u.expiration_date as "expirationDate"
+        ${buildOptionalSelectFragment(columns)},
         a.email          as "email"
       from users u
       ${EMAIL_JOIN}
@@ -197,9 +275,12 @@ router.post("/users", async (req, res): Promise<void> => {
   }
 
   const { cardUid, fullName, contactNumber, initialBalance, type } = parsed.data;
+  // Cast to `any` for the new optional fields until CreateUserBody in
+  // @workspace/api-zod declares them — see the note at the top of this file.
+  const body = parsed.data as typeof parsed.data & Record<string, unknown>;
 
   try {
-    const { hasType } = await detectUsersColumns();
+    const { hasType, columns } = await detectUsersColumns();
     const normalizedType = type || "Regular";
 
     const existing = await db.execute(sql`
@@ -210,23 +291,41 @@ router.post("/users", async (req, res): Promise<void> => {
       return;
     }
 
-    let insertResult: unknown;
+    // Base columns that always exist, plus `type` and any of the new
+    // optional columns that are actually present in the table right now.
+    const insertColumns: string[] = ["card_uid", "full_name", "contact_number", "balance", "status"];
+    const insertValues: unknown[] = [cardUid.trim(), fullName.trim(), contactNumber.trim(), String(initialBalance), "Active"];
 
     if (hasType) {
-      insertResult = await db.execute(sql`
-        insert into users (card_uid, full_name, contact_number, type, balance, status)
-        values (${cardUid.trim()}, ${fullName.trim()}, ${contactNumber.trim()}, ${normalizedType}, ${String(initialBalance)}, 'Active')
-        returning id, card_uid as "cardUid", full_name as "fullName", contact_number as "contactNumber",
-          type, balance, status, created_at as "createdAt", expiration_date as "expirationDate"
-      `);
-    } else {
-      insertResult = await db.execute(sql`
-        insert into users (card_uid, full_name, contact_number, balance, status)
-        values (${cardUid.trim()}, ${fullName.trim()}, ${contactNumber.trim()}, ${String(initialBalance)}, 'Active')
-        returning id, card_uid as "cardUid", full_name as "fullName", contact_number as "contactNumber",
-          'Regular'::text as type, balance, status, created_at as "createdAt", expiration_date as "expirationDate"
-      `);
+      insertColumns.push("type");
+      insertValues.push(normalizedType);
     }
+
+    for (const { col, field } of OPTIONAL_USER_COLUMNS) {
+      if (!columns.has(col)) continue;
+      const value = body[field];
+      insertColumns.push(col);
+      insertValues.push(value === undefined || value === "" ? null : value);
+    }
+
+    const columnsSql = sql.join(insertColumns.map((c) => sql.raw(c)), sql`, `);
+    const valuesSql = sql.join(insertValues.map((v) => sql`${v}`), sql`, `);
+
+    const insertResult = await db.execute(sql`
+      insert into users (${columnsSql})
+      values (${valuesSql})
+      returning
+        id,
+        card_uid          as "cardUid",
+        full_name         as "fullName",
+        contact_number    as "contactNumber",
+        ${hasType ? sql`type` : sql`'Regular'::text as type`},
+        balance,
+        status,
+        created_at        as "createdAt",
+        expiration_date   as "expirationDate"
+        ${buildOptionalSelectFragment(columns)}
+    `);
 
     const inserted = extractRows<UserRow>(insertResult)[0];
     inserted.email = null;
@@ -258,7 +357,7 @@ router.get("/users/:id", async (req, res): Promise<void> => {
       return;
     }
 
-    const { hasType } = await detectUsersColumns();
+    const { hasType, columns } = await detectUsersColumns();
     const result = await db.execute(sql`
       select
         u.id,
@@ -269,7 +368,8 @@ router.get("/users/:id", async (req, res): Promise<void> => {
         u.balance,
         u.status,
         u.created_at     as "createdAt",
-        u.expiration_date as "expirationDate",
+        u.expiration_date as "expirationDate"
+        ${buildOptionalSelectFragment(columns)},
         a.email          as "email"
       from users u
       ${EMAIL_JOIN}
@@ -293,7 +393,7 @@ router.get("/users/:id", async (req, res): Promise<void> => {
 // ── PATCH /users/:id ───────────────────────────────────────────────────────────
 router.patch("/users/:id", async (req, res): Promise<void> => {
   try {
-    const { hasType } = await detectUsersColumns();
+    const { hasType, columns } = await detectUsersColumns();
     const params = UpdateUserParams.safeParse(req.params);
     if (!params.success) {
       res.status(400).json({ error: params.error.message });
@@ -305,8 +405,11 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
       res.status(400).json({ error: parsed.error.message });
       return;
     }
+    // Cast to `any` for the new optional fields until UpdateUserBody in
+    // @workspace/api-zod declares them — see the note at the top of this file.
+    const body = parsed.data as typeof parsed.data & Record<string, unknown>;
 
-    const updates: Array<{ col: string; val: string | number }> = [];
+    const updates: Array<{ col: string; val: string | number | null }> = [];
     if (parsed.data.fullName !== undefined)
       updates.push({ col: "full_name", val: parsed.data.fullName });
     if (parsed.data.contactNumber !== undefined)
@@ -317,6 +420,15 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
       updates.push({ col: "status", val: parsed.data.status });
     if (hasType && parsed.data.type !== undefined)
       updates.push({ col: "type", val: parsed.data.type });
+
+    // Same pattern for the new personal/address/ID fields — only applies
+    // updates for columns that exist AND were actually sent in the body.
+    for (const { col, field } of OPTIONAL_USER_COLUMNS) {
+      if (!columns.has(col)) continue;
+      const value = body[field];
+      if (value === undefined) continue;
+      updates.push({ col, val: value === "" ? null : (value as string | number | null) });
+    }
 
     if (updates.length === 0) {
       res.status(400).json({ error: "No updatable fields provided" });
@@ -342,6 +454,7 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
         status,
         created_at       as "createdAt",
         expiration_date  as "expirationDate"
+        ${buildOptionalSelectFragment(columns)}
     `);
     const userRow = extractRows<UserRow>(result)[0];
 
