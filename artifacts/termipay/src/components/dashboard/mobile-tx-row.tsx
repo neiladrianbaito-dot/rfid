@@ -3,6 +3,47 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import type { Transaction } from "@/components/transaction-detail-modal";
 import { formatAmount } from "@/lib/dashboard-formatters";
 
+// 🆕 Net amount helpers — mirrors the desktop table's getNetAmount /
+// formatNetAmountWithSign so the mobile Top-up row shows the same figure
+// (amount minus fee minus VAT, with a "+" sign) instead of the raw amount.
+function getFeeAmount(tx: any): number | null {
+  const value = tx?.fee_amount ?? tx?.feeAmount;
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getVatAmount(tx: any): number | null {
+  const value = tx?.vat_amount ?? tx?.vatAmount;
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getNetAmount(tx: any): number | null {
+  const value = tx?.net_amount ?? tx?.netAmount;
+  if (value != null && value !== "") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  const amount = Number(tx?.amount);
+  const fee = getFeeAmount(tx);
+  const vat = getVatAmount(tx);
+  if (Number.isFinite(amount) && fee != null && vat != null) {
+    return amount - fee - vat;
+  }
+  return null;
+}
+
+function formatNetAmountWithSign(value: number | null): string {
+  return value == null || !Number.isFinite(value)
+    ? "—"
+    : `+₱${value.toLocaleString("en-PH", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+}
+
 export const MobileTxRow = memo(
   function MobileTxRow({
     tx,
@@ -27,6 +68,12 @@ export const MobileTxRow = memo(
       hour: "2-digit",
       minute: "2-digit",
     });
+
+    // 🆕 Top-up rows now show the Net Amount (with "+" sign) instead of the
+    // raw Amount. Fare rows are unchanged (they have no fee/VAT/net fields).
+    const displayAmount = isFare
+      ? formatAmount(tx.type, tx.amount)
+      : formatNetAmountWithSign(getNetAmount(tx));
 
     return (
       <button
@@ -90,7 +137,7 @@ export const MobileTxRow = memo(
                   : "text-emerald-600"
             }`}
           >
-            {formatAmount(tx.type, tx.amount)}
+            {displayAmount}
           </p>
 
           <p
@@ -113,5 +160,8 @@ export const MobileTxRow = memo(
   (prev, next) =>
     prev.tx.id === next.tx.id &&
     prev.tx.amount === next.tx.amount &&
+    (prev.tx as any).net_amount === (next.tx as any).net_amount &&
+    (prev.tx as any).fee_amount === (next.tx as any).fee_amount &&
+    (prev.tx as any).vat_amount === (next.tx as any).vat_amount &&
     prev.isDark === next.isDark,
 );
