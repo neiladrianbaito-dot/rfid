@@ -4,8 +4,55 @@
  * Api
  * TermiPay Admin Console API
  * OpenAPI spec version: 0.1.0
+ *
+ * Kept in sync with the userAddressResponseFields / userAddressBodyFields
+ * added to api.schemas.ts — see the MANUALLY PATCHED note in that file.
  */
-export interface User {
+
+// Shared address/KYC fields, split the same way api.schemas.ts splits them:
+// nullable+optional on responses (older rows won't have them), plain optional
+// strings on request bodies (form input, ISO "YYYY-MM-DD" for dateOfBirth).
+interface UserAddressResponseFields {
+  dateOfBirth?: Date | null;
+  streetAddress?: string | null;
+  zipCode?: string | null;
+  regionCode?: string | null;
+  regionName?: string | null;
+  provinceCode?: string | null;
+  provinceName?: string | null;
+  cityCode?: string | null;
+  cityName?: string | null;
+  barangayCode?: string | null;
+  barangayName?: string | null;
+  fullAddress?: string | null;
+  idImagePath?: string | null;
+}
+
+interface UserAddressBodyFields {
+  dateOfBirth?: string;
+  streetAddress?: string;
+  zipCode?: string;
+  regionCode?: string;
+  regionName?: string;
+  provinceCode?: string;
+  provinceName?: string;
+  cityCode?: string;
+  cityName?: string;
+  barangayCode?: string;
+  barangayName?: string;
+  fullAddress?: string;
+  idImagePath?: string;
+}
+
+export interface CreateUserBody extends UserAddressBodyFields {
+  cardUid: string;
+  fullName: string;
+  contactNumber: string;
+  initialBalance: number;
+  type?: string;
+}
+
+export interface User extends UserAddressResponseFields {
   id: number;
   cardUid: string;
   fullName: string;
@@ -14,5 +61,14 @@ export interface User {
   balance: number;
   status: string;
   createdAt: Date;
-  email: string | null;
+  email?: string | null;
+  expirationDate?: Date | null;
+}
+
+export interface UpdateUserBody extends UserAddressBodyFields {
+  fullName?: string;
+  contactNumber?: string;
+  balance?: number;
+  status?: string;
+  type?: string;
 }
