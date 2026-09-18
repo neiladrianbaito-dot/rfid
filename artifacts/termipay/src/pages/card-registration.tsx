@@ -780,14 +780,27 @@ export default function CardRegistrationPage() {
     /*
      * BASIC VALIDATION
      */
-    if (!form.cardUid.trim()) {
+    const normalizedCardUid = form.cardUid
+      .trim()
+      .toUpperCase();
+    const normalizedContactNumber = form.contactNumber
+      .trim();
+
+    if (!/^[A-Z0-9]{8}$/.test(normalizedCardUid)) {
       toast({
-        title: "Card UID Required",
-        description:
-          "Please enter the RFID card UID.",
+        title: "Invalid Card UID",
+        description: "RFID Card UID must be exactly 8 characters (letters and numbers only).",
         variant: "destructive",
       });
+      return;
+    }
 
+    if (!/^\d{11}$/.test(normalizedContactNumber)) {
+      toast({
+        title: "Invalid Contact Number",
+        description: "Contact number must be exactly 11 digits.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -911,10 +924,7 @@ export default function CardRegistrationPage() {
        */
       await createMutation.mutateAsync({
         data: {
-          cardUid:
-            form.cardUid
-              .trim()
-              .toUpperCase(),
+          cardUid: normalizedCardUid,
 
           fullName:
             form.fullName.trim(),
@@ -922,8 +932,7 @@ export default function CardRegistrationPage() {
           dateOfBirth:
             form.dob,
 
-          contactNumber:
-            form.contactNumber.trim(),
+          contactNumber: normalizedContactNumber,
 
           type:
             form.type,
@@ -1033,10 +1042,15 @@ export default function CardRegistrationPage() {
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
 
+        .address-select-content {
+          max-height: 280px;
+          overflow: hidden;
+        }
         .address-select-content [data-radix-select-viewport] {
-          max-height: 240px;
+          max-height: 280px;
           overflow-y: auto;
           overscroll-behavior: contain;
+          scrollbar-width: thin;
         }
       `}</style>
 
@@ -1249,15 +1263,14 @@ export default function CardRegistrationPage() {
                         "cardUid",
                         event.target.value
                           .toUpperCase()
-                          .replace(
-                            /[^A-Z0-9_-]/g,
-                            ""
-                          )
+                          .replace(/[^A-Z0-9]/g, "")
+                          .slice(0, 8)
                       )
                     }
-                    placeholder="e.g. 99B603A6"
+                    placeholder="8-character UID"
                     disabled={isSubmitting}
-                    maxLength={32}
+                    maxLength={8}
+                    inputMode="text"
                   />
                 </div>
 
@@ -1426,21 +1439,6 @@ export default function CardRegistrationPage() {
                         </div>
                       )}
 
-                      {!idImageFile && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() =>
-                            fileInputRef.current?.click()
-                          }
-                          disabled={isSubmitting}
-                          className="gap-2"
-                        >
-                          <Upload className="h-4 w-4" />
-                          Choose Image
-                        </Button>
-                      )}
-
                       {idImageFile && (
                         <Button
                           type="button"
@@ -1524,10 +1522,14 @@ export default function CardRegistrationPage() {
                       updateForm(
                         "contactNumber",
                         event.target.value
+                          .replace(/\D/g, "")
+                          .slice(0, 11)
                       )
                     }
                     placeholder="09XXXXXXXXX"
                     disabled={isSubmitting}
+                    maxLength={11}
+                    inputMode="numeric"
                   />
                 </div>
               </div>
