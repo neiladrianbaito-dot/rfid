@@ -23,6 +23,11 @@ export type Transaction = {
   status: string;
   route_id?: number | null;
   payment_method?: string | null; // ✅ added
+  // 🆕 Fee / VAT / Net amount — same fields the admin Transactions page
+  // fetches from the `transactions` table (fee_amount, vat_amount, net_amount).
+  fee_amount?: number | string | null;
+  vat_amount?: number | string | null;
+  net_amount?: number | string | null;
 };
 
 export type FareRoute = {
@@ -41,6 +46,46 @@ function formatAmount(amount: number | string): string {
     maximumFractionDigits: 2,
   });
   return `\u20B1${num}`;
+}
+
+// 🆕 Fee / VAT / Net amount helpers — mirrors the admin Transactions page's
+// getFeeAmount / getVatAmount / getNetAmount / formatNullableAmount.
+function getFeeAmount(tx: Transaction): number | null {
+  const value = tx?.fee_amount;
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getVatAmount(tx: Transaction): number | null {
+  const value = tx?.vat_amount;
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getNetAmount(tx: Transaction): number | null {
+  const value = tx?.net_amount;
+  if (value != null && value !== "") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  const amount = Number(tx?.amount);
+  const fee = getFeeAmount(tx);
+  const vat = getVatAmount(tx);
+  if (Number.isFinite(amount) && fee != null && vat != null) {
+    return amount - fee - vat;
+  }
+  return null;
+}
+
+function formatNullableAmount(value: number | null): string {
+  return value == null || !Number.isFinite(value)
+    ? "—"
+    : `\u20B1${value.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
 }
 
 // ✅ Maps raw PayMongo payment method codes to display-friendly labels
@@ -98,6 +143,15 @@ export function TransactionDetailModal({
 
   const paymentMethodLabel = formatPaymentMethod(tx.payment_method);
   const paymentMethodLogo = getPaymentMethodLogo(tx.payment_method);
+
+  // 🆕 Fee / VAT / Net amount — only meaningful for Top-up (non-Fare) rows.
+  const originalAmount = Math.abs(Number(tx.amount || 0));
+  const netAmount = getNetAmount(tx);
+  const feeAmount = getFeeAmount(tx);
+  const vatAmount = getVatAmount(tx);
+  // Hero figure shows the net amount for Top-up when it's available, same
+  // as the admin ReceiptModal — otherwise falls back to the raw amount.
+  const heroAmount = !isFare && netAmount != null ? netAmount : originalAmount;
 
   // ✅ theme-aware amount/status colors
   const amountColor = isFare
@@ -197,7 +251,9 @@ export function TransactionDetailModal({
           isDark ? "border-slate-700" : "border-slate-300"
         }`}>
           <p className={`text-3xl sm:text-4xl font-black tracking-tighter ${amountColor}`}>
-            {formatAmount(tx.amount)}
+            {isFare
+              ? formatAmount(tx.amount)
+              : formatNullableAmount(heroAmount)}
           </p>
           <p className={`text-[10px] sm:text-[11px] mt-1 ${
             isDark ? "text-slate-500" : "text-slate-400"
@@ -276,6 +332,70 @@ export function TransactionDetailModal({
               </div>
             )}
 
+            {/* 🆕 Amount / Fee / VAT / Net Amount breakdown — only for
+                Top-up (non-Fare) transactions, same fields the admin
+                Transactions page's ReceiptModal shows. */}
+            {!isFare && (
+              <>
+                <div className={`flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 ${
+                  isDark ? "bg-slate-950/40" : "bg-slate-50"
+                }`}>
+                  <span className={`text-[9px] sm:text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
+                    isDark ? "text-slate-500" : "text-slate-400"
+                  }`}>
+                    Amount
+                  </span>
+                  <span className={`text-[10px] sm:text-xs font-mono font-bold ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}>
+                    {formatAmount(originalAmount)}
+                  </span>
+                </div>
+                <div className={`flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 ${
+                  isDark ? "bg-slate-950/40" : "bg-slate-50"
+                }`}>
+                  <span className={`text-[9px] sm:text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
+                    isDark ? "text-slate-500" : "text-slate-400"
+                  }`}>
+                    Fee
+                  </span>
+                  <span className={`text-[10px] sm:text-xs font-mono font-medium ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}>
+                    {formatNullableAmount(feeAmount)}
+                  </span>
+                </div>
+                <div className={`flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 ${
+                  isDark ? "bg-slate-950/40" : "bg-slate-50"
+                }`}>
+                  <span className={`text-[9px] sm:text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
+                    isDark ? "text-slate-500" : "text-slate-400"
+                  }`}>
+                    VAT
+                  </span>
+                  <span className={`text-[10px] sm:text-xs font-mono font-medium ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}>
+                    {formatNullableAmount(vatAmount)}
+                  </span>
+                </div>
+                <div className={`flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 ${
+                  isDark ? "bg-slate-950/40" : "bg-slate-50"
+                }`}>
+                  <span className={`text-[9px] sm:text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
+                    isDark ? "text-slate-500" : "text-slate-400"
+                  }`}>
+                    Net Amount
+                  </span>
+                  <span className={`text-[10px] sm:text-xs font-mono font-bold ${
+                    isDark ? "text-emerald-400" : "text-emerald-600"
+                  }`}>
+                    {formatNullableAmount(netAmount)}
+                  </span>
+                </div>
+              </>
+            )}
+
             {/* Status row */}
             <div className={`flex items-center justify-between gap-3 px-3 py-2 sm:py-2.5 ${
               isDark ? "bg-slate-950/40" : "bg-slate-50"
@@ -329,10 +449,12 @@ export function TransactionDetailModal({
           <span className={`text-[10px] sm:text-xs font-semibold ${
             isDark ? "text-slate-400" : "text-slate-500"
           }`}>
-            {isFare ? "Amount deducted" : "Amount credited"}
+            {isFare ? "Amount deducted" : "Net Amount"}
           </span>
           <span className={`text-xs sm:text-sm font-black ${amountColor}`}>
-            {formatAmount(tx.amount)}
+            {isFare
+              ? formatAmount(tx.amount)
+              : formatNullableAmount(netAmount)}
           </span>
         </div>
 
