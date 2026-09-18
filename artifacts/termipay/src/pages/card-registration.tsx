@@ -5,6 +5,8 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
+import { motion } from "framer-motion";
 
 import {
   CreditCard,
@@ -27,10 +29,22 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  CardDescription,
 } from "@/components/ui/card";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 import {
   Select,
@@ -108,11 +122,51 @@ const INITIAL_FORM = {
 
 function SuccessTitle({ text }: { text: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <CheckCircle2 className="h-5 w-5" />
-      <span>{text}</span>
-    </div>
+    <span className="flex items-center gap-2">
+      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" strokeWidth={2.5} />
+      {text}
+    </span>
   );
+}
+
+// 🎨 Card type -> color mapping (old table style)
+// 🟥 Regular  🟦 Student  🟨 Senior  🟩 PWD
+function getTypeBadgeStyle(type: string | null | undefined, isDark: boolean) {
+  const t = (type || "Regular").toLowerCase();
+  switch (t) {
+    case "student":
+      return isDark
+        ? "border-blue-900 text-blue-400 bg-blue-950/40"
+        : "border-blue-200 text-blue-600 bg-blue-50";
+    case "senior":
+      return isDark
+        ? "border-yellow-900 text-yellow-400 bg-yellow-950/40"
+        : "border-yellow-300 text-yellow-700 bg-yellow-50";
+    case "pwd":
+      return isDark
+        ? "border-emerald-900 text-emerald-400 bg-emerald-950/40"
+        : "border-emerald-200 text-emerald-600 bg-emerald-50";
+    case "regular":
+    default:
+      return isDark
+        ? "border-red-900 text-red-400 bg-red-950/40"
+        : "border-red-200 text-red-600 bg-red-50";
+  }
+}
+
+function getTypeDotColor(type: string | null | undefined) {
+  const t = (type || "Regular").toLowerCase();
+  switch (t) {
+    case "student":
+      return "bg-blue-500";
+    case "senior":
+      return "bg-yellow-500";
+    case "pwd":
+      return "bg-emerald-500";
+    case "regular":
+    default:
+      return "bg-red-500";
+  }
 }
 
 export default function CardRegistrationPage() {
@@ -142,19 +196,47 @@ export default function CardRegistrationPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ✅ Realtime pulse state (old table behavior)
+  const [isPulsing, setIsPulsing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const prevCountRef = useRef<number>(0);
+
   const {
     data: recentUsersData,
     isLoading: isLoadingRecentUsers,
+    refetch: refetchRecentUsers,
   } = useListRecentUsers({
     query: {
       staleTime: 30_000,
+      refetchOnWindowFocus: true,
     },
+  });
+
+  // Mag-subscribe sa Postgres changes ng users table. Tuwing may bagong
+  // na-register na card (INSERT) o na-edit (UPDATE), mag-re-refetch.
+  useRealtimeRefetch(["users"], () => {
+    refetchRecentUsers();
   });
 
   const recentUsers =
     (recentUsersData as any)?.users ??
     (recentUsersData as any)?.data ??
+    (Array.isArray(recentUsersData) ? recentUsersData : []) ??
     [];
+
+  // ✅ Detect new card registered → pulse animation on the newest row
+  useEffect(() => {
+    const count = Array.isArray(recentUsers) ? recentUsers.length : 0;
+
+    if (prevCountRef.current !== 0 && count !== prevCountRef.current) {
+      setIsPulsing(true);
+      setTimeout(() => setIsPulsing(false), 800);
+    }
+
+    prevCountRef.current = count;
+    setLastUpdated(new Date());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recentUsers.length]);
 
   const createMutation = useCreateUser({
     mutation: {
@@ -940,6 +1022,21 @@ export default function CardRegistrationPage() {
 
   return (
     <div className="space-y-6">
+      <style>{`
+        @keyframes row-pulse {
+          0% { background-color: transparent; }
+          50% { background-color: rgba(37,99,235,0.08); }
+          100% { background-color: transparent; }
+        }
+        .row-pulse { animation: row-pulse 0.8s ease-in-out; }
+
+        @keyframes realtime-dot {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
+        }
+        .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+      `}</style>
+
       {/* PAGE HEADER */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -1118,182 +1215,116 @@ export default function CardRegistrationPage() {
         </Card>
       </div>
 
-      {/* RECENT USERS */}
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            Recently Registered Cards
-          </CardTitle>
-        </CardHeader>
-
-        <CardContent>
-          {isLoadingRecentUsers ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin" />
+      {/* RECENT USERS — old styled table (badges, dot colors, LIVE indicator, row pulse) */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+        <Card className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
+          <CardHeader className={`flex flex-row items-center justify-between border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+            <div>
+              <CardTitle className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                Recently Registered Cards
+                <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ml-2 ${
+                  isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+                }`}>
+                  <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+                  LIVE
+                </span>
+              </CardTitle>
+              <CardDescription className={`text-xs flex items-center gap-2 mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                Latest registered RFID cards
+                {lastUpdated && (
+                  <span className={isDark ? "text-slate-500" : "text-slate-400"}>· {lastUpdated.toLocaleTimeString()}</span>
+                )}
+              </CardDescription>
             </div>
-          ) : recentUsers.length === 0 ? (
-            <div
-              className={`py-12 text-center ${
-                isDark
-                  ? "text-slate-400"
-                  : "text-slate-500"
-              }`}
-            >
-              No registered cards yet.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[800px]">
-                <thead>
-                  <tr
-                    className={`border-b text-left text-xs uppercase tracking-wider ${
-                      isDark
-                        ? "border-slate-800 text-slate-400"
-                        : "border-slate-200 text-slate-500"
-                    }`}
-                  >
-                    <th className="px-4 py-3">
-                      Card
-                    </th>
+          </CardHeader>
 
-                    <th className="px-4 py-3">
-                      Full Name
-                    </th>
+          <CardContent className="pt-6">
+            {isLoadingRecentUsers ? (
+              <div className="space-y-4">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <Skeleton key={i} className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+                ))}
+              </div>
+            ) : recentUsers.length === 0 ? (
+              <div className={`flex flex-col items-center py-16 ${isDark ? "text-slate-700" : "text-slate-300"}`}>
+                <Plus size={48} className="mb-2" />
+                <p className="text-xs font-semibold uppercase tracking-widest">
+                  No cards registered yet
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className={`border-b hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                    <TableRow className="border-none hover:bg-transparent">
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card UID</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Full Name</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Type</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Balance</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
 
-                    <th className="px-4 py-3">
-                      Contact
-                    </th>
+                  <TableBody>
+                    {recentUsers.map((user: any, index: number) => {
+                      const cardUid = user.cardUid || user.card_uid || "N/A";
+                      const fullName = user.fullName || user.full_name || "N/A";
+                      const contactNumber = user.contactNumber || user.contact_number || "N/A";
+                      const type = user.type || "Regular";
+                      const status = user.status || "Active";
 
-                    <th className="px-4 py-3">
-                      Type
-                    </th>
-
-                    <th className="px-4 py-3">
-                      Balance
-                    </th>
-
-                    <th className="px-4 py-3">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {recentUsers.map(
-                    (user: any) => (
-                      <tr
-                        key={user.id}
-                        className={`border-b last:border-0 ${
-                          isDark
-                            ? "border-slate-800"
-                            : "border-slate-100"
-                        }`}
-                      >
-                        {/* CARD */}
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2">
-                            <CreditCard className="h-4 w-4 text-cyan-500" />
-
-                            <span className="font-mono text-sm font-medium">
-                              {user.cardUid ||
-                                user.card_uid ||
-                                "N/A"}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* FULL NAME */}
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2">
-                            <UserRound className="h-4 w-4 opacity-50" />
-
-                            <span className="font-medium">
-                              {user.fullName ||
-                                user.full_name ||
-                                "N/A"}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* CONTACT */}
-                        <td className="px-4 py-4 text-sm">
-                          {user.contactNumber ||
-                            user.contact_number ||
-                            "N/A"}
-                        </td>
-
-                        {/* TYPE */}
-                        <td className="px-4 py-4">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                              (
-                                user.type ||
-                                "Regular"
-                              ) === "Student"
+                      return (
+                        <TableRow
+                          key={user.id}
+                          className={`transition-colors group ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"} ${
+                            isPulsing && index === 0 ? "row-pulse" : ""
+                          }`}
+                        >
+                          <TableCell className="font-mono text-xs text-blue-500 font-semibold">
+                            {cardUid}
+                          </TableCell>
+                          <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                            {fullName}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] font-semibold flex items-center gap-1 w-fit ${getTypeBadgeStyle(type, isDark)}`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full inline-block ${getTypeDotColor(type)}`} />
+                              {type}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                            {contactNumber}
+                          </TableCell>
+                          <TableCell className="text-sm font-semibold text-emerald-500">
+                            ₱{Number(user.balance ?? 0).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Badge className={`${
+                              status === "Active"
                                 ? isDark
-                                  ? "bg-blue-500/10 text-blue-400"
-                                  : "bg-blue-50 text-blue-700"
-                                : (
-                                    user.type ||
-                                    "Regular"
-                                  ) === "Senior"
-                                ? isDark
-                                  ? "bg-yellow-500/10 text-yellow-400"
-                                  : "bg-yellow-50 text-yellow-700"
-                                : (
-                                    user.type ||
-                                    "Regular"
-                                  ) === "PWD"
-                                ? isDark
-                                  ? "bg-emerald-500/10 text-emerald-400"
-                                  : "bg-emerald-50 text-emerald-700"
+                                  ? "bg-emerald-950/40 text-emerald-400 border-emerald-900"
+                                  : "bg-emerald-50 text-emerald-600 border-emerald-200"
                                 : isDark
-                                ? "bg-slate-500/10 text-slate-300"
-                                : "bg-slate-100 text-slate-700"
-                            }`}
-                          >
-                            {user.type ||
-                              "Regular"}
-                          </span>
-                        </td>
-
-                        {/* BALANCE */}
-                        <td className="px-4 py-4 font-semibold">
-                          ₱
-                          {Number(
-                            user.balance ?? 0
-                          ).toFixed(2)}
-                        </td>
-
-                        {/* STATUS */}
-                        <td className="px-4 py-4">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                              (
-                                user.status ||
-                                "Active"
-                              ) === "Active"
-                                ? isDark
-                                  ? "bg-emerald-500/10 text-emerald-400"
-                                  : "bg-emerald-50 text-emerald-700"
-                                : isDark
-                                ? "bg-red-500/10 text-red-400"
-                                : "bg-red-50 text-red-700"
-                            }`}
-                          >
-                            {user.status ||
-                              "Active"}
-                          </span>
-                        </td>
-                      </tr>
-                    )
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                                  ? "bg-red-950/40 text-red-400 border-red-900"
+                                  : "bg-red-50 text-red-600 border-red-200"
+                            } text-[10px] font-semibold px-2 py-0.5 border`}>
+                              {status}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
 
       {/* REGISTRATION MODAL */}
       <Dialog
