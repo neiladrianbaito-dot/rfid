@@ -4,6 +4,9 @@
  * Api
  * TermiPay Admin Console API
  * OpenAPI spec version: 0.1.0
+ *
+ * Kept in sync with `CreateUserBody` (zod) in api.schemas.ts, which spreads
+ * `...userAddressBodyFields` — see the MANUALLY PATCHED note in that file.
  */
 
 export interface CreateUserBody {
@@ -11,4 +14,18 @@ export interface CreateUserBody {
   fullName: string;
   contactNumber: string;
   initialBalance: number;
+  type?: string;
+  dateOfBirth?: string;
+  streetAddress?: string;
+  zipCode?: string;
+  regionCode?: string;
+  regionName?: string;
+  provinceCode?: string;
+  provinceName?: string;
+  cityCode?: string;
+  cityName?: string;
+  barangayCode?: string;
+  barangayName?: string;
+  fullAddress?: string;
+  idImagePath?: string;
 }
