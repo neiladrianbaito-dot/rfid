@@ -794,7 +794,7 @@ function ReceiptModal({
                         paymentMethodLabel ??
                         ""
                       }
-                      className="h-7 sm:h-8 w-auto max-w-[44px] object-contain shrink-0"
+                      className="h-9 sm:h-10 w-auto max-w-[64px] object-contain shrink-0"
                     />
                   )}
                   <span className="truncate">
@@ -2400,7 +2400,7 @@ export default function TransactionsPage() {
                                             paymentMethodLogo
                                           }
                                           alt=""
-                                          className="h-4 w-auto max-w-[28px] object-contain shrink-0"
+                                          className="h-6 w-auto max-w-[52px] object-contain shrink-0"
                                         />
                                       )}
                                       <span>
