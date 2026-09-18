@@ -1080,10 +1080,14 @@ export default function ReportsPage() {
     navigate("/reports/preview");
   };
 
-  // ── EXPORT: one workbook, FOUR separate tabs/sheets — "Fare",
-  // "Top-up", "Transfers", "Discount Analytics" — mirroring the
-  // Fare / Top-up / Transfer tabs on the Transactions page instead of a
-  // single side-by-side combined sheet. ──
+  // ── EXPORT: one workbook, SIX separate tabs/sheets — "Fare",
+  // "Top-up", "Transfers", "Discount Analytics", "Route Summary",
+  // "Route Daily" — mirroring the Fare / Top-up / Transfer tabs on the
+  // Transactions page plus the Discount Collection Analytics and Route
+  // Performance tabs on this page. Discount Analytics and Route Daily now
+  // both pull from the FULL zero-filled calendar range (same data the
+  // on-screen charts use) instead of only the days that happen to have a
+  // transaction, so no date gets silently dropped from the export. ──
   const handleExportExcelLogs = async () => {
     const XLSXStyle = await import("xlsx-js-style" as any);
     const { utils, writeFile } = XLSXStyle;
@@ -1103,7 +1107,7 @@ export default function ReportsPage() {
     logExportAudit({
       entity: "Transaction Logs",
       format: "Excel",
-      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — 4 separate tabs: Fare, Top-up, Transfers, Discount Analytics${
+      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — 6 separate tabs: Fare, Top-up, Transfers, Discount Analytics, Route Summary, Route Daily${
         isFilterActive ? ` [Filtered: ${filterLabel}]` : ""
       }`,
     });
@@ -1153,33 +1157,15 @@ export default function ReportsPage() {
       }},
     ];
 
-    // ── discount analytics daily rows (Fare only), grouped from the
-    // filtered list so the export only includes days that actually have
-    // fare transactions — no zero-filled calendar padding needed here. ──
-    const discountDailyMap = new Map<
-      string,
-      { total: number; regular: number; student: number; senior: number; pwd: number }
-    >();
-    filteredFareList.forEach((tx: any) => {
-      const dateKey = getTxDateKey(tx);
-      if (!dateKey) return;
-      const amount = Math.abs(Number(tx.amount) || 0);
-      const cardType = getTxCardType(tx);
-      const entry = discountDailyMap.get(dateKey) || { total: 0, regular: 0, student: 0, senior: 0, pwd: 0 };
-      entry.total += amount;
-      if (cardType === "Student") entry.student += amount;
-      else if (cardType === "Senior") entry.senior += amount;
-      else if (cardType === "PWD") entry.pwd += amount;
-      else entry.regular += amount;
-      discountDailyMap.set(dateKey, entry);
-    });
-    const discountDailyRows = Array.from(discountDailyMap.entries())
-      .map(([date, v]) => ({ date, ...v }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
     const peso2 = (n: number) =>
       n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+    // ── 🔧 FIX: Discount Analytics rows now come straight from
+    // `filteredFareDiscountBreakdown` — the SAME zero-filled, full
+    // calendar-range dataset that drives the on-screen chart/table on the
+    // "Discount Collection Analytics" tab. This guarantees every date in
+    // the selected range appears, even if a day has ₱0.00 across the
+    // board, instead of silently skipping days with no Fare transaction. ──
     const discountColumns: SheetColumn[] = [
       { header: "Date", width: 16, get: (d) =>
         new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
@@ -1193,15 +1179,47 @@ export default function ReportsPage() {
       { header: "Discounted Share", width: 16, get: (d) =>
         d.total > 0 ? `${(((d.student + d.senior + d.pwd) / d.total) * 100).toFixed(1)}%` : "0.0%"
       },
-      // ➕ Revenue lost to the 20% discount, per day.
       { header: "Revenue Lost to 20% Discount (PHP)", width: 24, get: (d) =>
         peso2((d.student + d.senior + d.pwd) * LOST_REVENUE_MULTIPLIER)
       },
     ];
 
+    // ── 🆕 Route Performance — Summary. One row per route that had at
+    // least one ride in the filtered period (`rankedRoutes` already
+    // covers every route, not just the top 5 shown on the chart). ──
+    const routeSummaryColumns: SheetColumn[] = [
+      { header: "Rank", width: 8, get: (_r: any, idx: number) => String(idx + 1) },
+      { header: "Route", width: 30, get: (r: any) => r.name },
+      { header: "Total Rides", width: 14, get: (r: any) => r.totalRides.toLocaleString("en-US") },
+      { header: "Daily Avg Rides", width: 16, get: (r: any) => r.avgRidesPerDay.toFixed(1) },
+      { header: "Total Revenue (PHP)", width: 20, get: (r: any) => peso2(r.totalRevenue) },
+      { header: "Daily Avg Revenue (PHP)", width: 22, get: (r: any) => peso2(r.avgRevenuePerDay) },
+      { header: "Share of Rides", width: 16, get: (r: any) => `${r.sharePct.toFixed(1)}%` },
+    ];
+
+    // ── 🆕 Route Performance — Daily Ridership. One row per date across
+    // the SAME full, zero-filled `routePeriodDates` range used by the
+    // on-screen chart (`routeDailyMap`), one column per route (every
+    // route in `rankedRoutes`, not just the top 5 charted on-screen), so
+    // no date and no route gets left out of the export. ──
+    const routeDailyColumns: SheetColumn[] = [
+      { header: "Date", width: 16, get: (row: any) =>
+        new Date(row.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      },
+      ...rankedRoutes.map((r): SheetColumn => ({
+        header: r.name,
+        width: 20,
+        get: (row: any) => String(row.counts.get(r.routeId)?.count ?? 0),
+      })),
+    ];
+    const routeDailyRows = routePeriodDates.map((date) => ({
+      date,
+      counts: routeDailyMap.get(date) || new Map<number, { count: number; revenue: number }>(),
+    }));
+
     const filterSuffix = isFilterActive ? ` — Filtered: ${filterLabel}` : "";
 
-    // ── build the 4 tabs, one worksheet each ──
+    // ── build the 6 tabs, one worksheet each ──
     const fareSheet = buildSingleSheet(utils, {
       generatedAt,
       adminName,
@@ -1249,10 +1267,34 @@ export default function ReportsPage() {
       adminName,
       subtitle: `Discount Collection Analytics — Daily${filterSuffix}`,
       block: {
-        title: `DISCOUNT ANALYTICS — DAILY (${discountDailyRows.length})`,
+        title: `DISCOUNT ANALYTICS — DAILY (${filteredFareDiscountBreakdown.length})`,
         bandColor: "7C3AED",
         columns: discountColumns,
-        rows: discountDailyRows,
+        rows: filteredFareDiscountBreakdown,
+      },
+    });
+
+    const routeSummarySheet = buildSingleSheet(utils, {
+      generatedAt,
+      adminName,
+      subtitle: `Route Performance — Summary${filterSuffix}`,
+      block: {
+        title: `ROUTE PERFORMANCE — SUMMARY (${rankedRoutes.length})`,
+        bandColor: "EA580C",
+        columns: routeSummaryColumns,
+        rows: rankedRoutes,
+      },
+    });
+
+    const routeDailySheet = buildSingleSheet(utils, {
+      generatedAt,
+      adminName,
+      subtitle: `Route Performance — Daily Ridership${filterSuffix}`,
+      block: {
+        title: `ROUTE PERFORMANCE — DAILY RIDERSHIP (${routeDailyRows.length})`,
+        bandColor: "D97706",
+        columns: routeDailyColumns,
+        rows: routeDailyRows,
       },
     });
 
@@ -1261,6 +1303,8 @@ export default function ReportsPage() {
     utils.book_append_sheet(workbook, topupSheet, safeSheetName("Top-up"));
     utils.book_append_sheet(workbook, transfersSheet, safeSheetName("Transfers"));
     utils.book_append_sheet(workbook, discountSheet, safeSheetName("Discount Analytics"));
+    utils.book_append_sheet(workbook, routeSummarySheet, safeSheetName("Route Summary"));
+    utils.book_append_sheet(workbook, routeDailySheet, safeSheetName("Route Daily"));
 
     workbook.Props = {
       Title: "Transaction Logs",
