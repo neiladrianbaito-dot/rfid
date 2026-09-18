@@ -1425,7 +1425,10 @@ export default function ReportsPage() {
         })}
       </div>
 
-      {/* ══ SUMMARY CARDS ══ */}
+      {/* ══ SUMMARY CARDS — only rendered on the "Daily Revenue Breakdown"
+          (first / "chart") tab. Hidden on Discount Collection Analytics,
+          Detailed Revenue Log, and Route Performance. ══ */}
+      {activeTab === "chart" && (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-total-revenue",      flash: false },
@@ -1462,6 +1465,7 @@ export default function ReportsPage() {
           </Card>
         ))}
       </div>
+      )}
 
       {/* ══ TAB CONTENT — only the active tab's card renders. Each card's
           header row now carries the title AND the inline filter dropdowns
