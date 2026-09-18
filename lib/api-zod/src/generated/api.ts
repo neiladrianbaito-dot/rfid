@@ -62,19 +62,19 @@ const userAddressResponseFields = {
 // string, matching the <input type="date"> value from the form) — no
 // coercion here since these are inputs, not values read back from the DB.
 const userAddressBodyFields = {
-  dateOfBirth: zod.string().optional(),
-  streetAddress: zod.string().optional(),
-  zipCode: zod.string().optional(),
-  regionCode: zod.string().optional(),
-  regionName: zod.string().optional(),
-  provinceCode: zod.string().optional(),
-  provinceName: zod.string().optional(),
-  cityCode: zod.string().optional(),
-  cityName: zod.string().optional(),
-  barangayCode: zod.string().optional(),
-  barangayName: zod.string().optional(),
-  fullAddress: zod.string().optional(),
-  idImagePath: zod.string().optional(),
+  dateOfBirth: zod.string().nullable().optional(),
+  streetAddress: zod.string().nullable().optional(),
+  zipCode: zod.string().nullable().optional(),
+  regionCode: zod.string().nullable().optional(),
+  regionName: zod.string().nullable().optional(),
+  provinceCode: zod.string().nullable().optional(),
+  provinceName: zod.string().nullable().optional(),
+  cityCode: zod.string().nullable().optional(),
+  cityName: zod.string().nullable().optional(),
+  barangayCode: zod.string().nullable().optional(),
+  barangayName: zod.string().nullable().optional(),
+  fullAddress: zod.string().nullable().optional(),
+  idImagePath: zod.string().nullable().optional(),
 };
 
 export const ListUsersResponseItem = zod.object({
