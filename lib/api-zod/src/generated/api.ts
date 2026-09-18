@@ -3,6 +3,12 @@
  * Do not edit manually.
  * Api
  * TermiPay Admin Console API
+ *
+ * ⚠️ MANUALLY PATCHED — the User-related schemas below were hand-edited to add
+ * dateOfBirth / address / idImagePath fields. Port this into the source
+ * OpenAPI spec and re-run `orval` as soon as you can, so this file goes back
+ * to being fully generated instead of drifting from the spec.
+ *
  * OpenAPI spec version: 0.1.0
  */
 import * as zod from "zod";
@@ -31,6 +37,46 @@ export const ListUsersQueryParams = zod.object({
   search: zod.coerce.string().optional(),
 });
 
+// ── Shared fields for the new personal/address/ID-image data ───────────────
+// Kept as their own object so every User response item / body stays in sync.
+// Response side: nullable + optional, since older rows won't have these yet
+// and the backend fills in `null` for any column that doesn't exist on the
+// table (see the column-detection fallback in the users route).
+const userAddressResponseFields = {
+  dateOfBirth: zod.coerce.date().nullable().optional(),
+  streetAddress: zod.string().nullable().optional(),
+  zipCode: zod.string().nullable().optional(),
+  regionCode: zod.string().nullable().optional(),
+  regionName: zod.string().nullable().optional(),
+  provinceCode: zod.string().nullable().optional(),
+  provinceName: zod.string().nullable().optional(),
+  cityCode: zod.string().nullable().optional(),
+  cityName: zod.string().nullable().optional(),
+  barangayCode: zod.string().nullable().optional(),
+  barangayName: zod.string().nullable().optional(),
+  fullAddress: zod.string().nullable().optional(),
+  idImagePath: zod.string().nullable().optional(),
+};
+
+// Body side: plain optional strings (dateOfBirth as an ISO "YYYY-MM-DD"
+// string, matching the <input type="date"> value from the form) — no
+// coercion here since these are inputs, not values read back from the DB.
+const userAddressBodyFields = {
+  dateOfBirth: zod.string().optional(),
+  streetAddress: zod.string().optional(),
+  zipCode: zod.string().optional(),
+  regionCode: zod.string().optional(),
+  regionName: zod.string().optional(),
+  provinceCode: zod.string().optional(),
+  provinceName: zod.string().optional(),
+  cityCode: zod.string().optional(),
+  cityName: zod.string().optional(),
+  barangayCode: zod.string().optional(),
+  barangayName: zod.string().optional(),
+  fullAddress: zod.string().optional(),
+  idImagePath: zod.string().optional(),
+};
+
 export const ListUsersResponseItem = zod.object({
   id: zod.number(),
   cardUid: zod.string(),
@@ -42,6 +88,7 @@ export const ListUsersResponseItem = zod.object({
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
   expirationDate: zod.coerce.date().nullable().optional(),
+  ...userAddressResponseFields,
 });
 export const ListUsersResponse = zod.array(ListUsersResponseItem);
 
@@ -51,6 +98,7 @@ export const CreateUserBody = zod.object({
   contactNumber: zod.string(),
   initialBalance: zod.number(),
   type: zod.string().optional(),
+  ...userAddressBodyFields,
 });
 
 export const GetUserParams = zod.object({
@@ -68,6 +116,7 @@ export const GetUserResponse = zod.object({
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
   expirationDate: zod.coerce.date().nullable().optional(),
+  ...userAddressResponseFields,
 });
 
 export const UpdateUserParams = zod.object({
@@ -80,6 +129,7 @@ export const UpdateUserBody = zod.object({
   balance: zod.number().optional(),
   status: zod.string().optional(),
   type: zod.string().optional(),
+  ...userAddressBodyFields,
 });
 
 export const UpdateUserResponse = zod.object({
@@ -93,6 +143,7 @@ export const UpdateUserResponse = zod.object({
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
   expirationDate: zod.coerce.date().nullable().optional(),
+  ...userAddressResponseFields,
 });
 
 export const DeleteUserParams = zod.object({
@@ -110,6 +161,7 @@ export const ListRecentUsersResponseItem = zod.object({
   createdAt: zod.coerce.date(),
   email: zod.string().nullable().optional(),
   expirationDate: zod.coerce.date().nullable().optional(),
+  ...userAddressResponseFields,
 });
 export const ListRecentUsersResponse = zod.array(ListRecentUsersResponseItem);
 
