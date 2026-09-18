@@ -41,6 +41,9 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
+// ⚠️ Adjust this import to wherever your Supabase client is exported from in this project
+// (common paths: "@/lib/supabase", "@/lib/supabase-client", "@/integrations/supabase/client").
+import { supabase } from "@/lib/supabase";
 
 // ============================================================================
 // 🗺️ PSGC API — community-hosted Philippine Standard Geographic Code API
@@ -49,6 +52,62 @@ import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 // Docs / source: https://psgc.gitlab.io/api/
 // ============================================================================
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
+
+// ============================================================================
+// 🗄️ Supabase Storage — ID verification images go here instead of base64
+// in the DB. Bucket: "id-verifications" (20MB limit, jpeg/png/webp only —
+// matches the constraints enforced client-side below).
+//
+// NOTE: the bucket currently shows 0 storage policies. Until you add
+// policies, uploads (and/or reads) will be rejected by RLS. At minimum
+// you'll need something like:
+//
+//   -- allow uploads
+//   create policy "id-verifications insert"
+//   on storage.objects for insert
+//   with check (bucket_id = 'id-verifications');
+//
+//   -- allow reading files back (needed for getPublicUrl to actually load,
+//   -- or make the bucket "Public" in the dashboard instead)
+//   create policy "id-verifications select"
+//   on storage.objects for select
+//   using (bucket_id = 'id-verifications');
+//
+// Tighten these (e.g. restrict to authenticated staff only) as needed —
+// this is just enough to get uploads/reads working.
+// ============================================================================
+const ID_IMAGE_BUCKET = "id-verifications";
+const ALLOWED_ID_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const ALLOWED_ID_IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+const MAX_ID_IMAGE_BYTES = 20 * 1024 * 1024; // 20MB — matches the bucket's file size limit
+
+async function uploadIdImage(file: File, cardUid: string): Promise<string> {
+  const ext = ALLOWED_ID_IMAGE_EXTENSIONS[file.type] ?? "jpg";
+  const path = `${cardUid || "unassigned"}/${Date.now()}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(ID_IMAGE_BUCKET)
+    .upload(path, file, {
+      contentType: file.type,
+      upsert: false,
+    });
+
+  if (uploadError) {
+    throw new Error(uploadError.message || "Failed to upload ID image");
+  }
+
+  // If the bucket is private, swap this for a signed URL instead, e.g.:
+  // const { data, error } = await supabase.storage
+  //   .from(ID_IMAGE_BUCKET)
+  //   .createSignedUrl(path, 60 * 60 * 24 * 365); // 1 year
+  // return data.signedUrl;
+  const { data } = supabase.storage.from(ID_IMAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
 
 interface PsgcOption {
   code: string;
@@ -137,15 +196,6 @@ function formatDob(dobString: string | null | undefined): string {
   const dob = new Date(dobString);
   if (Number.isNaN(dob.getTime())) return "—";
   return dob.toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsDataURL(file);
-  });
 }
 
 const INITIAL_FORM = {
@@ -398,15 +448,17 @@ export default function CardRegistrationPage() {
   };
 
   // ✅ ID image handlers (proof for Student / Senior / PWD discount types)
+  // Validated against the same constraints as the Supabase "id-verifications"
+  // bucket: image/jpeg, image/png, image/webp, up to 20MB.
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setIdImageError("Please upload an image file");
+    if (!ALLOWED_ID_IMAGE_TYPES.includes(file.type)) {
+      setIdImageError("Only JPG, PNG, or WEBP images are allowed");
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setIdImageError("Image must be under 5MB");
+    if (file.size > MAX_ID_IMAGE_BYTES) {
+      setIdImageError("Image must be under 20MB");
       return;
     }
     setIdImageError("");
@@ -452,7 +504,7 @@ export default function CardRegistrationPage() {
     resetForm();
   };
 
-  const [isSubmittingImage, setIsSubmittingImage] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const createMutation = useCreateUser({
     mutation: {
@@ -542,8 +594,10 @@ export default function CardRegistrationPage() {
     }
 
     try {
-      setIsSubmittingImage(true);
-      const idImageBase64 = idImageFile ? await fileToBase64(idImageFile) : null;
+      setIsUploadingImage(true);
+      // ✅ Upload straight to the Supabase "id-verifications" bucket and
+      // store the resulting URL instead of a base64 blob in the DB.
+      const idImageUrl = idImageFile ? await uploadIdImage(idImageFile, form.cardUid) : null;
 
       createMutation.mutate({
         data: {
@@ -563,21 +617,22 @@ export default function CardRegistrationPage() {
           barangayCode: form.barangayCode,
           barangayName: form.barangayName,
           fullAddress,
-          // TODO: upload idImageFile to your storage bucket first (see add_registration_fields.sql
-          // note on id_image_path) and send the returned path/URL as `idImagePath` instead of base64.
-          // Sending raw base64 here works as a stopgap but will bloat the users table.
-          idImagePath: idImageBase64,
+          idImagePath: idImageUrl,
           initialBalance: 0, // default value dahil required pa rin ito sa backend
         },
       });
-    } catch {
-      toast({ title: "Failed to process ID image", variant: "destructive" });
+    } catch (err) {
+      toast({
+        title: "Failed to upload ID image",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
     } finally {
-      setIsSubmittingImage(false);
+      setIsUploadingImage(false);
     }
   };
 
-  const isSubmitting = createMutation.isPending || isSubmittingImage;
+  const isSubmitting = createMutation.isPending || isUploadingImage;
 
   return (
     <div className={`space-y-8 ${isDark ? "text-slate-200" : "text-slate-800"}`} data-testid="card-registration-page">
@@ -904,7 +959,7 @@ export default function CardRegistrationPage() {
                         <input
                           ref={fileInputRef}
                           type="file"
-                          accept="image/*"
+                          accept="image/jpeg,image/png,image/webp"
                           onChange={handleImageSelect}
                           className="hidden"
                           id="idImage"
@@ -924,7 +979,7 @@ export default function CardRegistrationPage() {
                             <span className={`text-xs font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
                               Click to upload {form.type} ID
                             </span>
-                            <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>PNG or JPG, up to 5MB</span>
+                            <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>JPG, PNG, or WEBP, up to 20MB</span>
                           </label>
                         ) : (
                           <div className={`relative flex items-center gap-3 p-3 border rounded-xl ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
@@ -1197,7 +1252,7 @@ export default function CardRegistrationPage() {
                 ) : (
                   <CreditCard className="w-4 h-4 mr-2" />
                 )}
-                {isSubmitting ? "Registering..." : "Register Card"}
+                {isSubmitting ? (idImageFile ? "Uploading..." : "Registering...") : "Register Card"}
               </Button>
             </DialogFooter>
           </form>
