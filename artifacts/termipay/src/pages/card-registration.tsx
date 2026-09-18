@@ -20,7 +20,6 @@ import {
   X,
   Loader2,
   CalendarDays,
-  ImageOff,
 } from "lucide-react";
 
 import {
@@ -53,16 +52,11 @@ import { useToast } from "@/hooks/use-toast";
 
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 
-const ID_IMAGE_BUCKET = "id-images";
+const ID_IMAGE_BUCKET = "id-verifications";
 const MAX_ID_IMAGE_SIZE = 5 * 1024 * 1024;
 
 interface PsgcOption {
   code: string;
-  name: string;
-}
-
-interface ViewingImage {
-  url: string;
   name: string;
 }
 
@@ -136,9 +130,6 @@ export default function CardRegistrationPage() {
   const [idImageFile, setIdImageFile] = useState<File | null>(null);
   const [idImagePreview, setIdImagePreview] = useState<string | null>(null);
 
-  const [viewingImage, setViewingImage] =
-    useState<ViewingImage | null>(null);
-
   const [regions, setRegions] = useState<PsgcOption[]>([]);
   const [provinces, setProvinces] = useState<PsgcOption[]>([]);
   const [cities, setCities] = useState<PsgcOption[]>([]);
@@ -193,7 +184,8 @@ export default function CardRegistrationPage() {
           toast({
             title: "Card Already Registered",
             description:
-              message || "This RFID card UID is already registered.",
+              message ||
+              "This RFID card UID is already registered.",
             variant: "destructive",
           });
 
@@ -204,7 +196,8 @@ export default function CardRegistrationPage() {
           toast({
             title: "Invalid Registration",
             description:
-              message || "Please check the information you entered.",
+              message ||
+              "Please check the information you entered.",
             variant: "destructive",
           });
 
@@ -419,6 +412,7 @@ export default function CardRegistrationPage() {
    */
   const openModal = useCallback(() => {
     setForm(INITIAL_FORM);
+
     setIdImageFile(null);
     setIdImagePreview(null);
 
@@ -442,7 +436,9 @@ export default function CardRegistrationPage() {
     }
 
     setIsModalOpen(false);
+
     setForm(INITIAL_FORM);
+
     setIdImageFile(null);
     setIdImagePreview(null);
 
@@ -557,9 +553,6 @@ export default function CardRegistrationPage() {
 
   /*
    * IMAGE SELECT
-   *
-   * IMPORTANT:
-   * The image is NEVER converted to Base64.
    */
   function handleImageSelect(
     event: React.ChangeEvent<HTMLInputElement>
@@ -573,7 +566,8 @@ export default function CardRegistrationPage() {
     if (!file.type.startsWith("image/")) {
       toast({
         title: "Invalid File",
-        description: "Please select an image file.",
+        description:
+          "Please select an image file.",
         variant: "destructive",
       });
 
@@ -621,8 +615,6 @@ export default function CardRegistrationPage() {
 
   /*
    * UPLOAD IMAGE DIRECTLY TO SUPABASE STORAGE
-   *
-   * Render NEVER receives the image file.
    */
   async function uploadIdImage(): Promise<{
     path: string;
@@ -635,6 +627,12 @@ export default function CardRegistrationPage() {
     const safeUid = form.cardUid
       .trim()
       .replace(/[^a-zA-Z0-9_-]/g, "");
+
+    if (!safeUid) {
+      throw new Error(
+        "Invalid RFID card UID."
+      );
+    }
 
     const extension =
       idImageFile.name
@@ -649,7 +647,9 @@ export default function CardRegistrationPage() {
 
     const filePath = `${safeUid}/${fileName}`;
 
-    const { error: uploadError } = await supabase.storage
+    const {
+      error: uploadError,
+    } = await supabase.storage
       .from(ID_IMAGE_BUCKET)
       .upload(filePath, idImageFile, {
         cacheControl: "3600",
@@ -664,18 +664,13 @@ export default function CardRegistrationPage() {
       );
     }
 
-    /*
-     * The bucket must be PUBLIC for this URL method.
-     */
-    const { data: publicUrlData } = supabase.storage
+    const {
+      data: publicUrlData,
+    } = supabase.storage
       .from(ID_IMAGE_BUCKET)
       .getPublicUrl(filePath);
 
     if (!publicUrlData?.publicUrl) {
-      /*
-       * Clean up the uploaded file if Supabase
-       * could not generate its public URL.
-       */
       await supabase.storage
         .from(ID_IMAGE_BUCKET)
         .remove([filePath]);
@@ -713,6 +708,7 @@ export default function CardRegistrationPage() {
           "Please enter the RFID card UID.",
         variant: "destructive",
       });
+
       return;
     }
 
@@ -723,6 +719,7 @@ export default function CardRegistrationPage() {
           "Please enter the card holder's full name.",
         variant: "destructive",
       });
+
       return;
     }
 
@@ -733,6 +730,7 @@ export default function CardRegistrationPage() {
           "Please select the date of birth.",
         variant: "destructive",
       });
+
       return;
     }
 
@@ -743,6 +741,7 @@ export default function CardRegistrationPage() {
           "Please enter the contact number.",
         variant: "destructive",
       });
+
       return;
     }
 
@@ -753,6 +752,7 @@ export default function CardRegistrationPage() {
           "Please select the region.",
         variant: "destructive",
       });
+
       return;
     }
 
@@ -763,6 +763,7 @@ export default function CardRegistrationPage() {
           "Please select the city or municipality.",
         variant: "destructive",
       });
+
       return;
     }
 
@@ -773,16 +774,21 @@ export default function CardRegistrationPage() {
           "Please select the barangay.",
         variant: "destructive",
       });
+
       return;
     }
 
-    if (requiresIdImage && !idImageFile) {
+    if (
+      requiresIdImage &&
+      !idImageFile
+    ) {
       toast({
         title: "ID Image Required",
         description:
           `${form.type} registration requires an ID image.`,
         variant: "destructive",
       });
+
       return;
     }
 
@@ -792,20 +798,17 @@ export default function CardRegistrationPage() {
       setIsSubmittingImage(true);
 
       /*
-       * STEP 1
-       * Upload the actual image DIRECTLY to Supabase Storage.
+       * IMAGE IS UPLOADED DIRECTLY TO SUPABASE.
+       * IT IS NOT CONVERTED TO BASE64.
        */
-      const uploadedImage = await uploadIdImage();
+      const uploadedImage =
+        await uploadIdImage();
 
-      uploadedImagePath = uploadedImage?.path ?? null;
+      uploadedImagePath =
+        uploadedImage?.path ?? null;
 
       /*
-       * IMPORTANT:
-       * We send ONLY the small public URL to Render.
-       *
-       * NO BASE64.
-       * NO File object.
-       * NO image bytes.
+       * ONLY THE SUPABASE URL IS SENT TO RENDER.
        */
       const idImagePath =
         uploadedImage?.publicUrl ?? null;
@@ -815,53 +818,76 @@ export default function CardRegistrationPage() {
         form.barangayName,
         form.cityName,
         form.provinceName,
-        form.regionName && form.zipCode
+        form.regionName &&
+        form.zipCode
           ? `${form.regionName} ${form.zipCode}`
-          : form.regionName || form.zipCode,
+          : form.regionName ||
+            form.zipCode,
       ]
         .filter(Boolean)
         .join(", ");
 
       /*
-       * STEP 2
-       * Send only normal JSON data + Supabase image URL.
+       * REGISTER USER
        */
       await createMutation.mutateAsync({
         data: {
-          cardUid: form.cardUid.trim().toUpperCase(),
-          fullName: form.fullName.trim(),
-          dateOfBirth: form.dob,
-          contactNumber: form.contactNumber.trim(),
+          cardUid:
+            form.cardUid
+              .trim()
+              .toUpperCase(),
 
-          type: form.type,
+          fullName:
+            form.fullName.trim(),
+
+          dateOfBirth:
+            form.dob,
+
+          contactNumber:
+            form.contactNumber.trim(),
+
+          type:
+            form.type,
 
           streetAddress:
-            form.streetAddress.trim() || null,
+            form.streetAddress.trim() ||
+            null,
 
           zipCode:
-            form.zipCode.trim() || null,
+            form.zipCode.trim() ||
+            null,
 
-          regionCode: form.regionCode,
-          regionName: form.regionName,
+          regionCode:
+            form.regionCode,
+
+          regionName:
+            form.regionName,
 
           provinceCode:
-            form.provinceCode || null,
+            form.provinceCode ||
+            null,
 
           provinceName:
-            form.provinceName || null,
+            form.provinceName ||
+            null,
 
-          cityCode: form.cityCode,
-          cityName: form.cityName,
+          cityCode:
+            form.cityCode,
 
-          barangayCode: form.barangayCode,
-          barangayName: form.barangayName,
+          cityName:
+            form.cityName,
+
+          barangayCode:
+            form.barangayCode,
+
+          barangayName:
+            form.barangayName,
 
           fullAddress,
 
           /*
-           * THIS IS NOW A SUPABASE URL.
-           *
-           * It is NOT Base64.
+           * SUPABASE PUBLIC URL
+           * NOT BASE64
            */
           idImagePath,
 
@@ -875,15 +901,15 @@ export default function CardRegistrationPage() {
       );
 
       /*
-       * If the image was successfully uploaded but
-       * the API registration failed, remove the image
-       * so Supabase does not contain an orphan file.
+       * REMOVE ORPHAN IMAGE IF API REGISTRATION FAILS
        */
       if (uploadedImagePath) {
         try {
           await supabase.storage
             .from(ID_IMAGE_BUCKET)
-            .remove([uploadedImagePath]);
+            .remove([
+              uploadedImagePath,
+            ]);
         } catch (cleanupError) {
           console.error(
             "Failed to remove orphan ID image:",
@@ -898,15 +924,13 @@ export default function CardRegistrationPage() {
         error?.message ??
         "Unable to register the card.";
 
-      /*
-       * If createMutation already handled the error,
-       * don't show a duplicate toast.
-       */
       if (!error?.response) {
         toast({
-          title: "Registration Failed",
+          title:
+            "Registration Failed",
           description: message,
-          variant: "destructive",
+          variant:
+            "destructive",
         });
       }
     } finally {
@@ -1119,7 +1143,7 @@ export default function CardRegistrationPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px]">
+              <table className="w-full min-w-[800px]">
                 <thead>
                   <tr
                     className={`border-b text-left text-xs uppercase tracking-wider ${
@@ -1149,10 +1173,6 @@ export default function CardRegistrationPage() {
                     </th>
 
                     <th className="px-4 py-3">
-                      ID
-                    </th>
-
-                    <th className="px-4 py-3">
                       Status
                     </th>
                   </tr>
@@ -1169,6 +1189,7 @@ export default function CardRegistrationPage() {
                             : "border-slate-100"
                         }`}
                       >
+                        {/* CARD */}
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
                             <CreditCard className="h-4 w-4 text-cyan-500" />
@@ -1181,6 +1202,7 @@ export default function CardRegistrationPage() {
                           </div>
                         </td>
 
+                        {/* FULL NAME */}
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
                             <UserRound className="h-4 w-4 opacity-50" />
@@ -1193,12 +1215,14 @@ export default function CardRegistrationPage() {
                           </div>
                         </td>
 
+                        {/* CONTACT */}
                         <td className="px-4 py-4 text-sm">
                           {user.contactNumber ||
                             user.contact_number ||
                             "N/A"}
                         </td>
 
+                        {/* TYPE */}
                         <td className="px-4 py-4">
                           <span
                             className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
@@ -1233,6 +1257,7 @@ export default function CardRegistrationPage() {
                           </span>
                         </td>
 
+                        {/* BALANCE */}
                         <td className="px-4 py-4 font-semibold">
                           ₱
                           {Number(
@@ -1240,50 +1265,7 @@ export default function CardRegistrationPage() {
                           ).toFixed(2)}
                         </td>
 
-                        <td className="px-4 py-4">
-                          {user.idImagePath ||
-                          user.id_image_path ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setViewingImage({
-                                  url:
-                                    user.idImagePath ||
-                                    user.id_image_path,
-                                  name:
-                                    user.fullName ||
-                                    user.full_name ||
-                                    "Card Holder",
-                                })
-                              }
-                              className="block cursor-pointer"
-                            >
-                              <img
-                                src={
-                                  user.idImagePath ||
-                                  user.id_image_path
-                                }
-                                alt={`${user.fullName || user.full_name || "Card Holder"} ID`}
-                                className={`h-9 w-9 rounded-md border object-cover transition-transform hover:scale-105 ${
-                                  isDark
-                                    ? "border-slate-800"
-                                    : "border-slate-200"
-                                }`}
-                              />
-                            </button>
-                          ) : (
-                            <div
-                              className={`flex h-9 w-9 items-center justify-center rounded-md ${
-                                isDark
-                                  ? "bg-slate-800 text-slate-500"
-                                  : "bg-slate-100 text-slate-400"
-                              }`}
-                            >
-                              <ImageOff className="h-4 w-4" />
-                            </div>
-                          )}
-                        </td>
-
+                        {/* STATUS */}
                         <td className="px-4 py-4">
                           <span
                             className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
@@ -1903,42 +1885,6 @@ export default function CardRegistrationPage() {
               </Button>
             </div>
           </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* IMAGE VIEWER */}
-      <Dialog
-        open={!!viewingImage}
-        onOpenChange={(open) => {
-          if (!open) {
-            setViewingImage(null);
-          }
-        }}
-      >
-        <DialogContent
-          className={`sm:max-w-3xl ${
-            isDark
-              ? "border-slate-800 bg-slate-950"
-              : "bg-white"
-          }`}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              {viewingImage
-                ? `${viewingImage.name} — ID Verification`
-                : "ID Verification"}
-            </DialogTitle>
-          </DialogHeader>
-
-          {viewingImage && (
-            <div className="flex justify-center">
-              <img
-                src={viewingImage.url}
-                alt={`${viewingImage.name} ID verification`}
-                className="max-h-[70vh] w-full object-contain px-6 pb-6"
-              />
-            </div>
-          )}
         </DialogContent>
       </Dialog>
     </div>
