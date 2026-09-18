@@ -11,9 +11,6 @@ import { motion } from "framer-motion";
 import {
   CreditCard,
   Plus,
-  Cpu,
-  ShieldCheck,
-  Zap,
   CheckCircle2,
   UserRound,
   MapPin,
@@ -1035,6 +1032,12 @@ export default function CardRegistrationPage() {
           50% { opacity: 0.2; }
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+
+        .address-select-content [data-radix-select-viewport] {
+          max-height: 240px;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+        }
       `}</style>
 
       {/* PAGE HEADER */}
@@ -1082,137 +1085,6 @@ export default function CardRegistrationPage() {
           <Plus className="h-4 w-4" />
           Register New Card
         </Button>
-      </div>
-
-      {/* INFO CARDS */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center gap-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                  isDark
-                    ? "bg-cyan-500/10 text-cyan-400"
-                    : "bg-cyan-50 text-cyan-600"
-                }`}
-              >
-                <Cpu className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p
-                  className={`text-xs ${
-                    isDark
-                      ? "text-slate-400"
-                      : "text-slate-500"
-                  }`}
-                >
-                  RFID
-                </p>
-
-                <p className="font-semibold">
-                  Contactless
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center gap-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                  isDark
-                    ? "bg-emerald-500/10 text-emerald-400"
-                    : "bg-emerald-50 text-emerald-600"
-                }`}
-              >
-                <ShieldCheck className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p
-                  className={`text-xs ${
-                    isDark
-                      ? "text-slate-400"
-                      : "text-slate-500"
-                  }`}
-                >
-                  Security
-                </p>
-
-                <p className="font-semibold">
-                  Verified Cards
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center gap-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                  isDark
-                    ? "bg-violet-500/10 text-violet-400"
-                    : "bg-violet-50 text-violet-600"
-                }`}
-              >
-                <Zap className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p
-                  className={`text-xs ${
-                    isDark
-                      ? "text-slate-400"
-                      : "text-slate-500"
-                  }`}
-                >
-                  Processing
-                </p>
-
-                <p className="font-semibold">
-                  Fast Registration
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center gap-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                  isDark
-                    ? "bg-amber-500/10 text-amber-400"
-                    : "bg-amber-50 text-amber-600"
-                }`}
-              >
-                <IdCard className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p
-                  className={`text-xs ${
-                    isDark
-                      ? "text-slate-400"
-                      : "text-slate-500"
-                  }`}
-                >
-                  ID Verification
-                </p>
-
-                <p className="font-semibold">
-                  Student / Senior / PWD
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* RECENT USERS — old styled table (badges, dot colors, LIVE indicator, row pulse) */}
@@ -1430,294 +1302,6 @@ export default function CardRegistrationPage() {
               </div>
             </div>
 
-            {/* PERSONAL INFORMATION */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <UserRound className="h-4 w-4 text-cyan-500" />
-
-                <h3 className="font-semibold">
-                  Personal Information
-                </h3>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <label className="text-sm font-medium">
-                    Full Name
-                  </label>
-
-                  <Input
-                    value={form.fullName}
-                    onChange={(event) =>
-                      updateForm(
-                        "fullName",
-                        event.target.value
-                      )
-                    }
-                    placeholder="Enter full name"
-                    disabled={isSubmitting}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Date of Birth
-                  </label>
-
-                  <div className="relative">
-                    <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50" />
-
-                    <Input
-                      type="date"
-                      value={form.dob}
-                      onChange={(event) =>
-                        updateForm(
-                          "dob",
-                          event.target.value
-                        )
-                      }
-                      className="pl-10"
-                      disabled={isSubmitting}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Contact Number
-                  </label>
-
-                  <Input
-                    value={form.contactNumber}
-                    onChange={(event) =>
-                      updateForm(
-                        "contactNumber",
-                        event.target.value
-                      )
-                    }
-                    placeholder="09XXXXXXXXX"
-                    disabled={isSubmitting}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* ADDRESS */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-cyan-500" />
-
-                <h3 className="font-semibold">
-                  Address
-                </h3>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <label className="text-sm font-medium">
-                    Street Address
-                  </label>
-
-                  <Input
-                    value={form.streetAddress}
-                    onChange={(event) =>
-                      updateForm(
-                        "streetAddress",
-                        event.target.value
-                      )
-                    }
-                    placeholder="House number, street, sitio"
-                    disabled={isSubmitting}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Region
-                  </label>
-
-                  <Select
-                    value={form.regionCode}
-                    onValueChange={
-                      handleRegionChange
-                    }
-                    disabled={
-                      isSubmitting ||
-                      loadingRegions
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingRegions
-                            ? "Loading regions..."
-                            : "Select region"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent>
-                      {regions.map(
-                        (region) => (
-                          <SelectItem
-                            key={region.code}
-                            value={region.code}
-                          >
-                            {region.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Province
-                  </label>
-
-                  <Select
-                    value={form.provinceCode}
-                    onValueChange={
-                      handleProvinceChange
-                    }
-                    disabled={
-                      isSubmitting ||
-                      !form.regionCode ||
-                      loadingProvinces
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingProvinces
-                            ? "Loading provinces..."
-                            : "Select province"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent>
-                      {provinces.map(
-                        (province) => (
-                          <SelectItem
-                            key={province.code}
-                            value={province.code}
-                          >
-                            {province.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    City / Municipality
-                  </label>
-
-                  <Select
-                    value={form.cityCode}
-                    onValueChange={
-                      handleCityChange
-                    }
-                    disabled={
-                      isSubmitting ||
-                      !form.provinceCode ||
-                      loadingCities
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingCities
-                            ? "Loading cities..."
-                            : "Select city / municipality"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent>
-                      {cities.map(
-                        (city) => (
-                          <SelectItem
-                            key={city.code}
-                            value={city.code}
-                          >
-                            {city.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Barangay
-                  </label>
-
-                  <Select
-                    value={form.barangayCode}
-                    onValueChange={
-                      handleBarangayChange
-                    }
-                    disabled={
-                      isSubmitting ||
-                      !form.cityCode ||
-                      loadingBarangays
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingBarangays
-                            ? "Loading barangays..."
-                            : "Select barangay"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent>
-                      {barangays.map(
-                        (barangay) => (
-                          <SelectItem
-                            key={barangay.code}
-                            value={barangay.code}
-                          >
-                            {barangay.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    ZIP Code
-                  </label>
-
-                  <Input
-                    value={form.zipCode}
-                    onChange={(event) =>
-                      updateForm(
-                        "zipCode",
-                        event.target.value.replace(
-                          /\D/g,
-                          ""
-                        )
-                      )
-                    }
-                    placeholder="6710"
-                    maxLength={10}
-                    disabled={isSubmitting}
-                  />
-                </div>
-              </div>
-            </div>
-
             {/* ID IMAGE */}
             {requiresIdImage && (
               <div className="space-y-4">
@@ -1876,6 +1460,294 @@ export default function CardRegistrationPage() {
                 </div>
               </div>
             )}
+
+            {/* PERSONAL INFORMATION */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <UserRound className="h-4 w-4 text-cyan-500" />
+
+                <h3 className="font-semibold">
+                  Personal Information
+                </h3>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium">
+                    Full Name
+                  </label>
+
+                  <Input
+                    value={form.fullName}
+                    onChange={(event) =>
+                      updateForm(
+                        "fullName",
+                        event.target.value
+                      )
+                    }
+                    placeholder="Enter full name"
+                    disabled={isSubmitting}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Date of Birth
+                  </label>
+
+                  <div className="relative">
+                    <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50" />
+
+                    <Input
+                      type="date"
+                      value={form.dob}
+                      onChange={(event) =>
+                        updateForm(
+                          "dob",
+                          event.target.value
+                        )
+                      }
+                      className="pl-10"
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Contact Number
+                  </label>
+
+                  <Input
+                    value={form.contactNumber}
+                    onChange={(event) =>
+                      updateForm(
+                        "contactNumber",
+                        event.target.value
+                      )
+                    }
+                    placeholder="09XXXXXXXXX"
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* ADDRESS */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-cyan-500" />
+
+                <h3 className="font-semibold">
+                  Address
+                </h3>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium">
+                    Street Address
+                  </label>
+
+                  <Input
+                    value={form.streetAddress}
+                    onChange={(event) =>
+                      updateForm(
+                        "streetAddress",
+                        event.target.value
+                      )
+                    }
+                    placeholder="House number, street, sitio"
+                    disabled={isSubmitting}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Region
+                  </label>
+
+                  <Select
+                    value={form.regionCode}
+                    onValueChange={
+                      handleRegionChange
+                    }
+                    disabled={
+                      isSubmitting ||
+                      loadingRegions
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={
+                          loadingRegions
+                            ? "Loading regions..."
+                            : "Select region"
+                        }
+                      />
+                    </SelectTrigger>
+
+                    <SelectContent className="address-select-content">
+                      {regions.map(
+                        (region) => (
+                          <SelectItem
+                            key={region.code}
+                            value={region.code}
+                          >
+                            {region.name}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Province
+                  </label>
+
+                  <Select
+                    value={form.provinceCode}
+                    onValueChange={
+                      handleProvinceChange
+                    }
+                    disabled={
+                      isSubmitting ||
+                      !form.regionCode ||
+                      loadingProvinces
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={
+                          loadingProvinces
+                            ? "Loading provinces..."
+                            : "Select province"
+                        }
+                      />
+                    </SelectTrigger>
+
+                    <SelectContent className="address-select-content">
+                      {provinces.map(
+                        (province) => (
+                          <SelectItem
+                            key={province.code}
+                            value={province.code}
+                          >
+                            {province.name}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    City / Municipality
+                  </label>
+
+                  <Select
+                    value={form.cityCode}
+                    onValueChange={
+                      handleCityChange
+                    }
+                    disabled={
+                      isSubmitting ||
+                      !form.provinceCode ||
+                      loadingCities
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={
+                          loadingCities
+                            ? "Loading cities..."
+                            : "Select city / municipality"
+                        }
+                      />
+                    </SelectTrigger>
+
+                    <SelectContent className="address-select-content">
+                      {cities.map(
+                        (city) => (
+                          <SelectItem
+                            key={city.code}
+                            value={city.code}
+                          >
+                            {city.name}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Barangay
+                  </label>
+
+                  <Select
+                    value={form.barangayCode}
+                    onValueChange={
+                      handleBarangayChange
+                    }
+                    disabled={
+                      isSubmitting ||
+                      !form.cityCode ||
+                      loadingBarangays
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={
+                          loadingBarangays
+                            ? "Loading barangays..."
+                            : "Select barangay"
+                        }
+                      />
+                    </SelectTrigger>
+
+                    <SelectContent className="address-select-content">
+                      {barangays.map(
+                        (barangay) => (
+                          <SelectItem
+                            key={barangay.code}
+                            value={barangay.code}
+                          >
+                            {barangay.name}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    ZIP Code
+                  </label>
+
+                  <Input
+                    value={form.zipCode}
+                    onChange={(event) =>
+                      updateForm(
+                        "zipCode",
+                        event.target.value.replace(
+                          /\D/g,
+                          ""
+                        )
+                      )
+                    }
+                    placeholder="6710"
+                    maxLength={10}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+            </div>
 
             {/* BUTTONS */}
             <div
