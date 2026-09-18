@@ -36,13 +36,11 @@ import {
   X,
   Loader2,
   CalendarDays,
+  ImageOff,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
-// ✅ NEW: Supabase client — adjust this import path to wherever your client is
-// initialized (e.g. `createClient(...)` from `@supabase/supabase-js`).
-import { supabase } from "@/lib/supabase";
 
 // ============================================================================
 // 🗺️ PSGC API — community-hosted Philippine Standard Geographic Code API
@@ -51,10 +49,6 @@ import { supabase } from "@/lib/supabase";
 // Docs / source: https://psgc.gitlab.io/api/
 // ============================================================================
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
-
-// ✅ NEW: Supabase Storage bucket name for uploaded ID images.
-// Palitan kung iba ang pangalan ng bucket mo sa Supabase Dashboard.
-const ID_IMAGE_BUCKET = "id-images";
 
 interface PsgcOption {
   code: string;
@@ -126,7 +120,7 @@ function SuccessTitle({ text }: { text: string }) {
   );
 }
 
-function calculateAge(dobString: string): number | null {
+function calculateAge(dobString: string | null | undefined): number | null {
   if (!dobString) return null;
   const dob = new Date(dobString);
   if (Number.isNaN(dob.getTime())) return null;
@@ -137,42 +131,21 @@ function calculateAge(dobString: string): number | null {
   return age >= 0 ? age : null;
 }
 
-// ✅ NEW: Uploads the selected ID image file directly to Supabase Storage and
-// returns its public URL. This replaces the old fileToBase64() approach,
-// which stored the entire image as a base64 string inside the `users` row
-// and would have bloated the table over time.
-//
-// Requirements on the Supabase side:
-//  1. A storage bucket named `ID_IMAGE_BUCKET` must exist.
-//  2. The bucket (or its RLS policies) must allow INSERT from the role your
-//     frontend uses (anon/authenticated) so this upload can succeed.
-//  3. If the bucket is public, `getPublicUrl` below returns a URL anyone with
-//     the link can view. For sensitive IDs (Student/Senior/PWD), consider a
-//     private bucket + `createSignedUrl` instead — ask if you want that
-//     version, the swap is small.
-async function uploadIdImageToStorage(file: File, cardUid: string): Promise<string> {
-  const fileExt = file.name.split(".").pop() || "jpg";
-  const safeExt = fileExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
-  const fileName = `${cardUid}-${Date.now()}.${safeExt}`;
-  const filePath = `id-images/${fileName}`;
+// ✅ Formats a stored DOB (ISO string) into a short, readable date for the table
+function formatDob(dobString: string | null | undefined): string {
+  if (!dobString) return "—";
+  const dob = new Date(dobString);
+  if (Number.isNaN(dob.getTime())) return "—";
+  return dob.toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
+}
 
-  const { error: uploadError } = await supabase.storage
-    .from(ID_IMAGE_BUCKET)
-    .upload(filePath, file, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: file.type || undefined,
-    });
-
-  if (uploadError) {
-    throw new Error(`Failed to upload ID image: ${uploadError.message}`);
-  }
-
-  const { data } = supabase.storage.from(ID_IMAGE_BUCKET).getPublicUrl(filePath);
-  if (!data?.publicUrl) {
-    throw new Error("Failed to resolve uploaded image URL");
-  }
-  return data.publicUrl;
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
 }
 
 const INITIAL_FORM = {
@@ -215,6 +188,9 @@ export default function CardRegistrationPage() {
   const [idImageFile, setIdImageFile] = useState<File | null>(null);
   const [idImagePreview, setIdImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ✅ Table row ID-image lightbox — view a registered cardholder's uploaded ID
+  const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null);
 
   // ✅ PSGC address dropdown data
   const [regions, setRegions] = useState<PsgcOption[]>([]);
@@ -476,10 +452,7 @@ export default function CardRegistrationPage() {
     resetForm();
   };
 
-  // ✅ Renamed from isSubmittingImage → isUploadingImage since this now
-  // reflects a real network upload to Supabase Storage, not a local
-  // base64 read.
-  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isSubmittingImage, setIsSubmittingImage] = useState(false);
 
   const createMutation = useCreateUser({
     mutation: {
@@ -569,15 +542,8 @@ export default function CardRegistrationPage() {
     }
 
     try {
-      setIsUploadingImage(true);
-
-      // ✅ FIXED: image now goes straight to Supabase Storage from the
-      // browser, and only the resulting public URL is sent to the backend
-      // as `idImagePath`. This replaces the old base64-into-the-row
-      // approach that used to bloat the `users` table.
-      const idImageUrl = idImageFile
-        ? await uploadIdImageToStorage(idImageFile, form.cardUid)
-        : null;
+      setIsSubmittingImage(true);
+      const idImageBase64 = idImageFile ? await fileToBase64(idImageFile) : null;
 
       createMutation.mutate({
         data: {
@@ -597,22 +563,21 @@ export default function CardRegistrationPage() {
           barangayCode: form.barangayCode,
           barangayName: form.barangayName,
           fullAddress,
-          idImagePath: idImageUrl, // 👈 storage URL, not base64
+          // TODO: upload idImageFile to your storage bucket first (see add_registration_fields.sql
+          // note on id_image_path) and send the returned path/URL as `idImagePath` instead of base64.
+          // Sending raw base64 here works as a stopgap but will bloat the users table.
+          idImagePath: idImageBase64,
           initialBalance: 0, // default value dahil required pa rin ito sa backend
         },
       });
-    } catch (err: any) {
-      toast({
-        title: "Failed to upload ID image",
-        description: err?.message || "Please try again.",
-        variant: "destructive",
-      });
+    } catch {
+      toast({ title: "Failed to process ID image", variant: "destructive" });
     } finally {
-      setIsUploadingImage(false);
+      setIsSubmittingImage(false);
     }
   };
 
-  const isSubmitting = createMutation.isPending || isUploadingImage;
+  const isSubmitting = createMutation.isPending || isSubmittingImage;
 
   return (
     <div className={`space-y-8 ${isDark ? "text-slate-200" : "text-slate-800"}`} data-testid="card-registration-page">
@@ -696,60 +661,104 @@ export default function CardRegistrationPage() {
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card UID</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Full Name</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Type</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date of Birth</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Address</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>ID</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Balance</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {Array.isArray(recentUsers) && recentUsers.length > 0 ? (
-                      recentUsers.map((user, index) => (
-                        <TableRow
-                          key={user.id}
-                          className={`transition-colors group ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"} ${
-                            // ✅ Pulse the newest row when data updates
-                            isPulsing && index === 0 ? "row-pulse" : ""
-                          }`}
-                        >
-                          <TableCell className="font-mono text-xs text-blue-500 font-semibold">
-                            {user.cardUid}
-                          </TableCell>
-                          <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                            {user.fullName}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] font-semibold flex items-center gap-1 w-fit ${getTypeBadgeStyle(user.type, isDark)}`}
+                      recentUsers.map((user, index) => {
+                        const userAge = calculateAge(user.dateOfBirth);
+                        return (
+                          <TableRow
+                            key={user.id}
+                            className={`transition-colors group ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"} ${
+                              // ✅ Pulse the newest row when data updates
+                              isPulsing && index === 0 ? "row-pulse" : ""
+                            }`}
+                          >
+                            <TableCell className="font-mono text-xs text-blue-500 font-semibold">
+                              {user.cardUid}
+                            </TableCell>
+                            <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {user.fullName}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] font-semibold flex items-center gap-1 w-fit ${getTypeBadgeStyle(user.type, isDark)}`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full inline-block ${getTypeDotColor(user.type)}`} />
+                                {user.type || "Regular"}
+                              </Badge>
+                            </TableCell>
+                            {/* ✅ Date of birth + derived age */}
+                            <TableCell className={`text-xs whitespace-nowrap ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {formatDob(user.dateOfBirth)}
+                              {userAge !== null && (
+                                <span className={isDark ? "text-slate-600" : "text-slate-400"}> ({userAge} yrs)</span>
+                              )}
+                            </TableCell>
+                            <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {user.contactNumber}
+                            </TableCell>
+                            {/* ✅ Full address, truncated with the complete string on hover */}
+                            <TableCell
+                              className={`text-xs max-w-[220px] truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}
+                              title={user.fullAddress || ""}
                             >
-                              <span className={`w-1.5 h-1.5 rounded-full inline-block ${getTypeDotColor(user.type)}`} />
-                              {user.type || "Regular"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                            {user.contactNumber}
-                          </TableCell>
-                          <TableCell className="text-sm font-semibold text-emerald-500">
-                            ₱{Number(user.balance || 0).toFixed(2)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Badge className={`${
-                              user.status === "Active"
-                                ? isDark
-                                  ? "bg-emerald-950/40 text-emerald-400 border-emerald-900"
-                                  : "bg-emerald-50 text-emerald-600 border-emerald-200"
-                                : isDark
-                                  ? "bg-red-950/40 text-red-400 border-red-900"
-                                  : "bg-red-50 text-red-600 border-red-200"
-                            } text-[10px] font-semibold px-2 py-0.5 border`}>
-                              {user.status}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))
+                              {user.fullAddress || "—"}
+                            </TableCell>
+                            {/* ✅ ID verification image — thumbnail, click to view full size */}
+                            <TableCell>
+                              {user.idImagePath ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setViewingImage({ url: user.idImagePath, name: user.fullName })}
+                                  className="cursor-pointer block"
+                                >
+                                  <img
+                                    src={user.idImagePath}
+                                    alt={`${user.fullName} ID`}
+                                    className={`h-9 w-9 rounded-md object-cover border transition-transform hover:scale-105 ${
+                                      isDark ? "border-slate-800" : "border-slate-200"
+                                    }`}
+                                  />
+                                </button>
+                              ) : (
+                                <span className={`flex items-center justify-center h-9 w-9 rounded-md border border-dashed ${
+                                  isDark ? "border-slate-800 text-slate-700" : "border-slate-200 text-slate-300"
+                                }`}>
+                                  <ImageOff size={14} />
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-sm font-semibold text-emerald-500">
+                              ₱{Number(user.balance || 0).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Badge className={`${
+                                user.status === "Active"
+                                  ? isDark
+                                    ? "bg-emerald-950/40 text-emerald-400 border-emerald-900"
+                                    : "bg-emerald-50 text-emerald-600 border-emerald-200"
+                                  : isDark
+                                    ? "bg-red-950/40 text-red-400 border-red-900"
+                                    : "bg-red-50 text-red-600 border-red-200"
+                              } text-[10px] font-semibold px-2 py-0.5 border`}>
+                                {user.status}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-20">
+                        <TableCell colSpan={9} className="text-center py-20">
                           <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                             <Plus size={48} className="mb-2" />
                             <p className="text-xs font-semibold uppercase tracking-widest">No cards registered yet</p>
@@ -764,6 +773,28 @@ export default function CardRegistrationPage() {
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* ============================================================== */}
+      {/* ID Image Lightbox — view a registered cardholder's uploaded ID  */}
+      {/* ============================================================== */}
+      <Dialog open={!!viewingImage} onOpenChange={(open) => !open && setViewingImage(null)}>
+        <DialogContent
+          className={`max-w-lg p-0 overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}
+        >
+          <DialogHeader className="px-6 pt-6 pb-2">
+            <DialogTitle className={`text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+              {viewingImage ? `${viewingImage.name} — ID Verification` : "ID Verification"}
+            </DialogTitle>
+          </DialogHeader>
+          {viewingImage && (
+            <img
+              src={viewingImage.url}
+              alt={`${viewingImage.name} ID verification`}
+              className="w-full max-h-[70vh] object-contain px-6 pb-6"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* ============================================================== */}
       {/* Add New Card — Registration Modal                              */}
@@ -1166,7 +1197,7 @@ export default function CardRegistrationPage() {
                 ) : (
                   <CreditCard className="w-4 h-4 mr-2" />
                 )}
-                {isSubmitting ? (isUploadingImage ? "Uploading ID..." : "Registering...") : "Register Card"}
+                {isSubmitting ? "Registering..." : "Register Card"}
               </Button>
             </DialogFooter>
           </form>
