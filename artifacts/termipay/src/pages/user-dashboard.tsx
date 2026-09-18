@@ -48,6 +48,53 @@ function normalizeTxType(type?: string | null): TxType {
   return "Top-up";
 }
 
+// 🆕 Fee / VAT / Net amount helpers — mirrors the admin Transactions page's
+// getFeeAmount / getVatAmount / getNetAmount / formatNullableAmount so the
+// user dashboard's Top-up view shows the same breakdown.
+type FinancialFields = {
+  fee_amount: number | null;
+  vat_amount: number | null;
+  net_amount: number | null;
+};
+
+function getFeeAmount(tx: any): number | null {
+  const value = tx?.fee_amount ?? tx?.feeAmount;
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getVatAmount(tx: any): number | null {
+  const value = tx?.vat_amount ?? tx?.vatAmount;
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getNetAmount(tx: any): number | null {
+  const value = tx?.net_amount ?? tx?.netAmount;
+  if (value != null && value !== "") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  const amount = Number(tx?.amount);
+  const fee = getFeeAmount(tx);
+  const vat = getVatAmount(tx);
+  if (Number.isFinite(amount) && fee != null && vat != null) {
+    return amount - fee - vat;
+  }
+  return null;
+}
+
+function formatNullableAmount(value: number | null): string {
+  return value == null || !Number.isFinite(value)
+    ? "—"
+    : `₱${value.toLocaleString("en-PH", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+}
+
 // ── Card Balance Transfer types + helpers ───────────────────────────────────
 // Mirrors the admin Transactions page's card_balance_transfers handling,
 // scoped here to just the rows where THIS user's card is source or target.
@@ -279,6 +326,11 @@ export default function PaymongoDashboardPage() {
   const [transfersLoading, setTransfersLoading] = useState(true);
   const [viewTransfer, setViewTransfer] = useState<CardTransfer | null>(null);
 
+  // 🆕 Fee / VAT / Net amount lookup, keyed by transaction id (string).
+  // Fetched from the `transactions` table the same way the admin page does,
+  // then merged into each top-up transaction below.
+  const [financialById, setFinancialById] = useState<Record<string, FinancialFields>>({});
+
   useEffect(() => {
     const isBusy = authChecking || cardDataLoading;
     if (!isBusy) {
@@ -328,11 +380,60 @@ export default function PaymongoDashboardPage() {
     };
   }, [isLinked, user?.id]);
 
+  // 🆕 Fetch fee_amount / vat_amount / net_amount for this card's
+  // transactions, same pattern as the admin Transactions page. Keyed by id
+  // so it can be merged into topupTransactions below without refetching
+  // everything else.
+  useEffect(() => {
+    let cancelled = false;
+    const loadFinancialFields = async () => {
+      const ids = transactions
+        .map((tx: any) => tx?.id)
+        .filter((id: any) => id != null)
+        .map((id: any) => Number(id))
+        .filter((id: number) => Number.isFinite(id));
+      if (ids.length === 0) {
+        setFinancialById({});
+        return;
+      }
+      const { data, error: financialError } = await supabase
+        .from("transactions")
+        .select("id, fee_amount, vat_amount, net_amount")
+        .in("id", ids);
+      if (cancelled) return;
+      if (financialError) {
+        console.warn("Unable to load transaction fee/VAT/net fields:", financialError.message);
+        return;
+      }
+      const next: Record<string, FinancialFields> = {};
+      for (const row of data ?? []) {
+        next[String(row.id)] = {
+          fee_amount: row.fee_amount == null ? null : Number(row.fee_amount),
+          vat_amount: row.vat_amount == null ? null : Number(row.vat_amount),
+          net_amount: row.net_amount == null ? null : Number(row.net_amount),
+        };
+      }
+      setFinancialById(next);
+    };
+    loadFinancialFields();
+    return () => {
+      cancelled = true;
+    };
+  }, [transactions]);
+
   // 🆕 Split this card's transactions into Top-up / Fare buckets, same as
   // the admin page — memoized so the array reference stays stable.
+  // Top-up rows are merged with their fee_amount / vat_amount / net_amount
+  // from financialById so both the table and the detail modal can show them.
   const topupTransactions = useMemo(
-    () => transactions.filter((tx) => normalizeTxType(tx.type) === "Top-up"),
-    [transactions],
+    () =>
+      transactions
+        .filter((tx) => normalizeTxType(tx.type) === "Top-up")
+        .map((tx: any) => ({
+          ...tx,
+          ...(financialById[String(tx.id)] ?? {}),
+        })),
+    [transactions, financialById],
   );
   const fareTransactions = useMemo(
     () => transactions.filter((tx) => normalizeTxType(tx.type) === "Fare"),
@@ -1016,22 +1117,44 @@ export default function PaymongoDashboardPage() {
                   <p className={`px-4 pt-2 pb-1 text-[10px] italic ${isDark ? "text-slate-600" : "text-slate-400"}`}>Tap a row to view transaction details.</p>
                   <div className="max-h-[400px] overflow-y-auto">
                     <table className="w-full text-left table-fixed">
-                      <colgroup>
-                        <col style={{ width: "30%" }} /><col style={{ width: "18%" }} />
-                        <col style={{ width: "30%" }} /><col style={{ width: "22%" }} />
-                      </colgroup>
+                      {activeTxTab === "topup" ? (
+                        <colgroup>
+                          <col style={{ width: "16%" }} /><col style={{ width: "12%" }} />
+                          <col style={{ width: "13%" }} /><col style={{ width: "13%" }} />
+                          <col style={{ width: "13%" }} /><col style={{ width: "15%" }} />
+                          <col style={{ width: "18%" }} />
+                        </colgroup>
+                      ) : (
+                        <colgroup>
+                          <col style={{ width: "30%" }} /><col style={{ width: "18%" }} />
+                          <col style={{ width: "30%" }} /><col style={{ width: "22%" }} />
+                        </colgroup>
+                      )}
                       <thead className={isDark ? "bg-slate-950/50" : "bg-slate-50"}>
                         <tr>
-                          {(["Timestamp", "Service", "Amount", "Result"] as const).map((h, i) => (
-                            <th key={h} className={`px-3 py-2.5 text-[9px] font-black uppercase whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"} ${
-                              i === 2 ? "text-right" : i === 3 ? "text-center" : ""}`}>{h}</th>
+                          {(activeTxTab === "topup"
+                            ? (["Timestamp", "Service", "Amount", "Fee", "VAT", "Net Amount", "Result"] as const)
+                            : (["Timestamp", "Service", "Amount", "Result"] as const)
+                          ).map((h) => (
+                            <th
+                              key={h}
+                              className={`px-3 py-2.5 text-[9px] font-black uppercase whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"} ${
+                                h === "Amount" || h === "Fee" || h === "VAT" || h === "Net Amount"
+                                  ? "text-right"
+                                  : h === "Result"
+                                    ? "text-center"
+                                    : ""
+                              }`}
+                            >
+                              {h}
+                            </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody className={isDark ? "divide-y divide-slate-800/50" : "divide-y divide-slate-100"}>
                         {currentTxList.length === 0 ? (
-                          <tr><td className={`p-12 text-center text-sm italic ${isDark ? "text-slate-600" : "text-slate-400"}`} colSpan={4}>No activity recorded.</td></tr>
-                        ) : currentTxList.map((tx) => (
+                          <tr><td className={`p-12 text-center text-sm italic ${isDark ? "text-slate-600" : "text-slate-400"}`} colSpan={activeTxTab === "topup" ? 7 : 4}>No activity recorded.</td></tr>
+                        ) : currentTxList.map((tx: any) => (
                           <tr key={tx.id} onClick={() => handleTxClick(tx)}
                             className={`transition-colors cursor-pointer ${isDark ? "hover:bg-slate-800/30 active:bg-slate-800/50" : "hover:bg-slate-50 active:bg-slate-100"}`}>
                             <td className="px-3 py-2.5">
@@ -1051,6 +1174,25 @@ export default function PaymongoDashboardPage() {
                                 {formatAmount(tx.type, tx.amount)}
                               </span>
                             </td>
+                            {activeTxTab === "topup" && (
+                              <>
+                                <td className="px-3 py-2.5 text-right">
+                                  <span className={`whitespace-nowrap tabular-nums text-[10px] font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                    {formatNullableAmount(getFeeAmount(tx))}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-right">
+                                  <span className={`whitespace-nowrap tabular-nums text-[10px] font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                    {formatNullableAmount(getVatAmount(tx))}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-right">
+                                  <span className={`whitespace-nowrap tabular-nums text-[11px] font-bold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                                    {formatNullableAmount(getNetAmount(tx))}
+                                  </span>
+                                </td>
+                              </>
+                            )}
                             <td className="px-3 py-2.5 text-center">
                               <Badge variant="outline" className={`text-[9px] font-black tracking-widest uppercase py-0 whitespace-nowrap ${
                                 tx.status === "Success"
