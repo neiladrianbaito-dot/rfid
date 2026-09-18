@@ -57,22 +57,22 @@ export interface CreateUserBody {
   cardUid: string;
   fullName: string;
   contactNumber: string;
-  initialBalance: number;
   type?: string;
-  dateOfBirth?: string | null;
-  streetAddress?: string | null;
-  zipCode?: string | null;
-  regionCode?: string | null;
-  regionName?: string | null;
-  provinceCode?: string | null;
-  provinceName?: string | null;
-  cityCode?: string | null;
-  cityName?: string | null;
-  barangayCode?: string | null;
-  barangayName?: string | null;
-  fullAddress?: string | null;
-  idImagePath?: string | null;
+  dateOfBirth?: string;
+  streetAddress?: string;
+  zipCode?: string;
+  regionCode?: string;
+  regionName?: string;
+  provinceCode?: string;
+  provinceName?: string;
+  cityCode?: string;
+  cityName?: string;
+  barangayCode?: string;
+  barangayName?: string;
+  fullAddress?: string;
+  idImagePath?: string;
 }
+ 
 
 export interface UpdateUserBody {
   fullName?: string;

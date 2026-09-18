@@ -96,7 +96,6 @@ export const CreateUserBody = zod.object({
   cardUid: zod.string(),
   fullName: zod.string(),
   contactNumber: zod.string(),
-  initialBalance: zod.number(),
   type: zod.string().optional(),
   ...userAddressBodyFields,
 });

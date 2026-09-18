@@ -137,9 +137,22 @@ async function detectUsersColumns(): Promise<{ hasType: boolean; columns: Set<st
 // Builds the `, u.col as "field"` (or `, null as "field"`) fragments for
 // every optional column, so every SELECT stays correct whether or not
 // add_registration_fields.sql has been run yet.
+// Use this one for SELECT queries that alias the table as `u`
+// (`from users u ...`).
 function buildOptionalSelectFragment(columns: Set<string>) {
   const parts = OPTIONAL_USER_COLUMNS.map(({ col, field }) =>
     columns.has(col) ? sql.raw(`, u.${col} as "${field}"`) : sql.raw(`, null as "${field}"`),
+  );
+  return sql.join(parts, sql``);
+}
+
+// Same as above but WITHOUT the `u.` prefix — for use in INSERT/UPDATE
+// RETURNING clauses, which have no table alias to resolve `u` against.
+// Using buildOptionalSelectFragment() there throws
+// "missing FROM-clause entry for table \"u\"".
+function buildOptionalReturningFragment(columns: Set<string>) {
+  const parts = OPTIONAL_USER_COLUMNS.map(({ col, field }) =>
+    columns.has(col) ? sql.raw(`, ${col} as "${field}"`) : sql.raw(`, null as "${field}"`),
   );
   return sql.join(parts, sql``);
 }
@@ -280,7 +293,7 @@ router.post("/users", async (req, res): Promise<void> => {
     return;
   }
 
-  const { cardUid, fullName, contactNumber, initialBalance, type } = parsed.data;
+  const { cardUid, fullName, contactNumber, type } = parsed.data;
   // Cast to `any` for the new optional fields until CreateUserBody in
   // @workspace/api-zod declares them — see the note at the top of this file.
   const body = parsed.data as typeof parsed.data & Record<string, unknown>;
@@ -300,7 +313,7 @@ router.post("/users", async (req, res): Promise<void> => {
     // Base columns that always exist, plus `type` and any of the new
     // optional columns that are actually present in the table right now.
     const insertColumns: string[] = ["card_uid", "full_name", "contact_number", "balance", "status"];
-    const insertValues: unknown[] = [cardUid.trim(), fullName.trim(), contactNumber.trim(), String(initialBalance), "Active"];
+    const insertValues: unknown[] = [cardUid.trim(), fullName.trim(), contactNumber.trim(), "0", "Active"];
 
     if (hasType) {
       insertColumns.push("type");
@@ -330,7 +343,7 @@ router.post("/users", async (req, res): Promise<void> => {
         status,
         created_at        as "createdAt",
         expiration_date   as "expirationDate"
-        ${buildOptionalSelectFragment(columns)}
+        ${buildOptionalReturningFragment(columns)}
     `);
 
     const inserted = extractRows<UserRow>(insertResult)[0];
@@ -460,7 +473,7 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
         status,
         created_at       as "createdAt",
         expiration_date  as "expirationDate"
-        ${buildOptionalSelectFragment(columns)}
+        ${buildOptionalReturningFragment(columns)}
     `);
     const userRow = extractRows<UserRow>(result)[0];
 
