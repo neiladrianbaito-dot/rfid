@@ -1868,6 +1868,7 @@ export default function CardRegistrationPage() {
                 <div className="space-y-2">
                   <label className="text-sm font-medium">
                     ZIP Code
+                       <RequiredMark />
                   </label>
 
                   <Input
