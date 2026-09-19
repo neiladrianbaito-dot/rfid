@@ -19,7 +19,7 @@ function sign(payloadB64: string) {
 
 export function createUserToken(
   data: { id: string; email: string; fullName: string },
-  ttlSeconds = 60 * 60 * 8,
+  ttlSeconds = 60 * 60 * 24 * 365, // 365 days
 ) {
   const payload: UserTokenPayload = {
     id: data.id,
