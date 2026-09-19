@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   useListUsers,
   useUpdateUser,
@@ -17,7 +17,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2 } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -67,6 +68,166 @@ const REGION_OPTIONS = [
   { code: "160000000", name: "Caraga" },
   { code: "150000000", name: "BARMM" },
 ] as const;
+
+// ═══════════════════════════════════════════════════════════════════════
+// LOCATION COMBOBOX — same component used in Card Registration.
+// Only ~15 rows are ever in the DOM (windowed list), plus type-to-search,
+// so long PSGC lists (e.g. ~900 barangays) scroll smoothly.
+// ═══════════════════════════════════════════════════════════════════════
+interface PsgcOption {
+  code: string;
+  name: string;
+}
+
+const REGION_COMBO_OPTIONS: PsgcOption[] = REGION_OPTIONS.map((r) => ({ code: r.code, name: r.name }));
+
+const COMBOBOX_ITEM_HEIGHT = 36;
+const COMBOBOX_LIST_HEIGHT = 260;
+const COMBOBOX_OVERSCAN = 6;
+
+interface LocationComboboxProps {
+  options: PsgcOption[];
+  value: string;
+  // Fallback label shown when the saved value isn't in `options` (yet)
+  selectedName?: string;
+  onChange: (code: string, name: string) => void;
+  placeholder: string;
+  loadingPlaceholder?: string;
+  loading?: boolean;
+  disabled?: boolean;
+  isDark: boolean;
+}
+
+function LocationCombobox({
+  options,
+  value,
+  selectedName,
+  onChange,
+  placeholder,
+  loadingPlaceholder,
+  loading,
+  disabled,
+  isDark,
+}: LocationComboboxProps) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [scrollTop, setScrollTop] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return options;
+    const query = search.trim().toLowerCase();
+    return options.filter((option) => option.name.toLowerCase().includes(query));
+  }, [options, search]);
+
+  useEffect(() => {
+    if (open) {
+      setSearch("");
+      setScrollTop(0);
+      if (listRef.current) listRef.current.scrollTop = 0;
+    }
+  }, [open]);
+
+  const selected = options.find((option) => option.code === value);
+  const label = selected?.name ?? (value ? selectedName : undefined);
+
+  const visibleCount = Math.ceil(COMBOBOX_LIST_HEIGHT / COMBOBOX_ITEM_HEIGHT) + COMBOBOX_OVERSCAN * 2;
+  const startIndex = Math.max(0, Math.floor(scrollTop / COMBOBOX_ITEM_HEIGHT) - COMBOBOX_OVERSCAN);
+  const endIndex = Math.min(filtered.length, startIndex + visibleCount);
+  const visibleItems = filtered.slice(startIndex, endIndex);
+  const totalHeight = filtered.length * COMBOBOX_ITEM_HEIGHT;
+  const offsetY = startIndex * COMBOBOX_ITEM_HEIGHT;
+
+  return (
+    <Popover open={open} onOpenChange={(next) => !disabled && setOpen(next)}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className={`flex h-9 w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
+            isDark ? "border-slate-800 bg-slate-950 text-slate-200" : "border-slate-200 bg-white text-slate-900"
+          }`}
+        >
+          <span className={`truncate ${!label ? "opacity-50" : ""}`}>
+            {label ?? (loading ? loadingPlaceholder ?? "Loading..." : placeholder)}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+
+      <PopoverContent
+        align="start"
+        className={`w-[--radix-popover-trigger-width] p-0 ${isDark ? "border-slate-800 bg-slate-950" : "bg-white"}`}
+      >
+        <div className={`flex items-center gap-2 border-b px-3 py-2 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+          <Search className="h-4 w-4 shrink-0 opacity-50" />
+          <input
+            autoFocus
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setScrollTop(0);
+              if (listRef.current) listRef.current.scrollTop = 0;
+            }}
+            placeholder="Search..."
+            className={`w-full bg-transparent text-sm outline-none placeholder:opacity-50 ${
+              isDark ? "text-slate-200" : "text-slate-900"
+            }`}
+          />
+        </div>
+
+        <div
+          ref={listRef}
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+          style={{
+            height: COMBOBOX_LIST_HEIGHT,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
+            contain: "strict",
+          }}
+          className="location-combobox-list"
+        >
+          {filtered.length === 0 ? (
+            <div className={`px-3 py-6 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              {loading ? "Loading..." : "No results found"}
+            </div>
+          ) : (
+            <div style={{ height: totalHeight, position: "relative" }}>
+              <div style={{ position: "absolute", top: offsetY, left: 0, right: 0 }}>
+                {visibleItems.map((option) => {
+                  const isSelected = option.code === value;
+                  return (
+                    <button
+                      type="button"
+                      key={option.code}
+                      onClick={() => {
+                        onChange(option.code, option.name);
+                        setOpen(false);
+                      }}
+                      style={{ height: COMBOBOX_ITEM_HEIGHT }}
+                      className={`flex w-full items-center gap-2 px-3 text-left text-sm transition-colors cursor-pointer ${
+                        isSelected
+                          ? isDark
+                            ? "bg-cyan-950/40 text-cyan-400"
+                            : "bg-cyan-50 text-cyan-700"
+                          : isDark
+                            ? "text-slate-200 hover:bg-slate-800"
+                            : "text-slate-800 hover:bg-slate-50"
+                      }`}
+                    >
+                      <Check className={`h-4 w-4 shrink-0 ${isSelected ? "opacity-100" : "opacity-0"}`} />
+                      <span className="truncate">{option.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 
 const formatPeso = (value: number) =>
@@ -721,6 +882,9 @@ export default function UserManagementPage() {
     editForm.zipCode !== originalForm.zipCode ||
     hasImageChange;
 
+  // True while the edit is uploading an image or saving to the API
+  const isSavingEdit = isUploadingEditImage || updateMutation.isPending;
+
   const handleEditImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1137,6 +1301,49 @@ export default function UserManagementPage() {
           -webkit-backface-visibility: hidden;
         }
         .card-face-back-locked { transform: rotateY(180deg); }
+
+        /* ✅ Edit form: always-visible, draggable side scrollbar */
+        .edit-sidebar-scroll {
+          overflow-y: scroll;                  /* scrollbar track is always shown */
+          overflow-x: hidden;
+          overscroll-behavior: contain;
+          scroll-behavior: smooth;
+          -webkit-overflow-scrolling: touch;
+          padding-right: 10px;
+          scrollbar-width: auto;               /* Firefox */
+          scrollbar-color: var(--sb-thumb) var(--sb-track);
+        }
+        .edit-sidebar-scroll::-webkit-scrollbar { width: 12px; }
+        .edit-sidebar-scroll::-webkit-scrollbar-track {
+          background: var(--sb-track);
+          border-radius: 9999px;
+        }
+        .edit-sidebar-scroll::-webkit-scrollbar-thumb {
+          background: var(--sb-thumb);
+          border-radius: 9999px;
+          border: 3px solid transparent;
+          background-clip: padding-box;
+        }
+        .edit-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+          background: var(--sb-thumb-hover);
+          background-clip: padding-box;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .edit-sidebar-scroll { scroll-behavior: auto; }
+        }
+
+        /* Windowed location list (same as Card Registration) */
+        .location-combobox-list {
+          scrollbar-width: thin;
+          will-change: scroll-position;
+          transform: translateZ(0);
+          -webkit-overflow-scrolling: touch;
+        }
+        .location-combobox-list::-webkit-scrollbar { width: 6px; }
+        .location-combobox-list::-webkit-scrollbar-thumb {
+          background: rgba(148, 163, 184, 0.4);
+          border-radius: 9999px;
+        }
 
         /* ✅ Smooth, contained scrolling for the Edit dialog body */
         .edit-scroll {
@@ -1761,320 +1968,338 @@ export default function UserManagementPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Dialog — responsive: 2 columns on md+ so nothing needs scrolling.
-          Below md it stacks; the body scrolls smoothly (see .edit-scroll) while
-          the header and footer stay pinned. */}
-      <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
+      {/* Edit Dialog — same layout/scroll pattern as Card Registration:
+          the whole modal scrolls (max-h-[92vh] + overflow-y-auto) and the
+          Region / Province / City / Barangay fields use the virtualized,
+          searchable LocationCombobox instead of Radix <Select>, which is what
+          made long lists (barangays) laggy. */}
+      <Dialog open={!!editUser} onOpenChange={(open) => { if (!open && !isSavingEdit) setEditUser(null); }}>
         <DialogContent
-          className={`flex flex-col gap-3 w-[95vw] sm:max-w-4xl max-h-[96dvh] p-4 sm:p-5 overflow-hidden [&>button]:cursor-pointer ${
-            isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+          className={`max-h-[92dvh] overflow-hidden sm:max-w-4xl [&>button]:cursor-pointer ${
+            isDark ? "border-slate-800 bg-slate-950 text-slate-200" : "bg-white text-slate-800"
           }`}
         >
-          <DialogHeader className={`flex-none pb-3 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
-              <Pencil size={18} /> Update User
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-cyan-500" />
+              Update User
             </DialogTitle>
           </DialogHeader>
 
-          {/* Scrollable body — smooth, contained, with a thin visible scrollbar */}
-          <div className="edit-scroll flex-1 min-h-0 -mx-1 px-2 py-1">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-              {/* ───────── Personal Information ───────── */}
-              <section className="space-y-3 min-w-0">
-                <h3 className={editHeadingCls}>Personal Information</h3>
-
-                <div className="space-y-1.5 min-w-0">
-                  <Label className={editLabelCls}>Full Name</Label>
-                  <Input
-                    value={editForm.fullName}
-                    onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
-                    className={`${editInputCls} font-medium`}
-                  />
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleUpdate();
+            }}
+            className="flex flex-col gap-4"
+          >
+            {/* SCROLLABLE AREA — always-visible side scrollbar */}
+            <div
+              className="edit-sidebar-scroll space-y-6"
+              style={{
+                maxHeight: "calc(92dvh - 190px)",
+                "--sb-thumb": isDark ? "#64748b" : "#94a3b8",
+                "--sb-thumb-hover": isDark ? "#94a3b8" : "#64748b",
+                "--sb-track": isDark ? "rgba(148,163,184,0.12)" : "rgba(148,163,184,0.18)",
+              } as React.CSSProperties}
+            >
+            {/* ID VERIFICATION (Student / Senior / PWD only) */}
+            {String(editForm.type).toLowerCase() !== "regular" && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <IdCard className="h-4 w-4 text-cyan-500" />
+                  <h3 className="font-semibold">ID Verification</h3>
                 </div>
 
-                <div className="space-y-1.5 min-w-0">
-                  <Label className={editLabelCls}>Date of Birth</Label>
+                <div className={`rounded-xl border p-4 ${isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-slate-50"}`}>
+                  <div className="flex flex-col gap-4 sm:flex-row">
+                    {(editIdImagePreview || editUser?.idImagePath || editUser?.id_image_path) ? (
+                      <div className="relative shrink-0">
+                        <img
+                          src={editIdImagePreview || editUser?.idImagePath || editUser?.id_image_path}
+                          alt="Current ID"
+                          className={`h-40 w-full sm:w-64 rounded-lg border object-contain ${isDark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"}`}
+                        />
+                        {editIdImagePreview && (
+                          <button
+                            type="button"
+                            onClick={clearEditImage}
+                            disabled={isSavingEdit}
+                            aria-label="Remove selected image"
+                            className={`absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm cursor-pointer ${isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700"}`}
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => editFileInputRef.current?.click()}
+                        disabled={isSavingEdit}
+                        className={`flex h-40 w-full sm:w-64 shrink-0 flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors cursor-pointer ${
+                          isDark ? "border-slate-700 hover:border-cyan-500 hover:bg-slate-900" : "border-slate-300 hover:border-cyan-500 hover:bg-white"
+                        }`}
+                      >
+                        <Upload className="mb-2 h-8 w-8 opacity-50" />
+                        <span className="text-sm font-medium">Upload ID Image</span>
+                        <span className="mt-1 text-xs opacity-60">JPG, PNG, WEBP up to 5 MB</span>
+                      </button>
+                    )}
+
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <p className="text-sm font-medium">{editForm.type} ID</p>
+                      <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                        Upload a replacement ID image. JPG, PNG, or WEBP up to 5 MB.
+                      </p>
+
+                      <input
+                        ref={editFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleEditImageSelect}
+                        disabled={isSavingEdit}
+                      />
+
+                      {editIdImageFile && (
+                        <div className={`rounded-md px-3 py-2 text-xs truncate ${isDark ? "bg-slate-800 text-slate-300" : "bg-white text-slate-600 border border-slate-200"}`}>
+                          {editIdImageFile.name} • {(editIdImageFile.size / 1024 / 1024).toFixed(2)} MB
+                        </div>
+                      )}
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => editFileInputRef.current?.click()}
+                        disabled={isSavingEdit}
+                        className="gap-2 cursor-pointer"
+                      >
+                        {isUploadingEditImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                        {editIdImageFile ? "Change Image" : "Upload / Change ID Image"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* PERSONAL INFORMATION */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <UserRound className="h-4 w-4 text-cyan-500" />
+                <h3 className="font-semibold">Personal Information</h3>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium">Full Name</label>
                   <Input
-                    type="date"
-                    value={editForm.dateOfBirth}
-                    onChange={(e) => setEditForm({ ...editForm, dateOfBirth: e.target.value })}
+                    value={editForm.fullName}
+                    onChange={(e) => setEditForm((c) => ({ ...c, fullName: e.target.value }))}
+                    placeholder="Enter full name"
+                    disabled={isSavingEdit}
                     className={editInputCls}
                   />
                 </div>
 
-                <div className="space-y-1.5 min-w-0">
-                  <Label className={`${editLabelCls} flex items-center gap-1`}>
-                    <Phone size={10} /> Contact Number
-                  </Label>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Date of Birth</label>
+                  <Input
+                    type="date"
+                    value={editForm.dateOfBirth}
+                    onChange={(e) => setEditForm((c) => ({ ...c, dateOfBirth: e.target.value }))}
+                    disabled={isSavingEdit}
+                    className={editInputCls}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Contact Number</label>
                   <Input
                     value={editForm.contactNumber}
-                    inputMode="numeric"
-                    type="tel"
-                    maxLength={11}
-                    pattern="[0-9]{11}"
+                    onChange={(e) =>
+                      setEditForm((c) => ({ ...c, contactNumber: e.target.value.replace(/\D/g, "").slice(0, 11) }))
+                    }
                     placeholder="09XXXXXXXXX"
-                    onChange={(e) => {
-                      const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 11);
-                      setEditForm({ ...editForm, contactNumber: digitsOnly });
-                    }}
+                    inputMode="numeric"
+                    maxLength={11}
+                    disabled={isSavingEdit}
                     className={`${editInputCls} font-mono`}
                   />
                 </div>
-              </section>
-
-              {/* ───────── Address ───────── */}
-              <section className="space-y-3 min-w-0">
-                <h3 className={editHeadingCls}>Address</h3>
-
-                <div className="grid grid-cols-6 gap-3">
-                  <div className="space-y-1.5 col-span-4 min-w-0">
-                    <Label className={editLabelCls}>Street Address</Label>
-                    <Input
-                      value={editForm.streetAddress}
-                      onChange={(e) => setEditForm({ ...editForm, streetAddress: e.target.value })}
-                      placeholder="Enter street address"
-                      className={editInputCls}
-                    />
-                  </div>
-
-                  <div className="space-y-1.5 col-span-2 min-w-0">
-                    <Label className={editLabelCls}>ZIP Code</Label>
-                    <Input
-                      value={editForm.zipCode}
-                      onChange={(e) => setEditForm({ ...editForm, zipCode: e.target.value.replace(/[^0-9]/g, "").slice(0, 4) })}
-                      inputMode="numeric"
-                      maxLength={4}
-                      placeholder="ZIP"
-                      className={`${editInputCls} font-mono`}
-                    />
-                  </div>
-
-                  <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
-                    <Label className={editLabelCls}>Region</Label>
-                    <Select
-                      value={editForm.regionCode || undefined}
-                      onValueChange={(code) => {
-                        const selected = REGION_OPTIONS.find((r) => r.code === code);
-                        setEditForm({
-                          ...editForm,
-                          regionCode: code,
-                          regionName: selected?.name || "",
-                          provinceCode: "",
-                          provinceName: "",
-                          cityCode: "",
-                          cityName: "",
-                          barangayCode: "",
-                          barangayName: "",
-                        });
-                        setProvinceOptions([]);
-                        setCityOptions([]);
-                        setBarangayOptions([]);
-                      }}
-                    >
-                      <SelectTrigger className={editTriggerCls}>
-                        <SelectValue placeholder="Select region" />
-                      </SelectTrigger>
-                      <SelectContent className={editContentCls}>
-                        {REGION_OPTIONS.map((region) => (
-                          <SelectItem key={region.code} value={region.code} className="cursor-pointer">
-                            {region.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
-                    <Label className={editLabelCls}>Province</Label>
-                    <Select
-                      value={editForm.provinceCode || undefined}
-                      disabled={!editForm.regionCode || isLoadingAddressOptions}
-                      onValueChange={(code) => {
-                        const selected = provinceOptions.find((p) => p.code === code);
-                        setEditForm({
-                          ...editForm,
-                          provinceCode: code,
-                          provinceName: selected?.name || "",
-                          cityCode: "",
-                          cityName: "",
-                          barangayCode: "",
-                          barangayName: "",
-                        });
-                        setCityOptions([]);
-                        setBarangayOptions([]);
-                      }}
-                    >
-                      <SelectTrigger className={editTriggerCls}>
-                        <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select province"} />
-                      </SelectTrigger>
-                      <SelectContent className={editContentCls}>
-                        {provinceOptions.map((province) => (
-                          <SelectItem key={province.code} value={province.code} className="cursor-pointer">
-                            {province.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
-                    <Label className={editLabelCls}>City / Municipality</Label>
-                    <Select
-                      value={editForm.cityCode || undefined}
-                      disabled={!editForm.provinceCode || isLoadingAddressOptions}
-                      onValueChange={(code) => {
-                        const selected = cityOptions.find((c) => c.code === code);
-                        setEditForm({
-                          ...editForm,
-                          cityCode: code,
-                          cityName: selected?.name || "",
-                          barangayCode: "",
-                          barangayName: "",
-                        });
-                        setBarangayOptions([]);
-                      }}
-                    >
-                      <SelectTrigger className={editTriggerCls}>
-                        <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select city"} />
-                      </SelectTrigger>
-                      <SelectContent className={editContentCls}>
-                        {cityOptions.map((city) => (
-                          <SelectItem key={city.code} value={city.code} className="cursor-pointer">
-                            {city.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
-                    <Label className={editLabelCls}>Barangay</Label>
-                    <Select
-                      value={editForm.barangayCode || undefined}
-                      disabled={!editForm.cityCode || isLoadingAddressOptions}
-                      onValueChange={(code) => {
-                        const selected = barangayOptions.find((b) => b.code === code);
-                        setEditForm({
-                          ...editForm,
-                          barangayCode: code,
-                          barangayName: selected?.name || "",
-                        });
-                      }}
-                    >
-                      <SelectTrigger className={editTriggerCls}>
-                        <SelectValue placeholder={isLoadingAddressOptions ? "Loading..." : "Select barangay"} />
-                      </SelectTrigger>
-                      <SelectContent className={editContentCls}>
-                        {barangayOptions.map((barangay) => (
-                          <SelectItem key={barangay.code} value={barangay.code} className="cursor-pointer">
-                            {barangay.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </section>
-
-              {/* ───────── ID Verification (Student / Senior / PWD only) ─────────
-                  Full-width horizontal strip: image on the left, upload
-                  controls on the right. Image height scales with the viewport
-                  (clamp) and uses object-contain so the WHOLE ID is always
-                  visible — never cropped, never overflowing. */}
-              {String(editForm.type).toLowerCase() !== "regular" && (
-                <section className="space-y-2 min-w-0 md:col-span-2">
-                  <h3 className={editHeadingCls}>ID Verification</h3>
-                  <div className={`rounded-xl border p-3 ${isDark ? "border-slate-800 bg-slate-950/60" : "border-slate-200 bg-slate-50"}`}>
-                    <div className="flex flex-col sm:flex-row gap-4 items-center">
-                      <div className="relative shrink-0 w-full sm:w-56">
-                        {(editIdImagePreview || editUser?.idImagePath || editUser?.id_image_path) ? (
-                          <>
-                            <img
-                              src={editIdImagePreview || editUser?.idImagePath || editUser?.id_image_path}
-                              alt="Current ID"
-                              className={`w-full h-[clamp(96px,18dvh,144px)] rounded-lg border object-contain ${isDark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"}`}
-                            />
-                            {editIdImagePreview && (
-                              <button
-                                type="button"
-                                onClick={clearEditImage}
-                                disabled={isUploadingEditImage || updateMutation.isPending}
-                                aria-label="Remove selected image"
-                                className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border shadow-sm cursor-pointer ${isDark ? "border-slate-700 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700"}`}
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </>
-                        ) : (
-                          <div className={`flex w-full h-[clamp(96px,18dvh,144px)] items-center justify-center rounded-lg border-2 border-dashed ${isDark ? "border-slate-700 text-slate-500" : "border-slate-300 text-slate-400"}`}>
-                            <div className="text-center">
-                              <CreditCard className="mx-auto mb-1 h-6 w-6 opacity-50" />
-                              <span className="text-xs">No ID image uploaded</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex-1 min-w-0 w-full space-y-2">
-                        <div>
-                          <p className="text-sm font-medium">{editForm.type} ID Image</p>
-                          <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                            Upload a replacement ID image. JPG, PNG, or WEBP up to 5 MB.
-                          </p>
-                        </div>
-
-                        <input
-                          ref={editFileInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleEditImageSelect}
-                          disabled={isUploadingEditImage || updateMutation.isPending}
-                        />
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => editFileInputRef.current?.click()}
-                            disabled={isUploadingEditImage || updateMutation.isPending}
-                            className="h-9 gap-2 cursor-pointer"
-                          >
-                            {isUploadingEditImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                            {editIdImageFile ? "Change Image" : "Upload / Change ID Image"}
-                          </Button>
-
-                          {editIdImageFile && (
-                            <div className={`min-w-0 max-w-full truncate rounded-md px-3 py-1.5 text-xs ${isDark ? "bg-slate-800 text-slate-300" : "bg-white text-slate-600 border border-slate-200"}`}>
-                              {editIdImageFile.name} • {(editIdImageFile.size / 1024 / 1024).toFixed(2)} MB
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              )}
+              </div>
             </div>
-          </div>
 
-          <DialogFooter className={`flex-none gap-2 pt-3 border-t ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-            <Button
-              variant="ghost"
-              onClick={() => setEditUser(null)}
-              className={`text-xs font-medium cursor-pointer ${isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500"}`}
+            {/* ADDRESS */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-cyan-500" />
+                <h3 className="font-semibold">Address</h3>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium">Street Address</label>
+                  <Input
+                    value={editForm.streetAddress}
+                    onChange={(e) => setEditForm((c) => ({ ...c, streetAddress: e.target.value }))}
+                    placeholder="House number, street, sitio"
+                    disabled={isSavingEdit}
+                    className={editInputCls}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Region</label>
+                  <LocationCombobox
+                    options={REGION_COMBO_OPTIONS}
+                    value={editForm.regionCode}
+                    selectedName={editForm.regionName}
+                    onChange={(code, name) => {
+                      setEditForm((c) => ({
+                        ...c,
+                        regionCode: code,
+                        regionName: name,
+                        provinceCode: "",
+                        provinceName: "",
+                        cityCode: "",
+                        cityName: "",
+                        barangayCode: "",
+                        barangayName: "",
+                      }));
+                      setProvinceOptions([]);
+                      setCityOptions([]);
+                      setBarangayOptions([]);
+                    }}
+                    placeholder="Select region"
+                    disabled={isSavingEdit}
+                    isDark={isDark}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Province</label>
+                  <LocationCombobox
+                    options={provinceOptions}
+                    value={editForm.provinceCode}
+                    selectedName={editForm.provinceName}
+                    onChange={(code, name) => {
+                      setEditForm((c) => ({
+                        ...c,
+                        provinceCode: code,
+                        provinceName: name,
+                        cityCode: "",
+                        cityName: "",
+                        barangayCode: "",
+                        barangayName: "",
+                      }));
+                      setCityOptions([]);
+                      setBarangayOptions([]);
+                    }}
+                    placeholder="Select province"
+                    loadingPlaceholder="Loading provinces..."
+                    loading={isLoadingAddressOptions}
+                    disabled={isSavingEdit || !editForm.regionCode}
+                    isDark={isDark}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">City / Municipality</label>
+                  <LocationCombobox
+                    options={cityOptions}
+                    value={editForm.cityCode}
+                    selectedName={editForm.cityName}
+                    onChange={(code, name) => {
+                      setEditForm((c) => ({
+                        ...c,
+                        cityCode: code,
+                        cityName: name,
+                        barangayCode: "",
+                        barangayName: "",
+                      }));
+                      setBarangayOptions([]);
+                    }}
+                    placeholder="Select city / municipality"
+                    loadingPlaceholder="Loading cities..."
+                    loading={isLoadingAddressOptions}
+                    disabled={isSavingEdit || !editForm.provinceCode}
+                    isDark={isDark}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Barangay</label>
+                  <LocationCombobox
+                    options={barangayOptions}
+                    value={editForm.barangayCode}
+                    selectedName={editForm.barangayName}
+                    onChange={(code, name) =>
+                      setEditForm((c) => ({ ...c, barangayCode: code, barangayName: name }))
+                    }
+                    placeholder="Select barangay"
+                    loadingPlaceholder="Loading barangays..."
+                    loading={isLoadingAddressOptions}
+                    disabled={isSavingEdit || !editForm.cityCode}
+                    isDark={isDark}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">ZIP Code</label>
+                  <Input
+                    value={editForm.zipCode}
+                    onChange={(e) =>
+                      setEditForm((c) => ({ ...c, zipCode: e.target.value.replace(/\D/g, "").slice(0, 4) }))
+                    }
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="6710"
+                    disabled={isSavingEdit}
+                    className={`${editInputCls} font-mono`}
+                  />
+                </div>
+              </div>
+            </div>
+
+            </div>
+
+            {/* BUTTONS */}
+            <div
+              className={`flex flex-col-reverse gap-3 border-t pt-5 sm:flex-row sm:justify-end ${
+                isDark ? "border-slate-800" : "border-slate-200"
+              }`}
             >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleUpdate}
-              disabled={!hasChanges || updateMutation.isPending || isUploadingEditImage}
-              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {isUploadingEditImage ? "Uploading ID..." : updateMutation.isPending ? "Saving..." : "Save Changes"}
-            </Button>
-          </DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditUser(null)}
+                disabled={isSavingEdit}
+                className="cursor-pointer disabled:cursor-not-allowed"
+              >
+                Cancel
+              </Button>
+
+              <Button
+                type="submit"
+                disabled={!hasChanges || isSavingEdit}
+                className="gap-2 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isSavingEdit ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {isUploadingEditImage ? "Uploading ID..." : "Saving..."}
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
 
