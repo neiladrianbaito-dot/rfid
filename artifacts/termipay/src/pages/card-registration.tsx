@@ -149,6 +149,7 @@ function RequiredMark() {
 
 // 🎨 Card type -> color mapping (old table style)
 // 🟥 Regular  🟦 Student  🟨 Senior  🟩 PWD
+// Card type colors: Regular = red, Student = blue, Senior = orange, PWD = green
 function getTypeBadgeStyle(type: string | null | undefined, isDark: boolean) {
   const t = (type || "Regular").toLowerCase();
   switch (t) {
@@ -158,12 +159,12 @@ function getTypeBadgeStyle(type: string | null | undefined, isDark: boolean) {
         : "border-blue-200 text-blue-600 bg-blue-50";
     case "senior":
       return isDark
-        ? "border-yellow-900 text-yellow-400 bg-yellow-950/40"
-        : "border-yellow-300 text-yellow-700 bg-yellow-50";
+        ? "border-orange-900 text-orange-400 bg-orange-950/40"
+        : "border-orange-200 text-orange-600 bg-orange-50";
     case "pwd":
       return isDark
-        ? "border-emerald-900 text-emerald-400 bg-emerald-950/40"
-        : "border-emerald-200 text-emerald-600 bg-emerald-50";
+        ? "border-green-900 text-green-400 bg-green-950/40"
+        : "border-green-200 text-green-600 bg-green-50";
     case "regular":
     default:
       return isDark
@@ -178,12 +179,28 @@ function getTypeDotColor(type: string | null | undefined) {
     case "student":
       return "bg-blue-500";
     case "senior":
-      return "bg-yellow-500";
+      return "bg-orange-500";
     case "pwd":
-      return "bg-emerald-500";
+      return "bg-green-500";
     case "regular":
     default:
       return "bg-red-500";
+  }
+}
+
+// Text color for the Card Type dropdown options, matching the badge scheme above
+function getTypeTextColor(type: string, isDark: boolean) {
+  const t = type.toLowerCase();
+  switch (t) {
+    case "student":
+      return isDark ? "text-blue-400" : "text-blue-600";
+    case "senior":
+      return isDark ? "text-orange-400" : "text-orange-600";
+    case "pwd":
+      return isDark ? "text-green-400" : "text-green-600";
+    case "regular":
+    default:
+      return isDark ? "text-red-400" : "text-red-600";
   }
 }
 
@@ -1496,19 +1513,39 @@ export default function CardRegistrationPage() {
 
                     <SelectContent>
                       <SelectItem value="Regular">
-                        Regular
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Regular")}`} />
+                          <span className={getTypeTextColor("Regular", isDark)}>
+                            Regular
+                          </span>
+                        </span>
                       </SelectItem>
 
                       <SelectItem value="Student">
-                        Student
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Student")}`} />
+                          <span className={getTypeTextColor("Student", isDark)}>
+                            Student
+                          </span>
+                        </span>
                       </SelectItem>
 
                       <SelectItem value="Senior">
-                        Senior
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Senior")}`} />
+                          <span className={getTypeTextColor("Senior", isDark)}>
+                            Senior
+                          </span>
+                        </span>
                       </SelectItem>
 
                       <SelectItem value="PWD">
-                        PWD
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("PWD")}`} />
+                          <span className={getTypeTextColor("PWD", isDark)}>
+                            PWD
+                          </span>
+                        </span>
                       </SelectItem>
                     </SelectContent>
                   </Select>
