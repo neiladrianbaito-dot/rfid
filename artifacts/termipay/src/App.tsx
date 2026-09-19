@@ -10,6 +10,7 @@ import PaymongoDashboardPage from "@/pages/user-dashboard";
 import LoginPage from "@/pages/login";
 import SigninPage from "@/pages/signin";
 import SignupPage from "@/pages/signup";
+import AuthCallback from "@/pages/AuthCallback";
 import ResetPasswordPage from "@/pages/reset-password";
 import DashboardPage from "@/pages/dashboard";
 import CardRegistrationPage from "@/pages/card-registration";
@@ -106,6 +107,7 @@ function AppRouter() {
       <Route path="/login" component={LoginRoute} />
       <Route path="/signin" component={SigninRoute} />
       <Route path="/signup" component={SignupPage} />
+      <Route path="/auth/callback" component={AuthCallback} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/paymongo-topup" component={PaymongoTopup} />
       <Route path="/user-dashboard" component={PaymongoRoute} />
