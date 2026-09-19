@@ -8,6 +8,7 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase"; // 👈 adjust to your actual supabase client path
+import { useAuth } from "@/hooks/use-auth"; // ⬅️ NEW: for the current admin's username
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -119,6 +120,11 @@ type Device = {
 
 export default function FareMatrixPage() {
   const { isDark } = useTheme();
+  const { user } = useAuth(); // ⬅️ NEW: current logged-in admin
+  // ⬅️ NEW: username to attribute audit log entries to when activating/
+  // deactivating a route (matches GetMeResponse.username from api-zod).
+  const actorUsername = user?.username ?? "unknown";
+
   const [showAdd, setShowAdd] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [addForm, setAddForm] = useState({
@@ -426,6 +432,7 @@ export default function FareMatrixPage() {
     const { error } = await supabase.rpc("activate_route", {
       p_route_id: activateRoute.id,
       p_device_id: selectedDeviceId,
+      p_actor: actorUsername, // ⬅️ NEW: who activated this route
     });
 
     if (error) {
@@ -443,6 +450,7 @@ export default function FareMatrixPage() {
       const { error: reverseError } = await supabase.rpc("activate_route", {
         p_route_id: reverseRoute.id,
         p_device_id: selectedDeviceId,
+        p_actor: actorUsername, // ⬅️ NEW: who activated this route
       });
       if (reverseError) {
         console.error("activate_route (reverse) error:", reverseError);
@@ -488,6 +496,7 @@ export default function FareMatrixPage() {
 
     const { error } = await supabase.rpc("deactivate_route", {
       p_route_id: routeId,
+      p_actor: actorUsername, // ⬅️ NEW: who deactivated this route
     });
 
     if (error) {
@@ -501,6 +510,7 @@ export default function FareMatrixPage() {
     if (reverseRoute?.isActive) {
       const { error: reverseError } = await supabase.rpc("deactivate_route", {
         p_route_id: reverseRoute.id,
+        p_actor: actorUsername, // ⬅️ NEW: who deactivated this route
       });
       if (reverseError) {
         console.error("deactivate_route (reverse) error:", reverseError);
