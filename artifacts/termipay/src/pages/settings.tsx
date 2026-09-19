@@ -288,6 +288,11 @@ export default function SettingsPage() {
           const { data: avatars, error: avatarError } = await supabase.rpc("get_admin_avatars");
           if (avatarError) {
             console.warn("get_admin_avatars failed:", avatarError.message);
+            toast({
+              title: "Avatars could not be loaded",
+              description: `${avatarError.message} — make sure admins-avatar.sql was run in Supabase.`,
+              variant: "destructive",
+            });
           } else if (Array.isArray(avatars)) {
             const byId = new Map<number, any>(avatars.map((a: any) => [Number(a.id), a]));
             setStaff(
