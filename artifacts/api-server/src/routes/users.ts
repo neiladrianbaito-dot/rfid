@@ -409,6 +409,15 @@ router.get("/users/:id", async (req, res): Promise<void> => {
   }
 });
 
+// =============================================================================
+// FIX: PATCH /users/:id — audit log dapat mag-log ng ACTUAL changed values
+// (old -> new), hindi lang listahan ng column names na pinasa sa request.
+//
+// Paano gamitin: palitan mo yung buong `router.patch("/users/:id", ...)`
+// block sa file mo ng version sa baba. Walang ibang binago sa file —
+// same pa rin yung imports, ibang routes, atbp.
+// =============================================================================
+
 // ── PATCH /users/:id ───────────────────────────────────────────────────────────
 router.patch("/users/:id", async (req, res): Promise<void> => {
   try {
@@ -427,6 +436,43 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
     // Cast to `any` for the new optional fields until UpdateUserBody in
     // @workspace/api-zod declares them — see the note at the top of this file.
     const body = parsed.data as typeof parsed.data & Record<string, unknown>;
+
+    // ── NEW: fetch the CURRENT row BEFORE applying any update ───────────────
+    // Kailangan natin ito para malaman kung ano talaga yung dating value
+    // ng bawat column, para ma-diff natin later kung ano ba ang TALAGANG
+    // nagbago (hindi lang kung ano ang pinasa sa request body).
+    const beforeResult = await db.execute(sql`
+      select
+        full_name        as "fullName",
+        contact_number   as "contactNumber",
+        balance,
+        status
+        ${hasType ? sql`, type` : sql``}
+        ${buildOptionalReturningFragment(columns)}
+      from users
+      where id = ${params.data.id}
+      limit 1
+    `);
+    const beforeRow = extractRows<Record<string, unknown>>(beforeResult)[0];
+
+    if (!beforeRow) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    // Map: db column name -> the value it had BEFORE this update.
+    // Uses the same "field" aliases as OPTIONAL_USER_COLUMNS + the base
+    // columns, so we can compare apples to apples against `updates` below.
+    const beforeByCol: Record<string, unknown> = {
+      full_name: beforeRow.fullName,
+      contact_number: beforeRow.contactNumber,
+      balance: beforeRow.balance,
+      status: beforeRow.status,
+      type: (beforeRow as { type?: unknown }).type,
+    };
+    for (const { col, field } of OPTIONAL_USER_COLUMNS) {
+      beforeByCol[col] = beforeRow[field];
+    }
 
     const updates: Array<{ col: string; val: string | number | null }> = [];
     if (parsed.data.fullName !== undefined)
@@ -453,6 +499,15 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
       res.status(400).json({ error: "No updatable fields provided" });
       return;
     }
+
+    // ── NEW: filter down to ACTUALLY changed fields (old !== new) ───────────
+    // Compare as strings para hindi tayo maloko ng type mismatch
+    // (null vs "", number vs numeric string, atbp).
+    const actuallyChanged = updates.filter(({ col, val }) => {
+      const oldVal = beforeByCol[col] ?? null;
+      const newVal = val ?? null;
+      return String(oldVal) !== String(newVal);
+    });
 
     const setClauses = sql.join(
       updates.map(({ col, val }) => sql`${sql.raw(col)} = ${val}`),
@@ -512,12 +567,28 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
     const emailRow = extractRows<{ email: string | null }>(emailResult)[0];
     userRow.email = emailRow?.email ?? null; // correctly null now if we just auto-unlinked above
 
-    await logAudit({
-      user: getActorFromRequest(req.headers.authorization),
-      action: "UPDATE",
-      entity: "User",
-      details: `updated user: ${userRow.fullName} (card ${userRow.cardUid}) — fields changed: ${updates.map((u) => u.col).join(", ")}`,
-    });
+    // ── NEW: log lang kung may talagang nagbago, at ilagay yung OLD -> NEW ──
+    if (actuallyChanged.length > 0) {
+      const changesSummary = actuallyChanged
+        .map(({ col }) => {
+          const oldVal = beforeByCol[col] ?? "—";
+          const newVal =
+            (updates.find((u) => u.col === col)?.val ?? null) ?? "—";
+          return `${col}: "${oldVal}" → "${newVal}"`;
+        })
+        .join("; ");
+
+      await logAudit({
+        user: getActorFromRequest(req.headers.authorization),
+        action: "UPDATE",
+        entity: "User",
+        details: `updated user: ${userRow.fullName} (card ${userRow.cardUid}) — ${changesSummary}`,
+      });
+    }
+    // kung actuallyChanged.length === 0, WALANG audit log na isusulat —
+    // ito yung nag-aayos sa mga duplicate/no-op UPDATE entries na paulit-ulit
+    // mong nakikita (hal. yung Shun KIddo record na sunod-sunod pero pareho
+    // lang laging laman).
 
     res.json(UpdateUserResponse.parse(formatUser(userRow)));
   } catch (error) {
@@ -525,7 +596,6 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
     res.status(500).json({ error: "Failed to update user" });
   }
 });
-
 // ── DELETE /users/:id ──────────────────────────────────────────────────────────
 router.delete("/users/:id", async (req, res): Promise<void> => {
   try {
