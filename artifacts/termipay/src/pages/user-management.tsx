@@ -474,12 +474,12 @@ export default function UserManagementPage() {
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
-    const editLabelCls = `text-[11px] font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`;
+  const editLabelCls = `text-[11px] font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`;
   const editHeadingCls = `text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`;
   const editInputCls = `h-9 text-sm ${isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"}`;
   const editTriggerCls = `h-9 w-full text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`;
   const editContentCls = isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700";
- 
+
 
   useEffect(() => {
     let cancelled = false;
@@ -1022,7 +1022,7 @@ export default function UserManagementPage() {
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
   };
 
-  
+
 
   // ✅ Opens the transfer-balance dialog for a given user (the lost/stolen card).
   // 🚫➕ GUARD: a card with zero balance has nothing to transfer.
@@ -1137,6 +1137,32 @@ export default function UserManagementPage() {
           -webkit-backface-visibility: hidden;
         }
         .card-face-back-locked { transform: rotateY(180deg); }
+
+        /* ✅ Smooth, contained scrolling for the Edit dialog body */
+        .edit-scroll {
+          overflow-y: auto;
+          overscroll-behavior: contain;        /* scroll doesn't leak to the page behind */
+          scroll-behavior: smooth;             /* glides when tabbing/focusing fields */
+          -webkit-overflow-scrolling: touch;   /* momentum scrolling on iOS */
+          scrollbar-width: thin;
+          scrollbar-color: rgba(100,116,139,0.5) transparent;
+          scrollbar-gutter: stable;            /* no layout jump when scrollbar appears */
+        }
+        .edit-scroll::-webkit-scrollbar { width: 8px; }
+        .edit-scroll::-webkit-scrollbar-track { background: transparent; }
+        .edit-scroll::-webkit-scrollbar-thumb {
+          background: rgba(100,116,139,0.45);
+          border-radius: 9999px;
+          border: 2px solid transparent;
+          background-clip: content-box;
+        }
+        .edit-scroll::-webkit-scrollbar-thumb:hover {
+          background: rgba(100,116,139,0.75);
+          background-clip: content-box;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .edit-scroll { scroll-behavior: auto; }
+        }
       `}</style>
 
       {/* Header */}
@@ -1735,37 +1761,28 @@ export default function UserManagementPage() {
         </DialogContent>
       </Dialog>
 
-      
-// ═══════════════════════════════════════════════════════════════════════
-// STEP 2 — Replace the WHOLE existing block from
-//            {/* Edit Dialog */}
-//          down to (but NOT including)
-//            {/* ✅ Renew Confirmation Dialog ... */}
-//          with everything below.
-// ═══════════════════════════════════════════════════════════════════════
- 
       {/* Edit Dialog — responsive: 2 columns on md+ so nothing needs scrolling.
-          Below md it stacks; the body only scrolls as a last-resort fallback
-          when the screen is physically too short (e.g. small phones). */}
+          Below md it stacks; the body scrolls smoothly (see .edit-scroll) while
+          the header and footer stay pinned. */}
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
         <DialogContent
           className={`flex flex-col gap-3 w-[95vw] sm:max-w-4xl max-h-[96dvh] p-4 sm:p-5 overflow-hidden [&>button]:cursor-pointer ${
             isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
           }`}
         >
-          <DialogHeader className="flex-none">
+          <DialogHeader className={`flex-none pb-3 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
             <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
               <Pencil size={18} /> Update User
             </DialogTitle>
           </DialogHeader>
- 
-          {/* Body — no fixed max-h; it just takes the space available. */}
-          <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
+
+          {/* Scrollable body — smooth, contained, with a thin visible scrollbar */}
+          <div className="edit-scroll flex-1 min-h-0 -mx-1 px-2 py-1">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
               {/* ───────── Personal Information ───────── */}
               <section className="space-y-3 min-w-0">
                 <h3 className={editHeadingCls}>Personal Information</h3>
- 
+
                 <div className="space-y-1.5 min-w-0">
                   <Label className={editLabelCls}>Full Name</Label>
                   <Input
@@ -1774,7 +1791,7 @@ export default function UserManagementPage() {
                     className={`${editInputCls} font-medium`}
                   />
                 </div>
- 
+
                 <div className="space-y-1.5 min-w-0">
                   <Label className={editLabelCls}>Date of Birth</Label>
                   <Input
@@ -1784,7 +1801,7 @@ export default function UserManagementPage() {
                     className={editInputCls}
                   />
                 </div>
- 
+
                 <div className="space-y-1.5 min-w-0">
                   <Label className={`${editLabelCls} flex items-center gap-1`}>
                     <Phone size={10} /> Contact Number
@@ -1804,11 +1821,11 @@ export default function UserManagementPage() {
                   />
                 </div>
               </section>
- 
+
               {/* ───────── Address ───────── */}
               <section className="space-y-3 min-w-0">
                 <h3 className={editHeadingCls}>Address</h3>
- 
+
                 <div className="grid grid-cols-6 gap-3">
                   <div className="space-y-1.5 col-span-4 min-w-0">
                     <Label className={editLabelCls}>Street Address</Label>
@@ -1819,7 +1836,7 @@ export default function UserManagementPage() {
                       className={editInputCls}
                     />
                   </div>
- 
+
                   <div className="space-y-1.5 col-span-2 min-w-0">
                     <Label className={editLabelCls}>ZIP Code</Label>
                     <Input
@@ -1831,7 +1848,7 @@ export default function UserManagementPage() {
                       className={`${editInputCls} font-mono`}
                     />
                   </div>
- 
+
                   <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
                     <Label className={editLabelCls}>Region</Label>
                     <Select
@@ -1866,7 +1883,7 @@ export default function UserManagementPage() {
                       </SelectContent>
                     </Select>
                   </div>
- 
+
                   <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
                     <Label className={editLabelCls}>Province</Label>
                     <Select
@@ -1899,7 +1916,7 @@ export default function UserManagementPage() {
                       </SelectContent>
                     </Select>
                   </div>
- 
+
                   <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
                     <Label className={editLabelCls}>City / Municipality</Label>
                     <Select
@@ -1929,7 +1946,7 @@ export default function UserManagementPage() {
                       </SelectContent>
                     </Select>
                   </div>
- 
+
                   <div className="space-y-1.5 col-span-6 sm:col-span-3 min-w-0">
                     <Label className={editLabelCls}>Barangay</Label>
                     <Select
@@ -1958,7 +1975,7 @@ export default function UserManagementPage() {
                   </div>
                 </div>
               </section>
- 
+
               {/* ───────── ID Verification (Student / Senior / PWD only) ─────────
                   Full-width horizontal strip: image on the left, upload
                   controls on the right. Image height scales with the viewport
@@ -1998,7 +2015,7 @@ export default function UserManagementPage() {
                           </div>
                         )}
                       </div>
- 
+
                       <div className="flex-1 min-w-0 w-full space-y-2">
                         <div>
                           <p className="text-sm font-medium">{editForm.type} ID Image</p>
@@ -2006,7 +2023,7 @@ export default function UserManagementPage() {
                             Upload a replacement ID image. JPG, PNG, or WEBP up to 5 MB.
                           </p>
                         </div>
- 
+
                         <input
                           ref={editFileInputRef}
                           type="file"
@@ -2027,7 +2044,7 @@ export default function UserManagementPage() {
                             {isUploadingEditImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                             {editIdImageFile ? "Change Image" : "Upload / Change ID Image"}
                           </Button>
- 
+
                           {editIdImageFile && (
                             <div className={`min-w-0 max-w-full truncate rounded-md px-3 py-1.5 text-xs ${isDark ? "bg-slate-800 text-slate-300" : "bg-white text-slate-600 border border-slate-200"}`}>
                               {editIdImageFile.name} • {(editIdImageFile.size / 1024 / 1024).toFixed(2)} MB
@@ -2041,8 +2058,8 @@ export default function UserManagementPage() {
               )}
             </div>
           </div>
- 
-          <DialogFooter className="flex-none gap-2">
+
+          <DialogFooter className={`flex-none gap-2 pt-3 border-t ${isDark ? "border-slate-800" : "border-slate-200"}`}>
             <Button
               variant="ghost"
               onClick={() => setEditUser(null)}
