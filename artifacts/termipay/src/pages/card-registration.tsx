@@ -1764,9 +1764,10 @@ export default function CardRegistrationPage() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
-                  <label className="text-sm font-medium">
-                    Street Address
-                  </label>
+                <label className="text-sm font-medium">
+  Street Address <span className="text-xs font-normal text-muted-foreground">(Optional)</span>
+</label>
+
 
                   <Input
                     value={form.streetAddress}
