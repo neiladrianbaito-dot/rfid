@@ -207,58 +207,45 @@ router.delete("/routes/:id", async (req, res): Promise<void> => {
   }
 });
 
-router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
-  const params = ToggleRouteParams.safeParse(req.params);
+// =============================================================================
+// FIX: PATCH /routes/:id — audit log dapat mag-log ng ACTUAL changed values
+// (old -> new), hindi lang listahan ng column names.
+//
+// Paano gamitin: palitan mo yung buong `router.patch("/routes/:id", ...)`
+// block sa routes file mo ng version sa baba. Wala ibang binago —
+// same pa rin yung ibang routes (POST, GET, DELETE, toggle).
+// =============================================================================
+
+router.patch("/routes/:id", async (req, res): Promise<void> => {
+  const params = UpdateRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
 
-  // ✅ FIX: accept an optional deviceId from the request body so the linked
-  // RFID reader actually gets persisted when a route is activated. Before
-  // this, the toggle endpoint only ever flipped isActive and silently
-  // dropped any deviceId the frontend sent — that's why device_id stayed
-  // null in fare_routes no matter what was selected in the Activate modal.
-  //
-  // NOTE: if you have a Zod schema for this body (e.g. ToggleRouteBody),
-  // swap the manual read below for a proper `ToggleRouteBody.safeParse(req.body)`
-  // so it's validated the same way the other routes are.
-  const rawDeviceId = (req.body as Record<string, unknown> | undefined)?.deviceId;
-  const deviceId =
-    typeof rawDeviceId === "string" && rawDeviceId.trim().length > 0
-      ? rawDeviceId.trim()
-      : undefined;
+  const parsed = UpdateRouteBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const updateData: Record<string, any> = {};
+  if (parsed.data.origin !== undefined) updateData.origin = parsed.data.origin;
+  if (parsed.data.destination !== undefined) updateData.destination = parsed.data.destination;
+  if (parsed.data.fareAmount !== undefined) updateData.fareAmount = String(parsed.data.fareAmount);
+  if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
 
   try {
-    const [existing] = await db
+    // ── NEW: kunin muna yung CURRENT row bago i-update, para may old values
+    // tayong maicompare later. Drizzle na mismo yung nagbibigay ng typed row.
+    const [beforeRoute] = await db
       .select()
       .from(fareRoutesTable)
       .where(eq(fareRoutesTable.id, params.data.id));
 
-    if (!existing) {
+    if (!beforeRoute) {
       res.status(404).json({ error: "Route not found" });
       return;
-    }
-
-    const willBeActive = !existing.isActive;
-
-    if (willBeActive) {
-      // Deactivate every other route, and clear their linked device too so
-      // an old reader assignment can't linger on a route that's no longer live.
-      await db
-        .update(fareRoutesTable)
-        .set({ isActive: false, deviceId: null })
-        .where(ne(fareRoutesTable.id, params.data.id));
-    }
-
-    const updateData: Record<string, any> = { isActive: willBeActive };
-    if (willBeActive) {
-      // Only set deviceId when activating. If none was provided, fall back
-      // to null rather than leaving whatever stale value was there before.
-      updateData.deviceId = deviceId ?? null;
-    } else {
-      // Deactivating: clear the device link since it's no longer in use.
-      updateData.deviceId = null;
     }
 
     const [route] = await db
@@ -267,25 +254,48 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
       .where(eq(fareRoutesTable.id, params.data.id))
       .returning();
 
-    try {
-      await logAudit({
-        user: getActorFromRequest(req.headers.authorization),
-        action: "UPDATE",
-        entity: "Fare Route",
-        details: willBeActive
-          ? `activated route: ${route.origin} → ${route.destination} (deactivated all others)${
-              deviceId ? ` — linked device ${deviceId}` : ""
-            }`
-          : `deactivated route: ${route.origin} → ${route.destination}`,
-      });
-    } catch (auditError) {
-      console.error("[PATCH /routes/:id/toggle] audit log failed:", auditError);
+    if (!route) {
+      res.status(404).json({ error: "Route not found" });
+      return;
     }
 
-    res.json(ToggleRouteResponse.parse(formatRoute(route)));
+    // ── NEW: i-diff lang yung fields kung saan old !== new ──────────────────
+    // (String comparison para hindi maloko ng type mismatch, e.g.
+    // fareAmount na "45" vs "45.00" o boolean vs string).
+    const changed = Object.entries(updateData).filter(([col, newVal]) => {
+      const oldVal = (beforeRoute as Record<string, unknown>)[col];
+      return String(oldVal ?? "") !== String(newVal ?? "");
+    });
+
+    if (changed.length > 0) {
+      const changesSummary = changed
+        .map(([col, newVal]) => {
+          const oldVal = (beforeRoute as Record<string, unknown>)[col];
+          const oldDisplay = oldVal === null || oldVal === undefined || oldVal === "" ? "—" : String(oldVal);
+          const newDisplay = newVal === null || newVal === undefined || newVal === "" ? "—" : String(newVal);
+          return `${col}: "${oldDisplay}" → "${newDisplay}"`;
+        })
+        .join("; ");
+
+      try {
+        await logAudit({
+          user: getActorFromRequest(req.headers.authorization),
+          action: "UPDATE",
+          entity: "Fare Route",
+          details: `updated route: ${route.origin} → ${route.destination} — ${changesSummary}`,
+        });
+      } catch (auditError) {
+        console.error("[PATCH /routes/:id] audit log failed:", auditError);
+      }
+    }
+    // kung walang laman yung `changed` (walang talagang nagbagong value),
+    // WALANG audit log na isusulat — inaayos nito yung mga no-op UPDATE
+    // entries na paulit-ulit lumalabas sa audit table.
+
+    res.json(UpdateRouteResponse.parse(formatRoute(route)));
   } catch (error) {
-    console.error("[PATCH /routes/:id/toggle] error:", error);
-    res.status(500).json({ error: "Failed to toggle route" });
+    console.error("[PATCH /routes/:id] error:", error);
+    res.status(500).json({ error: "Failed to update route" });
   }
 });
 
