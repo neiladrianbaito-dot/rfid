@@ -233,25 +233,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const roleLabel = getRoleLabel(user);
 
-  // Numeric id of the row in public.admins (null if the user object has none)
-  const adminId: number | null =
-    (user as any)?.id != null && /^\d+$/.test(String((user as any).id))
-      ? Number((user as any).id)
-      : null;
-
-  // Saves (or clears) the avatar on the admins row through the
-  // set_admin_avatar() SQL function. Throws if nothing was updated.
-  async function syncAvatarToAdmins(url: string | null, path: string | null) {
-    const { data, error } = await supabase.rpc("set_admin_avatar", {
-      p_id: adminId,
-      p_username: (user as any)?.username ?? null,
-      p_url: url,
-      p_path: path,
-    });
-    if (error) throw new Error(`Could not save avatar: ${error.message}`);
-    if (data === false) throw new Error("Could not save avatar: admin account not found.");
-  }
-
   // The avatar lives in its own state so it always displays, even when the
   // `user` object from useAuth doesn't include avatar fields. Sources, in order:
   //   1) the user object   2) Supabase auth user_metadata   3) public.admins row
@@ -273,31 +254,30 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        // 1) public.admins through the get_my_avatar() SQL function
-        //    (works with the legacy token login too)
-        if (adminId !== null || (user as any)?.username) {
-          const { data: rows, error: rpcError } = await supabase.rpc("get_my_avatar", {
-            p_id: adminId,
-            p_username: (user as any)?.username ?? null,
-          });
-
-          if (rpcError) {
-            console.warn("get_my_avatar failed:", rpcError.message);
-          } else if (Array.isArray(rows) && rows.length > 0) {
-            // A row was found — trust it, even when avatar_url is null ("removed")
-            if (!cancelled) {
-              setAvatar({ url: rows[0].avatar_url || null, path: rows[0].avatar_path || null });
-            }
-            return;
-          }
-        }
-
-        // 2) Supabase auth user_metadata
+        // getUser() asks Supabase for the latest user_metadata (not a stale cache)
         const { data } = await supabase.auth.getUser();
-        const meta: any = data?.user?.user_metadata;
+        const authUser = data?.user;
+        const meta: any = authUser?.user_metadata;
+
+        // If the key exists (even as null) trust it — null means "removed".
         if (meta && "avatar_url" in meta) {
           if (!cancelled) {
             setAvatar({ url: meta.avatar_url || null, path: meta.avatar_path || null });
+          }
+          return;
+        }
+
+        // Fallback: read it from public.admins
+        const key = (user as any)?.username || authUser?.email;
+        if (key) {
+          const { data: row } = await supabase
+            .from("admins")
+            .select("avatar_url, avatar_path")
+            .eq("username", key)
+            .maybeSingle();
+
+          if (!cancelled && row?.avatar_url) {
+            setAvatar({ url: row.avatar_url, path: row.avatar_path || null });
           }
         }
       } catch (error) {
@@ -481,7 +461,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         // 1) Upload the new avatar first (if any)
         if (avatarFile) {
-          newAvatar = await uploadAvatar(adminId !== null ? String(adminId) : supabaseSession.user.id);
+          newAvatar = await uploadAvatar(supabaseSession.user.id);
         }
 
         const newAvatarUrl = wantsAvatarChange ? newAvatar?.publicUrl ?? null : undefined;
@@ -512,12 +492,25 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         const { error: updateError } = await supabase.auth.updateUser(payload);
         if (updateError) throw new Error(updateError.message);
 
-        // 3) Save the avatar on the admins row (via RPC)
+        // 3) Best-effort: mirror the avatar into public.admins
+        //    (avatar_url / avatar_path columns). Adjust the .eq() column/value
+        //    to however your admin row is linked to the logged-in user.
         if (wantsAvatarChange) {
           try {
-            await syncAvatarToAdmins(newAvatarUrl ?? null, newAvatarPath ?? null);
+            const adminKey = (user as any)?.username || supabaseSession.user.email;
+            if (adminKey) {
+              const { error: adminError } = await supabase
+                .from("admins")
+                .update({
+                  avatar_url: newAvatarUrl,
+                  avatar_path: newAvatarPath,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("username", adminKey);
+              if (adminError) console.warn("Could not sync avatar to admins table:", adminError.message);
+            }
           } catch (syncError) {
-            console.warn(syncError);
+            console.warn("Could not sync avatar to admins table:", syncError);
           }
         }
 
@@ -543,9 +536,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       // Legacy path (non-Supabase)
       if (avatarFile) {
-        newAvatar = await uploadAvatar(
-          adminId !== null ? String(adminId) : String((user as any)?.username ?? "admin")
-        );
+        newAvatar = await uploadAvatar(String((user as any)?.id ?? "admin"));
       }
 
       const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
@@ -572,11 +563,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       if (!response.ok) throw new Error(data.error || "Failed to update profile");
 
       if (data?.token) window.localStorage.setItem("termipay_auth_token", data.token);
-
-      // Save the avatar on the admins row (works without any backend change)
-      if (wantsAvatarChange) {
-        await syncAvatarToAdmins(newAvatar?.publicUrl ?? null, newAvatar?.path ?? null);
-      }
 
       if (wantsAvatarChange && currentAvatarPath) {
         try {
