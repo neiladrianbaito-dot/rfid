@@ -409,6 +409,11 @@ router.post("/auth/oauth-sync", async (req, res): Promise<void> => {
 
     const supabaseUser = await getSupabaseUserFromToken(accessToken);
     if (!supabaseUser || !supabaseUser.email) {
+      console.error(
+        "OAuth sync: getSupabaseUserFromToken returned null. Check that SUPABASE_URL and " +
+        "SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY are set on this server and point to the " +
+        "SAME Supabase project as the frontend's VITE_SUPABASE_URL."
+      );
       res.status(401).json({ success: false, message: "Invalid or expired session. Please sign in again." });
       return;
     }
