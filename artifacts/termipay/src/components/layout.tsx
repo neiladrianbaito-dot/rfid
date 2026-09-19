@@ -123,7 +123,10 @@ function UserAvatar({
       <img
         src={url}
         alt={name ? `${name}'s avatar` : "Avatar"}
-        onError={() => setFailed(true)}
+        onError={() => {
+          console.warn("Avatar image failed to load:", url);
+          setFailed(true);
+        }}
         className="w-full h-full object-cover"
       />
     );
@@ -229,8 +232,77 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const roleLabel = getRoleLabel(user);
-  const currentAvatarUrl = getAvatarUrl(user);
-  const currentAvatarPath = getAvatarPath(user);
+
+  // The avatar lives in its own state so it always displays, even when the
+  // `user` object from useAuth doesn't include avatar fields. Sources, in order:
+  //   1) the user object   2) Supabase auth user_metadata   3) public.admins row
+  const [avatar, setAvatar] = useState<{ url: string | null; path: string | null }>({
+    url: getAvatarUrl(user),
+    path: getAvatarPath(user),
+  });
+  const currentAvatarUrl = avatar.url;
+  const currentAvatarPath = avatar.path;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAvatar() {
+      const fromUser = getAvatarUrl(user);
+      if (fromUser) {
+        if (!cancelled) setAvatar({ url: fromUser, path: getAvatarPath(user) });
+        return;
+      }
+
+      try {
+        // getUser() asks Supabase for the latest user_metadata (not a stale cache)
+        const { data } = await supabase.auth.getUser();
+        const authUser = data?.user;
+        const meta: any = authUser?.user_metadata;
+
+        // If the key exists (even as null) trust it — null means "removed".
+        if (meta && "avatar_url" in meta) {
+          if (!cancelled) {
+            setAvatar({ url: meta.avatar_url || null, path: meta.avatar_path || null });
+          }
+          return;
+        }
+
+        // Fallback: read it from public.admins
+        const key = (user as any)?.username || authUser?.email;
+        if (key) {
+          const { data: row } = await supabase
+            .from("admins")
+            .select("avatar_url, avatar_path")
+            .eq("username", key)
+            .maybeSingle();
+
+          if (!cancelled && row?.avatar_url) {
+            setAvatar({ url: row.avatar_url, path: row.avatar_path || null });
+          }
+        }
+      } catch (error) {
+        console.warn("Could not load avatar:", error);
+      }
+    }
+
+    loadAvatar();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // Keep the header avatar in sync right after supabase.auth.updateUser()
+  useEffect(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "USER_UPDATED") {
+        const meta: any = session?.user?.user_metadata;
+        if (meta && "avatar_url" in meta) {
+          setAvatar({ url: meta.avatar_url || null, path: meta.avatar_path || null });
+        }
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
   // What the modal shows right now: new selection > current (unless marked for removal)
   const modalAvatarUrl = avatarPreview ?? (removeAvatar ? null : currentAvatarUrl);
@@ -451,6 +523,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           }
         }
 
+        // Show the new picture immediately (don't wait for refetchUser)
+        if (wantsAvatarChange) {
+          setAvatar({ url: newAvatarUrl ?? null, path: newAvatarPath ?? null });
+        }
+
         await refetchUser();
         toast({ title: "Success", description: "Profile updated successfully." });
         setProfileModalOpen(false);
@@ -493,6 +570,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         } catch (cleanupError) {
           console.warn("Failed to remove old avatar:", cleanupError);
         }
+      }
+
+      if (wantsAvatarChange) {
+        setAvatar({ url: newAvatar?.publicUrl ?? null, path: newAvatar?.path ?? null });
       }
 
       await refetchUser();
