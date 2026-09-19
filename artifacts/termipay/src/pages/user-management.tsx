@@ -910,7 +910,8 @@ export default function UserManagementPage() {
     }
 
     // Revoke only the previous local preview. Do NOT touch the current
-    // Supabase image. The old Storage object is deleted only after Save succeeds.
+    // Supabase image. The old Storage object is deleted by the
+    // cleanup-id-images Edge Function after the DB row is updated.
     if (editIdImagePreview) URL.revokeObjectURL(editIdImagePreview);
 
     setEditIdImageFile(file);
@@ -974,7 +975,6 @@ export default function UserManagementPage() {
       setEditForm((current) => ({ ...current, contactNumber: normalizedContactNumber }));
     }
 
-    const oldImageValue = editUser.idImagePath || editUser.id_image_path || null;
     const replacingImage = !!editIdImageFile;
     let newImageUrl: string | null = null;
 
@@ -997,7 +997,7 @@ export default function UserManagementPage() {
       ].map((value) => value.trim()).filter(Boolean).join(", ");
 
       // 2. WAIT for the database update to finish successfully.
-      // mutateAsync prevents Storage cleanup from happening before the DB write.
+      // mutateAsync makes sure we only clear local state after the DB write.
       await updateMutation.mutateAsync({
         id: editUser.id,
         data: {
@@ -1022,59 +1022,11 @@ export default function UserManagementPage() {
         },
       });
 
-      // 3. NEW IMAGE DETECTED + DB UPDATE SUCCEEDED:
-      // Clean the user's old Storage objects only AFTER the DB now points to
-      // the new image. This removes the old original image AND previous
-      // edited-* images, so the folder does not keep growing.
-      if (replacingImage && newImageUrl) {
-        const newImagePath = getIdImageStoragePath(newImageUrl);
-        const safeUid = String(editUser.cardUid || editUser.card_uid || editUser.id)
-          .trim()
-          .replace(/[^a-zA-Z0-9_-]/g, "");
-
-        if (safeUid && newImagePath) {
-          const { data: storedFiles, error: listError } = await supabase
-            .storage
-            .from(ID_IMAGE_BUCKET)
-            .list(safeUid, {
-              limit: 1000,
-              offset: 0,
-              sortBy: { column: "name", order: "asc" },
-            });
-
-          if (listError) {
-            console.error(
-              "Could not list old ID images for cleanup:",
-              listError
-            );
-          } else {
-            const oldPaths = (storedFiles || [])
-              .filter((file: any) => file?.name)
-              .map((file: any) => `${safeUid}/${file.name}`)
-              .filter((path: string) => path !== newImagePath);
-
-            if (oldPaths.length > 0) {
-              const { error: deleteOldImagesError } = await supabase
-                .storage
-                .from(ID_IMAGE_BUCKET)
-                .remove(oldPaths);
-
-              if (deleteOldImagesError) {
-                console.error(
-                  "Old ID image cleanup failed.",
-                  { oldPaths, error: deleteOldImagesError }
-                );
-
-                toast({
-                  title: <SuccessTitle text="User Updated Successfully" />,
-                  description:
-                    "The new ID image was saved, but Supabase blocked deletion of the previous images. Check DELETE policy for id-verifications.",
-                });
-              }
-            }
-          }
-        }
-      }
+      // 3. DB update succeeded.
+      // ✅ Old ID image cleanup is now handled SERVER-SIDE by the
+      // "cleanup-id-images" Supabase Edge Function (Database Webhook on
+      // UPDATE/DELETE). It uses the service role key, so no Storage DELETE
+      // policy is needed on the client anymore.
 
       // Clear the selected local file/preview only after the DB update succeeds.
       if (editIdImagePreview) {
@@ -1123,6 +1075,9 @@ export default function UserManagementPage() {
     }
   };
 
+  // ✅ Deleting the user row is enough — the "cleanup-id-images" Edge Function
+  // (Database Webhook on DELETE) removes the card's ID images from the
+  // id-verifications bucket automatically.
   const confirmDelete = () => {
     if (!deleteUser) return;
     deleteMutation.mutate(
