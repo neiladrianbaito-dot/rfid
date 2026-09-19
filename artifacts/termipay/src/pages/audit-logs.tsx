@@ -8,13 +8,16 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTheme } from "@/hooks/use-theme";
 import {
   Search, ScrollText, ChevronLeft, ChevronRight, Zap,
   LogIn, LogOut, PlusCircle, Pencil, Trash2, RotateCcw, Download, Activity,
-  ChevronDown, ChevronUp,
+  Eye,
 } from "lucide-react";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase";
@@ -50,15 +53,13 @@ function actionMeta(action: string, isDark: boolean) {
   return { Icon: meta.icon, className: isDark ? meta.dark : meta.light };
 }
 
-// ── Details parsing (for expandable old → new changes list) ────────────────
+// ── Details parsing (for the "old → new" changes list in the modal) ────────
 // Parses strings like:
 //   'updated user: Juan (card 123) — full_name: "Juan" → "Juana"; city_name: "Cebu" → "Manila"'
 // into a prefix + a list of { field, oldVal, newVal }.
-// Works for ANY number of changed fields — 1 field or all of them —
-// since it just keeps matching the "field: "old" → "new"" pattern
-// as many times as it appears in the string.
+// Works for ANY number of changed fields — 1 field or all of them.
 // Returns changes: [] for logs that don't follow this pattern
-// (e.g. CREATE/DELETE/EXPORT/toggle logs), so those just render as plain text.
+// (e.g. CREATE/DELETE/EXPORT/toggle logs) — those show as plain text in the modal.
 type ParsedDetails = {
   prefix: string;
   changes: { field: string; oldVal: string; newVal: string }[];
@@ -96,7 +97,7 @@ export default function AuditLogsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [newRowId, setNewRowId] = useState<number | null>(null);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
   const prevTopIdRef = useRef<number | null>(null);
 
   // ── Fetch audit_logs from Supabase, with realtime updates ─────────────────
@@ -163,6 +164,9 @@ export default function AuditLogsPage() {
     prevTopIdRef.current = topId;
     setLastUpdated(new Date());
   }, [filteredList]);
+
+  // ── Parsed details for whichever log is currently open in the modal ────────
+  const selectedParsed = selectedLog ? parseChanges(selectedLog.details) : null;
 
   return (
     <div className={`space-y-8 h-full min-h-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}>
@@ -272,12 +276,13 @@ export default function AuditLogsPage() {
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Action</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Entity</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Details</TableHead>
+                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {paginatedList.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-32">
+                        <TableCell colSpan={6} className="text-center py-32">
                           <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                             <ScrollText size={48} className="mb-2" />
                             <p className="text-xs font-semibold uppercase tracking-widest">No records found</p>
@@ -287,10 +292,6 @@ export default function AuditLogsPage() {
                     ) : (
                       paginatedList.map((log) => {
                         const { Icon, className } = actionMeta(log.action, isDark);
-                        const { prefix, changes } = parseChanges(log.details);
-                        const isExpanded = expandedId === log.id;
-                        const hasChanges = changes.length > 0;
-
                         return (
                           <TableRow
                             key={log.id}
@@ -298,54 +299,36 @@ export default function AuditLogsPage() {
                               newRowId === log.id ? "row-pulse" : ""
                             }`}
                           >
-                            <TableCell className={`text-xs font-mono whitespace-nowrap align-top ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                            <TableCell className={`text-xs font-mono whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                               {new Date(log.timestamp).toLocaleString()}
                             </TableCell>
-                            <TableCell className="font-mono text-xs text-blue-500 font-semibold align-top">
+                            <TableCell className="font-mono text-xs text-blue-500 font-semibold">
                               {log.user}
                             </TableCell>
-                            <TableCell className="align-top">
+                            <TableCell>
                               <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${className}`}>
                                 <Icon className="w-3 h-3" />
                                 {log.action}
                               </Badge>
                             </TableCell>
-                            <TableCell className={`text-sm font-medium align-top ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                            <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                               {log.entity}
                             </TableCell>
-                            <TableCell className={`text-xs max-w-[420px] align-top ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                              <div className="flex items-start gap-1.5">
-                                <div className={isExpanded ? "" : "truncate"} title={!hasChanges ? log.details : undefined}>
-                                  {prefix}
-                                  {hasChanges && !isExpanded && (
-                                    <span className={isDark ? "text-slate-600" : "text-slate-400"}>
-                                      {" "}— {changes.length} field{changes.length > 1 ? "s" : ""} changed
-                                    </span>
-                                  )}
-                                  {hasChanges && isExpanded && (
-                                    <ul className="mt-1.5 space-y-1">
-                                      {changes.map((c, i) => (
-                                        <li key={i} className={`font-mono text-[11px] ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                                          <span className={isDark ? "text-slate-300" : "text-slate-700"}>{c.field}</span>
-                                          {": "}
-                                          <span className="text-red-500">{c.oldVal || "—"}</span>
-                                          {" → "}
-                                          <span className="text-emerald-500">{c.newVal || "—"}</span>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  )}
-                                </div>
-                                {hasChanges && (
-                                  <button
-                                    onClick={() => setExpandedId(isExpanded ? null : log.id)}
-                                    className={`shrink-0 mt-0.5 ${isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"}`}
-                                    title={isExpanded ? "Collapse" : "Expand"}
-                                  >
-                                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                                  </button>
-                                )}
-                              </div>
+                            <TableCell className={`text-xs max-w-[420px] truncate ${isDark ? "text-slate-400" : "text-slate-500"}`} title={log.details}>
+                              {log.details}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSelectedLog(log)}
+                                className={`h-7 px-2.5 text-xs font-medium gap-1.5 cursor-pointer ${
+                                  isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                                }`}
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                View
+                              </Button>
                             </TableCell>
                           </TableRow>
                         );
@@ -389,6 +372,74 @@ export default function AuditLogsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── View Details Modal ──────────────────────────────────────────────── */}
+      <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>
+        <DialogContent className={`max-w-lg ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+          {selectedLog && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  {(() => {
+                    const { Icon, className } = actionMeta(selectedLog.action, isDark);
+                    return (
+                      <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${className}`}>
+                        <Icon className="w-3 h-3" />
+                        {selectedLog.action}
+                      </Badge>
+                    );
+                  })()}
+                  <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                    {selectedLog.entity}
+                  </span>
+                </DialogTitle>
+                <DialogDescription className={`text-xs font-mono pt-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  {new Date(selectedLog.timestamp).toLocaleString()} · by{" "}
+                  <span className="text-blue-500 font-semibold">{selectedLog.user}</span>
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="pt-2">
+                <p className={`text-sm ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                  {selectedParsed?.prefix}
+                </p>
+
+                {selectedParsed && selectedParsed.changes.length > 0 ? (
+                  <div className={`mt-4 rounded-lg border overflow-hidden ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                    <div className={`grid grid-cols-[1fr_1fr_1fr] text-[10px] font-semibold uppercase tracking-wide px-3 py-2 ${
+                      isDark ? "bg-slate-950/60 text-slate-500 border-b border-slate-800" : "bg-slate-50 text-slate-400 border-b border-slate-200"
+                    }`}>
+                      <span>Field</span>
+                      <span>Old Value</span>
+                      <span>New Value</span>
+                    </div>
+                    <div className="max-h-[320px] overflow-y-auto">
+                      {selectedParsed.changes.map((c, i) => (
+                        <div
+                          key={i}
+                          className={`grid grid-cols-[1fr_1fr_1fr] text-xs px-3 py-2 font-mono ${
+                            i % 2 === 0
+                              ? (isDark ? "bg-slate-900" : "bg-white")
+                              : (isDark ? "bg-slate-950/40" : "bg-slate-50/60")
+                          }`}
+                        >
+                          <span className={isDark ? "text-slate-300" : "text-slate-700"}>{c.field}</span>
+                          <span className="text-red-500 truncate" title={c.oldVal}>{c.oldVal || "—"}</span>
+                          <span className="text-emerald-500 truncate" title={c.newVal}>{c.newVal || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  // No parsed "old -> new" pairs (CREATE/DELETE/EXPORT/toggle logs, etc.)
+                  // — nothing more to show beyond the prefix line above.
+                  null
+                )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
