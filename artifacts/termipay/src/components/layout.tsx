@@ -99,6 +99,92 @@ function getAvatarPath(user: any): string | null {
   );
 }
 
+// Turns a public URL from the avatar bucket back into "folder/file.ext".
+// Used when we only know the URL (no avatar_path), so the old file can still
+// be found and deleted.
+function getStoragePathFromUrl(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const { pathname } = new URL(url);
+    const marker = `/${AVATAR_BUCKET}/`;
+    const i = pathname.indexOf(marker);
+    if (i === -1) return null;
+    return decodeURIComponent(pathname.slice(i + marker.length)) || null;
+  } catch {
+    return null;
+  }
+}
+
+// Deletes the replaced avatar file(s) from the bucket so uploads never pile up.
+//   - removes the previous file (oldPath)
+//   - also sweeps every other leftover file in the same admin folder,
+//     keeping ONLY the new one (newPath)
+// Only ever touches the admin-avatars bucket.
+// Returns true when the cleanup worked (or there was nothing to delete).
+async function cleanupOldAvatarFiles(
+  oldPath: string | null,
+  newPath: string | null
+): Promise<boolean> {
+  const referencePath = newPath ?? oldPath;
+  if (!referencePath) return true;
+
+  const targets = new Set<string>();
+  if (oldPath && oldPath !== newPath) targets.add(oldPath);
+
+  // Sweep leftovers from earlier uploads in this admin's folder
+  if (referencePath.includes("/")) {
+    const folder = referencePath.split("/")[0];
+    try {
+      const { data, error } = await supabase.storage
+        .from(AVATAR_BUCKET)
+        .list(folder, { limit: 1000 });
+
+      if (error) {
+        console.warn("Could not list avatar folder:", error.message);
+      } else {
+        for (const f of data ?? []) {
+          // folders come back with id = null; skip them and the placeholder
+          if (!f?.name || (f as any).id === null || f.name === ".emptyFolderPlaceholder") continue;
+          const p = `${folder}/${f.name}`;
+          if (p !== newPath) targets.add(p);
+        }
+      }
+    } catch (listError) {
+      console.warn("Could not list avatar folder:", listError);
+    }
+  }
+
+  const paths = Array.from(targets);
+  if (paths.length === 0) return true;
+
+  try {
+    const { data, error } = await supabase.storage.from(AVATAR_BUCKET).remove(paths);
+
+    if (error) {
+      console.warn("Avatar cleanup failed:", error.message);
+      return false;
+    }
+
+    // Storage returns an empty list (no error) when a DELETE policy is missing
+    if (!data || data.length === 0) {
+      console.warn(
+        "Avatar cleanup removed nothing. The bucket probably has no DELETE policy:",
+        paths
+      );
+      return false;
+    }
+
+    console.log(
+      "Avatar cleanup removed:",
+      data.map((d: any) => d.name)
+    );
+    return true;
+  } catch (removeError) {
+    console.warn("Avatar cleanup threw:", removeError);
+    return false;
+  }
+}
+
 // Shows the avatar image, or falls back to the first letter of the name
 // (also when the image fails to load).
 function UserAvatar({
@@ -223,13 +309,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   });
 
   // ── Avatar state ──────────────────────────────────────────────────────
-  // Same approach as Card Registration's ID image: keep the File + a local
-  // preview URL, and only upload to Supabase Storage when "Save Changes"
-  // is pressed.
+  // Picking a picture ONLY stores the File + a local preview. Nothing is
+  // uploaded or deleted until "Save Changes" is pressed.
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [removeAvatar, setRemoveAvatar] = useState(false);
-  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const roleLabel = getRoleLabel(user);
@@ -294,6 +378,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   });
   const currentAvatarUrl = avatar.url;
   const currentAvatarPath = avatar.path;
+
+  // Storage path of the picture that is about to be replaced. Falls back to
+  // parsing the public URL when avatar_path is missing, so the old file can
+  // still be deleted.
+  const currentAvatarStoragePath = currentAvatarPath || getStoragePathFromUrl(currentAvatarUrl);
 
   useEffect(() => {
     let cancelled = false;
@@ -380,6 +469,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     if (avatarInputRef.current) avatarInputRef.current.value = "";
   }
 
+  // Reset the form when the modal opens, and drop any unsaved picture
+  // selection when it closes. Only depends on the modal state, so a background
+  // refetch of `user` can't wipe what you're typing or the picture you picked.
   useEffect(() => {
     if (profileModalOpen) {
       setFormData({
@@ -391,10 +483,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       resetAvatarSelection();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileModalOpen, user]);
+  }, [profileModalOpen]);
 
-  // Picking a picture saves it IMMEDIATELY: upload -> insert the URL into
-  // public.admins.avatar_url. No need to press "Save Changes" for the avatar.
+  // Picking a picture only shows a preview. It is uploaded when the user
+  // presses "Save Changes".
   function handleAvatarSelect(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -421,18 +513,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
     if (avatarPreview) URL.revokeObjectURL(avatarPreview);
 
-    // Show the picture right away while it uploads
     setAvatarFile(file);
     setAvatarPreview(URL.createObjectURL(file));
     setRemoveAvatar(false);
 
-    saveAvatarNow(file);
+    // Allow picking the same file again later
+    event.target.value = "";
   }
 
-  // Removing also applies immediately (clears avatar_url in public.admins)
+  // "Discard" drops a picture that was just picked. "Remove" marks the current
+  // picture for removal. Neither touches storage until "Save Changes".
   function handleRemoveAvatar() {
-    if (!currentAvatarUrl) return;
-    saveAvatarNow(null);
+    if (avatarFile) {
+      resetAvatarSelection();
+      return;
+    }
+    if (currentAvatarUrl) {
+      setRemoveAvatar(true);
+    }
   }
 
   // Uploads the picture directly to Supabase Storage (no Base64).
@@ -474,81 +572,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return { path: filePath, publicUrl: publicUrlData.publicUrl };
   }
 
-  // Upload (or remove) the avatar and write the URL into public.admins.
-  async function saveAvatarNow(file: File | null) {
-    setIsSavingAvatar(true);
-    let uploaded: { path: string; publicUrl: string } | null = null;
-
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData.session;
-
-      // 1) Upload the image to the storage bucket
-      if (file) {
-        const ownerId =
-          adminId !== null
-            ? String(adminId)
-            : session?.user?.id ?? String((user as any)?.username ?? "admin");
-        uploaded = await uploadAvatar(ownerId, file);
-      }
-
-      const newUrl = uploaded?.publicUrl ?? null;
-      const newPath = uploaded?.path ?? null;
-
-      // 2) Insert the URL into public.admins.avatar_url / avatar_path
-      await syncAvatarToAdmins(newUrl, newPath, session?.user?.email);
-
-      // 3) Keep Supabase auth metadata in sync too (only when there is a session)
-      if (session?.user) {
-        const { error: metaError } = await supabase.auth.updateUser({
-          data: { avatar_url: newUrl, avatar_path: newPath },
-        });
-        if (metaError) console.warn("Could not update auth metadata:", metaError.message);
-      }
-
-      // 4) Show it everywhere right away
-      const oldPath = currentAvatarPath;
-      setAvatar({ url: newUrl, path: newPath });
-
-      // 5) Delete the previous file (best-effort — needs a delete policy)
-      if (oldPath && oldPath !== newPath) {
-        try {
-          await supabase.storage.from(AVATAR_BUCKET).remove([oldPath]);
-        } catch (cleanupError) {
-          console.warn("Failed to remove old avatar:", cleanupError);
-        }
-      }
-
-      try {
-        await refetchUser();
-      } catch {
-        /* not critical */
-      }
-
-      toast({
-        title: "Success",
-        description: file ? "Profile picture updated." : "Profile picture removed.",
-      });
-    } catch (error: any) {
-      // The URL was not saved -> remove the orphan upload (best-effort)
-      if (uploaded) {
-        try {
-          await supabase.storage.from(AVATAR_BUCKET).remove([uploaded.path]);
-        } catch (cleanupError) {
-          console.warn("Failed to remove orphan avatar:", cleanupError);
-        }
-      }
-      toast({
-        title: "Avatar Update Failed",
-        description: error?.message || "Could not save your profile picture.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSavingAvatar(false);
-      resetAvatarSelection();
-    }
-  }
-
   const handleSaveChanges = async () => {
     const wantsPasswordChange = formData.newPassword.trim().length > 0;
     const wantsNameChange = formData.name.trim() !== (user?.name || "").trim();
@@ -585,6 +608,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
     // Track the freshly uploaded file so it can be removed if saving fails
     let newAvatar: { path: string; publicUrl: string } | null = null;
+    // Becomes true once the admins row points to the new picture. After that
+    // the new file must NEVER be deleted as an "orphan".
+    let avatarSaved = false;
+
+    // Path of the picture being replaced (captured before state changes)
+    const oldStoragePath = currentAvatarStoragePath;
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -639,6 +668,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         if (wantsAvatarChange) {
           try {
             await syncAvatarToAdmins(newAvatarUrl ?? null, newAvatarPath ?? null, supabaseSession.user.email);
+            avatarSaved = true;
           } catch (syncError: any) {
             console.warn(syncError);
             toast({
@@ -649,12 +679,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // 4) Delete the previous file from storage (best-effort)
-        if (wantsAvatarChange && currentAvatarPath) {
-          try {
-            await supabase.storage.from(AVATAR_BUCKET).remove([currentAvatarPath]);
-          } catch (cleanupError) {
-            console.warn("Failed to remove old avatar:", cleanupError);
+        // 4) Delete the previous picture(s) from the bucket. Only runs after the
+        //    admins row points to the new picture.
+        if (wantsAvatarChange && avatarSaved) {
+          const cleaned = await cleanupOldAvatarFiles(oldStoragePath, newAvatarPath ?? null);
+          if (!cleaned) {
+            toast({
+              title: "Old picture not deleted",
+              description:
+                "Your profile was saved, but the previous file could not be removed from the admin-avatars bucket. Add the Storage DELETE policy (see console for details).",
+              variant: "destructive",
+            });
           }
         }
 
@@ -663,7 +698,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           setAvatar({ url: newAvatarUrl ?? null, path: newAvatarPath ?? null });
         }
 
-        await refetchUser();
+        try {
+          await refetchUser();
+        } catch {
+          /* not critical */
+        }
+
         toast({ title: "Success", description: "Profile updated successfully." });
         setProfileModalOpen(false);
         return;
@@ -704,28 +744,39 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       // Save the avatar on the admins row (works without any backend change)
       if (wantsAvatarChange) {
         await syncAvatarToAdmins(newAvatar?.publicUrl ?? null, newAvatar?.path ?? null);
-      }
+        avatarSaved = true;
 
-      if (wantsAvatarChange && currentAvatarPath) {
-        try {
-          await supabase.storage.from(AVATAR_BUCKET).remove([currentAvatarPath]);
-        } catch (cleanupError) {
-          console.warn("Failed to remove old avatar:", cleanupError);
+        // Delete the previous picture(s) from the bucket
+        const cleaned = await cleanupOldAvatarFiles(oldStoragePath, newAvatar?.path ?? null);
+        if (!cleaned) {
+          toast({
+            title: "Old picture not deleted",
+            description:
+              "Your profile was saved, but the previous file could not be removed from the admin-avatars bucket. Add the Storage DELETE policy (see console for details).",
+            variant: "destructive",
+          });
         }
-      }
 
-      if (wantsAvatarChange) {
         setAvatar({ url: newAvatar?.publicUrl ?? null, path: newAvatar?.path ?? null });
       }
 
-      await refetchUser();
+      try {
+        await refetchUser();
+      } catch {
+        /* not critical */
+      }
+
       setProfileModalOpen(false);
       toast({ title: "Success", description: "Profile updated successfully." });
     } catch (error: any) {
       // Remove the orphan upload if saving the profile failed
-      if (newAvatar) {
+      // (never when the admins row already points to it)
+      if (newAvatar && !avatarSaved) {
         try {
-          await supabase.storage.from(AVATAR_BUCKET).remove([newAvatar.path]);
+          const { error: removeError } = await supabase.storage
+            .from(AVATAR_BUCKET)
+            .remove([newAvatar.path]);
+          if (removeError) console.warn("Failed to remove orphan avatar:", removeError.message);
         } catch (cleanupError) {
           console.warn("Failed to remove orphan avatar:", cleanupError);
         }
@@ -735,6 +786,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       setIsUpdating(false);
     }
   };
+
+  // Small status line under the avatar buttons
+  const avatarStatus = isUpdating
+    ? avatarFile
+      ? `Uploading ${avatarFile.name}...`
+      : removeAvatar
+        ? "Removing picture..."
+        : null
+    : avatarFile
+      ? "New picture selected. Click Save Changes to apply it."
+      : removeAvatar
+        ? "Picture will be removed when you click Save Changes."
+        : null;
 
   return (
     <div
@@ -961,7 +1025,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       <button
                         type="button"
                         onClick={() => avatarInputRef.current?.click()}
-                        disabled={isUpdating || isSavingAvatar}
+                        disabled={isUpdating}
                         aria-label="Change profile picture"
                         className="absolute -bottom-2 -right-2 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50 dark:border-slate-950"
                       >
@@ -974,7 +1038,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         Profile picture
                       </p>
                       <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        JPG, PNG or WEBP, up to 2 MB. Saved automatically.
+                        JPG, PNG or WEBP, up to 2 MB. Click Save Changes to apply.
                       </p>
 
                       <div className="flex flex-wrap gap-2">
@@ -983,7 +1047,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           variant="outline"
                           size="sm"
                           onClick={() => avatarInputRef.current?.click()}
-                          disabled={isUpdating || isSavingAvatar}
+                          disabled={isUpdating}
                           className="h-8 gap-1.5 text-xs"
                         >
                           <Upload className="h-3.5 w-3.5" />
@@ -996,23 +1060,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                             variant="ghost"
                             size="sm"
                             onClick={handleRemoveAvatar}
-                            disabled={isUpdating || isSavingAvatar}
+                            disabled={isUpdating}
                             className={`h-8 gap-1.5 text-xs ${
                               isDark ? "text-red-400 hover:text-red-300" : "text-red-600 hover:text-red-700"
                             }`}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
-                            Remove
+                            {avatarFile ? "Discard" : "Remove"}
                           </Button>
                         )}
                       </div>
 
-                      {isSavingAvatar && (
-                        <p className={`flex items-center gap-1.5 truncate text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          {avatarFile
-                            ? `Uploading ${avatarFile.name}...`
-                            : "Removing picture..."}
+                      {avatarStatus && (
+                        <p className={`flex items-center gap-1.5 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {isUpdating && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
+                          <span className="truncate">{avatarStatus}</span>
                         </p>
                       )}
                     </div>
@@ -1023,7 +1085,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       accept="image/*"
                       className="hidden"
                       onChange={handleAvatarSelect}
-                      disabled={isUpdating || isSavingAvatar}
+                      disabled={isUpdating}
                     />
                   </div>
 
@@ -1097,7 +1159,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   </Button>
                   <Button
                     onClick={handleSaveChanges}
-                    disabled={isUpdating || isSavingAvatar}
+                    disabled={isUpdating}
                     className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6"
                   >
                     {isUpdating ? (
