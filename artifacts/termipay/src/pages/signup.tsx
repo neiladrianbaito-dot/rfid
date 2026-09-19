@@ -23,6 +23,7 @@ import {
   Moon,
 } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-url";
+import { supabase } from "@/lib/supabase";
 
 const THEME_KEY = "termipay_theme";
 
@@ -647,6 +648,11 @@ export default function SignupPage() {
     setIsSubmitting,
   ] = useState(false);
 
+  const [
+    isGoogleSubmitting,
+    setIsGoogleSubmitting,
+  ] = useState(false);
+
   /* =======================================================
      THEME
      ======================================================= */
@@ -700,7 +706,7 @@ export default function SignupPage() {
     theme === "dark";
 
   /* =======================================================
-     SIGN UP
+     SIGN UP (email / password)
      ======================================================= */
 
   async function handleSubmit(
@@ -799,6 +805,47 @@ export default function SignupPage() {
       setError(msg);
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  /* =======================================================
+     SIGN UP / SIGN IN WITH GOOGLE (Supabase OAuth)
+     ======================================================= */
+
+  async function handleGoogleSignup() {
+    setError("");
+    setSuccess("");
+    setIsGoogleSubmitting(true);
+
+    try {
+      const { error: oauthError } =
+        await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            // Supabase redirects here after the Google consent
+            // screen. This route should mount the AuthCallback
+            // component, which finishes the sign-in and syncs
+            // the user with your backend.
+            redirectTo: `${window.location.origin}/auth/callback`,
+          },
+        });
+
+      if (oauthError) {
+        setError(oauthError.message);
+        setIsGoogleSubmitting(false);
+      }
+
+      // On success, the browser gets redirected to Google, so
+      // there's nothing else to do here — isGoogleSubmitting
+      // intentionally stays true until the redirect happens.
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Could not start Google sign in.";
+
+      setError(msg);
+      setIsGoogleSubmitting(false);
     }
   }
 
@@ -917,6 +964,73 @@ export default function SignupPage() {
           </CardHeader>
 
           <CardContent className="px-5 sm:px-6 pb-5 sm:pb-6">
+
+            {/* =================================================
+                GOOGLE SIGN UP
+                ================================================= */}
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleGoogleSignup}
+              disabled={isSubmitting || isGoogleSubmitting}
+              className={`w-full h-11 text-sm font-semibold gap-2 border-2 transition-all ${
+                isDark
+                  ? "bg-slate-900/60 border-slate-700/70 text-white hover:bg-slate-900 hover:border-slate-600"
+                  : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {isGoogleSubmitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <svg className="h-4 w-4" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M23.52 12.27c0-.85-.08-1.67-.22-2.45H12v4.63h6.47c-.28 1.5-1.13 2.77-2.4 3.62v3h3.88c2.27-2.09 3.57-5.17 3.57-8.8z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 24c3.24 0 5.96-1.07 7.95-2.9l-3.88-3.01c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.27v3.11C3.25 21.3 7.31 24 12 24z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.27 14.28A7.2 7.2 0 0 1 4.9 12c0-.79.14-1.56.37-2.28V6.61H1.27A11.98 11.98 0 0 0 0 12c0 1.93.46 3.76 1.27 5.39l4-3.11z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 4.75c1.76 0 3.34.6 4.58 1.79l3.44-3.44C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.7 1.27 6.61l4 3.11C6.22 6.86 8.87 4.75 12 4.75z"
+                  />
+                </svg>
+              )}
+              {isGoogleSubmitting
+                ? "Redirecting to Google..."
+                : "Continue with Google"}
+            </Button>
+
+            {/* =================================================
+                DIVIDER
+                ================================================= */}
+
+            <div className="flex items-center gap-3 my-5">
+              <div
+                className={`h-px flex-1 ${
+                  isDark ? "bg-slate-800" : "bg-slate-200"
+                }`}
+              />
+              <span
+                className={`text-[10px] uppercase tracking-widest ${
+                  isDark ? "text-slate-600" : "text-slate-400"
+                }`}
+              >
+                or sign up with email
+              </span>
+              <div
+                className={`h-px flex-1 ${
+                  isDark ? "bg-slate-800" : "bg-slate-200"
+                }`}
+              />
+            </div>
+
             <form
               onSubmit={handleSubmit}
               className="space-y-4"
@@ -1133,7 +1247,7 @@ export default function SignupPage() {
               <Button
                 type="submit"
                 className="w-full h-11 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold transition-all shadow-lg shadow-blue-900/20 text-sm mt-2"
-                disabled={isSubmitting}
+                disabled={isSubmitting || isGoogleSubmitting}
               >
                 {isSubmitting ? (
                   <span className="inline-flex items-center gap-2">
