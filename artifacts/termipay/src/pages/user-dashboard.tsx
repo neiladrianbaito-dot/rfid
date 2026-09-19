@@ -35,46 +35,6 @@ import { USER_AUTH_TOKEN_KEY, unlinkUserCard } from "@/lib/api";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 import { supabase } from "@/lib/supabase";
 
-// 🆕 Bottom-nav / page tab type (wasn't declared in this file before)
-type Tab = "home" | "Transactions" | "settings";
-
-// ── 🆕 User Avatar ──────────────────────────────────────────────────────────
-// Real photo (Google login) when available; otherwise falls back to the
-// `fallback` node (if given) or the user's initials. Also falls back if the
-// image fails to load (e.g. Google rate-limiting lh3.googleusercontent.com).
-function UserAvatar({
-  url,
-  name,
-  fallback,
-  className,
-}: {
-  url: string | null;
-  name: string;
-  fallback?: React.ReactNode;
-  className?: string;
-}) {
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-  }, [url]);
-
-  if (!url || failed) {
-    if (fallback) return <>{fallback}</>;
-    return <span className="font-black text-base tracking-tight">{getInitials(name || "?")}</span>;
-  }
-
-  return (
-    <img
-      src={url}
-      alt={name}
-      referrerPolicy="no-referrer"
-      onError={() => setFailed(true)}
-      className={`h-full w-full object-cover rounded-full ${className ?? ""}`}
-    />
-  );
-}
-
 // ── Transaction type normalizer ─────────────────────────────────────────────
 // Same idea as the admin Transactions page: the DB may hand back "Fare",
 // "fare", "TopUp", "top_up", "Top Up", etc. This forces one canonical label
@@ -371,10 +331,6 @@ export default function PaymongoDashboardPage() {
   // the user push more money onto it.
   const isCardUsable = isLinked && user?.status === "Active";
 
-  // 🆕 Real Google avatar (null for email/password users → initials fallback)
-  const avatarUrl = authProfile?.avatarUrl ?? null;
-  const avatarName = user?.fullName || authProfile?.fullName || "?";
-
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [virtualCardFlipped, setVirtualCardFlipped] = useState(false);
@@ -532,9 +488,6 @@ export default function PaymongoDashboardPage() {
     }
 
     window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
-    // 🆕 Also clear the Supabase (Google) session so the next user can't
-    // inherit the previous user's avatar/session.
-    await supabase.auth.signOut().catch(() => {});
     setLocation("/signin");
   };
 
@@ -575,6 +528,13 @@ export default function PaymongoDashboardPage() {
   const handleTxClick = useCallback((tx: Transaction) => {
     setSelectedTx(tx);
   }, []);
+
+  useEffect(() => {
+    const isBusy = authChecking || cardDataLoading;
+    if (!isBusy) { setSlowLoadHint(false); return; }
+    const timer = setTimeout(() => setSlowLoadHint(true), 3500);
+    return () => clearTimeout(timer);
+  }, [authChecking, cardDataLoading]);
 
   const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
     { tab: "home", icon: <Home className="h-5 w-5" />, label: "Home" },
@@ -901,24 +861,12 @@ export default function PaymongoDashboardPage() {
                 ) : (
                   <>
                     {[
-                      {
-                        // 🆕 Real avatar (Google) → falls back to the User icon
-                        icon: (
-                          <UserAvatar
-                            url={avatarUrl}
-                            name={avatarName}
-                            fallback={<User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />}
-                          />
-                        ),
-                        bg: "bg-blue-500/10 border-blue-500/20",
-                        label: "Name",
-                        value: isLinked ? (user?.fullName || "Not Linked") : "—",
-                      },
+                      { icon: <User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />, bg: "bg-blue-500/10 border-blue-500/20", label: "Name", value: isLinked ? (user?.fullName || "Not Linked") : "—" },
                       { icon: <CreditCard className={`h-4 w-4 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
                       { icon: <Tag className={`h-4 w-4 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: isLinked ? (user?.type || "General") : "—" },
                     ].map(({ icon, bg, label, value, mono }) => (
                       <div key={label} className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                        <div className={`h-9 w-9 rounded-full flex items-center justify-center border overflow-hidden shrink-0 ${bg}`}>{icon}</div>
+                        <div className={`h-9 w-9 rounded-full flex items-center justify-center border ${bg}`}>{icon}</div>
                         <div>
                           <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
                           <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"} ${mono ? "font-mono" : ""}`}>{value}</p>
@@ -1433,17 +1381,10 @@ export default function PaymongoDashboardPage() {
               ) : (
                 <>
                   <div className={`flex items-center gap-3 px-4 py-4 border-b ${isDark ? "border-slate-800/60" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                    {/* 🆕 Real Google avatar → falls back to initials */}
-                    <div className={`h-11 w-11 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0 overflow-hidden ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                      <UserAvatar
-                        url={avatarUrl}
-                        name={avatarName}
-                        fallback={
-                          <span className="font-black text-base tracking-tight">
-                            {getInitials(isLinked ? (user?.fullName || "?") : (authProfile?.fullName || "?"))}
-                          </span>
-                        }
-                      />
+                    <div className="h-11 w-11 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0">
+                      <span className={`font-black text-base tracking-tight ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                        {getInitials(isLinked ? (user?.fullName || "?") : "?")}
+                      </span>
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className={`text-sm font-bold leading-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
@@ -1687,14 +1628,14 @@ export default function PaymongoDashboardPage() {
       </div>
 
       {/* Mobile Bottom Nav */}
-      <nav
-        ref={navRef}
-        className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 border-t transition-all duration-300 ${
-          isDark ? "bg-[#020617] border-slate-800/60" : "bg-white border-slate-200"
-        } ${
-          linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
-        }`}
-      >
+     <nav
+  ref={navRef}
+  className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 border-t transition-all duration-300 ${
+    isDark ? "bg-[#020617] border-slate-800/60" : "bg-white border-slate-200"
+  } ${
+    linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
+  }`}
+>
         {navItems.map(({ tab, icon, label }) => {
           const isActive = activeTab === tab;
           return (
