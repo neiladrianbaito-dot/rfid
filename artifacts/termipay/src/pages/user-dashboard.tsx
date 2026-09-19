@@ -882,104 +882,116 @@ export default function PaymongoDashboardPage() {
                   </>
                 ) : (
                   <>
-                    {[
-                      {
-                        icon: (
-                          <UserAvatar
-                            url={avatarUrl}
-                            name={avatarName}
-                            fallback={<User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />}
-                          />
-                        ),
-                        bg: "bg-blue-500/10 border-blue-500/20",
-                        label: "Name",
-                        // 🔧 FIX: gamitin na ang settingsDisplayName (kasama na
-                        // ang email-derived fallback) imbes na "—" kapag
-                        // hindi pa naka-link ang card.
-                        value: settingsDisplayName,
-                      },
-                      { icon: <CreditCard className={`h-4 w-4 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
-                      { icon: <Tag className={`h-4 w-4 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: isLinked ? (user?.type || "General") : "—" },
-                    ].map(({ icon, bg, label, value, mono }) => (
-                      <div key={label} className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                        <div className={`h-9 w-9 rounded-full flex items-center justify-center border overflow-hidden shrink-0 ${bg}`}>{icon}</div>
-                        <div>
-                          <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
-                          <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"} ${mono ? "font-mono" : ""}`}>{value}</p>
-                        </div>
+                    {/* Name + avatar — laging visible, hindi gray */}
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-full flex items-center justify-center border overflow-hidden shrink-0 bg-blue-500/10 border-blue-500/20">
+                        <UserAvatar
+                          url={avatarUrl}
+                          name={avatarName}
+                          fallback={<User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />}
+                        />
                       </div>
-                    ))}
-
-                    {/* Contact */}
-                    <div className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                      <div className="h-9 w-9 rounded-full flex items-center justify-center border bg-orange-500/10 border-orange-500/20 shrink-0">
-                        <Phone className={`h-4 w-4 ${isDark ? "text-orange-400" : "text-orange-600"}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
-                        {editingContact ? (
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="tel"
-                              value={contactValue}
-                              onChange={(e) => setContactValue(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") handleSaveContact();
-                                if (e.key === "Escape") cancelEditContact();
-                              }}
-                              disabled={savingField === "contact"}
-                              autoFocus
-                              className={`text-sm font-semibold rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
-                                isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
-                              }`}
-                            />
-                            <button
-                              onClick={handleSaveContact}
-                              disabled={savingField === "contact"}
-                              className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                                isDark ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
-                              }`}
-                              title="Save"
-                            >
-                              <Check className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={cancelEditContact}
-                              disabled={savingField === "contact"}
-                              className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                                isDark ? "bg-slate-800 text-slate-400 hover:bg-slate-700" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                              }`}
-                              title="Cancel"
-                            >
-                              <XIcon className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5 group">
-                            <p className={`text-sm font-semibold truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{isLinked ? (displayContact || "None") : "—"}</p>
-                            <button
-                              onClick={startEditContact}
-                              disabled={!isLinked}
-                              className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer disabled:cursor-not-allowed ${
-                                isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
-                              }`}
-                              title="Edit contact number"
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </button>
-                          </div>
-                        )}
+                      <div>
+                        <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Name</p>
+                        <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{settingsDisplayName}</p>
                       </div>
                     </div>
 
-                    {/* Email */}
-                    <div className={`flex items-center gap-3 sm:col-span-2 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
+                    {/* UID + Class — linked lang */}
+                    {isLinked && (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-full flex items-center justify-center border shrink-0 bg-purple-500/10 border-purple-500/20">
+                            <CreditCard className={`h-4 w-4 ${isDark ? "text-purple-400" : "text-purple-600"}`} />
+                          </div>
+                          <div>
+                            <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>UID</p>
+                            <p className={`text-sm font-semibold font-mono ${isDark ? "text-slate-200" : "text-slate-800"}`}>{user?.cardUid || "----"}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-full flex items-center justify-center border shrink-0 bg-emerald-500/10 border-emerald-500/20">
+                            <Tag className={`h-4 w-4 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
+                          </div>
+                          <div>
+                            <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Class</p>
+                            <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{user?.type || "General"}</p>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Contact — linked lang */}
+                    {isLinked && (
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-full flex items-center justify-center border bg-orange-500/10 border-orange-500/20 shrink-0">
+                          <Phone className={`h-4 w-4 ${isDark ? "text-orange-400" : "text-orange-600"}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
+                          {editingContact ? (
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="tel"
+                                value={contactValue}
+                                onChange={(e) => setContactValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleSaveContact();
+                                  if (e.key === "Escape") cancelEditContact();
+                                }}
+                                disabled={savingField === "contact"}
+                                autoFocus
+                                className={`text-sm font-semibold rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                                  isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                                }`}
+                              />
+                              <button
+                                onClick={handleSaveContact}
+                                disabled={savingField === "contact"}
+                                className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                  isDark ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                                }`}
+                                title="Save"
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={cancelEditContact}
+                                disabled={savingField === "contact"}
+                                className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                  isDark ? "bg-slate-800 text-slate-400 hover:bg-slate-700" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                                }`}
+                                title="Cancel"
+                              >
+                                <XIcon className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5 group">
+                              <p className={`text-sm font-semibold truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{displayContact || "None"}</p>
+                              <button
+                                onClick={startEditContact}
+                                className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer ${
+                                  isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                                }`}
+                                title="Edit contact number"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Email — laging visible, hindi gray (edit lang kapag linked) */}
+                    <div className="flex items-center gap-3 sm:col-span-2">
                       <div className="h-9 w-9 rounded-full bg-sky-500/10 flex items-center justify-center border border-sky-500/20 shrink-0">
                         <Mail className={`h-4 w-4 ${isDark ? "text-sky-400" : "text-sky-600"}`} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</p>
-                        {editingEmail ? (
+                        {isLinked && editingEmail ? (
                           <div className="flex items-center gap-1.5 max-w-sm">
                             <input
                               type="email"
@@ -1018,17 +1030,18 @@ export default function PaymongoDashboardPage() {
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5 group">
-                            <p className={`text-sm truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{isLinked ? (displayEmail || "Not linked") : "—"}</p>
-                            <button
-                              onClick={startEditEmail}
-                              disabled={!isLinked}
-                              className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer disabled:cursor-not-allowed ${
-                                isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
-                              }`}
-                              title="Edit email"
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </button>
+                            <p className={`text-sm truncate ${isDark ? "text-slate-200" : "text-slate-800"}`}>{displayEmail || "—"}</p>
+                            {isLinked && (
+                              <button
+                                onClick={startEditEmail}
+                                className={`h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer ${
+                                  isDark ? "text-slate-600 hover:text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                                }`}
+                                title="Edit email"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1411,8 +1424,8 @@ export default function PaymongoDashboardPage() {
                 </div>
               ) : (
                 <>
-                  <div className={`flex items-center gap-3 px-4 py-4 border-b ${isDark ? "border-slate-800/60" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                    {/* 🆕 Real Google avatar → falls back to initials */}
+                  {/* Header: avatar + name + email — laging visible, hindi gray */}
+                  <div className={`flex items-center gap-3 px-4 py-4 ${isLinked ? "border-b" : ""} ${isDark ? "border-slate-800/60" : "border-slate-100"}`}>
                     <div className={`h-11 w-11 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0 overflow-hidden ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
                       <UserAvatar
                         url={avatarUrl}
@@ -1425,150 +1438,153 @@ export default function PaymongoDashboardPage() {
                       />
                     </div>
                     <div className="flex-1 min-w-0">
-                      {/* 🔧 FIX: gamitin na ang settingsDisplayName (kasama na
-                          ang email-derived fallback) imbes na "—" kapag
-                          hindi pa naka-link ang card. */}
                       <p className={`text-sm font-bold leading-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
                         {settingsDisplayName}
                       </p>
                       <p className={`text-[11px] mt-0.5 truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{isLinked ? (displayEmail || "—") : (authProfile?.email || "—")}</p>
-                      <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                        <Badge className={
-                          isLinked && user?.status === "Active"
-                            ? isDark
-                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-1.5 py-0 text-[9px]"
-                              : "bg-emerald-50 text-emerald-700 border-emerald-200 px-1.5 py-0 text-[9px]"
-                            : isDark
-                              ? "bg-red-500/10 text-red-400 border-red-500/20 px-1.5 py-0 text-[9px]"
-                              : "bg-red-50 text-red-700 border-red-200 px-1.5 py-0 text-[9px]"
-                        }>
-                          <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />{isLinked ? (user?.status || "Inactive") : "—"}
-                        </Badge>
-                        <Badge variant="outline" className={`px-1.5 py-0 text-[9px] ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
-                          {isLinked ? (user?.type || "Standard") : "—"}
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-
-                  {[
-                    { icon: <CreditCard className={`h-3.5 w-3.5 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
-                    { icon: <Tag className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, label: "Class", value: isLinked ? (user?.type || "General") : "—", mono: false },
-                  ].map(({ icon, label, value, mono }) => (
-                    <div key={label} className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                      <div className="shrink-0 opacity-80">{icon}</div>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
-                        <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"} ${mono ? "font-mono" : "font-medium"}`}>{value}</p>
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Contact (mobile) */}
-                  <div className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                    <div className="shrink-0 opacity-80"><Phone className={`h-3.5 w-3.5 ${isDark ? "text-orange-400" : "text-orange-600"}`} /></div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
-                      {editingContact ? (
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <input
-                            type="tel"
-                            value={contactValue}
-                            onChange={(e) => setContactValue(e.target.value)}
-                            disabled={savingField === "contact"}
-                            autoFocus
-                            className={`text-xs rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
-                              isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
-                            }`}
-                          />
-                          <button
-                            onClick={handleSaveContact}
-                            disabled={savingField === "contact"}
-                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                              isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600"
-                            }`}
-                          >
-                            <Check className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={cancelEditContact}
-                            disabled={savingField === "contact"}
-                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                              isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
-                            }`}
-                          >
-                            <XIcon className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          <p className={`text-xs font-medium truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{isLinked ? (displayContact || "None") : "—"}</p>
-                          <button
-                            onClick={startEditContact}
-                            disabled={!isLinked}
-                            className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer disabled:cursor-not-allowed ${
-                              isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
-                            }`}
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
+                      {/* Status/type badges — linked lang */}
+                      {isLinked && (
+                        <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                          <Badge className={
+                            user?.status === "Active"
+                              ? isDark
+                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-1.5 py-0 text-[9px]"
+                                : "bg-emerald-50 text-emerald-700 border-emerald-200 px-1.5 py-0 text-[9px]"
+                              : isDark
+                                ? "bg-red-500/10 text-red-400 border-red-500/20 px-1.5 py-0 text-[9px]"
+                                : "bg-red-50 text-red-700 border-red-200 px-1.5 py-0 text-[9px]"
+                          }>
+                            <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />{user?.status || "Inactive"}
+                          </Badge>
+                          <Badge variant="outline" className={`px-1.5 py-0 text-[9px] ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
+                            {user?.type || "Standard"}
+                          </Badge>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Email (mobile) */}
-                  <div className={`flex items-center gap-3 px-4 py-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                    <div className="shrink-0 opacity-80"><Mail className={`h-3.5 w-3.5 ${isDark ? "text-sky-400" : "text-sky-600"}`} /></div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</p>
-                      {editingEmail ? (
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <input
-                            type="email"
-                            value={emailValue}
-                            onChange={(e) => setEmailValue(e.target.value)}
-                            disabled={savingField === "email"}
-                            autoFocus
-                            className={`text-xs rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
-                              isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
-                            }`}
-                          />
-                          <button
-                            onClick={handleSaveEmail}
-                            disabled={savingField === "email"}
-                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                              isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600"
-                            }`}
-                          >
-                            <Check className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={cancelEditEmail}
-                            disabled={savingField === "email"}
-                            className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
-                              isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
-                            }`}
-                          >
-                            <XIcon className="h-3.5 w-3.5" />
-                          </button>
+                  {/* UID / Class / Contact / Email rows — linked lang */}
+                  {isLinked && (
+                    <>
+                      {[
+                        { icon: <CreditCard className={`h-3.5 w-3.5 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, label: "UID", value: user?.cardUid || "----", mono: true },
+                        { icon: <Tag className={`h-3.5 w-3.5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, label: "Class", value: user?.type || "General", mono: false },
+                      ].map(({ icon, label, value, mono }) => (
+                        <div key={label} className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"}`}>
+                          <div className="shrink-0 opacity-80">{icon}</div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+                            <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"} ${mono ? "font-mono" : "font-medium"}`}>{value}</p>
+                          </div>
                         </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{isLinked ? (displayEmail || "Not linked") : "—"}</p>
-                          <button
-                            onClick={startEditEmail}
-                            disabled={!isLinked}
-                            className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer disabled:cursor-not-allowed ${
-                              isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
-                            }`}
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
+                      ))}
+
+                      {/* Contact (mobile) */}
+                      <div className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"}`}>
+                        <div className="shrink-0 opacity-80"><Phone className={`h-3.5 w-3.5 ${isDark ? "text-orange-400" : "text-orange-600"}`} /></div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Contact</p>
+                          {editingContact ? (
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <input
+                                type="tel"
+                                value={contactValue}
+                                onChange={(e) => setContactValue(e.target.value)}
+                                disabled={savingField === "contact"}
+                                autoFocus
+                                className={`text-xs rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                                  isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                                }`}
+                              />
+                              <button
+                                onClick={handleSaveContact}
+                                disabled={savingField === "contact"}
+                                className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                  isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600"
+                                }`}
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={cancelEditContact}
+                                disabled={savingField === "contact"}
+                                className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                  isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
+                                }`}
+                              >
+                                <XIcon className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <p className={`text-xs font-medium truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{displayContact || "None"}</p>
+                              <button
+                                onClick={startEditContact}
+                                className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer ${
+                                  isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
+                                }`}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  </div>
+                      </div>
+
+                      {/* Email (mobile) */}
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <div className="shrink-0 opacity-80"><Mail className={`h-3.5 w-3.5 ${isDark ? "text-sky-400" : "text-sky-600"}`} /></div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-[9px] font-bold uppercase tracking-widest leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Email</p>
+                          {editingEmail ? (
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <input
+                                type="email"
+                                value={emailValue}
+                                onChange={(e) => setEmailValue(e.target.value)}
+                                disabled={savingField === "email"}
+                                autoFocus
+                                className={`text-xs rounded px-2 py-1 w-full min-w-0 focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
+                                  isDark ? "text-slate-200 bg-slate-950 border border-slate-700" : "text-slate-800 bg-white border border-slate-300"
+                                }`}
+                              />
+                              <button
+                                onClick={handleSaveEmail}
+                                disabled={savingField === "email"}
+                                className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                  isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600"
+                                }`}
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={cancelEditEmail}
+                                disabled={savingField === "email"}
+                                className={`h-6 w-6 flex items-center justify-center rounded shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed ${
+                                  isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
+                                }`}
+                              >
+                                <XIcon className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <p className={`text-xs truncate ${isDark ? "text-slate-200" : "text-slate-700"}`}>{displayEmail || "Not linked"}</p>
+                              <button
+                                onClick={startEditEmail}
+                                className={`h-5 w-5 flex items-center justify-center rounded shrink-0 cursor-pointer ${
+                                  isDark ? "text-slate-600 active:text-emerald-400" : "text-slate-400 active:text-emerald-600"
+                                }`}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>
