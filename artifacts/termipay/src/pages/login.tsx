@@ -167,13 +167,23 @@ const ParticleNetworkBackground = ({ theme }: { theme: Theme }) => {
 
   return (
     <div className={`fixed inset-0 -z-10 overflow-hidden transition-colors duration-300 ${theme === "dark" ? "bg-[#020617]" : "bg-white"}`}>
+      {/* Background image */}
+      <img
+        src="/Back.png"
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 w-full h-full object-cover"
+      />
+
+      {/* Tint/gradient overlay so text and the card stay readable over the image, and it adapts to theme */}
       <div
         className={`absolute inset-0 transition-opacity duration-300 ${
           theme === "dark"
-            ? "bg-[radial-gradient(ellipse_at_50%_35%,rgba(30,41,59,0.6)_0%,rgba(2,6,23,1)_70%)]"
-            : "bg-[radial-gradient(ellipse_at_50%_35%,rgba(37,99,235,0.08)_0%,rgba(255,255,255,1)_65%)]"
+            ? "bg-[radial-gradient(ellipse_at_50%_35%,rgba(30,41,59,0.55)_0%,rgba(2,6,23,0.88)_70%)]"
+            : "bg-[radial-gradient(ellipse_at_50%_35%,rgba(37,99,235,0.10)_0%,rgba(255,255,255,0.88)_65%)]"
         }`}
       />
+
       <canvas ref={canvasRef} className="absolute inset-0" />
     </div>
   );
