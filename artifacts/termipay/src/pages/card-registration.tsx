@@ -67,7 +67,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { useTheme } from "@/components/theme-provider";
+// ✅ FIX: use the SAME theme hook/path as TransactionsPage so both pages
+// stay in sync with dark/light mode using identical logic.
+import { useTheme } from "@/hooks/use-theme";
 import { useToast } from "@/hooks/use-toast";
 
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
@@ -381,9 +383,11 @@ function LocationCombobox({
 export default function CardRegistrationPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { theme } = useTheme();
 
-  const isDark = theme === "dark";
+  // ✅ FIX: same hook signature as TransactionsPage — { isDark } destructured
+  // directly instead of deriving it from a separate `theme` string. This
+  // keeps both pages reacting identically when the user toggles the theme.
+  const { isDark } = useTheme();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmittingImage, setIsSubmittingImage] = useState(false);
@@ -405,7 +409,7 @@ export default function CardRegistrationPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ Realtime pulse state (old table behavior)
+  // ✅ Realtime pulse state (same pattern as TransactionsPage)
   const [isPulsing, setIsPulsing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const prevCountRef = useRef<number>(0);
@@ -422,7 +426,8 @@ export default function CardRegistrationPage() {
   });
 
   // Mag-subscribe sa Postgres changes ng users table. Tuwing may bagong
-  // na-register na card (INSERT) o na-edit (UPDATE), mag-re-refetch.
+  // na-register na card (INSERT) o na-edit (UPDATE), mag-re-refetch —
+  // parehong pattern gaya ng ginagamit sa TransactionsPage.
   useRealtimeRefetch(["users"], () => {
     refetchRecentUsers();
   });
@@ -1300,7 +1305,7 @@ export default function CardRegistrationPage() {
         </Button>
       </div>
 
-      {/* RECENT USERS — old styled table (badges, dot colors, LIVE indicator, row pulse) */}
+      {/* RECENT USERS — realtime table (badges, dot colors, LIVE indicator, row pulse, last sync) */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
         <Card className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
           <CardHeader className={`flex flex-row items-center justify-between border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
