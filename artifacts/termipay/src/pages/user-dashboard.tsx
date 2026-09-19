@@ -35,11 +35,47 @@ import { USER_AUTH_TOKEN_KEY, unlinkUserCard } from "@/lib/api";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 import { supabase } from "@/lib/supabase";
 
+// 🆕 Bottom-nav / page tab type (wasn't declared in this file before)
+type Tab = "home" | "Transactions" | "settings";
+
+// ── 🆕 User Avatar ──────────────────────────────────────────────────────────
+// Real photo (Google login, galing sa Supabase Auth identities via backend)
+// kapag available; otherwise `fallback` (kung meron) o initials. Nagfa-fallback
+// din kapag hindi ma-load ang image.
+function UserAvatar({
+  url,
+  name,
+  fallback,
+  className,
+}: {
+  url: string | null;
+  name: string;
+  fallback?: React.ReactNode;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [url]);
+
+  if (!url || failed) {
+    if (fallback) return <>{fallback}</>;
+    return <span className="font-black text-base tracking-tight">{getInitials(name || "?")}</span>;
+  }
+
+  return (
+    <img
+      src={url}
+      alt={name}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      className={`h-full w-full object-cover rounded-full ${className ?? ""}`}
+    />
+  );
+}
+
 // ── Transaction type normalizer ─────────────────────────────────────────────
-// Same idea as the admin Transactions page: the DB may hand back "Fare",
-// "fare", "TopUp", "top_up", "Top Up", etc. This forces one canonical label
-// so the Top-up / Fare tabs split correctly no matter how the source data
-// is spelled/cased.
 type TxType = "Fare" | "Top-up";
 
 function normalizeTxType(type?: string | null): TxType {
@@ -48,9 +84,7 @@ function normalizeTxType(type?: string | null): TxType {
   return "Top-up";
 }
 
-// 🆕 Fee / VAT / Net amount helpers — mirrors the admin Transactions page's
-// getFeeAmount / getVatAmount / getNetAmount / formatNullableAmount so the
-// user dashboard's Top-up view shows the same breakdown.
+// Fee / VAT / Net amount helpers
 type FinancialFields = {
   fee_amount: number | null;
   vat_amount: number | null;
@@ -95,8 +129,6 @@ function formatNullableAmount(value: number | null): string {
       })}`;
 }
 
-// 🆕 Net Amount with a "+" sign, green-colored elsewhere — mirrors the
-// admin Transactions page's formatNetAmountWithSign.
 function formatNetAmountWithSign(value: number | null): string {
   return value == null || !Number.isFinite(value)
     ? "—"
@@ -106,8 +138,6 @@ function formatNetAmountWithSign(value: number | null): string {
       })}`;
 }
 
-// 🆕 Plain (no +/−) peso amount — used for the Top-up "Amount" column now
-// that the sign lives on Net Amount instead.
 function formatPlainAmount(amount: number): string {
   return `₱${Math.abs(Number(amount)).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
@@ -116,8 +146,6 @@ function formatPlainAmount(amount: number): string {
 }
 
 // ── Card Balance Transfer types + helpers ───────────────────────────────────
-// Mirrors the admin Transactions page's card_balance_transfers handling,
-// scoped here to just the rows where THIS user's card is source or target.
 type TransferStatus = "pending" | "completed" | "failed";
 
 type TransferCard = {
@@ -173,8 +201,7 @@ function transferStatusColorClasses(status: TransferStatus, isDark: boolean): st
   }
 }
 
-// ── Transfer Detail Modal — receipt-style view of a single card_balance_
-// transfers row, shown when the user taps a row in the Transfer tab. ───────
+// ── Transfer Detail Modal ───────────────────────────────────────────────────
 function TransferDetailModal({
   transfer,
   onClose,
@@ -294,8 +321,6 @@ function TransferDetailModal({
 
 type TxSubTab = "topup" | "fare" | "transfers";
 
-// 🆕 Shared tab definitions for the GCash-style underline tab bar, used by
-// both the desktop and mobile Transactions headers so the two stay in sync.
 const TX_TABS: { key: TxSubTab; label: string; icon: typeof CreditCard }[] = [
   { key: "topup", label: "Top-up", icon: CreditCard },
   { key: "fare", label: "Fare", icon: Route },
@@ -326,10 +351,11 @@ export default function PaymongoDashboardPage() {
   const displayEmail = localEmail ?? (isLinked ? user?.email : authProfile?.email) ?? "";
   const remainingTopup = Math.max(0, 20000 - currentBalance);
   const isAtMaxBalance = remainingTopup <= 0;
-  // Card must be linked AND status must be "Active" for top-up (and other
-  // card actions) to be allowed. A blocked/inactive card should never let
-  // the user push more money onto it.
   const isCardUsable = isLinked && user?.status === "Active";
+
+  // 🆕 Real Google avatar galing backend/Supabase Auth (null → initials fallback)
+  const avatarUrl = authProfile?.avatarUrl ?? null;
+  const avatarName = user?.fullName || authProfile?.fullName || "?";
 
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
@@ -339,16 +365,11 @@ export default function PaymongoDashboardPage() {
   const [unlinking, setUnlinking] = useState(false);
   const [slowLoadHint, setSlowLoadHint] = useState(false);
 
-  // 🆕 Transactions sub-tab: Top-up / Fare / Transfer — same pattern as the
-  // admin Transactions page, scoped to just this user's own card.
   const [activeTxTab, setActiveTxTab] = useState<TxSubTab>("topup");
   const [transfers, setTransfers] = useState<CardTransfer[]>([]);
   const [transfersLoading, setTransfersLoading] = useState(true);
   const [viewTransfer, setViewTransfer] = useState<CardTransfer | null>(null);
 
-  // 🆕 Fee / VAT / Net amount lookup, keyed by transaction id (string).
-  // Fetched from the `transactions` table the same way the admin page does,
-  // then merged into each top-up transaction below.
   const [financialById, setFinancialById] = useState<Record<string, FinancialFields>>({});
 
   useEffect(() => {
@@ -361,10 +382,7 @@ export default function PaymongoDashboardPage() {
     return () => clearTimeout(timer);
   }, [authChecking, cardDataLoading]);
 
-  // 🆕 Fetch this user's card_balance_transfers (sent OR received). Adjust
-  // the `users!card_balance_transfers_..._fkey` names below if your
-  // Supabase foreign keys are named differently, and adjust `user.id` if
-  // your `users` row's primary key field is named something else.
+  // Fetch this user's card_balance_transfers (sent OR received).
   useEffect(() => {
     if (!isLinked || !user?.id) {
       setTransfers([]);
@@ -400,10 +418,7 @@ export default function PaymongoDashboardPage() {
     };
   }, [isLinked, user?.id]);
 
-  // 🆕 Fetch fee_amount / vat_amount / net_amount for this card's
-  // transactions, same pattern as the admin Transactions page. Keyed by id
-  // so it can be merged into topupTransactions below without refetching
-  // everything else.
+  // Fetch fee_amount / vat_amount / net_amount for this card's transactions.
   useEffect(() => {
     let cancelled = false;
     const loadFinancialFields = async () => {
@@ -441,10 +456,6 @@ export default function PaymongoDashboardPage() {
     };
   }, [transactions]);
 
-  // 🆕 Split this card's transactions into Top-up / Fare buckets, same as
-  // the admin page — memoized so the array reference stays stable.
-  // Top-up rows are merged with their fee_amount / vat_amount / net_amount
-  // from financialById so both the table and the detail modal can show them.
   const topupTransactions = useMemo(
     () =>
       transactions
@@ -461,7 +472,6 @@ export default function PaymongoDashboardPage() {
   );
   const currentTxList = activeTxTab === "fare" ? fareTransactions : topupTransactions;
 
-  // 🆕 Tab → count lookup for the line tab bar (desktop shows counts).
   const txTabCounts: Record<TxSubTab, number> = {
     topup: topupTransactions.length,
     fare: fareTransactions.length,
@@ -488,6 +498,8 @@ export default function PaymongoDashboardPage() {
     }
 
     window.localStorage.removeItem(USER_AUTH_TOKEN_KEY);
+    // Clear din ang Supabase (Google) session sa browser
+    await supabase.auth.signOut().catch(() => {});
     setLocation("/signin");
   };
 
@@ -529,22 +541,12 @@ export default function PaymongoDashboardPage() {
     setSelectedTx(tx);
   }, []);
 
-  useEffect(() => {
-    const isBusy = authChecking || cardDataLoading;
-    if (!isBusy) { setSlowLoadHint(false); return; }
-    const timer = setTimeout(() => setSlowLoadHint(true), 3500);
-    return () => clearTimeout(timer);
-  }, [authChecking, cardDataLoading]);
-
   const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
     { tab: "home", icon: <Home className="h-5 w-5" />, label: "Home" },
     { tab: "Transactions", icon: <List className="h-5 w-5" />, label: "Transactions" },
     { tab: "settings", icon: <Settings className="h-5 w-5" />, label: "Settings" },
   ];
 
-  // 🆕 Full-page gate — see AuthCheckingScreen above. Bails out before any
-  // of the "no card linked yet" UI can render, which is what used to
-  // flash on refresh / cold start.
   if (authChecking) {
     return <AuthCheckingScreen isDark={isDark} slowHint={slowLoadHint} />;
   }
@@ -557,10 +559,6 @@ export default function PaymongoDashboardPage() {
       <TransactionDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} routes={routes} />
       <TransferDetailModal transfer={viewTransfer} onClose={() => setViewTransfer(null)} isDark={isDark} />
       <style>{`${DASHBOARD_STYLES}
-        /* 🔒 Locked-scale flip card — see LockedFlipCard component above.
-           The design canvas itself never reflows; only the outer wrapper's
-           transform: scale(...) changes, in a single React inline style.
-           Copied 1:1 from User Management's card preview CSS. */
         .card-flip-scene-locked {
           position: relative;
           width: 100%;
@@ -584,7 +582,7 @@ export default function PaymongoDashboardPage() {
         .card-face-back-locked { transform: rotateY(180deg); }
       `}</style>
 
-      {/* ✅ Logout confirmation dialog — compact, Yes/No always one line, small boxes */}
+      {/* ✅ Logout confirmation dialog */}
       <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
         <AlertDialogContent className={`max-w-[85vw] sm:max-w-xs p-4 rounded-xl ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
           <AlertDialogHeader className="space-y-1">
@@ -705,8 +703,6 @@ export default function PaymongoDashboardPage() {
           </div>
         )}
 
-        {/* ✅ Blocked/inactive card warning — top-up and other card actions
-            are disabled while this is visible. */}
         {isLinked && !cardDataLoading && user?.status && user.status !== "Active" && (
           <div className={`p-3 rounded-lg text-xs border flex items-center gap-2 ${isDark ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-red-50 border-red-200 text-red-600"}`}>
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
@@ -714,9 +710,6 @@ export default function PaymongoDashboardPage() {
           </div>
         )}
 
-        {/* 🆕 Cold-start hint — only surfaces once a linked account's card
-            data has been loading for a while, so it doesn't flash on
-            ordinary fast loads. */}
         {cardDataLoading && slowLoadHint && (
           <div className={`p-3 rounded-lg text-xs border flex items-center gap-2 ${
             isDark ? "bg-slate-800/60 border-slate-700 text-slate-400" : "bg-slate-100 border-slate-200 text-slate-500"
@@ -726,8 +719,6 @@ export default function PaymongoDashboardPage() {
           </div>
         )}
 
-        {/* ── Persistent reminder banner while no card is linked yet.
-            Desktop only — on mobile, Link Card lives inside the Settings tab. ── */}
         {!isLinked && (
           <div className="hidden md:block">
             <LinkReminderBanner isDark={isDark} onLink={() => linkCard.setIsOpen(true)} />
@@ -736,8 +727,6 @@ export default function PaymongoDashboardPage() {
 
         {/* HOME tab */}
         <div className={activeTab === "home" ? "block" : "hidden md:block"}>
-          {/* ── Mobile-only reminder — desktop already shows this banner
-              above, outside the tab sections. ── */}
           {!isLinked && (
             <div className="md:hidden mb-4">
               <LinkReminderBanner isDark={isDark} onLink={() => linkCard.setIsOpen(true)} />
@@ -756,7 +745,7 @@ export default function PaymongoDashboardPage() {
               </p>
             </div>
 
-            {/* Balance Card — dulled/blank until a card is linked, skeleton while a linked card's data is still loading */}
+            {/* Balance Card */}
             <Card className={`md:col-span-1 backdrop-blur-md border-t-emerald-500/50 border-t-2 ${
               isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"
             }`}>
@@ -831,7 +820,7 @@ export default function PaymongoDashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Virtual Card — mobile only. Hidden on desktop and placed directly below the Balance card. */}
+            {/* Virtual Card — mobile only */}
             {isLinked && (
               <div className="col-span-1 md:hidden">
                 {user ? (
@@ -847,7 +836,7 @@ export default function PaymongoDashboardPage() {
               </div>
             )}
 
-            {/* Profile Card — desktop only, dulled/blank until a card is linked, skeleton while loading */}
+            {/* Profile Card — desktop only */}
             <Card className={`hidden md:block md:col-span-2 backdrop-blur-md ${isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"}`}>
               <CardContent className="pt-6 grid grid-cols-1 sm:grid-cols-2 gap-y-6 gap-x-4">
                 {cardDataLoading ? (
@@ -861,12 +850,23 @@ export default function PaymongoDashboardPage() {
                 ) : (
                   <>
                     {[
-                      { icon: <User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />, bg: "bg-blue-500/10 border-blue-500/20", label: "Name", value: isLinked ? (user?.fullName || "Not Linked") : "—" },
+                      {
+                        icon: (
+                          <UserAvatar
+                            url={avatarUrl}
+                            name={avatarName}
+                            fallback={<User className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />}
+                          />
+                        ),
+                        bg: "bg-blue-500/10 border-blue-500/20",
+                        label: "Name",
+                        value: isLinked ? (user?.fullName || "Not Linked") : "—",
+                      },
                       { icon: <CreditCard className={`h-4 w-4 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
                       { icon: <Tag className={`h-4 w-4 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: isLinked ? (user?.type || "General") : "—" },
                     ].map(({ icon, bg, label, value, mono }) => (
                       <div key={label} className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                        <div className={`h-9 w-9 rounded-full flex items-center justify-center border ${bg}`}>{icon}</div>
+                        <div className={`h-9 w-9 rounded-full flex items-center justify-center border overflow-hidden shrink-0 ${bg}`}>{icon}</div>
                         <div>
                           <p className={`text-[10px] font-bold uppercase leading-none mb-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
                           <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"} ${mono ? "font-mono" : ""}`}>{value}</p>
@@ -874,7 +874,7 @@ export default function PaymongoDashboardPage() {
                       </div>
                     ))}
 
-                    {/* ✅ Contact — editable, disabled until a card is linked */}
+                    {/* Contact */}
                     <div className={`flex items-center gap-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                       <div className="h-9 w-9 rounded-full flex items-center justify-center border bg-orange-500/10 border-orange-500/20 shrink-0">
                         <Phone className={`h-4 w-4 ${isDark ? "text-orange-400" : "text-orange-600"}`} />
@@ -936,7 +936,7 @@ export default function PaymongoDashboardPage() {
                       </div>
                     </div>
 
-                    {/* ✅ Email — editable, disabled until a card is linked */}
+                    {/* Email */}
                     <div className={`flex items-center gap-3 sm:col-span-2 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                       <div className="h-9 w-9 rounded-full bg-sky-500/10 flex items-center justify-center border border-sky-500/20 shrink-0">
                         <Mail className={`h-4 w-4 ${isDark ? "text-sky-400" : "text-sky-600"}`} />
@@ -1011,8 +1011,6 @@ export default function PaymongoDashboardPage() {
               <CardTitle className={`text-xs font-bold flex items-center gap-2 uppercase tracking-widest mb-2.5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />Transactions History
               </CardTitle>
-              {/* 🆕 GCash-style line tabs — flat underline instead of the old
-                  pill/segmented control. No background "card" per tab. */}
               {isLinked && (
                 <div className={`flex items-center gap-6 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
                   {TX_TABS.map(({ key, label, icon: Icon }) => {
@@ -1246,8 +1244,6 @@ export default function PaymongoDashboardPage() {
               <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />
               Transactions History
             </p>
-            {/* 🆕 GCash-style line tabs — full-width, equally spaced, flat
-                underline indicator instead of the old rounded pill group. */}
             {isLinked && (
               <div className={`mt-2 flex items-stretch border-t ${isDark ? "border-slate-800/60" : "border-slate-100"}`}>
                 {TX_TABS.map(({ key, label, icon: Icon }) => {
@@ -1362,7 +1358,6 @@ export default function PaymongoDashboardPage() {
         <div className={activeTab === "settings" ? "block md:hidden" : "hidden"}>
           <div className="space-y-3">
 
-
             {/* Profile Card */}
             <div className={`rounded-2xl overflow-hidden border ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
               {cardDataLoading ? (
@@ -1381,10 +1376,17 @@ export default function PaymongoDashboardPage() {
               ) : (
                 <>
                   <div className={`flex items-center gap-3 px-4 py-4 border-b ${isDark ? "border-slate-800/60" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
-                    <div className="h-11 w-11 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0">
-                      <span className={`font-black text-base tracking-tight ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                        {getInitials(isLinked ? (user?.fullName || "?") : "?")}
-                      </span>
+                    {/* 🆕 Real Google avatar → falls back to initials */}
+                    <div className={`h-11 w-11 rounded-full bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center shrink-0 overflow-hidden ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                      <UserAvatar
+                        url={avatarUrl}
+                        name={avatarName}
+                        fallback={
+                          <span className="font-black text-base tracking-tight">
+                            {getInitials(isLinked ? (user?.fullName || "?") : (authProfile?.fullName || "?"))}
+                          </span>
+                        }
+                      />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className={`text-sm font-bold leading-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
@@ -1423,7 +1425,7 @@ export default function PaymongoDashboardPage() {
                     </div>
                   ))}
 
-                  {/* ✅ Contact — editable (mobile), disabled until a card is linked */}
+                  {/* Contact (mobile) */}
                   <div className={`flex items-center gap-3 px-4 py-3 border-b ${isDark ? "border-slate-800/50" : "border-slate-100"} ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                     <div className="shrink-0 opacity-80"><Phone className={`h-3.5 w-3.5 ${isDark ? "text-orange-400" : "text-orange-600"}`} /></div>
                     <div className="flex-1 min-w-0">
@@ -1476,7 +1478,7 @@ export default function PaymongoDashboardPage() {
                     </div>
                   </div>
 
-                  {/* ✅ Email — editable (mobile, auth_users), disabled until a card is linked */}
+                  {/* Email (mobile) */}
                   <div className={`flex items-center gap-3 px-4 py-3 ${!isLinked ? "opacity-40 grayscale" : ""}`}>
                     <div className="shrink-0 opacity-80"><Mail className={`h-3.5 w-3.5 ${isDark ? "text-sky-400" : "text-sky-600"}`} /></div>
                     <div className="flex-1 min-w-0">
@@ -1532,7 +1534,7 @@ export default function PaymongoDashboardPage() {
               )}
             </div>
 
-            {/* Account actions — always usable regardless of link status */}
+            {/* Account actions */}
             <div className={`rounded-2xl overflow-hidden border ${isDark ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
               <p className={`px-4 pt-3 pb-1.5 text-[9px] font-black uppercase tracking-widest ${isDark ? "text-slate-600" : "text-slate-400"}`}>Account</p>
 
@@ -1628,14 +1630,14 @@ export default function PaymongoDashboardPage() {
       </div>
 
       {/* Mobile Bottom Nav */}
-     <nav
-  ref={navRef}
-  className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 border-t transition-all duration-300 ${
-    isDark ? "bg-[#020617] border-slate-800/60" : "bg-white border-slate-200"
-  } ${
-    linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
-  }`}
->
+      <nav
+        ref={navRef}
+        className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 border-t transition-all duration-300 ${
+          isDark ? "bg-[#020617] border-slate-800/60" : "bg-white border-slate-200"
+        } ${
+          linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
+        }`}
+      >
         {navItems.map(({ tab, icon, label }) => {
           const isActive = activeTab === tab;
           return (
