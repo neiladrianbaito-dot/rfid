@@ -4,7 +4,7 @@ import { db, adminsTable } from "@workspace/db";
 import { LoginBody, GetMeResponse } from "@workspace/api-zod";
 import { createAdminToken, verifyAdminToken } from "../lib/admin-token";
 import { createUserToken, verifyUserToken } from "../lib/user-token";
-import { signInSupabaseWithPassword } from "../lib/supabase";
+import { signInSupabaseWithPassword, getSupabaseUserFromToken } from "../lib/supabase";
 import { logAudit } from "../lib/audit-logger";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
@@ -383,6 +383,100 @@ router.post("/auth/user-signin", async (req, res): Promise<void> => {
     });
   } catch (error) {
     console.error("User sign in error:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// ── GOOGLE OAUTH SYNC ─────────────────────────────────────────────────────────
+// Called by the frontend right after Supabase finishes the Google OAuth
+// redirect (see AuthCallback.tsx). We NEVER trust email/fullName sent
+// directly by the client for this — anyone could POST here claiming to be
+// someone else. Instead we verify the Supabase access token server-side
+// and pull the email/name from that verified response only.
+//
+// Behavior: auto-create. First-time Google sign-in creates a new
+// auth_users row; a returning one just re-links/refreshes it.
+
+router.post("/auth/oauth-sync", async (req, res): Promise<void> => {
+  try {
+    const body = req.body as { accessToken?: string };
+    const accessToken = typeof body?.accessToken === "string" ? body.accessToken : "";
+
+    if (!accessToken) {
+      res.status(400).json({ success: false, message: "accessToken is required" });
+      return;
+    }
+
+    const supabaseUser = await getSupabaseUserFromToken(accessToken);
+    if (!supabaseUser || !supabaseUser.email) {
+      res.status(401).json({ success: false, message: "Invalid or expired session. Please sign in again." });
+      return;
+    }
+
+    const email = supabaseUser.email.trim().toLowerCase();
+
+    const fullNameFromGoogle =
+      (typeof supabaseUser.user_metadata?.full_name === "string" && supabaseUser.user_metadata.full_name.trim()) ||
+      (typeof supabaseUser.user_metadata?.name === "string" && supabaseUser.user_metadata.name.trim()) ||
+      email;
+
+    const canReadLinkedCard = await hasLinkedCardUidColumn();
+
+    // auth_users.password_hash is required by the schema even for OAuth
+    // accounts — store an unusable random hash, since these accounts will
+    // only ever sign in through Google, never via /auth/user-signin
+    // password auth.
+    const placeholderHash = hashPassword(randomBytes(32).toString("hex"));
+
+    await db.execute(sql`
+      insert into auth_users (supabase_auth_id, full_name, email, password_hash)
+      values (${supabaseUser.id}::uuid, ${fullNameFromGoogle}, ${email}, ${placeholderHash})
+      on conflict (email) do update
+      set
+        supabase_auth_id = excluded.supabase_auth_id,
+        updated_at       = now()
+    `);
+
+    const rawRecord = await db.execute(
+      canReadLinkedCard
+        ? sql`select id as uid, full_name, email, linked_card_uid from auth_users where email = ${email} limit 1`
+        : sql`select id as uid, full_name, email from auth_users where email = ${email} limit 1`
+    );
+
+    type UserRow = { uid: string; full_name: string; email: string; linked_card_uid?: string | null };
+    const user = extractRows<UserRow>(rawRecord)[0];
+
+    if (!user) {
+      res.status(500).json({ success: false, message: "Could not create account. Please try again." });
+      return;
+    }
+
+    // Same as the password-based signin route: card status is
+    // informational only, never blocks access to the account itself.
+    const { blocked: cardBlocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
+
+    await logAudit({
+      user: user.email,
+      action: "LOGIN",
+      entity: "User",
+      details: `${user.email} signed in with Google`,
+    });
+
+    res.json({
+      success: true,
+      message: "Signed in with Google",
+      token: createUserToken({ id: user.uid, email: user.email, fullName: user.full_name }),
+      user: {
+        id: user.uid,
+        fullName: user.full_name,
+        email: user.email,
+        linkedCardUid: user.linked_card_uid ?? "",
+        cardBlocked,
+        cardStatus,
+      },
+    });
+  } catch (error) {
+    console.error("OAuth sync error:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
