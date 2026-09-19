@@ -730,9 +730,19 @@ export default function UserManagementPage() {
   const handleUpdate = async () => {
     if (!editUser || !hasChanges) return;
 
-    setIsUploadingEditImage(!!editIdImageFile);
+    const oldImageValue = editUser.idImagePath || editUser.id_image_path || null;
+    const replacingImage = !!editIdImageFile;
+    let newImageUrl: string | null = null;
+
+    setIsUploadingEditImage(replacingImage);
+
     try {
-      const newImageUrl = await uploadEditedIdImage(editUser);
+      // 1. Upload the replacement first.
+      // Keep the OLD image in Storage until the database update succeeds.
+      newImageUrl = replacingImage
+        ? await uploadEditedIdImage(editUser)
+        : null;
+
       const fullAddress = [
         editForm.streetAddress,
         editForm.barangayName,
@@ -742,7 +752,9 @@ export default function UserManagementPage() {
         editForm.zipCode,
       ].map((value) => value.trim()).filter(Boolean).join(", ");
 
-      updateMutation.mutate({
+      // 2. WAIT for the database update to finish successfully.
+      // mutateAsync prevents Storage cleanup from happening before the DB write.
+      await updateMutation.mutateAsync({
         id: editUser.id,
         data: {
           fullName: editForm.fullName.trim(),
@@ -759,17 +771,83 @@ export default function UserManagementPage() {
           barangayName: editForm.barangayName.trim() || undefined,
           zipCode: editForm.zipCode.trim() || undefined,
           fullAddress: fullAddress || undefined,
+
+          // Only send idImagePath when a NEW image was actually selected.
+          // If no image was selected, the existing DB image is preserved.
           ...(newImageUrl ? { idImagePath: newImageUrl } : {}),
         },
-      }, {
-        onSuccess: () => {
-          setEditIdImageFile(null);
-          setEditIdImagePreview(null);
-        },
       });
+
+      // 3. NEW IMAGE DETECTED + DB UPDATE SUCCEEDED:
+      // Now it is safe to delete the OLD image from the Supabase bucket.
+      // If there was no new image, this block does nothing.
+      if (replacingImage && newImageUrl && oldImageValue) {
+        const oldImagePath = getIdImageStoragePath(oldImageValue);
+        const newImagePath = getIdImageStoragePath(newImageUrl);
+
+        // Never delete the newly uploaded object by mistake.
+        if (oldImagePath && oldImagePath !== newImagePath) {
+          const { error: deleteOldImageError } = await supabase
+            .storage
+            .from(ID_IMAGE_BUCKET)
+            .remove([oldImagePath]);
+
+          if (deleteOldImageError) {
+            // The DB update already succeeded, so do NOT roll it back.
+            // The only remaining issue is Storage cleanup.
+            console.error("Old ID image cleanup error:", deleteOldImageError);
+
+            toast({
+              title: <SuccessTitle text="User Updated Successfully" />,
+              description:
+                "The new ID image is active, but the previous image could not be removed from Storage.",
+            });
+          }
+        }
+      }
+
+      // Clear the selected local file/preview only after the DB update succeeds.
+      if (editIdImagePreview) {
+        URL.revokeObjectURL(editIdImagePreview);
+      }
+
+      setEditIdImageFile(null);
+      setEditIdImagePreview(null);
+
+      if (editFileInputRef.current) {
+        editFileInputRef.current.value = "";
+      }
     } catch (error: any) {
-      console.error("Edit ID image error:", error);
-      toast({ title: "Failed to update user", description: error?.message || "Unable to upload the new ID image.", variant: "destructive" });
+      console.error("Edit user/image update error:", error);
+
+      // IMPORTANT:
+      // If the NEW image was uploaded but the DB update failed,
+      // delete the NEW orphaned image instead.
+      // The OLD image is intentionally kept because it is still the active one.
+      if (newImageUrl) {
+        const newImagePath = getIdImageStoragePath(newImageUrl);
+
+        if (newImagePath) {
+          const { error: cleanupError } = await supabase
+            .storage
+            .from(ID_IMAGE_BUCKET)
+            .remove([newImagePath]);
+
+          if (cleanupError) {
+            console.error(
+              "Failed to clean up newly uploaded ID image:",
+              cleanupError
+            );
+          }
+        }
+      }
+
+      toast({
+        title: "Failed to update user",
+        description:
+          error?.message || "Unable to update the user or ID image.",
+        variant: "destructive",
+      });
     } finally {
       setIsUploadingEditImage(false);
     }
