@@ -84,6 +84,24 @@ function normalizeTxType(type?: string | null): TxType {
   return "Top-up";
 }
 
+// ── 🆕 Temporary display name mula sa email, gagamitin lang bilang
+// pansamantalang pangalan HABANG hindi pa naka-link ang card (walang
+// pang fullName mula sa cardholder record). Hindi ito totoong pangalan —
+// pinapalitan lang nito ang "—"/null-looking placeholder sa Settings.
+//   "juan.delacruz23@gmail.com" -> "Juan Delacruz23"
+//   "j_delacruz"                -> "J Delacruz"
+function deriveNameFromEmail(email?: string | null): string {
+  if (!email) return "";
+  const localPart = email.split("@")[0] || "";
+  if (!localPart.trim()) return "";
+  return localPart
+    .split(/[._\-+]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+    .trim();
+}
+
 // Fee / VAT / Net amount helpers
 type FinancialFields = {
   fee_amount: number | null;
@@ -355,7 +373,22 @@ export default function PaymongoDashboardPage() {
 
   // 🆕 Real Google avatar galing backend/Supabase Auth (null → initials fallback)
   const avatarUrl = authProfile?.avatarUrl ?? null;
-  const avatarName = user?.fullName || authProfile?.fullName || "?";
+
+  // 🆕 Pansamantalang pangalan galing email — LALABAS LANG kapag:
+  //   1) hindi pa naka-link ang card (walang totoong fullName mula sa users table)
+  //   2) walang laman ang authProfile?.fullName
+  // Hindi ito nagpapalit sa totoong pangalan pagkatapos ma-link — sa sandaling
+  // ma-link ang card, agad na gagamitin ang tunay na user?.fullName sa taas.
+  const tempNameFromEmail = !isLinked ? deriveNameFromEmail(authProfile?.email) : "";
+
+  // 🆕 Ito ang gagamitin sa buong Settings tab (desktop Profile Card at
+  // mobile Settings tab) para hindi na lumabas ang "—"/null-looking na
+  // pangalan kapag hindi pa naka-link ang card.
+  const settingsDisplayName = isLinked
+    ? (user?.fullName || "Not linked")
+    : (displayName || tempNameFromEmail || "Guest");
+
+  const avatarName = user?.fullName || authProfile?.fullName || tempNameFromEmail || "?";
 
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
@@ -860,7 +893,10 @@ export default function PaymongoDashboardPage() {
                         ),
                         bg: "bg-blue-500/10 border-blue-500/20",
                         label: "Name",
-                        value: isLinked ? (user?.fullName || "Not Linked") : "—",
+                        // 🔧 FIX: gamitin na ang settingsDisplayName (kasama na
+                        // ang email-derived fallback) imbes na "—" kapag
+                        // hindi pa naka-link ang card.
+                        value: settingsDisplayName,
                       },
                       { icon: <CreditCard className={`h-4 w-4 ${isDark ? "text-purple-400" : "text-purple-600"}`} />, bg: "bg-purple-500/10 border-purple-500/20", label: "UID", value: isLinked ? (user?.cardUid || "----") : "—", mono: true },
                       { icon: <Tag className={`h-4 w-4 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />, bg: "bg-emerald-500/10 border-emerald-500/20", label: "Class", value: isLinked ? (user?.type || "General") : "—" },
@@ -1383,16 +1419,19 @@ export default function PaymongoDashboardPage() {
                         name={avatarName}
                         fallback={
                           <span className="font-black text-base tracking-tight">
-                            {getInitials(isLinked ? (user?.fullName || "?") : (authProfile?.fullName || "?"))}
+                            {getInitials(avatarName)}
                           </span>
                         }
                       />
                     </div>
                     <div className="flex-1 min-w-0">
+                      {/* 🔧 FIX: gamitin na ang settingsDisplayName (kasama na
+                          ang email-derived fallback) imbes na "—" kapag
+                          hindi pa naka-link ang card. */}
                       <p className={`text-sm font-bold leading-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
-                        {isLinked ? (user?.fullName || "Not linked") : "—"}
+                        {settingsDisplayName}
                       </p>
-                      <p className={`text-[11px] mt-0.5 truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{isLinked ? (displayEmail || "—") : "—"}</p>
+                      <p className={`text-[11px] mt-0.5 truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>{isLinked ? (displayEmail || "—") : (authProfile?.email || "—")}</p>
                       <div className="flex gap-1.5 mt-1.5 flex-wrap">
                         <Badge className={
                           isLinked && user?.status === "Active"
