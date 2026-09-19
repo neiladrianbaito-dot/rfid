@@ -63,7 +63,14 @@ export async function getSignedInUser() {
   if (!response.ok) {
     throw new Error(payload?.message || "Not authenticated");
   }
-  return payload as { user?: { linkedCardUid?: string } };
+  return payload as {
+    user?: {
+      fullName?: string;
+      email?: string;
+      linkedCardUid?: string | null;
+      avatarUrl?: string | null; // 🆕
+    };
+  };
 }
 
 export async function saveLinkedCardUid(cardUid: string) {
