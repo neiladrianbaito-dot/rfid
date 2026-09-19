@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { resolveAuthAvatar } from "../lib/auth-avatar";
 import { eq, sql } from "drizzle-orm";
 import { db, adminsTable } from "@workspace/db";
 import { LoginBody, GetMeResponse } from "@workspace/api-zod";
@@ -499,11 +500,17 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
     const canReadLinkedCard = await hasLinkedCardUidColumn();
     const rawRecord = await db.execute(
       canReadLinkedCard
-        ? sql`select id as uid, full_name, email, linked_card_uid from auth_users where id = ${currentUser.id} limit 1`
-        : sql`select id as uid, full_name, email from auth_users where id = ${currentUser.id} limit 1`
+        ? sql`select id as uid, full_name, email, linked_card_uid, supabase_auth_id from auth_users where id = ${currentUser.id} limit 1`
+        : sql`select id as uid, full_name, email, supabase_auth_id from auth_users where id = ${currentUser.id} limit 1`
     );
 
-    type UserRow = { uid: string; full_name: string; email: string; linked_card_uid?: string | null };
+    type UserRow = {
+      uid: string;
+      full_name: string;
+      email: string;
+      linked_card_uid?: string | null;
+      supabase_auth_id?: string | null;
+    };
     const user = extractRows<UserRow>(rawRecord)[0];
 
     if (!user) {
@@ -515,6 +522,18 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
     // access to the account itself.
     const { blocked: cardBlocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
 
+    // 🆕 Best-effort avatar lookup — hindi dapat ito mag-fail ng buong request
+    // kung walang picture o may isyu sa lookup.
+    let avatarUrl: string | null = null;
+    try {
+      avatarUrl = await resolveAuthAvatar({
+        supabaseUserId: user.supabase_auth_id ?? null,
+        email: user.email, // galing sa verified DB row, hindi sa request body
+      });
+    } catch (avatarError) {
+      console.warn("resolveAuthAvatar failed in /auth/user-me:", avatarError);
+    }
+
     res.json({
       success: true,
       user: {
@@ -524,6 +543,7 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
         linkedCardUid: user.linked_card_uid ?? "",
         cardBlocked,
         cardStatus,
+        avatarUrl, // 🆕
       },
     });
   } catch (error) {
