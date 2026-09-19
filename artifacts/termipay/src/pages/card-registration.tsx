@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   useCreateUser,
   useListRecentUsers,
@@ -19,6 +19,9 @@ import {
   X,
   Loader2,
   CalendarDays,
+  ChevronsUpDown,
+  Check,
+  Search,
 } from "lucide-react";
 
 import {
@@ -50,6 +53,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 import {
   Dialog,
@@ -164,6 +173,199 @@ function getTypeDotColor(type: string | null | undefined) {
     default:
       return "bg-red-500";
   }
+}
+
+/*
+ * LOCATION COMBOBOX
+ *
+ * Why this exists: the PSGC address lists (especially barangays — some
+ * cities like Manila have ~900 of them) were being rendered as full DOM
+ * trees inside Radix's <Select>, which is what caused the scroll lag.
+ *
+ * This component only ever renders ~15 visible rows (+ a small overscan
+ * buffer) no matter how long the underlying list is, and windows the rest
+ * off-screen using a spacer div. It also adds type-to-filter search, which
+ * makes long lists (barangays especially) much faster to use than scrolling.
+ */
+const COMBOBOX_ITEM_HEIGHT = 36;
+const COMBOBOX_LIST_HEIGHT = 260;
+const COMBOBOX_OVERSCAN = 6;
+
+interface LocationComboboxProps {
+  options: PsgcOption[];
+  value: string;
+  onChange: (code: string, name: string) => void;
+  placeholder: string;
+  loadingPlaceholder?: string;
+  loading?: boolean;
+  disabled?: boolean;
+  isDark: boolean;
+}
+
+function LocationCombobox({
+  options,
+  value,
+  onChange,
+  placeholder,
+  loadingPlaceholder,
+  loading,
+  disabled,
+  isDark,
+}: LocationComboboxProps) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [scrollTop, setScrollTop] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return options;
+
+    const query = search.trim().toLowerCase();
+
+    return options.filter((option) =>
+      option.name.toLowerCase().includes(query)
+    );
+  }, [options, search]);
+
+  useEffect(() => {
+    if (open) {
+      setSearch("");
+      setScrollTop(0);
+
+      if (listRef.current) {
+        listRef.current.scrollTop = 0;
+      }
+    }
+  }, [open]);
+
+  const selected = options.find((option) => option.code === value);
+
+  const visibleCount =
+    Math.ceil(COMBOBOX_LIST_HEIGHT / COMBOBOX_ITEM_HEIGHT) +
+    COMBOBOX_OVERSCAN * 2;
+
+  const startIndex = Math.max(
+    0,
+    Math.floor(scrollTop / COMBOBOX_ITEM_HEIGHT) - COMBOBOX_OVERSCAN
+  );
+
+  const endIndex = Math.min(filtered.length, startIndex + visibleCount);
+  const visibleItems = filtered.slice(startIndex, endIndex);
+  const totalHeight = filtered.length * COMBOBOX_ITEM_HEIGHT;
+  const offsetY = startIndex * COMBOBOX_ITEM_HEIGHT;
+
+  return (
+    <Popover open={open} onOpenChange={(next) => !disabled && setOpen(next)}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className={`flex h-9 w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            isDark
+              ? "border-slate-800 bg-slate-950 text-slate-200"
+              : "border-slate-200 bg-white text-slate-900"
+          }`}
+        >
+          <span className={`truncate ${!selected ? "opacity-50" : ""}`}>
+            {selected?.name ??
+              (loading ? loadingPlaceholder ?? "Loading..." : placeholder)}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+
+      <PopoverContent
+        align="start"
+        className={`w-[--radix-popover-trigger-width] p-0 ${
+          isDark ? "border-slate-800 bg-slate-950" : "bg-white"
+        }`}
+      >
+        <div
+          className={`flex items-center gap-2 border-b px-3 py-2 ${
+            isDark ? "border-slate-800" : "border-slate-100"
+          }`}
+        >
+          <Search className="h-4 w-4 shrink-0 opacity-50" />
+          <input
+            autoFocus
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setScrollTop(0);
+
+              if (listRef.current) {
+                listRef.current.scrollTop = 0;
+              }
+            }}
+            placeholder="Search..."
+            className={`w-full bg-transparent text-sm outline-none placeholder:opacity-50 ${
+              isDark ? "text-slate-200" : "text-slate-900"
+            }`}
+          />
+        </div>
+
+        <div
+          ref={listRef}
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+          style={{
+            height: COMBOBOX_LIST_HEIGHT,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
+            contain: "strict",
+          }}
+          className="location-combobox-list"
+        >
+          {filtered.length === 0 ? (
+            <div
+              className={`px-3 py-6 text-center text-sm ${
+                isDark ? "text-slate-500" : "text-slate-400"
+              }`}
+            >
+              No results found
+            </div>
+          ) : (
+            <div style={{ height: totalHeight, position: "relative" }}>
+              <div
+                style={{ position: "absolute", top: offsetY, left: 0, right: 0 }}
+              >
+                {visibleItems.map((option) => {
+                  const isSelected = option.code === value;
+
+                  return (
+                    <button
+                      type="button"
+                      key={option.code}
+                      onClick={() => {
+                        onChange(option.code, option.name);
+                        setOpen(false);
+                      }}
+                      style={{ height: COMBOBOX_ITEM_HEIGHT }}
+                      className={`flex w-full items-center gap-2 px-3 text-left text-sm transition-colors ${
+                        isSelected
+                          ? isDark
+                            ? "bg-cyan-950/40 text-cyan-400"
+                            : "bg-cyan-50 text-cyan-700"
+                          : isDark
+                            ? "text-slate-200 hover:bg-slate-800"
+                            : "text-slate-800 hover:bg-slate-50"
+                      }`}
+                    >
+                      <Check
+                        className={`h-4 w-4 shrink-0 ${
+                          isSelected ? "opacity-100" : "opacity-0"
+                        }`}
+                      />
+                      <span className="truncate">{option.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export default function CardRegistrationPage() {
@@ -546,16 +748,12 @@ export default function CardRegistrationPage() {
   /*
    * REGION CHANGE
    */
-  function handleRegionChange(value: string) {
-    const selected = regions.find(
-      (region) => region.code === value
-    );
-
+  function handleRegionChange(code: string, name: string) {
     setForm((current) => ({
       ...current,
 
-      regionCode: value,
-      regionName: selected?.name ?? "",
+      regionCode: code,
+      regionName: name,
 
       provinceCode: "",
       provinceName: "",
@@ -574,16 +772,12 @@ export default function CardRegistrationPage() {
   /*
    * PROVINCE CHANGE
    */
-  function handleProvinceChange(value: string) {
-    const selected = provinces.find(
-      (province) => province.code === value
-    );
-
+  function handleProvinceChange(code: string, name: string) {
     setForm((current) => ({
       ...current,
 
-      provinceCode: value,
-      provinceName: selected?.name ?? "",
+      provinceCode: code,
+      provinceName: name,
 
       cityCode: "",
       cityName: "",
@@ -598,16 +792,12 @@ export default function CardRegistrationPage() {
   /*
    * CITY CHANGE
    */
-  function handleCityChange(value: string) {
-    const selected = cities.find(
-      (city) => city.code === value
-    );
-
+  function handleCityChange(code: string, name: string) {
     setForm((current) => ({
       ...current,
 
-      cityCode: value,
-      cityName: selected?.name ?? "",
+      cityCode: code,
+      cityName: name,
 
       barangayCode: "",
       barangayName: "",
@@ -617,16 +807,12 @@ export default function CardRegistrationPage() {
   /*
    * BARANGAY CHANGE
    */
-  function handleBarangayChange(value: string) {
-    const selected = barangays.find(
-      (barangay) => barangay.code === value
-    );
-
+  function handleBarangayChange(code: string, name: string) {
     setForm((current) => ({
       ...current,
 
-      barangayCode: value,
-      barangayName: selected?.name ?? "",
+      barangayCode: code,
+      barangayName: name,
     }));
   }
 
@@ -1042,32 +1228,18 @@ export default function CardRegistrationPage() {
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
 
-        /* Smooth native-like scrolling for long PSGC dropdown lists. */
-        .address-select-content {
-          max-height: min(280px, 40vh);
-          overflow: hidden;
-          overscroll-behavior: contain;
-          contain: layout paint;
-        }
-
-        .address-select-content [data-radix-select-viewport] {
-          max-height: min(280px, 40vh);
-          overflow-y: auto !important;
-          overflow-x: hidden;
-          overscroll-behavior: contain;
-          -webkit-overflow-scrolling: touch;
-          touch-action: pan-y;
+        .location-combobox-list {
           scrollbar-width: thin;
-          scrollbar-gutter: stable;
           will-change: scroll-position;
           transform: translateZ(0);
-          contain: strict;
+          -webkit-overflow-scrolling: touch;
         }
-
-        /* Prevent Radix item hover/focus transitions from making wheel scrolling feel sticky. */
-        .address-select-content [data-radix-select-item] {
-          touch-action: pan-y;
-          user-select: none;
+        .location-combobox-list::-webkit-scrollbar {
+          width: 6px;
+        }
+        .location-combobox-list::-webkit-scrollbar-thumb {
+          background: rgba(148, 163, 184, 0.4);
+          border-radius: 9999px;
         }
       `}</style>
 
@@ -1586,39 +1758,16 @@ export default function CardRegistrationPage() {
                     Region
                   </label>
 
-                  <Select
+                  <LocationCombobox
+                    options={regions}
                     value={form.regionCode}
-                    onValueChange={
-                      handleRegionChange
-                    }
-                    disabled={
-                      isSubmitting ||
-                      loadingRegions
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingRegions
-                            ? "Loading regions..."
-                            : "Select region"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent className="address-select-content">
-                      {regions.map(
-                        (region) => (
-                          <SelectItem
-                            key={region.code}
-                            value={region.code}
-                          >
-                            {region.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
+                    onChange={handleRegionChange}
+                    placeholder="Select region"
+                    loadingPlaceholder="Loading regions..."
+                    loading={loadingRegions}
+                    disabled={isSubmitting || loadingRegions}
+                    isDark={isDark}
+                  />
                 </div>
 
                 <div className="space-y-2">
@@ -1626,40 +1775,20 @@ export default function CardRegistrationPage() {
                     Province
                   </label>
 
-                  <Select
+                  <LocationCombobox
+                    options={provinces}
                     value={form.provinceCode}
-                    onValueChange={
-                      handleProvinceChange
-                    }
+                    onChange={handleProvinceChange}
+                    placeholder="Select province"
+                    loadingPlaceholder="Loading provinces..."
+                    loading={loadingProvinces}
                     disabled={
                       isSubmitting ||
                       !form.regionCode ||
                       loadingProvinces
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingProvinces
-                            ? "Loading provinces..."
-                            : "Select province"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent className="address-select-content">
-                      {provinces.map(
-                        (province) => (
-                          <SelectItem
-                            key={province.code}
-                            value={province.code}
-                          >
-                            {province.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
+                    isDark={isDark}
+                  />
                 </div>
 
                 <div className="space-y-2">
@@ -1667,40 +1796,20 @@ export default function CardRegistrationPage() {
                     City / Municipality
                   </label>
 
-                  <Select
+                  <LocationCombobox
+                    options={cities}
                     value={form.cityCode}
-                    onValueChange={
-                      handleCityChange
-                    }
+                    onChange={handleCityChange}
+                    placeholder="Select city / municipality"
+                    loadingPlaceholder="Loading cities..."
+                    loading={loadingCities}
                     disabled={
                       isSubmitting ||
                       !form.provinceCode ||
                       loadingCities
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingCities
-                            ? "Loading cities..."
-                            : "Select city / municipality"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent className="address-select-content">
-                      {cities.map(
-                        (city) => (
-                          <SelectItem
-                            key={city.code}
-                            value={city.code}
-                          >
-                            {city.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
+                    isDark={isDark}
+                  />
                 </div>
 
                 <div className="space-y-2">
@@ -1708,40 +1817,20 @@ export default function CardRegistrationPage() {
                     Barangay
                   </label>
 
-                  <Select
+                  <LocationCombobox
+                    options={barangays}
                     value={form.barangayCode}
-                    onValueChange={
-                      handleBarangayChange
-                    }
+                    onChange={handleBarangayChange}
+                    placeholder="Select barangay"
+                    loadingPlaceholder="Loading barangays..."
+                    loading={loadingBarangays}
                     disabled={
                       isSubmitting ||
                       !form.cityCode ||
                       loadingBarangays
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          loadingBarangays
-                            ? "Loading barangays..."
-                            : "Select barangay"
-                        }
-                      />
-                    </SelectTrigger>
-
-                    <SelectContent className="address-select-content">
-                      {barangays.map(
-                        (barangay) => (
-                          <SelectItem
-                            key={barangay.code}
-                            value={barangay.code}
-                          >
-                            {barangay.name}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
+                    isDark={isDark}
+                  />
                 </div>
 
                 <div className="space-y-2">
