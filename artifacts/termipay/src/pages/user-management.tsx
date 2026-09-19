@@ -117,6 +117,46 @@ function normalizeEmail(email: string | null | undefined): string | null {
   return trimmed;
 }
 
+
+// Get the exact Storage object path from an ID image value.
+// Supports both a full Supabase public URL and a bucket-relative path.
+function getIdImageStoragePath(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  // Already a bucket-relative object path.
+  if (!/^https?:\/\//i.test(raw)) {
+    return raw.replace(/^\/+/, "").split("?")[0] || null;
+  }
+
+  try {
+    const url = new URL(raw);
+    const pathname = url.pathname;
+
+    const markers = [
+      `/storage/v1/object/public/${ID_IMAGE_BUCKET}/`,
+      `/storage/v1/object/sign/${ID_IMAGE_BUCKET}/`,
+      `/storage/v1/object/authenticated/${ID_IMAGE_BUCKET}/`,
+      `/storage/v1/object/${ID_IMAGE_BUCKET}/`,
+    ];
+
+    for (const marker of markers) {
+      const index = pathname.indexOf(marker);
+      if (index !== -1) {
+        const encodedPath = pathname.slice(index + marker.length);
+        const decodedPath = decodeURIComponent(encodedPath).replace(/^\/+/, "");
+        return decodedPath || null;
+      }
+    }
+  } catch (error) {
+    console.warn("Could not parse ID image Storage URL:", error);
+  }
+
+  return null;
+}
+
 // 🎨 Card type -> color mapping
 // 🟥 Regular  🟦 Student  🟨 Senior  🟩 PWD
 function getTypeBadgeStyle(type: string | null | undefined, isDark: boolean) {
@@ -633,7 +673,8 @@ export default function UserManagementPage() {
     const initial = {
       fullName: user.fullName || "",
       dateOfBirth: user.dateOfBirth ? String(user.dateOfBirth).slice(0, 10) : "",
-      contactNumber: user.contactNumber || "",
+      // Keep the edit field strictly numeric and capped at 11 digits.
+      contactNumber: String(user.contactNumber || "").replace(/\D/g, "").slice(0, 11),
       streetAddress: user.streetAddress || "",
       regionCode: user.regionCode || "",
       regionName: user.regionName || "",
@@ -654,9 +695,15 @@ export default function UserManagementPage() {
     setProvinceOptions([]);
     setCityOptions([]);
     setBarangayOptions([]);
+    if (editIdImagePreview) URL.revokeObjectURL(editIdImagePreview);
     setEditIdImageFile(null);
     setEditIdImagePreview(null);
+    if (editFileInputRef.current) editFileInputRef.current.value = "";
   };
+
+  // IMPORTANT: selecting a new ID image is itself an edit.
+  // This allows "image only" changes to enable Save Changes.
+  const hasImageChange = editIdImageFile !== null;
 
   const hasChanges =
     editForm.fullName !== originalForm.fullName ||
@@ -671,27 +718,42 @@ export default function UserManagementPage() {
     editForm.cityName !== originalForm.cityName ||
     editForm.barangayCode !== originalForm.barangayCode ||
     editForm.barangayName !== originalForm.barangayName ||
-    editForm.zipCode !== originalForm.zipCode;
+    editForm.zipCode !== originalForm.zipCode ||
+    hasImageChange;
 
   const handleEditImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
-      toast({ title: "Invalid File", description: "Please select an image file.", variant: "destructive" });
+      toast({
+        title: "Invalid File",
+        description: "Please select an image file.",
+        variant: "destructive",
+      });
       event.target.value = "";
       return;
     }
 
     if (file.size > MAX_ID_IMAGE_SIZE) {
-      toast({ title: "Image Too Large", description: "The ID image must be 5 MB or smaller.", variant: "destructive" });
+      toast({
+        title: "Image Too Large",
+        description: "The ID image must be 5 MB or smaller.",
+        variant: "destructive",
+      });
       event.target.value = "";
       return;
     }
 
+    // Revoke only the previous local preview. Do NOT touch the current
+    // Supabase image. The old Storage object is deleted only after Save succeeds.
     if (editIdImagePreview) URL.revokeObjectURL(editIdImagePreview);
+
     setEditIdImageFile(file);
     setEditIdImagePreview(URL.createObjectURL(file));
+
+    // Reset the input so selecting the SAME file again still fires onChange.
+    event.target.value = "";
   };
 
   const clearEditImage = () => {
@@ -730,6 +792,24 @@ export default function UserManagementPage() {
   const handleUpdate = async () => {
     if (!editUser || !hasChanges) return;
 
+    const normalizedContactNumber = String(editForm.contactNumber || "")
+      .replace(/\D/g, "")
+      .slice(0, 11);
+
+    if (normalizedContactNumber.length !== 11) {
+      toast({
+        title: "Invalid Contact Number",
+        description: "Contact number must contain exactly 11 digits.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Keep the state normalized before saving.
+    if (editForm.contactNumber !== normalizedContactNumber) {
+      setEditForm((current) => ({ ...current, contactNumber: normalizedContactNumber }));
+    }
+
     const oldImageValue = editUser.idImagePath || editUser.id_image_path || null;
     const replacingImage = !!editIdImageFile;
     let newImageUrl: string | null = null;
@@ -758,7 +838,7 @@ export default function UserManagementPage() {
         id: editUser.id,
         data: {
           fullName: editForm.fullName.trim(),
-          contactNumber: editForm.contactNumber.trim(),
+          contactNumber: normalizedContactNumber,
           dateOfBirth: editForm.dateOfBirth || undefined,
           streetAddress: editForm.streetAddress.trim() || undefined,
           regionCode: editForm.regionCode || undefined,
@@ -779,29 +859,55 @@ export default function UserManagementPage() {
       });
 
       // 3. NEW IMAGE DETECTED + DB UPDATE SUCCEEDED:
-      // Now it is safe to delete the OLD image from the Supabase bucket.
-      // If there was no new image, this block does nothing.
-      if (replacingImage && newImageUrl && oldImageValue) {
-        const oldImagePath = getIdImageStoragePath(oldImageValue);
+      // Clean the user's old Storage objects only AFTER the DB now points to
+      // the new image. This removes the old original image AND previous
+      // edited-* images, so the folder does not keep growing.
+      if (replacingImage && newImageUrl) {
         const newImagePath = getIdImageStoragePath(newImageUrl);
+        const safeUid = String(editUser.cardUid || editUser.card_uid || editUser.id)
+          .trim()
+          .replace(/[^a-zA-Z0-9_-]/g, "");
 
-        // Never delete the newly uploaded object by mistake.
-        if (oldImagePath && oldImagePath !== newImagePath) {
-          const { error: deleteOldImageError } = await supabase
+        if (safeUid && newImagePath) {
+          const { data: storedFiles, error: listError } = await supabase
             .storage
             .from(ID_IMAGE_BUCKET)
-            .remove([oldImagePath]);
-
-          if (deleteOldImageError) {
-            // The DB update already succeeded, so do NOT roll it back.
-            // The only remaining issue is Storage cleanup.
-            console.error("Old ID image cleanup error:", deleteOldImageError);
-
-            toast({
-              title: <SuccessTitle text="User Updated Successfully" />,
-              description:
-                "The new ID image is active, but the previous image could not be removed from Storage.",
+            .list(safeUid, {
+              limit: 1000,
+              offset: 0,
+              sortBy: { column: "name", order: "asc" },
             });
+
+          if (listError) {
+            console.error(
+              "Could not list old ID images for cleanup:",
+              listError
+            );
+          } else {
+            const oldPaths = (storedFiles || [])
+              .filter((file: any) => file?.name)
+              .map((file: any) => `${safeUid}/${file.name}`)
+              .filter((path: string) => path !== newImagePath);
+
+            if (oldPaths.length > 0) {
+              const { error: deleteOldImagesError } = await supabase
+                .storage
+                .from(ID_IMAGE_BUCKET)
+                .remove(oldPaths);
+
+              if (deleteOldImagesError) {
+                console.error(
+                  "Old ID image cleanup failed.",
+                  { oldPaths, error: deleteOldImagesError }
+                );
+
+                toast({
+                  title: <SuccessTitle text="User Updated Successfully" />,
+                  description:
+                    "The new ID image was saved, but Supabase blocked deletion of the previous images. Check DELETE policy for id-verifications.",
+                });
+              }
+            }
           }
         }
       }
@@ -1685,7 +1791,15 @@ export default function UserManagementPage() {
                   </Label>
                   <Input
                     value={editForm.contactNumber}
-                    onChange={(e) => setEditForm({ ...editForm, contactNumber: e.target.value })}
+                    inputMode="numeric"
+                    type="tel"
+                    maxLength={11}
+                    pattern="[0-9]{11}"
+                    placeholder="09XXXXXXXXX"
+                    onChange={(e) => {
+                      const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 11);
+                      setEditForm({ ...editForm, contactNumber: digitsOnly });
+                    }}
                     className={`${editInputCls} font-mono`}
                   />
                 </div>
