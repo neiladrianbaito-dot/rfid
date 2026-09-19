@@ -1419,7 +1419,6 @@ export default function CardRegistrationPage() {
         >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CreditCard className="h-5 w-5 text-cyan-500" />
 
               Register New RFID Card
             </DialogTitle>
