@@ -1042,15 +1042,32 @@ export default function CardRegistrationPage() {
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
 
+        /* Smooth native-like scrolling for long PSGC dropdown lists. */
         .address-select-content {
-          max-height: 280px;
+          max-height: min(280px, 40vh);
           overflow: hidden;
-        }
-        .address-select-content [data-radix-select-viewport] {
-          max-height: 280px;
-          overflow-y: auto;
           overscroll-behavior: contain;
+          contain: layout paint;
+        }
+
+        .address-select-content [data-radix-select-viewport] {
+          max-height: min(280px, 40vh);
+          overflow-y: auto !important;
+          overflow-x: hidden;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
+          touch-action: pan-y;
           scrollbar-width: thin;
+          scrollbar-gutter: stable;
+          will-change: scroll-position;
+          transform: translateZ(0);
+          contain: strict;
+        }
+
+        /* Prevent Radix item hover/focus transitions from making wheel scrolling feel sticky. */
+        .address-select-content [data-radix-select-item] {
+          touch-action: pan-y;
+          user-select: none;
         }
       `}</style>
 
