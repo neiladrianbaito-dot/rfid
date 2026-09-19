@@ -1258,42 +1258,29 @@ export default function CardRegistrationPage() {
         }
       `}</style>
 
-      {/* PAGE HEADER */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* PAGE HEADER — same logo + text positioning/color pattern as TransactionsPage */}
+      <div
+        className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6 ${
+          isDark ? "border-slate-800" : "border-slate-200"
+        }`}
+      >
         <div>
-          <div className="flex items-center gap-3">
-            <div
-              className={`flex h-11 w-11 items-center justify-center rounded-xl ${
-                isDark
-                  ? "bg-cyan-500/10 text-cyan-400"
-                  : "bg-cyan-50 text-cyan-600"
-              }`}
-            >
-              <CreditCard className="h-6 w-6" />
-            </div>
+          <h1
+            className={`text-2xl font-bold tracking-tight flex items-center gap-3 ${
+              isDark ? "text-white" : "text-slate-900"
+            }`}
+          >
+            <CreditCard className="text-blue-500" size={26} />
+            Card Registration
+          </h1>
 
-            <div>
-              <h1
-                className={`text-2xl font-bold tracking-tight ${
-                  isDark
-                    ? "text-white"
-                    : "text-slate-900"
-                }`}
-              >
-                Card Registration
-              </h1>
-
-              <p
-                className={`text-sm ${
-                  isDark
-                    ? "text-slate-400"
-                    : "text-slate-500"
-                }`}
-              >
-                Register RFID cards and card holder information
-              </p>
-            </div>
-          </div>
+          <p
+            className={`text-sm mt-1 ${
+              isDark ? "text-slate-400" : "text-slate-500"
+            }`}
+          >
+            Register RFID cards and card holder information
+          </p>
         </div>
 
         <Button
