@@ -14,6 +14,7 @@ import { useTheme } from "@/hooks/use-theme";
 import {
   Search, ScrollText, ChevronLeft, ChevronRight, Zap,
   LogIn, LogOut, PlusCircle, Pencil, Trash2, RotateCcw, Download, Activity,
+  ChevronDown, ChevronUp,
 } from "lucide-react";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase";
@@ -49,6 +50,39 @@ function actionMeta(action: string, isDark: boolean) {
   return { Icon: meta.icon, className: isDark ? meta.dark : meta.light };
 }
 
+// ── Details parsing (for expandable old → new changes list) ────────────────
+// Parses strings like:
+//   'updated user: Juan (card 123) — full_name: "Juan" → "Juana"; city_name: "Cebu" → "Manila"'
+// into a prefix + a list of { field, oldVal, newVal }.
+// Works for ANY number of changed fields — 1 field or all of them —
+// since it just keeps matching the "field: "old" → "new"" pattern
+// as many times as it appears in the string.
+// Returns changes: [] for logs that don't follow this pattern
+// (e.g. CREATE/DELETE/EXPORT/toggle logs), so those just render as plain text.
+type ParsedDetails = {
+  prefix: string;
+  changes: { field: string; oldVal: string; newVal: string }[];
+};
+
+function parseChanges(details: string): ParsedDetails {
+  const separatorIndex = details.indexOf(" — ");
+  if (separatorIndex === -1) return { prefix: details, changes: [] };
+
+  const prefix = details.slice(0, separatorIndex);
+  const changesPart = details.slice(separatorIndex + 3);
+
+  const changeRegex = /([a-zA-Z0-9_]+):\s*"([^"]*)"\s*→\s*"([^"]*)"/g;
+  const changes: ParsedDetails["changes"] = [];
+  let match: RegExpExecArray | null;
+  while ((match = changeRegex.exec(changesPart)) !== null) {
+    changes.push({ field: match[1], oldVal: match[2], newVal: match[3] });
+  }
+
+  if (changes.length === 0) return { prefix: details, changes: [] };
+
+  return { prefix, changes };
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AuditLogsPage() {
@@ -62,6 +96,7 @@ export default function AuditLogsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [newRowId, setNewRowId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const prevTopIdRef = useRef<number | null>(null);
 
   // ── Fetch audit_logs from Supabase, with realtime updates ─────────────────
@@ -252,6 +287,10 @@ export default function AuditLogsPage() {
                     ) : (
                       paginatedList.map((log) => {
                         const { Icon, className } = actionMeta(log.action, isDark);
+                        const { prefix, changes } = parseChanges(log.details);
+                        const isExpanded = expandedId === log.id;
+                        const hasChanges = changes.length > 0;
+
                         return (
                           <TableRow
                             key={log.id}
@@ -259,23 +298,54 @@ export default function AuditLogsPage() {
                               newRowId === log.id ? "row-pulse" : ""
                             }`}
                           >
-                            <TableCell className={`text-xs font-mono whitespace-nowrap ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                            <TableCell className={`text-xs font-mono whitespace-nowrap align-top ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                               {new Date(log.timestamp).toLocaleString()}
                             </TableCell>
-                            <TableCell className="font-mono text-xs text-blue-500 font-semibold">
+                            <TableCell className="font-mono text-xs text-blue-500 font-semibold align-top">
                               {log.user}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="align-top">
                               <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${className}`}>
                                 <Icon className="w-3 h-3" />
                                 {log.action}
                               </Badge>
                             </TableCell>
-                            <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                            <TableCell className={`text-sm font-medium align-top ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                               {log.entity}
                             </TableCell>
-                            <TableCell className={`text-xs max-w-[420px] truncate ${isDark ? "text-slate-400" : "text-slate-500"}`} title={log.details}>
-                              {log.details}
+                            <TableCell className={`text-xs max-w-[420px] align-top ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              <div className="flex items-start gap-1.5">
+                                <div className={isExpanded ? "" : "truncate"} title={!hasChanges ? log.details : undefined}>
+                                  {prefix}
+                                  {hasChanges && !isExpanded && (
+                                    <span className={isDark ? "text-slate-600" : "text-slate-400"}>
+                                      {" "}— {changes.length} field{changes.length > 1 ? "s" : ""} changed
+                                    </span>
+                                  )}
+                                  {hasChanges && isExpanded && (
+                                    <ul className="mt-1.5 space-y-1">
+                                      {changes.map((c, i) => (
+                                        <li key={i} className={`font-mono text-[11px] ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                                          <span className={isDark ? "text-slate-300" : "text-slate-700"}>{c.field}</span>
+                                          {": "}
+                                          <span className="text-red-500">{c.oldVal || "—"}</span>
+                                          {" → "}
+                                          <span className="text-emerald-500">{c.newVal || "—"}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
+                                {hasChanges && (
+                                  <button
+                                    onClick={() => setExpandedId(isExpanded ? null : log.id)}
+                                    className={`shrink-0 mt-0.5 ${isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"}`}
+                                    title={isExpanded ? "Collapse" : "Expand"}
+                                  >
+                                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                  </button>
+                                )}
+                              </div>
                             </TableCell>
                           </TableRow>
                         );
