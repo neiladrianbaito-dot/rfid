@@ -67,7 +67,19 @@ type StaffUser = {
   role: string; // "staff" | "super_admin"
   status: string;
   created_at: string;
+  avatar_url?: string | null;
+  avatar_path?: string | null;
 };
+
+// The API may return snake_case (avatar_url) or camelCase (avatarUrl).
+// Normalize both into avatar_url / avatar_path so the UI only reads one shape.
+function normalizeStaff(row: any): StaffUser {
+  return {
+    ...row,
+    avatar_url: row?.avatar_url ?? row?.avatarUrl ?? null,
+    avatar_path: row?.avatar_path ?? row?.avatarPath ?? null,
+  };
+}
 
 // ── Role label helpers ───────────────────────────────────────────────────────
 function roleLabel(role: string): string {
@@ -83,6 +95,69 @@ function roleBadgeClass(role: string, isDark: boolean) {
   return isDark
     ? "bg-slate-800 text-slate-400 border-slate-700"
     : "bg-slate-100 text-slate-500 border-slate-200";
+}
+
+// ── Avatar ───────────────────────────────────────────────────────────────────
+// Shows the uploaded picture; falls back to the first letter of the name when
+// there is no picture or the image fails to load.
+function StaffAvatar({
+  url,
+  name,
+  role,
+  isDark,
+}: {
+  url?: string | null;
+  name: string;
+  role: string;
+  isDark: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [url]);
+
+  const showImage = !!url && !failed;
+  const isSuper = role === "super_admin";
+
+  const frameClass = isSuper
+    ? isDark
+      ? "bg-blue-950/40 border-blue-900"
+      : "bg-blue-50 border-blue-100"
+    : isDark
+      ? "bg-slate-800 border-slate-700"
+      : "bg-slate-100 border-slate-200";
+
+  const letterClass = isSuper
+    ? isDark
+      ? "text-blue-400"
+      : "text-blue-600"
+    : isDark
+      ? "text-slate-300"
+      : "text-slate-600";
+
+  return (
+    <div
+      className={`w-9 h-9 shrink-0 rounded-xl border flex items-center justify-center overflow-hidden ${frameClass}`}
+    >
+      {showImage ? (
+        <img
+          src={url as string}
+          alt={`${name}'s avatar`}
+          loading="lazy"
+          onError={() => {
+            console.warn("Avatar image failed to load:", url);
+            setFailed(true);
+          }}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <span className={`text-sm font-bold ${letterClass}`}>
+          {name ? name.trim().charAt(0).toUpperCase() : "?"}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export default function SettingsPage() {
@@ -202,8 +277,9 @@ export default function SettingsPage() {
         headers: { ...getAuthHeaders() },
       });
       const data = await parseJsonSafe(response);
-      if (response.ok && data.staff) setStaff(data.staff as StaffUser[]);
-      else if (!response.ok) {
+      if (response.ok && Array.isArray(data.staff)) {
+        setStaff((data.staff as any[]).map(normalizeStaff));
+      } else if (!response.ok) {
         console.error("Failed to load staff:", data.error || data);
       }
     } catch (error) {
@@ -375,8 +451,18 @@ export default function SettingsPage() {
                         key={s.id}
                         className={isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}
                       >
-                        <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                          {s.full_name}
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <StaffAvatar
+                              url={s.avatar_url}
+                              name={s.full_name}
+                              role={s.role}
+                              isDark={isDark}
+                            />
+                            <span className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {s.full_name}
+                            </span>
+                          </div>
                         </TableCell>
                         <TableCell className={`text-xs font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                           {s.username}
