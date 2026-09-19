@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
+import { supabase } from "@/lib/supabase";
 import {
   Settings, UserPlus, Users, Lock, Shield,
   Loader2, ShieldCheck, Trash2, RefreshCw, Crown, ShieldAlert,
@@ -278,7 +279,27 @@ export default function SettingsPage() {
       });
       const data = await parseJsonSafe(response);
       if (response.ok && Array.isArray(data.staff)) {
-        setStaff((data.staff as any[]).map(normalizeStaff));
+        const rows = (data.staff as any[]).map(normalizeStaff);
+        setStaff(rows); // show the list right away
+
+        // Fill in the avatars straight from Supabase, so they show even if
+        // the API doesn't return avatar_url.
+        try {
+          const { data: avatars, error: avatarError } = await supabase.rpc("get_admin_avatars");
+          if (avatarError) {
+            console.warn("get_admin_avatars failed:", avatarError.message);
+          } else if (Array.isArray(avatars)) {
+            const byId = new Map<number, any>(avatars.map((a: any) => [Number(a.id), a]));
+            setStaff(
+              rows.map((r) => {
+                const match = byId.get(Number(r.id));
+                return match ? { ...r, avatar_url: match.avatar_url ?? null } : r;
+              })
+            );
+          }
+        } catch (avatarError) {
+          console.warn("Could not load avatars:", avatarError);
+        }
       } else if (!response.ok) {
         console.error("Failed to load staff:", data.error || data);
       }
