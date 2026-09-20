@@ -821,8 +821,8 @@ export default function ReportsPage() {
   // and its own Excel export tab. ──
   const fareDiscountDailyBreakdown = React.useMemo(() => {
     const map = new Map<
-      string,
-      { total: number; regular: number; student: number; senior: number; pwd: number }
+      string, { total: number; regular: number; student: number; senior: number; pwd: number;
+        totalRides: number; regularRides: number; studentRides: number; seniorRides: number; pwdRides: number }
     >();
     txList.forEach((tx: any) => {
       if (normalizeTxType(tx.type) !== "Fare") return;
@@ -830,12 +830,13 @@ export default function ReportsPage() {
       if (!dateKey) return;
       const amount = Math.abs(Number(tx.amount) || 0);
       const cardType = getTxCardType(tx);
-      const entry = map.get(dateKey) || { total: 0, regular: 0, student: 0, senior: 0, pwd: 0 };
+      const entry = map.get(dateKey) || { total: 0, regular: 0, student: 0, senior: 0, pwd: 0, totalRides: 0, regularRides: 0, studentRides: 0, seniorRides: 0, pwdRides: 0 };
       entry.total += amount;
-      if (cardType === "Student") entry.student += amount;
-      else if (cardType === "Senior") entry.senior += amount;
-      else if (cardType === "PWD") entry.pwd += amount;
-      else entry.regular += amount;
+      entry.totalRides += 1;
+      if (cardType === "Student") { entry.student += amount; entry.studentRides += 1; }
+      else if (cardType === "Senior") { entry.senior += amount; entry.seniorRides += 1; }
+      else if (cardType === "PWD") { entry.pwd += amount; entry.pwdRides += 1; }
+      else { entry.regular += amount; entry.regularRides += 1; }
       map.set(dateKey, entry);
     });
     return Array.from(map.entries())
@@ -919,7 +920,7 @@ export default function ReportsPage() {
     if (fullRange) {
       return fullRange.map((date) => {
         const existing = fareDiscountByDate.get(date);
-        return existing || { date, total: 0, regular: 0, student: 0, senior: 0, pwd: 0 };
+        return existing || { date, total: 0, regular: 0, student: 0, senior: 0, pwd: 0, totalRides: 0, regularRides: 0, studentRides: 0, seniorRides: 0, pwdRides: 0 };
       });
     }
 
@@ -1709,7 +1710,10 @@ export default function ReportsPage() {
         {[
           { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-total-revenue",      flash: false },
           { label: "Today's Revenue",         value: formatPeso(todayRevenue),      icon: PhilippinePeso, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-today-revenue",      flash: revenueFlash },
-          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: User, color: isDark ? "text-indigo-400" : "text-indigo-600",  bg: isDark ? "bg-indigo-950/40" : "bg-indigo-50",  border: isDark ? "border-indigo-900" : "border-indigo-100",  testId: "text-total-taps",         flash: false },
+          { label: "Total Passengers Today", value: (() => {
+              const today = getLocalDateString();
+              return txList.filter((tx: any) => normalizeTxType(tx.type) === "Fare" && getTxDateKey(tx) === today).length;
+            })(),               icon: User, color: isDark ? "text-indigo-400" : "text-indigo-600",  bg: isDark ? "bg-indigo-950/40" : "bg-indigo-50",  border: isDark ? "border-indigo-900" : "border-indigo-100",  testId: "text-total-taps",         flash: false },
           { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: isDark ? "text-sky-400" : "text-sky-600",     bg: isDark ? "bg-sky-950/40" : "bg-sky-50",     border: isDark ? "border-sky-900" : "border-sky-100",     testId: "text-total-linked-cards", flash: false },
         ].map((stat, idx) => (
           <Card
@@ -1774,9 +1778,9 @@ export default function ReportsPage() {
               No records match the selected filter.
             </div>
           ) : (
-            <div className="h-[300px] w-full">
+            <div className="h-[320px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={filteredBreakdown}>
+                <LineChart data={filteredFareDiscountBreakdown} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
                   <XAxis
                     dataKey="date"
@@ -1784,14 +1788,24 @@ export default function ReportsPage() {
                       const date = new Date(d + "T00:00:00");
                       return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
                     }}
-                    stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
+                    stroke={isDark ? "#64748b" : "#94a3b8"}
+                    fontSize={11}
+                    fontWeight="600"
+                    axisLine={false}
+                    tickLine={false}
                   />
                   <YAxis
-                    stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
-                    tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false}
+                    allowDecimals={false}
+                    stroke={isDark ? "#64748b" : "#94a3b8"}
+                    fontSize={11}
+                    fontWeight="600"
+                    tickFormatter={(v: number) => v.toLocaleString("en-US")}
+                    axisLine={false}
+                    tickLine={false}
+                    width={52}
                   />
                   <Tooltip
-                    cursor={{ fill: isDark ? "rgba(96,165,250,0.08)" : "rgba(37,99,235,0.05)" }}
+                    cursor={{ stroke: isDark ? "#475569" : "#cbd5e1", strokeWidth: 1 }}
                     contentStyle={{
                       backgroundColor: isDark ? "#0f172a" : "#ffffff",
                       border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
@@ -1801,19 +1815,24 @@ export default function ReportsPage() {
                       boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
                     }}
                     labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
-                    itemStyle={{ color: isDark ? "#60a5fa" : "#2563eb" }}
-                    formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
+                    labelFormatter={(d: string) => {
+                      const date = new Date(d + "T00:00:00");
+                      return date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+                    }}
+                    formatter={(value: number, name: string) => [`${value.toLocaleString("en-US")} ${value === 1 ? "passenger" : "passengers"}`, name]}
                   />
-                  <Bar dataKey="revenue" radius={[4, 4, 0, 0]} className="cursor-pointer">
-                    {filteredBreakdown.map((_entry: any, index: number) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={index === filteredBreakdown.length - 1 ? "#3b82f6" : isDark ? "#334155" : "#cbd5e1"}
-                        className="cursor-pointer"
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
+                  <Legend
+                    wrapperStyle={{ fontSize: "10px", fontWeight: 600 }}
+                    formatter={(value: string) => (
+                      <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>
+                    )}
+                  />
+                  <Line type="monotone" dataKey="totalRides" name="Total Passengers" stroke="#7c3aed" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="regularRides" name="Regular" stroke="#ef4444" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="studentRides" name="Student" stroke="#3b82f6" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="seniorRides" name="Senior" stroke="#eab308" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="pwdRides" name="PWD" stroke="#10b981" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+                </LineChart>
               </ResponsiveContainer>
             </div>
           )}
@@ -1922,7 +1941,40 @@ export default function ReportsPage() {
                           <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
                           <XAxis dataKey="date" tickFormatter={(d: string) => { const date = new Date(d + "T00:00:00"); return date.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }} stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={10} fontWeight="600" axisLine={false} tickLine={false} />
                           <YAxis stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={10} fontWeight="600" tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false} width={58} />
-                          <Tooltip contentStyle={{ backgroundColor: isDark ? "#0f172a" : "#ffffff", border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0", borderRadius: "8px", fontSize: "11px", fontWeight: "600", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={(d: string) => { const date = new Date(d + "T00:00:00"); return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }} labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }} formatter={(value: number, name: string) => [formatPeso(Math.abs(value)), name]} />
+                          <Tooltip
+                            content={({ active, payload, label }) => {
+                              if (!active || !payload || payload.length === 0) return null;
+                              const row: any = payload[0]?.payload || {};
+                              const date = new Date(String(label) + "T00:00:00");
+                              const dateLabel = date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                              const rideRows = [
+                                { key: "regular", name: "Regular", rides: Number(row.regularRides || 0), color: DISCOUNT_LINE_COLORS.regular },
+                                { key: "student", name: "Student", rides: Number(row.studentRides || 0), color: DISCOUNT_LINE_COLORS.student },
+                                { key: "senior", name: "Senior", rides: Number(row.seniorRides || 0), color: DISCOUNT_LINE_COLORS.senior },
+                                { key: "pwd", name: "PWD", rides: Number(row.pwdRides || 0), color: DISCOUNT_LINE_COLORS.pwd },
+                              ];
+                              const totalRides = rideRows.reduce((sum, item) => sum + item.rides, 0);
+                              return (
+                                <div style={{ backgroundColor: isDark ? "#0f172a" : "#ffffff", border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 12px", boxShadow: "0 4px 12px rgba(0,0,0,0.12)", minWidth: "190px" }}>
+                                  <div style={{ color: isDark ? "#e2e8f0" : "#1e293b", fontSize: "11px", fontWeight: 700, marginBottom: "7px" }}>{dateLabel}</div>
+                                  <div style={{ color: isDark ? "#94a3b8" : "#64748b", fontSize: "10px", fontWeight: 700, marginBottom: "5px", textTransform: "uppercase" }}>Rides by card type</div>
+                                  {rideRows.map((item) => (
+                                    <div key={item.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", fontSize: "11px", marginTop: "4px" }}>
+                                      <span style={{ display: "flex", alignItems: "center", gap: "5px", color: isDark ? "#cbd5e1" : "#334155" }}>
+                                        <span style={{ width: "7px", height: "7px", borderRadius: "50%", backgroundColor: item.color, display: "inline-block" }} />
+                                        {item.name}
+                                      </span>
+                                      <span style={{ color: isDark ? "#f8fafc" : "#0f172a", fontWeight: 700 }}>{item.rides} {item.rides === 1 ? "ride" : "rides"}</span>
+                                    </div>
+                                  ))}
+                                  <div style={{ borderTop: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0", marginTop: "7px", paddingTop: "6px", display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 800 }}>
+                                    <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>Total Rides</span>
+                                    <span style={{ color: isDark ? "#f8fafc" : "#0f172a" }}>{totalRides}</span>
+                                  </div>
+                                </div>
+                              );
+                            }}
+                          />
                           <Legend wrapperStyle={{ fontSize: "10px", fontWeight: 600 }} formatter={(value: string) => (<span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>)} />
                           <Line type="monotone" dataKey="regular" name="Regular" stroke={DISCOUNT_LINE_COLORS.regular} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                           <Line type="monotone" dataKey="student" name="Student" stroke={DISCOUNT_LINE_COLORS.student} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
@@ -1947,22 +1999,18 @@ export default function ReportsPage() {
                     <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
                       <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
                         <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date</TableHead>
-                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Collected</TableHead>
-                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Regular</TableHead>
+                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Rides</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-red-500">Regular</TableHead>
                         <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Student</TableHead>
                         <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-yellow-600">Senior</TableHead>
                         <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">PWD</TableHead>
-                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Discounted %</TableHead>
-                        {/* ➕ per-day revenue lost column */}
-                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-rose-500">Revenue Lost</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Discounted Rides</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredFareDiscountBreakdown.map((day, i) => {
                         const date = new Date(day.date + "T00:00:00");
-                        const discountedTotal = day.student + day.senior + day.pwd;
-                        const sharePct = day.total > 0 ? (discountedTotal / day.total) * 100 : 0;
-                        const dayLost = discountedTotal * LOST_REVENUE_MULTIPLIER;
+                        const discountedTotal = day.studentRides + day.seniorRides + day.pwdRides;
                         return (
                           <TableRow
                             key={i}
@@ -1972,27 +2020,24 @@ export default function ReportsPage() {
                               {date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                             </TableCell>
                             <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                              {formatPeso(day.total)}
+                              {day.totalRides}
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                              {formatPeso(day.regular)}
+                              {day.regularRides}
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs ${isDark ? "text-blue-400" : "text-blue-600"}`}>
-                              {formatPeso(day.student)}
+                              {day.studentRides}
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs ${isDark ? "text-yellow-400" : "text-yellow-700"}`}>
-                              {formatPeso(day.senior)}
+                              {day.seniorRides}
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                              {formatPeso(day.pwd)}
+                              {day.pwdRides}
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
-                              {sharePct.toFixed(1)}%
+                              {discountedTotal}
                             </TableCell>
-                            {/* ➕ per-day revenue lost value */}
-                            <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-rose-400" : "text-rose-600"}`}>
-                              −{formatPeso(dayLost)}
-                            </TableCell>
+                            
                           </TableRow>
                         );
                       })}
