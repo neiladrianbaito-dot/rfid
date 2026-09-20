@@ -787,7 +787,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Small status line under the avatar buttons
+  // Small status line under the avatar buttons. Always rendered (even when
+  // empty) so this row never changes height and never pushes the layout.
   const avatarStatus = isUpdating
     ? avatarFile
       ? `Uploading ${avatarFile.name}...`
@@ -988,13 +989,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </motion.div>
               </DialogTrigger>
 
+              {/*
+                FIX: the dialog now has a FIXED overall height (h-[640px]) and a
+                fixed flex column: header (shrink-0) / scrollable body (flex-1
+                overflow-y-auto) / footer (shrink-0). Only the middle section
+                scrolls now, so picking a new image or seeing the upload status
+                text never resizes or repositions the whole modal anymore.
+              */}
               <DialogContent
-                className={`sm:max-w-[425px] max-h-[92vh] overflow-y-auto transition-colors ${
+                className={`sm:max-w-[425px] h-[640px] max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden transition-colors ${
                   isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
                 }`}
               >
-                <div className="absolute top-0 left-0 w-full h-[3px] bg-blue-600 rounded-t-lg" />
-                <DialogHeader>
+                <div className="absolute top-0 left-0 w-full h-[3px] bg-blue-600 rounded-t-lg z-10" />
+
+                <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
                   <DialogTitle className={`font-bold tracking-tight transition-colors ${isDark ? "text-white" : "text-slate-900"}`}>
                     Security & Profile
                   </DialogTitle>
@@ -1005,150 +1014,159 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   </VisuallyHidden>
                 </DialogHeader>
 
-                <div className="grid gap-6 py-4">
-                  {/* Avatar upload */}
-                  <div className="flex items-center gap-4">
-                    <div className="relative shrink-0">
-                      <div
-                        className={`w-20 h-20 rounded-2xl border flex items-center justify-center overflow-hidden ${
-                          isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"
-                        }`}
-                      >
-                        <UserAvatar
-                          url={modalAvatarUrl}
-                          name={formData.name || user?.name}
-                          isDark={isDark}
-                          textClassName="text-2xl"
-                        />
-                      </div>
+                {/* Scrollable body — this is the ONLY part that scrolls */}
+                <div className="flex-1 overflow-y-auto px-6">
+                  <div className="grid gap-6 py-4">
+                    {/* Avatar upload */}
+                    <div className="flex items-center gap-4">
+                      <div className="relative shrink-0">
+                        <div
+                          className={`w-20 h-20 rounded-2xl border flex items-center justify-center overflow-hidden ${
+                            isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"
+                          }`}
+                        >
+                          <UserAvatar
+                            url={modalAvatarUrl}
+                            name={formData.name || user?.name}
+                            isDark={isDark}
+                            textClassName="text-2xl"
+                          />
+                        </div>
 
-                      <button
-                        type="button"
-                        onClick={() => avatarInputRef.current?.click()}
-                        disabled={isUpdating}
-                        aria-label="Change profile picture"
-                        className="absolute -bottom-2 -right-2 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50 dark:border-slate-950"
-                      >
-                        <Camera className="h-4 w-4" />
-                      </button>
-                    </div>
-
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <p className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                        Profile picture
-                      </p>
-                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        JPG, PNG or WEBP, up to 2 MB. Click Save Changes to apply.
-                      </p>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Button
+                        <button
                           type="button"
-                          variant="outline"
-                          size="sm"
                           onClick={() => avatarInputRef.current?.click()}
                           disabled={isUpdating}
-                          className="h-8 gap-1.5 text-xs"
+                          aria-label="Change profile picture"
+                          className="absolute -bottom-2 -right-2 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50 dark:border-slate-950"
                         >
-                          <Upload className="h-3.5 w-3.5" />
-                          {modalAvatarUrl ? "Change" : "Upload"}
-                        </Button>
-
-                        {modalAvatarUrl && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleRemoveAvatar}
-                            disabled={isUpdating}
-                            className={`h-8 gap-1.5 text-xs ${
-                              isDark ? "text-red-400 hover:text-red-300" : "text-red-600 hover:text-red-700"
-                            }`}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            {avatarFile ? "Discard" : "Remove"}
-                          </Button>
-                        )}
+                          <Camera className="h-4 w-4" />
+                        </button>
                       </div>
 
-                      {avatarStatus && (
-                        <p className={`flex items-center gap-1.5 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          {isUpdating && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
-                          <span className="truncate">{avatarStatus}</span>
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <p className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                          Profile picture
                         </p>
-                      )}
+                        <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          JPG, PNG or WEBP, up to 2 MB. Click Save Changes to apply.
+                        </p>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => avatarInputRef.current?.click()}
+                            disabled={isUpdating}
+                            className="h-8 gap-1.5 text-xs"
+                          >
+                            <Upload className="h-3.5 w-3.5" />
+                            {modalAvatarUrl ? "Change" : "Upload"}
+                          </Button>
+
+                          {modalAvatarUrl && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={handleRemoveAvatar}
+                              disabled={isUpdating}
+                              className={`h-8 gap-1.5 text-xs ${
+                                isDark ? "text-red-400 hover:text-red-300" : "text-red-600 hover:text-red-700"
+                              }`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              {avatarFile ? "Discard" : "Remove"}
+                            </Button>
+                          )}
+                        </div>
+
+                        {/* Reserved-height status row: always rendered so this
+                            block never grows/shrinks the modal when the text
+                            appears or disappears. */}
+                        <p className={`flex items-center gap-1.5 text-xs min-h-[16px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {avatarStatus && (
+                            <>
+                              {isUpdating && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
+                              <span className="truncate">{avatarStatus}</span>
+                            </>
+                          )}
+                        </p>
+                      </div>
+
+                      <input
+                        ref={avatarInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleAvatarSelect}
+                        disabled={isUpdating}
+                      />
                     </div>
 
-                    <input
-                      ref={avatarInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleAvatarSelect}
-                      disabled={isUpdating}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className={`text-xs uppercase tracking-wide font-semibold transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                      Full Name
-                    </Label>
-                    <Input
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className={`focus:border-blue-500 focus-visible:ring-blue-500 transition-colors ${
-                        isDark ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"
+                    <div className="space-y-2">
+                      <Label className={`text-xs uppercase tracking-wide font-semibold transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                        Full Name
+                      </Label>
+                      <Input
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        className={`focus:border-blue-500 focus-visible:ring-blue-500 transition-colors ${
+                          isDark ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"
+                        }`}
+                      />
+                    </div>
+                    <div
+                      className={`p-4 rounded-xl border space-y-4 transition-colors ${
+                        isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"
                       }`}
-                    />
-                  </div>
-                  <div
-                    className={`p-4 rounded-xl border space-y-4 transition-colors ${
-                      isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"
-                    }`}
-                  >
-                    <div className={`flex items-center gap-2 ${isDark ? "text-blue-400" : "text-blue-700"}`}>
-                      <ShieldCheck size={14} />
-                      <span className="text-xs font-semibold uppercase tracking-wide">Authentication Update</span>
-                    </div>
-                    <p className={`text-xs leading-relaxed transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                      To change your password, fill in both fields below. To update your name or picture only, leave the password fields blank.
-                    </p>
-                    <div className="space-y-2">
-                      <Label className={`text-xs font-medium transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        Current Password
-                      </Label>
-                      <Input
-                        type="password"
-                        placeholder="Required if changing password"
-                        value={formData.currentPassword}
-                        onChange={(e) => setFormData({ ...formData, currentPassword: e.target.value })}
-                        className={`h-9 transition-colors ${
-                          isDark
-                            ? "bg-slate-900 border-slate-800 text-white placeholder:text-slate-600"
-                            : "bg-white border-slate-200 placeholder:text-slate-400"
-                        }`}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className={`text-xs font-medium transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        New Password
-                      </Label>
-                      <Input
-                        type="password"
-                        placeholder="Leave blank if not changing password"
-                        value={formData.newPassword}
-                        onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
-                        className={`h-9 transition-colors ${
-                          isDark
-                            ? "bg-slate-900 border-slate-800 text-white placeholder:text-slate-600"
-                            : "bg-white border-slate-200 placeholder:text-slate-400"
-                        }`}
-                      />
+                    >
+                      <div className={`flex items-center gap-2 ${isDark ? "text-blue-400" : "text-blue-700"}`}>
+                        <ShieldCheck size={14} />
+                        <span className="text-xs font-semibold uppercase tracking-wide">Authentication Update</span>
+                      </div>
+                      <p className={`text-xs leading-relaxed transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                        To change your password, fill in both fields below. To update your name or picture only, leave the password fields blank.
+                      </p>
+                      <div className="space-y-2">
+                        <Label className={`text-xs font-medium transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          Current Password
+                        </Label>
+                        <Input
+                          type="password"
+                          placeholder="Required if changing password"
+                          value={formData.currentPassword}
+                          onChange={(e) => setFormData({ ...formData, currentPassword: e.target.value })}
+                          className={`h-9 transition-colors ${
+                            isDark
+                              ? "bg-slate-900 border-slate-800 text-white placeholder:text-slate-600"
+                              : "bg-white border-slate-200 placeholder:text-slate-400"
+                          }`}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className={`text-xs font-medium transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          New Password
+                        </Label>
+                        <Input
+                          type="password"
+                          placeholder="Leave blank if not changing password"
+                          value={formData.newPassword}
+                          onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
+                          className={`h-9 transition-colors ${
+                            isDark
+                              ? "bg-slate-900 border-slate-800 text-white placeholder:text-slate-600"
+                              : "bg-white border-slate-200 placeholder:text-slate-400"
+                          }`}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-3 pt-4">
+                {/* Fixed footer — never moves, always visible, no scrolling needed to reach it */}
+                <div className={`flex justify-end gap-3 px-6 py-4 border-t shrink-0 transition-colors ${isDark ? "border-slate-800" : "border-slate-200"}`}>
                   <Button
                     variant="ghost"
                     onClick={() => setProfileModalOpen(false)}
