@@ -35,7 +35,7 @@ import { supabase } from "@/lib/supabase";
 import {
   Settings, UserPlus, Users, Lock, Shield,
   Loader2, ShieldCheck, Trash2, RefreshCw, Crown, ShieldAlert,
-  Camera, Upload,
+  Camera, Upload, Eye, Pencil,
 } from "lucide-react";
 
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
@@ -187,6 +187,8 @@ async function saveAvatarToAdmin(adminId: number, url: string | null, path: stri
   if (data !== true) throw new Error("Could not save avatar: no matching admin account was found.");
 }
 
+type PermissionLevel = "full_access" | "view_only";
+
 type StaffUser = {
   id: number;
   username: string;
@@ -196,15 +198,27 @@ type StaffUser = {
   created_at: string;
   avatar_url?: string | null;
   avatar_path?: string | null;
+  permission: PermissionLevel;
 };
 
 // The API may return snake_case (avatar_url) or camelCase (avatarUrl).
 // Normalize both into avatar_url / avatar_path so the UI only reads one shape.
+// Super Admins are always full_access (mirrors the backend's
+// normalizePermission()), regardless of whatever is stored in the row.
 function normalizeStaff(row: any): StaffUser {
+  const rawPermission = row?.permission ?? row?.permissionLevel ?? "full_access";
+  const permission: PermissionLevel =
+    row?.role === "super_admin"
+      ? "full_access"
+      : rawPermission === "view_only"
+        ? "view_only"
+        : "full_access";
+
   return {
     ...row,
     avatar_url: row?.avatar_url ?? row?.avatarUrl ?? null,
     avatar_path: row?.avatar_path ?? row?.avatarPath ?? null,
+    permission,
   };
 }
 
@@ -222,6 +236,22 @@ function roleBadgeClass(role: string, isDark: boolean) {
   return isDark
     ? "bg-slate-800 text-slate-400 border-slate-700"
     : "bg-slate-100 text-slate-500 border-slate-200";
+}
+
+// ── Permission (access level) label / badge helpers ─────────────────────────
+function permissionLabel(permission: PermissionLevel): string {
+  return permission === "view_only" ? "View Only" : "Full Access";
+}
+
+function permissionBadgeClass(permission: PermissionLevel, isDark: boolean) {
+  if (permission === "view_only") {
+    return isDark
+      ? "bg-amber-950/30 text-amber-400 border-amber-900"
+      : "bg-amber-50 text-amber-700 border-amber-200";
+  }
+  return isDark
+    ? "bg-emerald-950/30 text-emerald-400 border-emerald-900"
+    : "bg-emerald-50 text-emerald-700 border-emerald-200";
 }
 
 // ── Avatar ───────────────────────────────────────────────────────────────────
@@ -331,8 +361,10 @@ export default function SettingsPage() {
   const { toast } = useToast();
   const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
 
-  // ── Who am I? (needed to know if the Add Staff form should even show) ──────
+  // ── Who am I? (needed to know if the Add Staff form should even show,
+  // and whether I'm allowed to edit/delete anything at all) ──────────────────
   const [myRole, setMyRole] = useState<string | null>(null);
+  const [myPermission, setMyPermission] = useState<PermissionLevel>("full_access");
   const [myRoleLoaded, setMyRoleLoaded] = useState(false);
 
   useEffect(() => {
@@ -342,7 +374,10 @@ export default function SettingsPage() {
           headers: { ...getAuthHeaders() },
         });
         const data = await parseJsonSafe(response);
-        if (response.ok && data.role) setMyRole(data.role);
+        if (response.ok && data.role) {
+          setMyRole(data.role);
+          setMyPermission(data.permission === "view_only" ? "view_only" : "full_access");
+        }
       } catch (error) {
         console.error("Failed to load current admin role:", error);
       } finally {
@@ -352,6 +387,12 @@ export default function SettingsPage() {
   }, []);
 
   const isSuperAdmin = myRole === "super_admin";
+  // A logged-in Staff account with "view_only" access can see this page but
+  // can't add, edit, or delete anything — mirrors the backend, which only
+  // lets a Super Admin hit the create/delete/access-change endpoints anyway,
+  // but we also gate the UI so a view_only staff member never even sees
+  // controls that would 403.
+  const canManage = isSuperAdmin && myPermission === "full_access";
 
   // ── Add staff form state ───────────────────────────────────────────────
   // ── FIX: form now lives inside a Dialog instead of an always-visible
@@ -363,6 +404,7 @@ export default function SettingsPage() {
     username: "",
     password: "",
     role: "staff",
+    permission: "full_access" as PermissionLevel,
   });
 
   // Picking a picture in the Add Account form only stores the File + a
@@ -373,7 +415,7 @@ export default function SettingsPage() {
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const resetForm = () => {
-    setForm({ fullName: "", username: "", password: "", role: "staff" });
+    setForm({ fullName: "", username: "", password: "", role: "staff", permission: "full_access" });
     if (avatarPreview) URL.revokeObjectURL(avatarPreview);
     setAvatarFile(null);
     setAvatarPreview(null);
@@ -440,6 +482,9 @@ export default function SettingsPage() {
           username: form.username.trim(),
           password: form.password.trim(),
           role: form.role,
+          // Ignored server-side for super_admin (always forced to
+          // full_access there), respected for staff.
+          permission: form.permission,
         }),
       });
 
@@ -495,6 +540,44 @@ export default function SettingsPage() {
   const [deleteTarget, setDeleteTarget] = useState<StaffUser | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  // ── Access-level (permission) change — Super Admin only, staff rows
+  // only. Calls PATCH /admin/staff/:id/access, same endpoint the backend
+  // already exposes for this. ──────────────────────────────────────────────
+  const [updatingPermissionId, setUpdatingPermissionId] = useState<number | null>(null);
+
+  async function handlePermissionChange(target: StaffUser, nextPermission: PermissionLevel) {
+    if (target.permission === nextPermission) return;
+    if (target.role === "super_admin") return; // backend rejects this anyway
+
+    setUpdatingPermissionId(target.id);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/admin/staff/${target.id}/access`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ permission: nextPermission }),
+      });
+
+      const data = await parseJsonSafe(response);
+      if (!response.ok) throw new Error(data.error || "Failed to update access level");
+
+      setStaff((prev) =>
+        prev.map((s) => (s.id === target.id ? { ...s, permission: nextPermission } : s))
+      );
+
+      toast({
+        title: "Access Updated",
+        description: `${target.full_name} can now ${nextPermission === "view_only" ? "only view" : "view, edit, and delete"} records.`,
+      });
+    } catch (error: any) {
+      toast({ title: "Failed to Update Access", description: error.message, variant: "destructive" });
+    } finally {
+      setUpdatingPermissionId(null);
+    }
+  }
+
   // ── Edit-picture modal for an EXISTING staff row. Opened by clicking an
   // account's avatar (Super Admin only). Same upload/cleanup logic as
   // Layout.tsx's own "Security & Profile" avatar section, just targeting
@@ -510,6 +593,7 @@ export default function SettingsPage() {
   const editModalAvatarUrl = editAvatarPreview ?? (editRemoveAvatar ? null : editAvatarTarget?.avatar_url ?? null);
 
   function openEditAvatar(s: StaffUser) {
+    if (!canManage) return;
     if (isSavingAvatar) return;
     setEditAvatarTarget(s);
     setEditAvatarFile(null);
@@ -647,8 +731,8 @@ export default function SettingsPage() {
             });
           } else if (Array.isArray(avatars)) {
             const byId = new Map<number, any>(avatars.map((a: any) => [Number(a.id), a]));
-            setStaff(
-              rows.map((r) => {
+            setStaff((prevRows) =>
+              prevRows.map((r) => {
                 const match = byId.get(Number(r.id));
                 return match ? { ...r, avatar_url: match.avatar_url ?? null } : r;
               })
@@ -710,6 +794,8 @@ export default function SettingsPage() {
     }
   };
 
+  const columnCount = 5 + (canManage ? 1 : 0); // Name, Username, Role, Access, Date Added [, Actions]
+
   return (
     <div className={`space-y-8 h-full min-h-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}>
       {/* Header */}
@@ -730,7 +816,13 @@ export default function SettingsPage() {
               You are logged in as {roleLabel(myRole)}
             </Badge>
           )}
-          {myRoleLoaded && isSuperAdmin && (
+          {myRoleLoaded && !isSuperAdmin && (
+            <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${permissionBadgeClass(myPermission, isDark)}`}>
+              {myPermission === "view_only" ? <Eye className="w-3 h-3" /> : <Pencil className="w-3 h-3" />}
+              {permissionLabel(myPermission)}
+            </Badge>
+          )}
+          {myRoleLoaded && canManage && (
             <Button
               onClick={() => setIsAddOpen(true)}
               className="bg-blue-600 hover:bg-blue-700 text-white font-medium gap-2"
@@ -747,6 +839,15 @@ export default function SettingsPage() {
           <Shield className={`mt-0.5 shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`} size={18} />
           <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
             Only a <strong>Super Admin</strong> can create or remove staff accounts. You can still view the list below.
+          </p>
+        </div>
+      )}
+
+      {myRoleLoaded && isSuperAdmin && !canManage && (
+        <div className={`p-4 rounded-lg border flex items-start gap-3 ${isDark ? "bg-amber-950/20 border-amber-900" : "bg-amber-50 border-amber-200"}`}>
+          <Eye className={`mt-0.5 shrink-0 ${isDark ? "text-amber-400" : "text-amber-600"}`} size={18} />
+          <p className={`text-sm ${isDark ? "text-amber-300" : "text-amber-700"}`}>
+            Your account is set to <strong>View Only</strong>. You can browse the staff list, but adding, editing, or removing accounts is disabled.
           </p>
         </div>
       )}
@@ -807,8 +908,9 @@ export default function SettingsPage() {
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Name</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Username</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Role</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Access</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date Added</TableHead>
-                    {isSuperAdmin && (
+                    {canManage && (
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
                     )}
                   </TableRow>
@@ -816,7 +918,7 @@ export default function SettingsPage() {
                 <TableBody>
                   {filteredStaff.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={isSuperAdmin ? 5 : 4} className="text-center py-32">
+                      <TableCell colSpan={columnCount} className="text-center py-32">
                         <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
                           <Users size={48} className="mb-2" />
                           <p className="text-xs font-semibold uppercase tracking-widest">No accounts found</p>
@@ -831,7 +933,7 @@ export default function SettingsPage() {
                       >
                         <TableCell>
                           <div className="flex items-center gap-3">
-                            {isSuperAdmin ? (
+                            {canManage ? (
                               <button
                                 type="button"
                                 onClick={() => openEditAvatar(s)}
@@ -867,10 +969,51 @@ export default function SettingsPage() {
                             {roleLabel(s.role)}
                           </Badge>
                         </TableCell>
+                        <TableCell>
+                          {s.role === "super_admin" ? (
+                            <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${permissionBadgeClass("full_access", isDark)}`}>
+                              <Pencil className="w-3 h-3" />
+                              Full Access
+                            </Badge>
+                          ) : canManage ? (
+                            <Select
+                              value={s.permission}
+                              onValueChange={(v) => handlePermissionChange(s, v as PermissionLevel)}
+                              disabled={updatingPermissionId === s.id}
+                            >
+                              <SelectTrigger
+                                className={`h-7 w-[132px] text-[11px] gap-1 cursor-pointer ${
+                                  isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"
+                                }`}
+                              >
+                                {updatingPermissionId === s.id ? (
+                                  <span className="flex items-center gap-1.5">
+                                    <Loader2 className="w-3 h-3 animate-spin" /> Saving...
+                                  </span>
+                                ) : (
+                                  <SelectValue />
+                                )}
+                              </SelectTrigger>
+                              <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                                <SelectItem value="full_access">
+                                  <span className="flex items-center gap-1.5"><Pencil className="w-3 h-3" /> Full Access</span>
+                                </SelectItem>
+                                <SelectItem value="view_only">
+                                  <span className="flex items-center gap-1.5"><Eye className="w-3 h-3" /> View Only</span>
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${permissionBadgeClass(s.permission, isDark)}`}>
+                              {s.permission === "view_only" ? <Eye className="w-3 h-3" /> : <Pencil className="w-3 h-3" />}
+                              {permissionLabel(s.permission)}
+                            </Badge>
+                          )}
+                        </TableCell>
                         <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                           {new Date(s.created_at).toLocaleDateString()}
                         </TableCell>
-                        {isSuperAdmin && (
+                        {canManage && (
                           <TableCell className="text-right">
                             {s.role === "staff" ? (
                               <Button
@@ -1034,6 +1177,31 @@ export default function SettingsPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Access level only matters for Staff — a Super Admin is
+                always forced to full_access on the backend, so hide the
+                control entirely when that role is selected to avoid
+                implying it does anything. */}
+            {form.role === "staff" && (
+              <div className="space-y-2 sm:col-span-2">
+                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Access Level
+                </Label>
+                <Select value={form.permission} onValueChange={(v) => setForm({ ...form, permission: v as PermissionLevel })}>
+                  <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
+                    <SelectItem value="full_access">
+                      <span className="flex items-center gap-1.5"><Pencil className="w-3 h-3" /> Full Access — can view, edit, and delete</span>
+                    </SelectItem>
+                    <SelectItem value="view_only">
+                      <span className="flex items-center gap-1.5"><Eye className="w-3 h-3" /> View Only — can view records only</span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <div className={`p-3 rounded-lg border flex items-start gap-2 ${isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"}`}>
