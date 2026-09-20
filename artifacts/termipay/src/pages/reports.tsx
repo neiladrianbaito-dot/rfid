@@ -117,8 +117,6 @@ const ROUTE_LINE_COLORS = ["#3b82f6", "#f97316", "#10b981", "#a855f7", "#ef4444"
 
 // How many days ahead the Route Performance forecast projects.
 const ROUTE_FORECAST_DAYS = 7;
-// How many of the busiest routes get their own line on the chart.
-const ROUTE_CHART_TOP_N = 5;
 
 // ➕ Standard PH statutory discount rate for Student/Senior/PWD fares
 // (20% off). Used to back-calculate how much revenue was foregone by
@@ -1178,58 +1176,31 @@ export default function ReportsPage() {
   }, [routeTotals, getRouteName, routePeriodDayCount, totalRoutedRides]);
 
   const topRoute = rankedRoutes[0] || null;
-  const topRoutesForChart = rankedRoutes.slice(0, ROUTE_CHART_TOP_N);
 
-  // ── chart data: actual daily ride counts for the top routes, plus a
-  // short linear-trend forecast appended after the last real day. Two
-  // dataKeys per route ("..._actual" solid, "..._forecast" dashed) so
-  // recharts can style the projected segment differently. The forecast
-  // series starts on the last actual day (duplicating that value) so the
-  // dashed line visually connects to the solid one instead of jumping. ──
-  const { routeChartData, routeChartSeries } = React.useMemo(() => {
-    if (topRoutesForChart.length === 0 || routePeriodDates.length === 0) {
-      return { routeChartData: [] as any[], routeChartSeries: [] as any[] };
-    }
-
-    const series = topRoutesForChart.map((r, idx) => {
+  // ── Horizontal Route Performance bars ───────────────────────────────────
+  // Keeps every route in the filtered period visible. The bar length represents
+  // total rides, while the tooltip preserves the important route metrics:
+  // daily average, total/daily revenue, ride share, and next-day trend forecast.
+  const routeBarData = React.useMemo(() => {
+    return rankedRoutes.map((route, idx) => {
       const actualValues = routePeriodDates.map((date) => {
         const dayMap = routeDailyMap.get(date);
-        return dayMap?.get(r.routeId)?.count ?? 0;
+        return dayMap?.get(route.routeId)?.count ?? 0;
       });
+
       const forecastValues = linearRegressionForecast(actualValues, ROUTE_FORECAST_DAYS);
+
       return {
-        routeId: r.routeId,
-        name: r.name,
-        color: ROUTE_LINE_COLORS[idx % ROUTE_LINE_COLORS.length],
-        actualKey: `r${r.routeId}_actual`,
-        forecastKey: `r${r.routeId}_forecast`,
-        actualValues,
-        forecastValues,
+        ...route,
+        barColor: ROUTE_LINE_COLORS[idx % ROUTE_LINE_COLORS.length],
+        nextDayForecast: forecastValues[0] ?? 0,
+        forecast7DayAverage:
+          forecastValues.length > 0
+            ? forecastValues.reduce((sum, value) => sum + value, 0) / forecastValues.length
+            : 0,
       };
     });
-
-    const lastDate = routePeriodDates[routePeriodDates.length - 1];
-    const forecastDates = Array.from({ length: ROUTE_FORECAST_DAYS }, (_, i) =>
-      addDaysToDateString(lastDate, i + 1)
-    );
-    const allDates = [...routePeriodDates, ...forecastDates];
-
-    const data = allDates.map((date, idx) => {
-      const row: any = { date, isForecast: idx >= routePeriodDates.length };
-      series.forEach((s) => {
-        if (idx < routePeriodDates.length) {
-          row[s.actualKey] = s.actualValues[idx];
-          row[s.forecastKey] = idx === routePeriodDates.length - 1 ? s.actualValues[idx] : null;
-        } else {
-          row[s.actualKey] = null;
-          row[s.forecastKey] = s.forecastValues[idx - routePeriodDates.length];
-        }
-      });
-      return row;
-    });
-
-    return { routeChartData: data, routeChartSeries: series };
-  }, [topRoutesForChart, routePeriodDates, routeDailyMap]);
+  }, [rankedRoutes, routePeriodDates, routeDailyMap]);
 
   // ── filtered transfers, same date-filter rule as transactions above,
   // driving the "Transfers" export tab. ──
@@ -2161,238 +2132,326 @@ export default function ReportsPage() {
       )}
 
       {/* ══ ROUTE PERFORMANCE ══
-          Which route gets the most riders/day (Fare transactions only,
-          grouped by routeId), a line-graph trend per route with a short
-          linear-trend forecast, and each route's daily average. Same
-          Year/Month/Day filter, rendered inline in this card's header row
-          next to the title. */}
+          Horizontal bar visualization for every routed Fare route. The
+          underlying route totals/table data are unchanged; only the visual
+          presentation of the performance section is redesigned. */}
       {activeTab === "routes" && (
-      <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-amber-500 to-transparent" />
-        <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3 flex-wrap">
-              <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                <RouteIcon size={14} className="text-orange-500" />
-                Route Performance
-                {isFilterActive && (
-                  <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                    — {filterLabel}
-                  </span>
-                )}
-              </CardTitle>
-              {renderFilterBar()}
-            </div>
-            <div className={`text-[10px] font-medium uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              <Sparkles size={11} className="text-amber-500" />
-              Fare rides only · {ROUTE_FORECAST_DAYS}-day trend forecast
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-6 space-y-6">
-          {isLoading ? (
-            <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
-          ) : rankedRoutes.length === 0 ? (
-            <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              No routed Fare rides match the selected filter.
-            </div>
-          ) : (
-            <>
-              {/* ── Top route highlight ── */}
-              {topRoute && (
-                <div className={`flex items-center gap-4 rounded-lg border px-5 py-4 ${
-                  isDark ? "bg-amber-950/30 border-amber-900" : "bg-amber-50 border-amber-200"
-                }`}>
-                  <div className={`w-11 h-11 rounded-lg flex items-center justify-center flex-none ${
-                    isDark ? "bg-amber-900/50 text-amber-400" : "bg-amber-100 text-amber-600"
+        <section
+          className={`flex-1 overflow-hidden rounded-2xl border shadow-sm ${
+            isDark
+              ? "bg-slate-900/95 border-slate-800"
+              : "bg-white border-slate-200"
+          }`}
+        >
+          <div className="h-1 w-full bg-gradient-to-r from-orange-500 via-amber-400 to-orange-200 dark:to-orange-950" />
+
+          <div className={`border-b px-6 py-5 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${
+                    isDark ? "bg-orange-950/50 text-orange-400" : "bg-orange-50 text-orange-600"
                   }`}>
-                    <Award size={22} />
+                    <RouteIcon size={18} />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-amber-500/80" : "text-amber-700/80"}`}>
-                     Most Traveled Route {isFilterActive ? `(${filterLabel})` : "(All-time)"}
-                    </p>
-                    <p className={`text-lg font-bold tracking-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
-                      {topRoute.name}
+                  <div>
+                    <h2 className={`text-sm font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
+                      Route Performance
+                    </h2>
+                    <p className={`mt-0.5 text-[11px] ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                      Total routed Fare rides by route
+                      {isFilterActive ? ` · ${filterLabel}` : " · All-time"}
                     </p>
                   </div>
-                  <div className="flex items-center gap-6 flex-none">
-                    <div className="text-right">
-                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Rides</p>
-                      <p className={`text-lg font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>{topRoute.totalRides.toLocaleString("en-US")}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily Avg</p>
-                      <p className={`text-lg font-bold font-mono ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                        {topRoute.avgRidesPerDay.toFixed(1)} <span className="text-xs font-normal opacity-70">rides/day</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {topRoute && (
+                  <>
+                    <div className={`rounded-xl border px-3 py-2 ${
+                      isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"
+                    }`}>
+                      <p className={`text-[9px] font-bold uppercase tracking-wider ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                        Routes
+                      </p>
+                      <p className={`mt-0.5 text-sm font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>
+                        {rankedRoutes.length.toLocaleString("en-US")}
                       </p>
                     </div>
-                    <div className="text-right hidden sm:block">
-                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revenue</p>
-                      <p className={`text-lg font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>{formatPeso(topRoute.totalRevenue)}</p>
+
+                    <div className={`rounded-xl border px-3 py-2 ${
+                      isDark ? "bg-orange-950/30 border-orange-900/60" : "bg-orange-50 border-orange-200"
+                    }`}>
+                      <p className={`text-[9px] font-bold uppercase tracking-wider ${isDark ? "text-orange-400/70" : "text-orange-700/70"}`}>
+                        Total Rides
+                      </p>
+                      <p className={`mt-0.5 text-sm font-bold font-mono ${isDark ? "text-orange-300" : "text-orange-700"}`}>
+                        {totalRoutedRides.toLocaleString("en-US")}
+                      </p>
                     </div>
+
+                    <div className={`rounded-xl border px-3 py-2 ${
+                      isDark ? "bg-emerald-950/30 border-emerald-900/60" : "bg-emerald-50 border-emerald-200"
+                    }`}>
+                      <p className={`text-[9px] font-bold uppercase tracking-wider ${isDark ? "text-emerald-400/70" : "text-emerald-700/70"}`}>
+                        Route Revenue
+                      </p>
+                      <p className={`mt-0.5 text-sm font-bold font-mono ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>
+                        {formatPeso(rankedRoutes.reduce((sum, r) => sum + r.totalRevenue, 0))}
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                <div className="ml-0">
+                  {renderFilterBar()}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6">
+            {isLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3, 4].map((i) => (
+                  <Skeleton
+                    key={i}
+                    className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`}
+                  />
+                ))}
+              </div>
+            ) : rankedRoutes.length === 0 ? (
+              <div className={`py-16 text-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                <RouteIcon className="mx-auto mb-3 opacity-40" size={30} />
+                <p className="text-sm font-medium">No routed Fare rides match the selected filter.</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* ── Chart heading ── */}
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className={`text-xs font-bold uppercase tracking-wider ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                      Ridership by Route
+                    </p>
+                    <p className={`mt-1 text-[11px] ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                      Longer bars represent more Fare rides. Hover a bar for complete route details.
+                    </p>
+                  </div>
+
+                  {topRoute && (
+                    <div className={`flex items-center gap-2 rounded-full px-3 py-1.5 ${
+                      isDark ? "bg-amber-950/30 text-amber-400" : "bg-amber-50 text-amber-700"
+                    }`}>
+                      <Award size={13} />
+                      <span className="text-[10px] font-bold uppercase tracking-wide">
+                        #1 {topRoute.name}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Horizontal bar graph ── */}
+                <div
+                  className="w-full overflow-x-auto"
+                  style={{ minHeight: `${Math.max(360, rankedRoutes.length * 58 + 90)}px` }}
+                >
+                  <div
+                    className="w-full"
+                    style={{ minWidth: "760px", height: `${Math.max(360, rankedRoutes.length * 58 + 90)}px` }}
+                  >
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={routeBarData}
+                        layout="vertical"
+                        margin={{ top: 8, right: 70, left: 18, bottom: 8 }}
+                        barCategoryGap="24%"
+                      >
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke={isDark ? "#1e293b" : "#e2e8f0"}
+                          horizontal={false}
+                        />
+                        <XAxis
+                          type="number"
+                          allowDecimals={false}
+                          stroke={isDark ? "#64748b" : "#94a3b8"}
+                          fontSize={10}
+                          fontWeight="600"
+                          axisLine={false}
+                          tickLine={false}
+                          tickFormatter={(value: number) => value.toLocaleString("en-US")}
+                        />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={185}
+                          stroke={isDark ? "#64748b" : "#94a3b8"}
+                          fontSize={10}
+                          fontWeight="600"
+                          axisLine={false}
+                          tickLine={false}
+                          tickFormatter={(value: string) =>
+                            value.length > 30 ? `${value.slice(0, 30)}…` : value
+                          }
+                        />
+                        <Tooltip
+                          cursor={{ fill: isDark ? "#1e293b" : "#f8fafc", opacity: 0.75 }}
+                          content={({ active, payload, label }: any) => {
+                            if (!active || !payload?.length) return null;
+                            const route = payload[0]?.payload;
+                            if (!route) return null;
+
+                            return (
+                              <div className={`min-w-[260px] rounded-xl border p-4 shadow-xl ${
+                                isDark
+                                  ? "bg-slate-950 border-slate-700 text-slate-100"
+                                  : "bg-white border-slate-200 text-slate-900"
+                              }`}>
+                                <div className="mb-3 flex items-start gap-2">
+                                  <div
+                                    className="mt-1 h-2.5 w-2.5 rounded-full flex-none"
+                                    style={{ backgroundColor: route.barColor }}
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold leading-4">{label}</p>
+                                    <p className={`mt-0.5 text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                                      Route #{route.routeId}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2">
+                                  {[
+                                    ["Total rides", route.totalRides.toLocaleString("en-US"), "text-orange-500"],
+                                    ["Daily average", `${route.avgRidesPerDay.toFixed(1)} / day`, "text-emerald-500"],
+                                    ["Total revenue", formatPeso(route.totalRevenue), "text-blue-500"],
+                                    ["Revenue / day", formatPeso(route.avgRevenuePerDay), "text-cyan-500"],
+                                    ["Ride share", `${route.sharePct.toFixed(1)}%`, "text-purple-500"],
+                                    ["Next-day forecast", `${route.nextDayForecast.toLocaleString("en-US")} rides`, "text-amber-500"],
+                                  ].map(([title, value, accent]) => (
+                                    <div
+                                      key={title}
+                                      className={`rounded-lg px-2.5 py-2 ${isDark ? "bg-slate-900" : "bg-slate-50"}`}
+                                    >
+                                      <p className={`text-[9px] font-bold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                                        {title}
+                                      </p>
+                                      <p className={`mt-0.5 text-[11px] font-bold font-mono ${accent}`}>
+                                        {value}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                <div className={`mt-2 rounded-lg px-2.5 py-2 text-[10px] ${
+                                  isDark ? "bg-slate-900 text-slate-400" : "bg-slate-50 text-slate-500"
+                                }`}>
+                                  7-day forecast average:{" "}
+                                  <span className={`font-bold font-mono ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                                    {route.forecast7DayAverage.toFixed(1)} rides/day
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          }}
+                        />
+                        <Bar
+                          dataKey="totalRides"
+                          name="Total Rides"
+                          radius={[0, 8, 8, 0]}
+                          maxBarSize={34}
+                          label={{
+                            position: "right",
+                            fill: isDark ? "#cbd5e1" : "#475569",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            formatter: (value: number) => value.toLocaleString("en-US"),
+                          }}
+                        >
+                          {routeBarData.map((route) => (
+                            <Cell
+                              key={route.routeId}
+                              fill={route.barColor}
+                              fillOpacity={0.9}
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
-              )}
 
-              {/* ── Ranking badges for the rest of the top routes ── */}
-              {rankedRoutes.length > 1 && (
-                <div className="flex flex-wrap gap-3">
-                  {rankedRoutes.slice(1, ROUTE_CHART_TOP_N).map((r, idx) => (
-                    <div
-                      key={r.routeId}
-                      className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${
-                        isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50 border-slate-200"
-                      }`}
-                    >
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold flex-none ${
-                        isDark ? "bg-slate-700 text-slate-300" : "bg-slate-200 text-slate-600"
-                      }`}>
-                        {idx + 2}
-                      </div>
-                      <div>
-                        <div className={`text-xs font-bold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</div>
-                        <div className={`text-[11px] font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          {r.totalRides.toLocaleString("en-US")} rides · {r.avgRidesPerDay.toFixed(1)}/day · {r.sharePct.toFixed(0)}% share
-                        </div>
-                      </div>
+                {/* ── Complete route details retained below the visual ── */}
+                <div className={`rounded-xl border overflow-hidden ${
+                  isDark ? "border-slate-800 bg-slate-950/30" : "border-slate-200 bg-slate-50/40"
+                }`}>
+                  <div className={`flex items-center justify-between px-4 py-3 border-b ${
+                    isDark ? "border-slate-800" : "border-slate-200"
+                  }`}>
+                    <div>
+                      <p className={`text-xs font-bold uppercase tracking-wide ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                        Route Details
+                      </p>
+                      <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                        Full metrics for every route in the selected period
+                      </p>
                     </div>
-                  ))}
-                </div>
-              )}
+                    <span className={`text-[10px] font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                      {rankedRoutes.length} route{rankedRoutes.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
 
-              {/* ── Line graph: ridership trend per route + short forecast ── */}
-              {routeChartData.length === 0 ? (
-                <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  Not enough data to chart a trend for this filter.
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
+                        <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                          <TableHead className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>#</TableHead>
+                          <TableHead className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Route</TableHead>
+                          <TableHead className="text-right text-[10px] font-semibold uppercase tracking-wide text-orange-500">Total Rides</TableHead>
+                          <TableHead className="text-right text-[10px] font-semibold uppercase tracking-wide text-emerald-600">Daily Avg</TableHead>
+                          <TableHead className={`text-right text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revenue</TableHead>
+                          <TableHead className={`text-right text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revenue / Day</TableHead>
+                          <TableHead className="text-right text-[10px] font-semibold uppercase tracking-wide text-purple-500">Share</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {rankedRoutes.map((r, i) => (
+                          <TableRow
+                            key={r.routeId}
+                            className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-white"}`}
+                          >
+                            <TableCell className={`text-xs font-bold ${i === 0 ? "text-orange-500" : isDark ? "text-slate-500" : "text-slate-400"}`}>
+                              {i + 1}
+                            </TableCell>
+                            <TableCell className={`text-xs font-semibold whitespace-nowrap ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {r.name}
+                            </TableCell>
+                            <TableCell className={`text-right font-semibold font-mono text-xs ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {r.totalRides.toLocaleString("en-US")}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                              {r.avgRidesPerDay.toFixed(1)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {formatPeso(r.totalRevenue)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {formatPeso(r.avgRevenuePerDay)}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
+                              {r.sharePct.toFixed(1)}%
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
-              ) : (
-                <div className="h-[340px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={routeChartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
-                      <XAxis
-                        dataKey="date"
-                        tickFormatter={(d: string) => {
-                          const date = new Date(d + "T00:00:00");
-                          return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                        }}
-                        stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
-                      />
-                      <YAxis
-                        allowDecimals={false}
-                        stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600"
-                        tickFormatter={(v: number) => `${v}`} axisLine={false} tickLine={false}
-                        label={{
-                          value: "Rides / day",
-                          angle: -90,
-                          position: "insideLeft",
-                          style: { fontSize: 10, fontWeight: 600, fill: isDark ? "#64748b" : "#94a3b8" },
-                        }}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                          border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
-                          borderRadius: "8px",
-                          fontSize: "11px",
-                          fontWeight: "600",
-                          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-                        }}
-                        labelFormatter={(d: string) => {
-                          const date = new Date(d + "T00:00:00");
-                          return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-                        }}
-                        labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
-                        formatter={(value: number, name: string) =>
-                          value === null || value === undefined ? ["—", name] : [`${value} rides`, name]
-                        }
-                      />
-                      <Legend
-                        wrapperStyle={{ fontSize: "11px", fontWeight: 600 }}
-                        formatter={(value: string) => (
-                          <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>
-                        )}
-                      />
-                      {routeChartSeries.map((s) => (
-                        <Line
-                          key={s.actualKey}
-                          type="monotone"
-                          dataKey={s.actualKey}
-                          name={s.name}
-                          stroke={s.color}
-                          strokeWidth={2.5}
-                          dot={false}
-                          activeDot={{ r: 4 }}
-                          connectNulls={false}
-                        />
-                      ))}
-                      {routeChartSeries.map((s) => (
-                        <Line
-                          key={s.forecastKey}
-                          type="monotone"
-                          dataKey={s.forecastKey}
-                          name={`${s.name} (Forecast)`}
-                          stroke={s.color}
-                          strokeWidth={2}
-                          strokeDasharray="5 4"
-                          dot={false}
-                          activeDot={{ r: 3 }}
-                          legendType="none"
-                          connectNulls={false}
-                        />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-
-              {/* ── Daily average table, every routed ride in the period ── */}
-              <div className="overflow-x-auto -mx-2 px-2">
-                <Table>
-                  <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
-                    <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>#</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Route</TableHead>
-                      <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-orange-500">Total Rides</TableHead>
-                      <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">Daily Avg (Rides)</TableHead>
-                      <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Revenue</TableHead>
-                      <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily Avg (Revenue)</TableHead>
-                      <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Share</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rankedRoutes.map((r, i) => (
-                      <TableRow
-                        key={r.routeId}
-                        className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
-                      >
-                        <TableCell className={`text-xs font-bold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{i + 1}</TableCell>
-                        <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</TableCell>
-                        <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                          {r.totalRides.toLocaleString("en-US")}
-                        </TableCell>
-                        <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                          {r.avgRidesPerDay.toFixed(1)}
-                        </TableCell>
-                        <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          {formatPeso(r.totalRevenue)}
-                        </TableCell>
-                        <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          {formatPeso(r.avgRevenuePerDay)}
-                        </TableCell>
-                        <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
-                          {r.sharePct.toFixed(1)}%
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
               </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </div>
+        </section>
       )}
 
       {/* ══ DATA TABLE ══ */}
