@@ -1327,15 +1327,25 @@ export default function CardRegistrationPage() {
           </p>
         </div>
 
-        {/* 🔒 Add button — makikita lang kapag loaded na at may permission (hindi view_only) */}
-        {loaded && canManage && (
-          <Button
-            onClick={openModal}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Register New Card
-          </Button>
+        {/* Register button remains visible; view-only users see it disabled. */}
+        {loaded && (
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={openModal}
+              disabled={!canManage}
+              aria-disabled={!canManage}
+              className={`gap-2 ${!canManage ? "cursor-not-allowed opacity-50" : ""}`}
+              title={!canManage ? "View Only" : "Register a new card"}
+            >
+              <Plus className="h-4 w-4" />
+              Register New Card
+            </Button>
+            {!canManage && (
+              <Badge variant="secondary" className="text-xs">
+                View Only
+              </Badge>
+            )}
+          </div>
         )}
       </div>
 
