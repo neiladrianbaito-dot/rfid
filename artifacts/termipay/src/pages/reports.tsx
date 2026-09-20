@@ -1036,9 +1036,10 @@ export default function ReportsPage() {
     return discountSummary.totalCollected / dayCount;
   }, [filteredFareDiscountBreakdown, discountSummary.totalCollected]);
 
-  // Card Type distribution for the Discount Collection Analytics donut.
-  // Uses the same filtered Fare dataset as the analytics summary so the chart
-  // always stays in sync with the active Year / Month / Day filter.
+  // Registered-user distribution by Card Type for the Discount Collection
+  // Analytics donut. This is intentionally based on the registered `users`
+  // dataset — NOT Fare transactions — so the chart answers "how many users
+  // are registered under each card type" rather than "how many rides occurred".
   const cardTypeDistribution = React.useMemo(() => {
     const counts: Record<"Regular" | "Student" | "Senior" | "PWD", number> = {
       Regular: 0,
@@ -1047,14 +1048,14 @@ export default function ReportsPage() {
       PWD: 0,
     };
 
-    filteredFareList.forEach((tx: any) => {
-      counts[getTxCardType(tx)] += 1;
+    userList.forEach((u: any) => {
+      counts[normalizeCardType(u?.type)] += 1;
     });
 
     return (Object.entries(counts) as Array<[keyof typeof counts, number]>)
       .map(([name, value]) => ({ name, value }))
       .filter((item) => item.value > 0);
-  }, [filteredFareList, getTxCardType]);
+  }, [userList]);
 
   const CARD_TYPE_CHART_COLORS: Record<string, string> = {
     Regular: "#64748b",
@@ -1919,19 +1920,19 @@ export default function ReportsPage() {
 
               {/* ── Card Type distribution ─────────────────────────────────────
                   Replaces the old Card Type summary card with a donut chart.
-                  Counts are derived from the filtered Fare transactions so
-                  the visualization follows the active report filters. ── */}
+                  Counts are based on registered users, grouped by their card type.
+                  Date filters do not change these registration counts. ── */}
               <div className={`rounded-lg border p-4 ${isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-slate-50/60"}`}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <h3 className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-300" : "text-slate-600"}`}>Card Type</h3>
-                    <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fare transaction distribution</p>
+                    <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Registered users by card type</p>
                   </div>
                 </div>
 
                 {cardTypeDistribution.length === 0 ? (
                   <div className={`h-[240px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                    No fare records match the selected filter.
+                    No registered users found.
                   </div>
                 ) : (
                   <div className="h-[260px] w-full">
@@ -1953,6 +1954,12 @@ export default function ReportsPage() {
                             <Cell key={entry.name} fill={CARD_TYPE_CHART_COLORS[entry.name]} />
                           ))}
                         </Pie>
+                        <text x="50%" y="48%" textAnchor="middle" dominantBaseline="middle" fill={isDark ? "#e2e8f0" : "#1e293b"} fontSize="22" fontWeight="700">
+                          {cardTypeDistribution.reduce((sum, item) => sum + item.value, 0)}
+                        </text>
+                        <text x="50%" y="58%" textAnchor="middle" dominantBaseline="middle" fill={isDark ? "#64748b" : "#94a3b8"} fontSize="10" fontWeight="600">
+                          REGISTERED USERS
+                        </text>
                         <Tooltip
                           contentStyle={{
                             backgroundColor: isDark ? "#0f172a" : "#ffffff",
@@ -1964,7 +1971,7 @@ export default function ReportsPage() {
                           formatter={(value: number, name: string) => {
                             const total = cardTypeDistribution.reduce((sum, item) => sum + item.value, 0);
                             const pct = total > 0 ? (value / total) * 100 : 0;
-                            return [`${value} ${value === 1 ? "ride" : "rides"} (${pct.toFixed(1)}%)`, name];
+                            return [`${value} ${value === 1 ? "user" : "users"} (${pct.toFixed(1)}%)`, name];
                           }}
                         />
                         <Legend
