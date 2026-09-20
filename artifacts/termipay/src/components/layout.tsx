@@ -390,6 +390,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [profileModalOpen, setProfileModalOpen] = useState(false);
 
   const [isUpdating, setIsUpdating] = useState(false);
+  // Hard lock against double-submits (double-click, double-fire, etc). A
+  // ref is used instead of relying on `isUpdating` state alone because
+  // state updates are async — two rapid clicks can both read the old
+  // `isUpdating === false` before the first setIsUpdating(true) commits.
+  const isSavingRef = useRef(false);
   const [formData, setFormData] = useState({
     name: user?.name || "",
     username: getUsername(user),
@@ -458,37 +463,39 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     throw new Error("Could not save avatar: no matching admin account was found.");
   }
 
-  // Saves the new username on the public.admins row directly. Matches the
-  // row the same way syncAvatarToAdmins does: prefer the numeric admin id
-  // (stable even after the username itself changes), and fall back to the
-  // OLD username/email if no id is known.
+  // Saves the new username on the public.admins row via a security-definer
+  // RPC (public.set_admin_username — see accompanying .sql file), NOT a
+  // direct table update. A direct `.update().select()` looked like it
+  // failed even on success whenever there was no SELECT policy letting the
+  // admin read their own row back — Postgres silently returns an empty
+  // array in that case instead of an error. The RPC bypasses RLS entirely
+  // and reports success/failure from actual row count, so it can't lie.
   //
-  // NOTE: requires an UPDATE policy on public.admins that allows an admin to
-  // update their own row (matching on id, or on the pre-change username).
+  // The RPC is also idempotent: if the row is already at p_new_username
+  // (e.g. this got called twice — a stale click, a re-render, anything)
+  // it still returns true instead of "no matching admin account found".
   async function syncUsernameToAdmins(newUsername: string, oldUsername: string) {
-  const trimmedNew = newUsername.trim();
-  if (!trimmedNew) throw new Error("Username cannot be empty.");
+    const trimmedNew = newUsername.trim();
+    if (!trimmedNew) throw new Error("Username cannot be empty.");
 
-  const { data, error } = await supabase.rpc("set_admin_username", {
-    p_id: adminId,
-    p_username: oldUsername.trim() || null,
-    p_new_username: trimmedNew,
-  });
+    const { data, error } = await supabase.rpc("set_admin_username", {
+      p_id: adminId,
+      p_username: oldUsername.trim() || null,
+      p_new_username: trimmedNew,
+    });
 
-  console.log("set_admin_username ->", { data, error }); // temp debug, remove after confirming
+    if (error) {
+      throw new Error(
+        error.code === "23505" || /already exists|duplicate/i.test(error.message)
+          ? "That username is already taken."
+          : `Could not save username: ${error.message}`
+      );
+    }
 
-  if (error) {
-    throw new Error(
-      error.code === "23505" || /already exists|duplicate/i.test(error.message)
-        ? "That username is already taken."
-        : `Could not save username: ${error.message}`
-    );
+    if (data !== true) {
+      throw new Error("Could not save username: no matching admin account was found.");
+    }
   }
-
-  if (data !== true) {
-    throw new Error("Could not save username: no matching admin account was found.");
-  }
-}
 
   // The avatar lives in its own state so it always displays, even when the
   // `user` object from useAuth doesn't include avatar fields. Sources, in order:
@@ -695,6 +702,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }
 
   const handleSaveChanges = async () => {
+    // Block a second call (double-click, double-fire from an event
+    // re-bind, etc.) while one is already running. This is what was
+    // causing syncUsernameToAdmins to run twice — the second run searched
+    // for the OLD username, which the first run had already renamed away,
+    // so it looked like a failure even though the save had succeeded.
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
+
     const currentUsername = getUsername(user);
     const trimmedNewUsername = formData.username.trim();
 
@@ -946,6 +961,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       toast({ title: "Update Failed", description: error.message, variant: "destructive" });
     } finally {
       setIsUpdating(false);
+      isSavingRef.current = false;
     }
   };
 
