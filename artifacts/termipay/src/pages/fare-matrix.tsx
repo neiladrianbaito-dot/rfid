@@ -69,6 +69,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 
+// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
+// at `loaded` (true kapag tapos na ma-fetch ang access info).
+import { useAdminAccess } from "@/hooks/use-admin-access";
+
 const CALBAYOG_BARANGAYS = [
   "Bugtong",
   "Tinaplacan",
@@ -125,6 +129,10 @@ export default function FareMatrixPage() {
   // deactivating a route (matches GetMeResponse.username from api-zod).
   const actorUsername = user?.username ?? "unknown";
 
+  // 🔒 ADMIN ACCESS: `canManage` = false kapag view_only.
+  // `loaded` = true kapag tapos na ma-load ang access info.
+  const { canManage, loaded } = useAdminAccess();
+
   const [showAdd, setShowAdd] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [addForm, setAddForm] = useState({
@@ -165,6 +173,20 @@ export default function FareMatrixPage() {
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // 🔒 Safety guard helper — ginagamit sa lahat ng Add/Edit/Delete/Activate/
+  // Deactivate handlers. Kapag view_only, magpapakita ng toast at ibabalik
+  // ang `true` para mag-early return ang caller. Proteksyon ito kahit
+  // ma-bypass ang UI.
+  const blockIfViewOnly = (): boolean => {
+    if (canManage) return false;
+    toast({
+      title: "View Only Access",
+      description: "You don't have permission to perform this action.",
+      variant: "destructive",
+    });
+    return true;
+  };
 
   const { data: routes, isLoading, refetch: refetchRoutes } = useListRoutes(undefined, {
     query: {
@@ -337,6 +359,9 @@ export default function FareMatrixPage() {
   });
 
   const openEdit = (route: any) => {
+    // 🔒 Guard: bawal mag-edit kapag view_only
+    if (blockIfViewOnly()) return;
+
     setEditRoute(route);
     const initial = {
       origin: route.origin,
@@ -395,6 +420,9 @@ export default function FareMatrixPage() {
   };
 
   const openActivateModal = (route: any) => {
+    // 🔒 Guard: bawal mag-activate kapag view_only
+    if (blockIfViewOnly()) return;
+
     setActivateRoute(route);
     setSelectedDeviceId("");
     fetchActiveDevices(route.id);
@@ -422,6 +450,13 @@ export default function FareMatrixPage() {
       : null;
 
   const confirmActivate = async () => {
+    // 🔒 Guard: bawal mag-confirm ng activation kapag view_only
+    if (blockIfViewOnly()) {
+      setActivateRoute(null);
+      setSelectedDeviceId("");
+      return;
+    }
+
     if (!activateRoute || !selectedDeviceId) return;
 
     setIsTogglePending(true);
@@ -488,6 +523,9 @@ export default function FareMatrixPage() {
   // ✅ VICE VERSA: also deactivates the reverse-direction counterpart route
   // (same reasoning as activate — one reader serves both directions).
   const handleDeactivate = async (routeId: string | number) => {
+    // 🔒 Guard: bawal mag-deactivate kapag view_only
+    if (blockIfViewOnly()) return;
+
     setIsTogglePending(true);
     setPendingRouteId(routeId);
 
@@ -528,6 +566,9 @@ export default function FareMatrixPage() {
   };
 
   const handleAdd = async () => {
+    // 🔒 Guard: bawal mag-add ng route kapag view_only
+    if (blockIfViewOnly()) return;
+
     const origin = addForm.origin.trim();
     const destination = addForm.destination.trim();
     const fare = parseFloat(addForm.fareAmount) || 0;
@@ -572,6 +613,12 @@ export default function FareMatrixPage() {
   };
 
   const confirmDelete = () => {
+    // 🔒 Guard: bawal mag-delete kapag view_only
+    if (blockIfViewOnly()) {
+      setDeleteRoute(null);
+      return;
+    }
+
     if (!deleteRoute) return;
     deleteMutation.mutate(
       { id: deleteRoute.id },
@@ -580,6 +627,9 @@ export default function FareMatrixPage() {
   };
 
   const handleUpdate = () => {
+    // 🔒 Guard: bawal mag-save ng edit kapag view_only
+    if (blockIfViewOnly()) return;
+
     if (!editRoute || !hasRouteChanges) return;
     const origin = editForm.origin.trim();
     const destination = editForm.destination.trim();
@@ -621,14 +671,18 @@ export default function FareMatrixPage() {
               <Zap className="text-blue-500" size={16} />
               <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
             </div>
-            <Button
-              onClick={() => setShowAdd(true)}
-              data-testid="button-add-route"
-              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm cursor-pointer shrink-0 whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Route
-            </Button>
+
+            {/* 🔒 Add Route button — makikita lang kapag loaded na at may permission (hindi view_only) */}
+            {loaded && canManage && (
+              <Button
+                onClick={() => setShowAdd(true)}
+                data-testid="button-add-route"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Route
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -865,59 +919,69 @@ export default function FareMatrixPage() {
                             {route.isActive ? "Active" : "Inactive"}
                           </Badge>
                         </TableCell>
+
+                        {/* 🔒 Activate / Deactivate — makikita lang kapag may permission (hindi view_only).
+                            Ang view_only ay "—" lang ang makikita. */}
                         <TableCell>
-                          <Button
-                            size="sm"
-                            variant={route.isActive ? "destructive" : "default"}
-                            className={
-                              (route.isActive
-                                ? "bg-red-500 hover:bg-red-600 text-white"
-                                : "bg-emerald-600 hover:bg-emerald-700 text-white") +
-                              " cursor-pointer disabled:cursor-not-allowed"
-                            }
-                            onClick={() => {
-                              if (route.isActive) {
-                                // Deactivating doesn't need a device selection
-                                handleDeactivate(route.id);
-                              } else {
-                                // Activating opens the device-selection modal
-                                openActivateModal(route);
+                          {canManage ? (
+                            <Button
+                              size="sm"
+                              variant={route.isActive ? "destructive" : "default"}
+                              className={
+                                (route.isActive
+                                  ? "bg-red-500 hover:bg-red-600 text-white"
+                                  : "bg-emerald-600 hover:bg-emerald-700 text-white") +
+                                " cursor-pointer disabled:cursor-not-allowed"
                               }
-                            }}
-                            disabled={isTogglePending && pendingRouteId === route.id}
-                            data-testid={`toggle-route-${route.id}`}
-                          >
-                            {route.isActive ? (
-                              <><PowerOff className="w-3.5 h-3.5 mr-1" /> Deactivate</>
-                            ) : (
-                              <><Power className="w-3.5 h-3.5 mr-1" /> Activate</>
-                            )}
-                          </Button>
+                              onClick={() => {
+                                if (route.isActive) {
+                                  // Deactivating doesn't need a device selection
+                                  handleDeactivate(route.id);
+                                } else {
+                                  // Activating opens the device-selection modal
+                                  openActivateModal(route);
+                                }
+                              }}
+                              disabled={isTogglePending && pendingRouteId === route.id}
+                              data-testid={`toggle-route-${route.id}`}
+                            >
+                              {route.isActive ? (
+                                <><PowerOff className="w-3.5 h-3.5 mr-1" /> Deactivate</>
+                              ) : (
+                                <><Power className="w-3.5 h-3.5 mr-1" /> Activate</>
+                              )}
+                            </Button>
+                          ) : (
+                            <span className={`text-xs ${isDark ? "text-slate-600" : "text-slate-300"}`}>—</span>
+                          )}
                         </TableCell>
 
+                        {/* 🔒 Edit / Delete — makikita lang kapag may permission (hindi view_only) */}
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
-                              onClick={() => openEdit(route)}
-                              data-testid={`button-edit-route-${route.id}`}
-                              title="Edit route"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
-                              onClick={() => setDeleteRoute(route)}
-                              data-testid={`button-delete-route-${route.id}`}
-                              title="Delete route"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
-                          </div>
+                          {canManage && (
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
+                                onClick={() => openEdit(route)}
+                                data-testid={`button-edit-route-${route.id}`}
+                                title="Edit route"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
+                                onClick={() => setDeleteRoute(route)}
+                                data-testid={`button-delete-route-${route.id}`}
+                                title="Delete route"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))
@@ -929,9 +993,10 @@ export default function FareMatrixPage() {
         </CardContent>
       </Card>
 
-      {/* Add Route Dialog */}
+      {/* Add Route Dialog
+          🔒 `open` naka-gate sa canManage — hindi kailanman magbubukas kapag view_only */}
       <Dialog
-        open={showAdd}
+        open={canManage && showAdd}
         onOpenChange={(open) => {
           setShowAdd(open);
           if (!open)
@@ -1036,8 +1101,9 @@ export default function FareMatrixPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Route Dialog — styled to match User Management's Edit User dialog */}
-      <Dialog open={!!editRoute} onOpenChange={(open) => !open && setEditRoute(null)}>
+      {/* Edit Route Dialog — styled to match User Management's Edit User dialog
+          🔒 `open` naka-gate sa canManage */}
+      <Dialog open={canManage && !!editRoute} onOpenChange={(open) => !open && setEditRoute(null)}>
         <DialogContent className={`[&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
           <DialogHeader>
             <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
@@ -1106,9 +1172,10 @@ export default function FareMatrixPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ✅ Activate Route Dialog — device selection, pulled live from Supabase `devices` table */}
+      {/* ✅ Activate Route Dialog — device selection, pulled live from Supabase `devices` table
+          🔒 `open` naka-gate sa canManage */}
       <Dialog
-        open={!!activateRoute}
+        open={canManage && !!activateRoute}
         onOpenChange={(open) => {
           if (!open) {
             setActivateRoute(null);
@@ -1204,8 +1271,9 @@ export default function FareMatrixPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirm — styled to match User Management's Delete Confirm dialog */}
-      <AlertDialog open={!!deleteRoute} onOpenChange={(open) => !open && setDeleteRoute(null)}>
+      {/* Delete Confirm — styled to match User Management's Delete Confirm dialog
+          🔒 `open` naka-gate sa canManage */}
+      <AlertDialog open={canManage && !!deleteRoute} onOpenChange={(open) => !open && setDeleteRoute(null)}>
         <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
           <AlertDialogHeader>
             <AlertDialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
