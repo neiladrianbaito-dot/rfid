@@ -657,7 +657,7 @@ export default function ReportsPage() {
   // transaction list below (enrichedTxList) so the Top-up Excel export
   // tab can show Fee / VAT / Net Amount columns, exactly like the
   // Transactions page's receipt modal already does on-screen. ──
-  const [financialById, setFinancialById] = useState
+  const [financialById, setFinancialById] = useState<
     Record<string, { fee_amount: number | null; vat_amount: number | null; net_amount: number | null }>
   >({});
 
@@ -780,7 +780,7 @@ export default function ReportsPage() {
   // the hover tooltip can dynamically show only the passenger counts for the
   // exact day represented by the hovered revenue bar.
   const passengerBreakdownByDate = React.useMemo(() => {
-    const map = new Map
+    const map = new Map<
       string,
       { total: number; regular: number; student: number; senior: number; pwd: number }
     >();
@@ -867,7 +867,7 @@ export default function ReportsPage() {
   // discounted). Powers the "Discount Collection Analytics" card below
   // and its own Excel export tab. ──
   const fareDiscountDailyBreakdown = React.useMemo(() => {
-    const map = new Map
+    const map = new Map<
       string,
       { total: number; regular: number; student: number; senior: number; pwd: number }
     >();
