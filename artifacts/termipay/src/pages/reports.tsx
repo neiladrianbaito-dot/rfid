@@ -795,11 +795,11 @@ export default function ReportsPage() {
     return map;
   }, [txList, getTxCardType]);
 
-  const totalUniqueTaps = React.useMemo(() => {
-    const uids = new Set(
-      txList.map((tx: any) => tx.card_uid || tx.cardUid).filter(Boolean)
-    );
-    return uids.size;
+  const totalTapsToday = React.useMemo(() => {
+    const today = getLocalDateString();
+    return txList.filter((tx: any) => {
+      return normalizeTxType(tx.type) === "Fare" && getTxDateKey(tx) === today;
+    }).length;
   }, [txList]);
 
   const totalLinkedCards = React.useMemo(() => {
@@ -1743,7 +1743,7 @@ export default function ReportsPage() {
         {[
           { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-total-revenue",      flash: false },
           { label: "Today's Revenue",         value: formatPeso(todayRevenue),      icon: PhilippinePeso, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-today-revenue",      flash: revenueFlash },
-          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: User, color: isDark ? "text-indigo-400" : "text-indigo-600",  bg: isDark ? "bg-indigo-950/40" : "bg-indigo-50",  border: isDark ? "border-indigo-900" : "border-indigo-100",  testId: "text-total-taps",         flash: false },
+          { label: "Total Tap Today",        value: totalTapsToday,               icon: User, color: isDark ? "text-indigo-400" : "text-indigo-600",  bg: isDark ? "bg-indigo-950/40" : "bg-indigo-50",  border: isDark ? "border-indigo-900" : "border-indigo-100",  testId: "text-total-taps",         flash: false },
           { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: isDark ? "text-sky-400" : "text-sky-600",     bg: isDark ? "bg-sky-950/40" : "bg-sky-50",     border: isDark ? "border-sky-900" : "border-sky-100",     testId: "text-total-linked-cards", flash: false },
         ].map((stat, idx) => (
           <Card
@@ -1854,7 +1854,7 @@ export default function ReportsPage() {
                       });
 
                       const rows = [
-                        { label: "Regular", value: breakdown.regular, color: "#64748b" },
+                        { label: "Regular", value: breakdown.regular, color: "#ef4444" },
                         { label: "Student", value: breakdown.student, color: "#3b82f6" },
                         { label: "Senior", value: breakdown.senior, color: "#f59e0b" },
                         { label: "PWD", value: breakdown.pwd, color: "#10b981" },
