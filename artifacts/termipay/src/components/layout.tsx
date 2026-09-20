@@ -475,6 +475,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     p_new_username: trimmedNew,
   });
 
+  console.log("set_admin_username ->", { data, error }); // temp debug, remove after confirming
+
   if (error) {
     throw new Error(
       error.code === "23505" || /already exists|duplicate/i.test(error.message)
