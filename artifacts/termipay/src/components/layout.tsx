@@ -52,6 +52,10 @@ import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTheme } from "@/hooks/use-theme";
 
+// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
+// at `loaded` (true kapag tapos na ma-fetch ang access info).
+import { useAdminAccess } from "@/hooks/use-admin-access";
+
 // Supabase Storage bucket for admin profile pictures (see admins-avatar.sql)
 const AVATAR_BUCKET = "admin-avatars";
 const MAX_AVATAR_SIZE = 2 * 1024 * 1024; // 2 MB
@@ -352,6 +356,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { toast } = useToast();
   const { isDark, toggleTheme } = useTheme();
 
+  // 🔒 ADMIN ACCESS:
+  //  - canEditProfile: true lang kapag tapos nang mag-load ang access info
+  //    AT may permission (hindi view_only). Ito ang ginagamit sa lahat ng
+  //    profile edit controls at sa handleSaveChanges().
+  //  - isViewOnly: true kapag loaded na at walang permission — para sa
+  //    "View only" message sa modal.
+  const { canManage, loaded } = useAdminAccess();
+  const canEditProfile = loaded && canManage;
+  const isViewOnly = loaded && !canManage;
+
   // Sidebar visibility — works for BOTH breakpoints now:
   //  - Desktop (lg+): true = sidebar shown at its normal width, false = width
   //    collapses to 0 and the page content expands to fill the freed space.
@@ -552,7 +566,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           // Self-heal: the picture exists in auth metadata but not in
           // public.admins (e.g. an earlier save failed). Copy it over so the
           // Settings page can show it too.
-          if (meta.avatar_url) {
+          // 🔒 Ito ay isang WRITE sa admins table, kaya hindi ito tatakbo
+          // para sa view_only admin.
+          if (meta.avatar_url && canEditProfile) {
             try {
               await syncAvatarToAdmins(meta.avatar_url, meta.avatar_path || null, data?.user?.email);
             } catch (healError) {
@@ -569,7 +585,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, canEditProfile]);
 
   // Keep the header avatar in sync right after supabase.auth.updateUser()
   useEffect(() => {
@@ -617,6 +634,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // Picking a picture only shows a preview. It is uploaded when the user
   // presses "Save Changes".
   function handleAvatarSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    // 🔒 Guard: bawal pumili ng bagong picture kapag view_only
+    if (!canEditProfile) {
+      event.target.value = "";
+      return;
+    }
+
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -653,6 +676,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // "Discard" drops a picture that was just picked. "Remove" marks the current
   // picture for removal. Neither touches storage until "Save Changes".
   function handleRemoveAvatar() {
+    // 🔒 Guard: bawal mag-remove ng picture kapag view_only
+    if (!canEditProfile) return;
+
     if (avatarFile) {
       resetAvatarSelection();
       return;
@@ -702,13 +728,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }
 
   const handleSaveChanges = async () => {
+    // 🔒 Guard: bawal mag-update ng profile (name, username, password, picture)
+    // kapag view_only. Proteksyon ito kahit ma-bypass ang UI.
+    if (!canEditProfile) {
+      toast({
+        title: "View Only Access",
+        description: "You don't have permission to update your profile.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Block a second call (double-click, double-fire from an event
     // re-bind, etc.) while one is already running. This is what was
     // causing syncUsernameToAdmins to run twice — the second run searched
     // for the OLD username, which the first run had already renamed away,
     // so it looked like a failure even though the save had succeeded.
     if (isSavingRef.current) return;
-    isSavingRef.current = true;
 
     const currentUsername = getUsername(user);
     const trimmedNewUsername = formData.username.trim();
@@ -754,6 +790,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // ✅ FIX: ang lock ay itinakda na DITO (pagkatapos ng lahat ng validation)
+    // at hindi na sa taas. Dati, kapag nag-return nang maaga ang "No Changes
+    // Detected" / "Invalid ..." toasts, hindi na nare-reset ang isSavingRef
+    // (finally block lang ang nag-reset nito), kaya hindi na makakapag-save
+    // ulit hanggang mag-refresh ang page. Walang `await` sa pagitan ng check
+    // sa taas at nitong pagtakda, kaya safe pa rin ito laban sa double-click.
+    isSavingRef.current = true;
     setIsUpdating(true);
 
     // Track the freshly uploaded file so it can be removed if saving fails
@@ -967,17 +1010,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // Small status line under the avatar buttons. Always rendered (even when
   // empty) with a fixed height so this row NEVER changes the modal's size.
-  const avatarStatus = isUpdating
-    ? avatarFile
-      ? `Uploading ${avatarFile.name}...`
-      : removeAvatar
-        ? "Removing picture..."
-        : null
-    : avatarFile
-      ? "New picture selected."
-      : removeAvatar
-        ? "Will be removed on save."
-        : null;
+  // 🔒 Kapag view_only, "View only" message ang ipinapakita dito (nasa
+  // reserved-height row na, kaya hindi nagbabago ang laki ng modal).
+  const avatarStatus = isViewOnly
+    ? "View only — profile editing is disabled."
+    : isUpdating
+      ? avatarFile
+        ? `Uploading ${avatarFile.name}...`
+        : removeAvatar
+          ? "Removing picture..."
+          : null
+      : avatarFile
+        ? "New picture selected."
+        : removeAvatar
+          ? "Will be removed on save."
+          : null;
 
   return (
     <div
@@ -1251,15 +1298,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           />
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => avatarInputRef.current?.click()}
-                          disabled={isUpdating}
-                          aria-label="Change profile picture"
-                          className="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50 dark:border-slate-950"
-                        >
-                          <Camera className="h-3 w-3" />
-                        </button>
+                        {/* 🔒 Camera button — makikita lang kapag may permission (hindi view_only) */}
+                        {canEditProfile && (
+                          <button
+                            type="button"
+                            onClick={() => avatarInputRef.current?.click()}
+                            disabled={isUpdating}
+                            aria-label="Change profile picture"
+                            className="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50 dark:border-slate-950"
+                          >
+                            <Camera className="h-3 w-3" />
+                          </button>
+                        )}
                       </div>
 
                       <div className="min-w-0 flex-1">
@@ -1267,40 +1317,48 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           Profile picture
                         </p>
 
-                        <div className="flex flex-wrap gap-1.5 mt-1.5">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => avatarInputRef.current?.click()}
-                            disabled={isUpdating}
-                            className="h-7 gap-1 text-[11px] px-2"
-                          >
-                            <Upload className="h-3 w-3" />
-                            {modalAvatarUrl ? "Change" : "Upload"}
-                          </Button>
-
-                          {modalAvatarUrl && (
+                        {/* 🔒 Upload / Change / Remove — makikita lang kapag may permission (hindi view_only) */}
+                        {canEditProfile && (
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
                             <Button
                               type="button"
-                              variant="ghost"
+                              variant="outline"
                               size="sm"
-                              onClick={handleRemoveAvatar}
+                              onClick={() => avatarInputRef.current?.click()}
                               disabled={isUpdating}
-                              className={`h-7 gap-1 text-[11px] px-2 ${
-                                isDark ? "text-red-400 hover:text-red-300" : "text-red-600 hover:text-red-700"
-                              }`}
+                              className="h-7 gap-1 text-[11px] px-2"
                             >
-                              <Trash2 className="h-3 w-3" />
-                              {avatarFile ? "Discard" : "Remove"}
+                              <Upload className="h-3 w-3" />
+                              {modalAvatarUrl ? "Change" : "Upload"}
                             </Button>
-                          )}
-                        </div>
+
+                            {modalAvatarUrl && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleRemoveAvatar}
+                                disabled={isUpdating}
+                                className={`h-7 gap-1 text-[11px] px-2 ${
+                                  isDark ? "text-red-400 hover:text-red-300" : "text-red-600 hover:text-red-700"
+                                }`}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                {avatarFile ? "Discard" : "Remove"}
+                              </Button>
+                            )}
+                          </div>
+                        )}
 
                         {/* Reserved-height status row — height NEVER changes,
                             whether text is showing or not. Truncated so a
-                            long filename can never push the layout. */}
-                        <p className={`flex items-center gap-1 text-[10.5px] h-[14px] mt-1 leading-none ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                            long filename can never push the layout.
+                            Ito rin ang nagpapakita ng "View only" message. */}
+                        <p className={`flex items-center gap-1 text-[10.5px] h-[14px] mt-1 leading-none ${
+                          isViewOnly
+                            ? isDark ? "text-amber-400" : "text-amber-600"
+                            : isDark ? "text-slate-400" : "text-slate-500"
+                        }`}>
                           {avatarStatus && (
                             <>
                               {isUpdating && <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />}
@@ -1316,7 +1374,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         accept="image/*"
                         className="hidden"
                         onChange={handleAvatarSelect}
-                        disabled={isUpdating}
+                        disabled={isUpdating || !canEditProfile}
                       />
                     </div>
 
@@ -1330,7 +1388,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         <Input
                           value={formData.name}
                           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                          disabled={isUpdating}
+                          disabled={isUpdating || !canEditProfile}
                           className={`h-9 focus:border-blue-500 focus-visible:ring-blue-500 transition-colors ${
                             isDark ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"
                           }`}
@@ -1350,7 +1408,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                               username: e.target.value.replace(/\s+/g, "").toLowerCase(),
                             })
                           }
-                          disabled={isUpdating}
+                          disabled={isUpdating || !canEditProfile}
                           autoCapitalize="none"
                           autoCorrect="off"
                           spellCheck={false}
@@ -1383,7 +1441,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           placeholder="Required if changing password"
                           value={formData.currentPassword}
                           onChange={(e) => setFormData({ ...formData, currentPassword: e.target.value })}
-                          disabled={isUpdating}
+                          disabled={isUpdating || !canEditProfile}
                           className={`h-8 text-xs transition-colors ${
                             isDark
                               ? "bg-slate-900 border-slate-800 text-white placeholder:text-slate-600"
@@ -1400,7 +1458,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           placeholder="Leave blank if not changing"
                           value={formData.newPassword}
                           onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
-                          disabled={isUpdating}
+                          disabled={isUpdating || !canEditProfile}
                           className={`h-8 text-xs transition-colors ${
                             isDark
                               ? "bg-slate-900 border-slate-800 text-white placeholder:text-slate-600"
@@ -1421,23 +1479,27 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     disabled={isUpdating}
                     className={`font-medium ${isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500"}`}
                   >
-                    Cancel
+                    {canEditProfile ? "Cancel" : "Close"}
                   </Button>
-                  <Button
-                    size="sm"
-                    onClick={handleSaveChanges}
-                    disabled={isUpdating}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5"
-                  >
-                    {isUpdating ? (
-                      <span className="flex items-center gap-2">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        {avatarFile ? "Uploading..." : "Saving..."}
-                      </span>
-                    ) : (
-                      "Save Changes"
-                    )}
-                  </Button>
+
+                  {/* 🔒 Save Changes — makikita lang kapag may permission (hindi view_only) */}
+                  {canEditProfile && (
+                    <Button
+                      size="sm"
+                      onClick={handleSaveChanges}
+                      disabled={isUpdating}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5"
+                    >
+                      {isUpdating ? (
+                        <span className="flex items-center gap-2">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          {avatarFile ? "Uploading..." : "Saving..."}
+                        </span>
+                      ) : (
+                        "Save Changes"
+                      )}
+                    </Button>
+                  )}
                 </div>
               </DialogContent>
             </Dialog>
