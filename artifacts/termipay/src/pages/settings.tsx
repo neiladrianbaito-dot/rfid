@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +35,7 @@ import { supabase } from "@/lib/supabase";
 import {
   Settings, UserPlus, Users, Lock, Shield,
   Loader2, ShieldCheck, Trash2, RefreshCw, Crown, ShieldAlert,
+  Camera, Upload,
 } from "lucide-react";
 
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
@@ -59,6 +60,131 @@ async function parseJsonSafe(response: Response): Promise<any> {
       `Response started with: "${text.slice(0, 120).replace(/\s+/g, " ")}"`
     );
   }
+}
+
+// ── Avatar storage helpers ───────────────────────────────────────────────────
+// Mirrors Layout.tsx's admin-avatars handling exactly, so any account's
+// picture (the logged-in admin's own, via Layout.tsx, or another staff
+// member's, via this page) ends up in the same bucket, same path shape,
+// and is saved/cleaned up the same way.
+const AVATAR_BUCKET = "admin-avatars";
+const MAX_AVATAR_SIZE = 2 * 1024 * 1024; // 2 MB
+
+// Turns a public URL from the avatar bucket back into "folder/file.ext".
+// Used when we only know the URL (no avatar_path column value), so the old
+// file can still be found and deleted after a replace.
+function getStoragePathFromUrl(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const { pathname } = new URL(url);
+    const marker = `/${AVATAR_BUCKET}/`;
+    const i = pathname.indexOf(marker);
+    if (i === -1) return null;
+    return decodeURIComponent(pathname.slice(i + marker.length)) || null;
+  } catch {
+    return null;
+  }
+}
+
+// Deletes the replaced avatar file(s) from the bucket so uploads never pile
+// up — removes the previous file (oldPath) and sweeps any other leftovers in
+// the same owner folder, keeping only the new one (newPath). Same logic as
+// Layout.tsx's cleanupOldAvatarFiles.
+async function cleanupOldAvatarFiles(
+  oldPath: string | null,
+  newPath: string | null
+): Promise<boolean> {
+  const referencePath = newPath ?? oldPath;
+  if (!referencePath) return true;
+
+  const targets = new Set<string>();
+  if (oldPath && oldPath !== newPath) targets.add(oldPath);
+
+  if (referencePath.includes("/")) {
+    const folder = referencePath.split("/")[0];
+    try {
+      const { data, error } = await supabase.storage
+        .from(AVATAR_BUCKET)
+        .list(folder, { limit: 1000 });
+
+      if (error) {
+        console.warn("Could not list avatar folder:", error.message);
+      } else {
+        for (const f of data ?? []) {
+          if (!f?.name || (f as any).id === null || f.name === ".emptyFolderPlaceholder") continue;
+          const p = `${folder}/${f.name}`;
+          if (p !== newPath) targets.add(p);
+        }
+      }
+    } catch (listError) {
+      console.warn("Could not list avatar folder:", listError);
+    }
+  }
+
+  const paths = Array.from(targets);
+  if (paths.length === 0) return true;
+
+  try {
+    const { data, error } = await supabase.storage.from(AVATAR_BUCKET).remove(paths);
+    if (error) {
+      console.warn("Avatar cleanup failed:", error.message);
+      return false;
+    }
+    if (!data || data.length === 0) {
+      console.warn("Avatar cleanup removed nothing. The bucket probably has no DELETE policy:", paths);
+      return false;
+    }
+    return true;
+  } catch (removeError) {
+    console.warn("Avatar cleanup threw:", removeError);
+    return false;
+  }
+}
+
+// Uploads directly to Supabase Storage (no Base64). Path shape:
+// <ownerId>/<timestamp>-<random>.<ext> — identical to Layout.tsx's
+// uploadAvatar, so both places write into the same folder-per-admin layout.
+async function uploadAvatarFile(
+  ownerId: string,
+  file: File
+): Promise<{ path: string; publicUrl: string }> {
+  const safeOwner = String(ownerId).replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safeOwner) throw new Error("Invalid admin id for avatar upload.");
+
+  const extension = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`;
+  const filePath = `${safeOwner}/${fileName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(AVATAR_BUCKET)
+    .upload(filePath, file, { cacheControl: "3600", upsert: false, contentType: file.type });
+
+  if (uploadError) {
+    throw new Error(uploadError.message || "Failed to upload avatar to Supabase Storage.");
+  }
+
+  const { data: publicUrlData } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(filePath);
+  if (!publicUrlData?.publicUrl) {
+    await supabase.storage.from(AVATAR_BUCKET).remove([filePath]);
+    throw new Error("Avatar was uploaded, but its public URL could not be generated.");
+  }
+
+  return { path: filePath, publicUrl: publicUrlData.publicUrl };
+}
+
+// Saves (or clears) the avatar on a specific admins row through the same
+// set_admin_avatar() SQL function Layout.tsx uses for the logged-in admin's
+// own picture — this just targets it by numeric id (p_username left null),
+// since here we always already know the staff row's id.
+async function saveAvatarToAdmin(adminId: number, url: string | null, path: string | null): Promise<void> {
+  const { data, error } = await supabase.rpc("set_admin_avatar", {
+    p_id: adminId,
+    p_username: null,
+    p_url: url,
+    p_path: path,
+  });
+  if (error) throw new Error(`Could not save avatar: ${error.message}`);
+  if (data !== true) throw new Error("Could not save avatar: no matching admin account was found.");
 }
 
 type StaffUser = {
@@ -161,6 +287,45 @@ function StaffAvatar({
   );
 }
 
+// Larger version used inside the avatar picker/preview boxes (64px), shared
+// by the "Add Account" form and the "Edit Picture" dialog below.
+function AvatarPreviewBox({
+  url,
+  name,
+  isDark,
+}: {
+  url: string | null;
+  name?: string | null;
+  isDark: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [url]);
+
+  return (
+    <div
+      className={`w-16 h-16 rounded-2xl border flex items-center justify-center overflow-hidden shrink-0 ${
+        isDark ? "bg-blue-950/40 border-blue-900" : "bg-blue-50 border-blue-100"
+      }`}
+    >
+      {url && !failed ? (
+        <img
+          src={url}
+          alt={name ? `${name}'s avatar` : "Avatar"}
+          onError={() => setFailed(true)}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <span className={`text-xl font-bold ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+          {name ? name.trim().charAt(0).toUpperCase() : "?"}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { isDark } = useTheme();
   const { toast } = useToast();
@@ -200,9 +365,48 @@ export default function SettingsPage() {
     role: "staff",
   });
 
+  // Picking a picture in the Add Account form only stores the File + a
+  // local preview — nothing is uploaded until "Create Account" is pressed,
+  // same pattern as the avatar picker in Layout.tsx.
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
   const resetForm = () => {
     setForm({ fullName: "", username: "", password: "", role: "staff" });
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarFile(null);
+    setAvatarPreview(null);
+    if (avatarInputRef.current) avatarInputRef.current.value = "";
   };
+
+  function handleAvatarSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Invalid File", description: "Please select an image file.", variant: "destructive" });
+      event.target.value = "";
+      return;
+    }
+    if (file.size > MAX_AVATAR_SIZE) {
+      toast({ title: "Image Too Large", description: "The profile picture must be 2 MB or smaller.", variant: "destructive" });
+      event.target.value = "";
+      return;
+    }
+
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+    event.target.value = ""; // allow picking the same file again later
+  }
+
+  function handleDiscardNewAvatar() {
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarFile(null);
+    setAvatarPreview(null);
+    if (avatarInputRef.current) avatarInputRef.current.value = "";
+  }
 
   const handleAddStaff = async () => {
     if (!form.fullName.trim() || !form.username.trim() || !form.password.trim()) {
@@ -242,6 +446,25 @@ export default function SettingsPage() {
       const data = await parseJsonSafe(response);
       if (!response.ok) throw new Error(data.error || "Failed to create staff account");
 
+      // The account exists now (row id comes back from the insert). Avatar
+      // upload happens as a second, best-effort step — a failure here
+      // should NOT be reported as "failed to create staff", since the
+      // account itself was already created successfully.
+      const newId = data?.staff?.id;
+      if (avatarFile && newId != null) {
+        try {
+          const { path, publicUrl } = await uploadAvatarFile(String(newId), avatarFile);
+          await saveAvatarToAdmin(Number(newId), publicUrl, path);
+        } catch (avatarError: any) {
+          console.warn("Avatar upload failed for new staff:", avatarError);
+          toast({
+            title: "Account created, but picture not saved",
+            description: avatarError?.message || "You can add a picture later from the staff list.",
+            variant: "destructive",
+          });
+        }
+      }
+
       toast({
         title: "Account Created",
         description: `${form.fullName.trim()} has been added as ${roleLabel(form.role)}.`,
@@ -271,6 +494,135 @@ export default function SettingsPage() {
   // delete action is hidden entirely on super_admin rows. ──
   const [deleteTarget, setDeleteTarget] = useState<StaffUser | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // ── Edit-picture modal for an EXISTING staff row. Opened by clicking an
+  // account's avatar (Super Admin only). Same upload/cleanup logic as
+  // Layout.tsx's own "Security & Profile" avatar section, just targeting
+  // whichever staff row was clicked instead of "me". ──
+  const [editAvatarTarget, setEditAvatarTarget] = useState<StaffUser | null>(null);
+  const [editAvatarFile, setEditAvatarFile] = useState<File | null>(null);
+  const [editAvatarPreview, setEditAvatarPreview] = useState<string | null>(null);
+  const [editRemoveAvatar, setEditRemoveAvatar] = useState(false);
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+  const editAvatarInputRef = useRef<HTMLInputElement>(null);
+  const isSavingAvatarRef = useRef(false); // hard lock, same reasoning as Layout.tsx's isSavingRef
+
+  const editModalAvatarUrl = editAvatarPreview ?? (editRemoveAvatar ? null : editAvatarTarget?.avatar_url ?? null);
+
+  function openEditAvatar(s: StaffUser) {
+    if (isSavingAvatar) return;
+    setEditAvatarTarget(s);
+    setEditAvatarFile(null);
+    setEditAvatarPreview(null);
+    setEditRemoveAvatar(false);
+  }
+
+  function closeEditAvatar() {
+    if (isSavingAvatar) return;
+    if (editAvatarPreview) URL.revokeObjectURL(editAvatarPreview);
+    setEditAvatarTarget(null);
+    setEditAvatarFile(null);
+    setEditAvatarPreview(null);
+    setEditRemoveAvatar(false);
+    if (editAvatarInputRef.current) editAvatarInputRef.current.value = "";
+  }
+
+  function handleEditAvatarSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Invalid File", description: "Please select an image file.", variant: "destructive" });
+      event.target.value = "";
+      return;
+    }
+    if (file.size > MAX_AVATAR_SIZE) {
+      toast({ title: "Image Too Large", description: "The profile picture must be 2 MB or smaller.", variant: "destructive" });
+      event.target.value = "";
+      return;
+    }
+
+    if (editAvatarPreview) URL.revokeObjectURL(editAvatarPreview);
+    setEditAvatarFile(file);
+    setEditAvatarPreview(URL.createObjectURL(file));
+    setEditRemoveAvatar(false);
+    event.target.value = "";
+  }
+
+  function handleRemoveEditAvatarPick() {
+    if (editAvatarFile) {
+      if (editAvatarPreview) URL.revokeObjectURL(editAvatarPreview);
+      setEditAvatarFile(null);
+      setEditAvatarPreview(null);
+      if (editAvatarInputRef.current) editAvatarInputRef.current.value = "";
+      return;
+    }
+    if (editAvatarTarget?.avatar_url) {
+      setEditRemoveAvatar(true);
+    }
+  }
+
+  async function saveEditAvatar() {
+    if (!editAvatarTarget) return;
+    if (isSavingAvatarRef.current) return; // block double-submit, same as Layout.tsx
+    isSavingAvatarRef.current = true;
+
+    const target = editAvatarTarget;
+    const oldStoragePath = target.avatar_path || getStoragePathFromUrl(target.avatar_url || null);
+    const wantsChange = !!editAvatarFile || (editRemoveAvatar && !!target.avatar_url);
+
+    if (!wantsChange) {
+      isSavingAvatarRef.current = false;
+      closeEditAvatar();
+      return;
+    }
+
+    setIsSavingAvatar(true);
+    let newAvatar: { path: string; publicUrl: string } | null = null;
+
+    try {
+      if (editAvatarFile) {
+        newAvatar = await uploadAvatarFile(String(target.id), editAvatarFile);
+      }
+
+      const newUrl = newAvatar?.publicUrl ?? null; // null covers the "remove" case too
+      const newPath = newAvatar?.path ?? null;
+
+      await saveAvatarToAdmin(target.id, newUrl, newPath);
+
+      const cleaned = await cleanupOldAvatarFiles(oldStoragePath, newPath);
+      if (!cleaned) {
+        toast({
+          title: "Old picture not deleted",
+          description:
+            "The picture was updated, but the previous file could not be removed from the admin-avatars bucket. Check the Storage DELETE policy.",
+          variant: "destructive",
+        });
+      }
+
+      setStaff((prev) =>
+        prev.map((s) => (s.id === target.id ? { ...s, avatar_url: newUrl, avatar_path: newPath } : s))
+      );
+
+      toast({ title: "Picture Updated", description: `${target.full_name}'s profile picture has been updated.` });
+      closeEditAvatar();
+    } catch (error: any) {
+      // Orphan cleanup — never delete once saveAvatarToAdmin succeeded, but
+      // we only reach here if it threw, so newAvatar (if any) is always safe
+      // to remove.
+      if (newAvatar) {
+        try {
+          await supabase.storage.from(AVATAR_BUCKET).remove([newAvatar.path]);
+        } catch (cleanupError) {
+          console.warn("Failed to remove orphan avatar:", cleanupError);
+        }
+      }
+      toast({ title: "Update Failed", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSavingAvatar(false);
+      isSavingAvatarRef.current = false;
+    }
+  }
 
   const loadStaff = async () => {
     try {
@@ -479,12 +831,28 @@ export default function SettingsPage() {
                       >
                         <TableCell>
                           <div className="flex items-center gap-3">
-                            <StaffAvatar
-                              url={s.avatar_url}
-                              name={s.full_name}
-                              role={s.role}
-                              isDark={isDark}
-                            />
+                            {isSuperAdmin ? (
+                              <button
+                                type="button"
+                                onClick={() => openEditAvatar(s)}
+                                title="Change profile picture"
+                                className="rounded-xl cursor-pointer transition-opacity hover:opacity-80"
+                              >
+                                <StaffAvatar
+                                  url={s.avatar_url}
+                                  name={s.full_name}
+                                  role={s.role}
+                                  isDark={isDark}
+                                />
+                              </button>
+                            ) : (
+                              <StaffAvatar
+                                url={s.avatar_url}
+                                name={s.full_name}
+                                role={s.role}
+                                isDark={isDark}
+                              />
+                            )}
                             <span className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                               {s.full_name}
                             </span>
@@ -553,6 +921,63 @@ export default function SettingsPage() {
               Create a login for a staff member or another super admin.
             </DialogDescription>
           </DialogHeader>
+
+          {/* Avatar picker — optional, same pattern as Layout.tsx's own
+              profile picture upload. Nothing is uploaded until the account
+              is created and we have a real id to attach it to. */}
+          <div className="flex items-center gap-3">
+            <div className="relative shrink-0">
+              <AvatarPreviewBox url={avatarPreview} name={form.fullName} isDark={isDark} />
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={isSubmitting}
+                aria-label="Add profile picture"
+                className="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50 dark:border-slate-900"
+              >
+                <Camera className="h-3 w-3" />
+              </button>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className={`text-xs font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                Profile picture (optional)
+              </p>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={isSubmitting}
+                  className="h-7 gap-1 text-[11px] px-2"
+                >
+                  <Upload className="h-3 w-3" />
+                  {avatarPreview ? "Change" : "Upload"}
+                </Button>
+                {avatarPreview && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleDiscardNewAvatar}
+                    disabled={isSubmitting}
+                    className={`h-7 gap-1 text-[11px] px-2 ${isDark ? "text-red-400 hover:text-red-300" : "text-red-600 hover:text-red-700"}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    Discard
+                  </Button>
+                )}
+              </div>
+            </div>
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleAvatarSelect}
+              disabled={isSubmitting}
+            />
+          </div>
 
           <div className="grid gap-5 py-2 sm:grid-cols-2">
             <div className="space-y-2">
@@ -637,6 +1062,101 @@ export default function SettingsPage() {
             >
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
               {isSubmitting ? "Creating..." : "Create Account"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Picture Modal — change/remove an EXISTING staff member's
+          avatar. Opened by clicking their avatar in the table above. ────── */}
+      <Dialog open={!!editAvatarTarget} onOpenChange={(open) => !open && closeEditAvatar()}>
+        <DialogContent className={`sm:max-w-sm ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+          <DialogHeader>
+            <DialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+              <Camera className="text-blue-500" size={18} />
+              Change Profile Picture
+            </DialogTitle>
+            <DialogDescription className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              {editAvatarTarget?.full_name}'s profile picture.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center gap-3 py-2">
+            <div className="relative shrink-0">
+              <AvatarPreviewBox url={editModalAvatarUrl} name={editAvatarTarget?.full_name} isDark={isDark} />
+              <button
+                type="button"
+                onClick={() => editAvatarInputRef.current?.click()}
+                disabled={isSavingAvatar}
+                aria-label="Change profile picture"
+                className="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50 dark:border-slate-900"
+              >
+                <Camera className="h-3 w-3" />
+              </button>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => editAvatarInputRef.current?.click()}
+                  disabled={isSavingAvatar}
+                  className="h-7 gap-1 text-[11px] px-2"
+                >
+                  <Upload className="h-3 w-3" />
+                  {editModalAvatarUrl ? "Change" : "Upload"}
+                </Button>
+                {editModalAvatarUrl && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleRemoveEditAvatarPick}
+                    disabled={isSavingAvatar}
+                    className={`h-7 gap-1 text-[11px] px-2 ${isDark ? "text-red-400 hover:text-red-300" : "text-red-600 hover:text-red-700"}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    {editAvatarFile ? "Discard" : "Remove"}
+                  </Button>
+                )}
+              </div>
+              <p className={`text-[10.5px] h-[14px] mt-1 leading-none ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                {isSavingAvatar
+                  ? "Saving..."
+                  : editAvatarFile
+                    ? "New picture selected."
+                    : editRemoveAvatar
+                      ? "Will be removed on save."
+                      : ""}
+              </p>
+            </div>
+            <input
+              ref={editAvatarInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleEditAvatarSelect}
+              disabled={isSavingAvatar}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={isSavingAvatar}
+              onClick={closeEditAvatar}
+              className={isDark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={saveEditAvatar}
+              disabled={isSavingAvatar}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 gap-2"
+            >
+              {isSavingAvatar ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {isSavingAvatar ? "Saving..." : "Save Picture"}
             </Button>
           </DialogFooter>
         </DialogContent>
