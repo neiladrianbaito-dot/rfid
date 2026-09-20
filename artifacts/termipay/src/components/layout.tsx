@@ -38,6 +38,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar as CalendarWidget } from "@/components/ui/calendar";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -274,23 +280,59 @@ const navGroups = [
 
 function CurrentDateTime({ isDark }: { isDark: boolean }) {
   const [now, setNow] = useState(new Date());
+  const [calendarOpen, setCalendarOpen] = useState(false);
+
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
   return (
-    <div
-      className={`flex items-center gap-2 px-3 py-1.5 border rounded-md font-mono text-[11px] transition-colors ${
-        isDark ? "bg-slate-900 border-slate-800 text-slate-400" : "bg-slate-50 border-slate-200 text-slate-600"
-      }`}
-    >
-      <Clock size={12} className="text-blue-500" />
-      <span>
-        {now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-      </span>
-      <span className={isDark ? "text-slate-700" : "text-slate-300"}>|</span>
-      <span>{now.toLocaleTimeString("en-US", { hour12: false })}</span>
-    </div>
+    <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+      {/* Clicking the date/time pill opens a small calendar popup, so the
+          admin can see today's date (and browse other days) at a glance. */}
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Show calendar"
+          data-testid="button-show-calendar"
+          className={`flex items-center gap-2 px-3 py-1.5 border rounded-md font-mono text-[11px] transition-colors cursor-pointer ${
+            isDark
+              ? "bg-slate-900 border-slate-800 text-slate-400 hover:border-blue-700"
+              : "bg-slate-50 border-slate-200 text-slate-600 hover:border-blue-300"
+          }`}
+        >
+          <Clock size={12} className="text-blue-500" />
+          <span>
+            {now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+          </span>
+          <span className={isDark ? "text-slate-700" : "text-slate-300"}>|</span>
+          <span>{now.toLocaleTimeString("en-US", { hour12: false })}</span>
+        </button>
+      </PopoverTrigger>
+
+      <PopoverContent
+        align="start"
+        className={`w-auto p-0 transition-colors ${
+          isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"
+        }`}
+      >
+        <div className={`px-3 pt-3 pb-1 text-center border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+          <p className={`text-sm font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
+            {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+          </p>
+          <p className={`text-[10px] uppercase tracking-widest font-semibold ${isDark ? "text-blue-400/70" : "text-blue-600/80"}`}>
+            Today
+          </p>
+        </div>
+        <CalendarWidget
+          mode="single"
+          selected={now}
+          defaultMonth={now}
+          className={isDark ? "text-slate-200" : ""}
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 
