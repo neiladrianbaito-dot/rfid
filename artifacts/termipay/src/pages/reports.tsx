@@ -105,7 +105,7 @@ function getDiscountDotColor(kind: "Student" | "Senior" | "PWD") {
 // so "Student" always means blue, "Senior" always means yellow, etc.
 const DISCOUNT_LINE_COLORS = {
   total: "#7c3aed", // purple — matches the export tab's band color
-  regular: "#64748b", // slate
+  regular: "#ef4444", // slate
   student: "#3b82f6", // blue
   senior: "#eab308", // yellow
   pwd: "#10b981", // emerald
