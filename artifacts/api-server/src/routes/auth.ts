@@ -1038,8 +1038,14 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
       return;
     }
 
-    const body = req.body as { name?: string; currentPassword?: string; newPassword?: string };
+    const body = req.body as {
+      name?: string;
+      username?: string;
+      currentPassword?: string;
+      newPassword?: string;
+    };
     const name = typeof body?.name === "string" ? body.name.trim() : "";
+    const username = typeof body?.username === "string" ? body.username.trim() : "";
     const currentPassword = typeof body?.currentPassword === "string" ? body.currentPassword.trim() : "";
     const newPassword = typeof body?.newPassword === "string" ? body.newPassword.trim() : "";
 
@@ -1069,52 +1075,64 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
       return;
     }
 
+    // ── Username change: validate + uniqueness check ──────────────────────
+    const wantsUsernameChange = !!username && username.toLowerCase() !== admin.username.toLowerCase();
+
+    if (username === "" && body.username !== undefined) {
+      res.status(400).json({ error: "Username cannot be empty" });
+      return;
+    }
+
+    if (wantsUsernameChange) {
+      const clash = await db.execute(sql`
+        select id from admins
+        where lower(username) = lower(${username}) and id != ${admin.id}
+        limit 1
+      `);
+      if (extractRows(clash).length > 0) {
+        res.status(409).json({ error: "That username is already taken" });
+        return;
+      }
+    }
+
     const nextFullName = name || admin.full_name;
+    const nextUsername = wantsUsernameChange ? username : admin.username;
     const nextPasswordHash = newPassword ? hashPassword(newPassword) : admin.password_hash;
     const role = normalizeRole(admin.role);
 
     await db
       .update(adminsTable)
-      .set({ full_name: nextFullName, password_hash: nextPasswordHash })
+      .set({ full_name: nextFullName, username: nextUsername, password_hash: nextPasswordHash })
       .where(eq(adminsTable.id, admin.id));
 
     await logAudit({
-      user: admin.username,
+      user: nextUsername,
       action: "UPDATE",
       entity: roleLabel(role),
-      details: newPassword
-        ? `${admin.username} updated their profile and changed their password`
-        : `${admin.username} updated their profile`,
+      details: [
+        wantsUsernameChange ? `changed username from "${admin.username}" to "${nextUsername}"` : null,
+        newPassword ? "changed their password" : null,
+        !wantsUsernameChange && !newPassword ? "updated their profile" : null,
+      ]
+        .filter(Boolean)
+        .join(", "),
     });
 
     res.json({
       success: true,
       message: "Profile updated successfully",
-      username: admin.username,
+      username: nextUsername,
       name: nextFullName,
       role,
-      token: createAdminToken({ username: admin.username, name: nextFullName, role }),
+      // Re-issue the token — it's signed with the OLD username, so if that
+      // changed, every subsequent request with the stale token would fail
+      // to find the admin row (verifyAdminToken -> username lookup above).
+      token: createAdminToken({ username: nextUsername, name: nextFullName, role }),
     });
   } catch (error) {
     console.error("Update profile error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
-
-// ── ADMIN LOGOUT ──────────────────────────────────────────────────────────────
-
-router.post("/auth/logout", async (req, res): Promise<void> => {
-  const token = getBearerToken(req.headers.authorization);
-  const adminUser = token ? verifyAdminToken(token) : null;
-  if (adminUser) {
-    await logAudit({
-      user: adminUser.username,
-      action: "LOGOUT",
-      entity: roleLabel(normalizeRole((adminUser as any).role)),
-      details: `${adminUser.username} logged out`,
-    });
-  }
-  res.status(200).json({ success: true });
 });
 
 // ── ADMIN ME ──────────────────────────────────────────────────────────────────
