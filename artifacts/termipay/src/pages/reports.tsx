@@ -821,8 +821,8 @@ export default function ReportsPage() {
   // and its own Excel export tab. ──
   const fareDiscountDailyBreakdown = React.useMemo(() => {
     const map = new Map<
-      string,
-      { total: number; regular: number; student: number; senior: number; pwd: number }
+      string, { total: number; regular: number; student: number; senior: number; pwd: number;
+        totalRides: number; regularRides: number; studentRides: number; seniorRides: number; pwdRides: number }
     >();
     txList.forEach((tx: any) => {
       if (normalizeTxType(tx.type) !== "Fare") return;
@@ -830,12 +830,13 @@ export default function ReportsPage() {
       if (!dateKey) return;
       const amount = Math.abs(Number(tx.amount) || 0);
       const cardType = getTxCardType(tx);
-      const entry = map.get(dateKey) || { total: 0, regular: 0, student: 0, senior: 0, pwd: 0 };
+      const entry = map.get(dateKey) || { total: 0, regular: 0, student: 0, senior: 0, pwd: 0, totalRides: 0, regularRides: 0, studentRides: 0, seniorRides: 0, pwdRides: 0 };
       entry.total += amount;
-      if (cardType === "Student") entry.student += amount;
-      else if (cardType === "Senior") entry.senior += amount;
-      else if (cardType === "PWD") entry.pwd += amount;
-      else entry.regular += amount;
+      entry.totalRides += 1;
+      if (cardType === "Student") { entry.student += amount; entry.studentRides += 1; }
+      else if (cardType === "Senior") { entry.senior += amount; entry.seniorRides += 1; }
+      else if (cardType === "PWD") { entry.pwd += amount; entry.pwdRides += 1; }
+      else { entry.regular += amount; entry.regularRides += 1; }
       map.set(dateKey, entry);
     });
     return Array.from(map.entries())
@@ -919,7 +920,7 @@ export default function ReportsPage() {
     if (fullRange) {
       return fullRange.map((date) => {
         const existing = fareDiscountByDate.get(date);
-        return existing || { date, total: 0, regular: 0, student: 0, senior: 0, pwd: 0 };
+        return existing || { date, total: 0, regular: 0, student: 0, senior: 0, pwd: 0, totalRides: 0, regularRides: 0, studentRides: 0, seniorRides: 0, pwdRides: 0 };
       });
     }
 
@@ -1709,7 +1710,10 @@ export default function ReportsPage() {
         {[
           { label: "7-Day Revenue",          value: formatPeso(totalRevenue7Days), icon: TrendingUp, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-total-revenue",      flash: false },
           { label: "Today's Revenue",         value: formatPeso(todayRevenue),      icon: PhilippinePeso, color: isDark ? "text-emerald-400" : "text-emerald-600", bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50", border: isDark ? "border-emerald-900" : "border-emerald-100", testId: "text-today-revenue",      flash: revenueFlash },
-          { label: "Total Registered Users",  value: totalUniqueTaps,               icon: User, color: isDark ? "text-indigo-400" : "text-indigo-600",  bg: isDark ? "bg-indigo-950/40" : "bg-indigo-50",  border: isDark ? "border-indigo-900" : "border-indigo-100",  testId: "text-total-taps",         flash: false },
+          { label: "Total Tap Today",       value: (() => {
+              const today = getLocalDateString();
+              return txList.filter((tx: any) => normalizeTxType(tx.type) === "Fare" && getTxDateKey(tx) === today).length;
+            })(),               icon: User, color: isDark ? "text-indigo-400" : "text-indigo-600",  bg: isDark ? "bg-indigo-950/40" : "bg-indigo-50",  border: isDark ? "border-indigo-900" : "border-indigo-100",  testId: "text-total-taps",         flash: false },
           { label: "Total Linked Cards",      value: totalLinkedCards,              icon: LinkIcon,   color: isDark ? "text-sky-400" : "text-sky-600",     bg: isDark ? "bg-sky-950/40" : "bg-sky-50",     border: isDark ? "border-sky-900" : "border-sky-100",     testId: "text-total-linked-cards", flash: false },
         ].map((stat, idx) => (
           <Card
@@ -1947,22 +1951,18 @@ export default function ReportsPage() {
                     <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
                       <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
                         <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date</TableHead>
-                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Collected</TableHead>
-                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Regular</TableHead>
+                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Rides</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-red-500">Regular</TableHead>
                         <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Student</TableHead>
                         <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-yellow-600">Senior</TableHead>
                         <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">PWD</TableHead>
-                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Discounted %</TableHead>
-                        {/* ➕ per-day revenue lost column */}
-                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-rose-500">Revenue Lost</TableHead>
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-purple-500">Discounted Rides</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredFareDiscountBreakdown.map((day, i) => {
                         const date = new Date(day.date + "T00:00:00");
-                        const discountedTotal = day.student + day.senior + day.pwd;
-                        const sharePct = day.total > 0 ? (discountedTotal / day.total) * 100 : 0;
-                        const dayLost = discountedTotal * LOST_REVENUE_MULTIPLIER;
+                        const discountedTotal = day.studentRides + day.seniorRides + day.pwdRides;
                         return (
                           <TableRow
                             key={i}
@@ -1972,27 +1972,24 @@ export default function ReportsPage() {
                               {date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                             </TableCell>
                             <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                              {formatPeso(day.total)}
+                              {day.totalRides}
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                              {formatPeso(day.regular)}
+                              {day.regularRides}
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs ${isDark ? "text-blue-400" : "text-blue-600"}`}>
-                              {formatPeso(day.student)}
+                              {day.studentRides}
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs ${isDark ? "text-yellow-400" : "text-yellow-700"}`}>
-                              {formatPeso(day.senior)}
+                              {day.seniorRides}
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                              {formatPeso(day.pwd)}
+                              {day.pwdRides}
                             </TableCell>
                             <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>
-                              {sharePct.toFixed(1)}%
+                              {discountedTotal}
                             </TableCell>
-                            {/* ➕ per-day revenue lost value */}
-                            <TableCell className={`text-right font-mono text-xs font-semibold ${isDark ? "text-rose-400" : "text-rose-600"}`}>
-                              −{formatPeso(dayLost)}
-                            </TableCell>
+                            
                           </TableRow>
                         );
                       })}
