@@ -998,7 +998,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   : "bg-white border-slate-200 text-blue-600 hover:border-blue-400"
               }`}
             >
-              {sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+              <Menu className="w-4 h-4" />
             </button>
 
             <CurrentDateTime isDark={isDark} />
