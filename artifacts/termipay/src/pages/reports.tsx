@@ -2167,11 +2167,12 @@ export default function ReportsPage() {
           Year/Month/Day filter, rendered inline in this card's header row
           next to the title. */}
       {activeTab === "routes" && (
-      <section className="flex-1 overflow-hidden relative">
-        <div className={`border-b pb-4 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+      <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-amber-500 to-transparent" />
+        <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3 flex-wrap">
-              <div className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 <RouteIcon size={14} className="text-orange-500" />
                 Route Performance
                 {isFilterActive && (
@@ -2179,7 +2180,7 @@ export default function ReportsPage() {
                     — {filterLabel}
                   </span>
                 )}
-              </div>
+              </CardTitle>
               {renderFilterBar()}
             </div>
             <div className={`text-[10px] font-medium uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
@@ -2187,8 +2188,8 @@ export default function ReportsPage() {
               Fare rides only · {ROUTE_FORECAST_DAYS}-day trend forecast
             </div>
           </div>
-        </div>
-        <div className="pt-6 space-y-6">
+        </CardHeader>
+        <CardContent className="pt-6 space-y-6">
           {isLoading ? (
             <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
           ) : rankedRoutes.length === 0 ? (
@@ -2197,6 +2198,68 @@ export default function ReportsPage() {
             </div>
           ) : (
             <>
+              {/* ── Top route highlight ── */}
+              {topRoute && (
+                <div className={`flex items-center gap-4 rounded-lg border px-5 py-4 ${
+                  isDark ? "bg-amber-950/30 border-amber-900" : "bg-amber-50 border-amber-200"
+                }`}>
+                  <div className={`w-11 h-11 rounded-lg flex items-center justify-center flex-none ${
+                    isDark ? "bg-amber-900/50 text-amber-400" : "bg-amber-100 text-amber-600"
+                  }`}>
+                    <Award size={22} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-amber-500/80" : "text-amber-700/80"}`}>
+                     Most Traveled Route {isFilterActive ? `(${filterLabel})` : "(All-time)"}
+                    </p>
+                    <p className={`text-lg font-bold tracking-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
+                      {topRoute.name}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-6 flex-none">
+                    <div className="text-right">
+                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Rides</p>
+                      <p className={`text-lg font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>{topRoute.totalRides.toLocaleString("en-US")}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily Avg</p>
+                      <p className={`text-lg font-bold font-mono ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                        {topRoute.avgRidesPerDay.toFixed(1)} <span className="text-xs font-normal opacity-70">rides/day</span>
+                      </p>
+                    </div>
+                    <div className="text-right hidden sm:block">
+                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revenue</p>
+                      <p className={`text-lg font-bold font-mono ${isDark ? "text-white" : "text-slate-900"}`}>{formatPeso(topRoute.totalRevenue)}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Ranking badges for the rest of the top routes ── */}
+              {rankedRoutes.length > 1 && (
+                <div className="flex flex-wrap gap-3">
+                  {rankedRoutes.slice(1, ROUTE_CHART_TOP_N).map((r, idx) => (
+                    <div
+                      key={r.routeId}
+                      className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${
+                        isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50 border-slate-200"
+                      }`}
+                    >
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold flex-none ${
+                        isDark ? "bg-slate-700 text-slate-300" : "bg-slate-200 text-slate-600"
+                      }`}>
+                        {idx + 2}
+                      </div>
+                      <div>
+                        <div className={`text-xs font-bold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</div>
+                        <div className={`text-[11px] font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {r.totalRides.toLocaleString("en-US")} rides · {r.avgRidesPerDay.toFixed(1)}/day · {r.sharePct.toFixed(0)}% share
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* ── Line graph: ridership trend per route + short forecast ── */}
               {routeChartData.length === 0 ? (
@@ -2328,8 +2391,8 @@ export default function ReportsPage() {
               </div>
             </>
           )}
-        </div>
-      </section>
+        </CardContent>
+      </Card>
       )}
 
       {/* ══ DATA TABLE ══ */}
