@@ -761,6 +761,40 @@ export default function ReportsPage() {
     [cardTypeByUid]
   );
 
+  // ── Daily passenger volume by Card Type ─────────────────────────────────
+  // Built from Fare transactions only because each Fare transaction represents
+  // one passenger ride. The date key comes from the transaction timestamp, so
+  // the hover tooltip can dynamically show only the passenger counts for the
+  // exact day represented by the hovered revenue bar.
+  const passengerBreakdownByDate = React.useMemo(() => {
+    const map = new Map<
+      string,
+      { total: number; regular: number; student: number; senior: number; pwd: number }
+    >();
+
+    txList.forEach((tx: any) => {
+      if (normalizeTxType(tx.type) !== "Fare") return;
+
+      const dateKey = getTxDateKey(tx);
+      if (!dateKey) return;
+
+      const cardType = getTxCardType(tx);
+      const entry =
+        map.get(dateKey) || { total: 0, regular: 0, student: 0, senior: 0, pwd: 0 };
+
+      entry.total += 1;
+
+      if (cardType === "Student") entry.student += 1;
+      else if (cardType === "Senior") entry.senior += 1;
+      else if (cardType === "PWD") entry.pwd += 1;
+      else entry.regular += 1;
+
+      map.set(dateKey, entry);
+    });
+
+    return map;
+  }, [txList, getTxCardType]);
+
   const totalUniqueTaps = React.useMemo(() => {
     const uids = new Set(
       txList.map((tx: any) => tx.card_uid || tx.cardUid).filter(Boolean)
@@ -1792,17 +1826,93 @@ export default function ReportsPage() {
                   />
                   <Tooltip
                     cursor={{ fill: isDark ? "rgba(96,165,250,0.08)" : "rgba(37,99,235,0.05)" }}
-                    contentStyle={{
-                      backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                      border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
-                      borderRadius: "8px",
-                      fontSize: "11px",
-                      fontWeight: "600",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                    content={({ active, label }) => {
+                      if (!active || !label) return null;
+
+                      const dateKey = String(label).split("T")[0];
+                      const breakdown = passengerBreakdownByDate.get(dateKey) || {
+                        total: 0,
+                        regular: 0,
+                        student: 0,
+                        senior: 0,
+                        pwd: 0,
+                      };
+
+                      const date = new Date(`${dateKey}T00:00:00`);
+                      const formattedDate = date.toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      });
+
+                      const rows = [
+                        { label: "Regular", value: breakdown.regular },
+                        { label: "Student", value: breakdown.student },
+                        { label: "Senior", value: breakdown.senior },
+                        { label: "PWD", value: breakdown.pwd },
+                      ];
+
+                      return (
+                        <div
+                          style={{
+                            backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                            border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                            borderRadius: "8px",
+                            padding: "10px 12px",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                            minWidth: "170px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              color: isDark ? "#e2e8f0" : "#1e293b",
+                              marginBottom: "7px",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {formattedDate}
+                          </div>
+
+                          <div
+                            style={{
+                              color: isDark ? "#60a5fa" : "#2563eb",
+                              marginBottom: "7px",
+                              paddingBottom: "7px",
+                              borderBottom: isDark
+                                ? "1px solid #1e293b"
+                                : "1px solid #e2e8f0",
+                            }}
+                          >
+                            Total Passengers: {breakdown.total.toLocaleString("en-US")}
+                          </div>
+
+                          {rows.map((row) => (
+                            <div
+                              key={row.label}
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                gap: "18px",
+                                color: isDark ? "#cbd5e1" : "#475569",
+                                marginTop: "4px",
+                              }}
+                            >
+                              <span>{row.label}</span>
+                              <span
+                                style={{
+                                  color: isDark ? "#f8fafc" : "#0f172a",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {row.value.toLocaleString("en-US")}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      );
                     }}
-                    labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
-                    itemStyle={{ color: isDark ? "#60a5fa" : "#2563eb" }}
-                    formatter={(value: number) => [formatPeso(Math.abs(value)), "Revenue"]}
                   />
                   <Bar dataKey="revenue" radius={[4, 4, 0, 0]} className="cursor-pointer">
                     {filteredBreakdown.map((_entry: any, index: number) => (
