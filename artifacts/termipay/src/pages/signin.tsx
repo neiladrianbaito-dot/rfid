@@ -459,7 +459,8 @@ className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-
       {/* Forgot Password Dialog */}
       <Dialog open={forgotOpen} onOpenChange={setForgotOpen}>
         <DialogContent
-          className={`w-[calc(100vw-2rem)] max-w-[340px] sm:max-w-sm mx-auto rounded-2xl max-h-[85dvh] overflow-y-auto p-4 sm:p-6 gap-0 ${
+         // BAGO NA
+className={`auth-smooth w-[calc(100vw-2rem)] max-w-[340px] sm:max-w-sm mx-auto rounded-2xl
             isDark
               ? "bg-slate-950 border-slate-800 text-white"
               : "bg-white border-slate-200 text-slate-900"

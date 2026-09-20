@@ -200,8 +200,7 @@ export default function SignupPage() {
   return (
     <div
       // BAGO NA
-className={`auth-smooth w-[calc(100vw-2rem)] max-w-[340px] sm:max-w-sm mx-auto rounded-2xl
-        isDark ? "text-white" : "text-slate-900"
+className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-4 sm:p-6 relative overflow-x-hidden ${
       }`}
     >
       <AuthBackground theme={theme} />
