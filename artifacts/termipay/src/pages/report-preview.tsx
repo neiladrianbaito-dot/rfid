@@ -3,6 +3,9 @@ import { useLocation } from "wouter";
 import { useGetReportSummary, useListTransactions } from "@workspace/api-client-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch"; // ⚠️ adjust path to match where you saved that hook
+// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
+// at `loaded` (true kapag tapos na ma-fetch ang access info).
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Printer, Loader2, Wallet, Plus, Minus, RotateCcw, CheckCircle2 } from "lucide-react";
 
@@ -126,6 +129,16 @@ export default function ReportPreviewPage() {
   const adminName = user?.name || "System Administrator";
   const adminRoleLabel = getRoleLabel(user); // "Staff" or "Super Admin", fetched from the signed-in user
 
+  // 🔒 ADMIN ACCESS:
+  //  - canPrint: true lang kapag tapos nang mag-load ang access info
+  //    AT may permission (hindi view_only). Ginagamit sa Print button
+  //    at sa handlePrint() bilang proteksyon.
+  //  - isViewOnly: true kapag loaded na at walang permission — para sa
+  //    tooltip/message at para i-block ang Ctrl+P / browser print.
+  const { canManage, loaded } = useAdminAccess();
+  const canPrint = loaded && canManage;
+  const isViewOnly = loaded && !canManage;
+
   const [zoom, setZoom] = React.useState(ZOOM_DEFAULT);
   const zoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, z + ZOOM_STEP));
   const zoomOut = () => setZoom((z) => Math.max(ZOOM_MIN, z - ZOOM_STEP));
@@ -142,6 +155,10 @@ export default function ReportPreviewPage() {
   }, []);
 
   const handlePrint = () => {
+    // 🔒 Guard: bawal mag-print / mag-save as PDF kapag view_only.
+    // Proteksyon ito kahit ma-bypass ang UI (devtools, atbp).
+    if (!canPrint) return;
+
     if (isPreparingPrint) return; // guard against double-clicks
     setIsPreparingPrint(true);
 
@@ -178,6 +195,22 @@ export default function ReportPreviewPage() {
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
   }, []);
+
+  // 🔒 Block Ctrl+P / Cmd+P kapag view_only, para hindi ma-bypass ang
+  // grey-out na button gamit ang keyboard shortcut ng browser.
+  React.useEffect(() => {
+    if (!isViewOnly) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [isViewOnly]);
 
   const traceId = React.useRef(Math.random().toString(36).substr(2, 9).toUpperCase()).current;
   const timestamp = React.useRef(
@@ -253,6 +286,11 @@ export default function ReportPreviewPage() {
 
   const handleBack = () => navigate("/reports");
 
+  // 🔒 Tooltip para sa Print button
+  const printButtonTitle = isViewOnly
+    ? "View only — you don't have permission to print or save as PDF."
+    : undefined;
+
   if (isLoading) {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-blue-50">
@@ -290,6 +328,13 @@ export default function ReportPreviewPage() {
     }
     .print-toast {
       display: none !important;
+    }
+    ${
+      // 🔒 Kapag view_only, walang lalabas sa print output kahit ma-bypass
+      // ang button (hal. browser menu > Print). Blangko ang pahina.
+      isViewOnly
+        ? `.audit-doc, .audit-doc * { visibility: hidden !important; display: none !important; }`
+        : ""
     }
   }
 
@@ -333,6 +378,14 @@ export default function ReportPreviewPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* 🔒 View-only notice — maliit lang, nasa toolbar mismo kaya
+                hindi nagbabago ang layout ng page */}
+            {isViewOnly && (
+              <span className="hidden md:inline text-[11px] font-semibold text-amber-600">
+                View only — printing is disabled.
+              </span>
+            )}
+
             {/* ══ ZOOM CONTROLS ══ */}
             <div className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-1 py-1">
               <button
@@ -368,11 +421,18 @@ export default function ReportPreviewPage() {
               </button>
             </div>
 
+            {/* 🔒 Print button — NAKA-GREY OUT (disabled) kapag view_only,
+                hindi tinatanggal sa screen. */}
             <Button
               onClick={handlePrint}
-              disabled={isPreparingPrint}
-              className="bg-blue-700 hover:bg-blue-600 active:bg-blue-800 text-white font-black uppercase text-xs tracking-widest cursor-pointer transition-colors duration-150 hover:shadow-lg hover:shadow-blue-500/30 disabled:cursor-not-allowed disabled:opacity-70"
+              disabled={isPreparingPrint || !canPrint}
+              className={`font-black uppercase text-xs tracking-widest text-white transition-colors duration-150 disabled:cursor-not-allowed ${
+                canPrint
+                  ? "bg-blue-700 hover:bg-blue-600 active:bg-blue-800 cursor-pointer hover:shadow-lg hover:shadow-blue-500/30 disabled:opacity-70"
+                  : "bg-slate-300 text-slate-500 hover:bg-slate-300 disabled:opacity-100"
+              }`}
               data-testid="button-print"
+              title={printButtonTitle}
             >
               {isPreparingPrint ? (
                 <>
