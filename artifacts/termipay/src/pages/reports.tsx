@@ -2292,12 +2292,13 @@ export default function ReportsPage() {
 
       {/* ══ DATA TABLE ══ */}
       {activeTab === "log" && (
-      <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-          <div className="flex items-center justify-between flex-wrap gap-3">
+      <Card className={`shadow-sm overflow-hidden flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="h-1 w-full bg-gradient-to-r from-blue-600 via-indigo-500 to-cyan-400" />
+        <CardHeader className={`border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/70 border-slate-100"}`}>
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-3 flex-wrap">
-              <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                <FileText size={14} className="text-blue-500" />
+              <CardTitle className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-2 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                <BarChart3 size={15} className="text-blue-500" />
                 Detailed Revenue Log
                 {isFilterActive && (
                   <span className={`normal-case font-medium ${isDark ? "text-slate-500" : "text-slate-400"}`}>
@@ -2307,48 +2308,154 @@ export default function ReportsPage() {
               </CardTitle>
               {renderFilterBar()}
             </div>
+            <div className={`flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              <Activity size={13} className="text-blue-500" />
+              Revenue performance
+            </div>
           </div>
         </CardHeader>
-        <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0 px-6 pb-6 mt-6">
+
+        <CardContent className="p-6">
           {isLoading ? (
-            <div className="space-y-4">
-              {[1, 2, 3].map((i) => <Skeleton key={i} className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />)}
-            </div>
+            <div className={`h-[520px] rounded-xl ${isDark ? "bg-slate-800" : "bg-slate-100"} animate-pulse`} />
           ) : filteredBreakdown.length === 0 ? (
-            <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+            <div className={`h-[520px] flex items-center justify-center rounded-xl border border-dashed ${isDark ? "border-slate-700 text-slate-500" : "border-slate-200 text-slate-400"}`}>
               No records match the selected filter.
             </div>
           ) : (
-            <Table>
-              <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
-                <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Log Date</TableHead>
-                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Standard Day</TableHead>
-                  <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Revenue Credited</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredBreakdown.map((day: any, i: number) => {
-                  const date = new Date(day.date + "T00:00:00");
-                  return (
-                    <TableRow
-                      key={i}
-                      className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
+            <div className={`w-full rounded-2xl border p-5 md:p-6 ${isDark ? "bg-slate-950/50 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
+              <div className="flex items-start justify-between gap-4 mb-5">
+                <div>
+                  <p className={`text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+                    Revenue by Day
+                  </p>
+                  <p className={`text-xs mt-1 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                    Daily credited revenue across the selected reporting period
+                  </p>
+                </div>
+                <div className={`shrink-0 rounded-lg px-3 py-2 border ${isDark ? "bg-blue-950/30 border-blue-900/60" : "bg-blue-50 border-blue-100"}`}>
+                  <p className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+                    Total
+                  </p>
+                  <p className={`text-sm font-bold font-mono mt-0.5 ${isDark ? "text-white" : "text-slate-900"}`}>
+                    {formatPeso(filteredRevenueTotal)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Landscape chart: wide horizontal layout with a full-width plotting area. */}
+              <div className="w-full h-[520px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={filteredBreakdown}
+                    margin={{ top: 12, right: 20, left: 12, bottom: 28 }}
+                    barCategoryGap="22%"
+                  >
+                    <CartesianGrid
+                      strokeDasharray="4 4"
+                      stroke={isDark ? "#1e293b" : "#e2e8f0"}
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="date"
+                      interval={filteredBreakdown.length > 14 ? Math.ceil(filteredBreakdown.length / 14) - 1 : 0}
+                      tickFormatter={(d: string) => {
+                        const date = new Date(d + "T00:00:00");
+                        return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                      }}
+                      stroke={isDark ? "#64748b" : "#94a3b8"}
+                      fontSize={10}
+                      fontWeight="600"
+                      axisLine={false}
+                      tickLine={false}
+                      tickMargin={10}
+                    />
+                    <YAxis
+                      width={72}
+                      stroke={isDark ? "#64748b" : "#94a3b8"}
+                      fontSize={10}
+                      fontWeight="600"
+                      tickFormatter={(v: number) => `₱${Number(v).toLocaleString("en-US")}`}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <Tooltip
+                      cursor={{ fill: isDark ? "rgba(59,130,246,0.08)" : "rgba(37,99,235,0.06)" }}
+                      contentStyle={{
+                        backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                        border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                        borderRadius: "12px",
+                        fontSize: "11px",
+                        fontWeight: "600",
+                        boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+                        padding: "10px 12px",
+                      }}
+                      labelFormatter={(d: string) => {
+                        const date = new Date(d + "T00:00:00");
+                        return date.toLocaleDateString("en-US", {
+                          weekday: "short",
+                          month: "long",
+                          day: "numeric",
+                          year: "numeric",
+                        });
+                      }}
+                      labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b", marginBottom: 4 }}
+                      itemStyle={{ color: isDark ? "#60a5fa" : "#2563eb" }}
+                      formatter={(value: number) => [formatPeso(Math.abs(Number(value) || 0)), "Revenue"]}
+                    />
+                    <Bar
+                      dataKey="revenue"
+                      name="Revenue"
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={42}
+                      isAnimationActive
+                      animationDuration={700}
                     >
-                      <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                        {date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-                      </TableCell>
-                      <TableCell className={`text-[11px] font-semibold uppercase ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                        {date.toLocaleDateString("en-US", { weekday: "long" })}
-                      </TableCell>
-                      <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                        {formatPeso(day.revenue)}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                      {filteredBreakdown.map((entry: any, index: number) => (
+                        <Cell
+                          key={`revenue-bar-${entry.date}-${index}`}
+                          fill={
+                            index === filteredBreakdown.length - 1
+                              ? "#2563eb"
+                              : isDark
+                                ? "#475569"
+                                : "#93c5fd"
+                          }
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+                <div className={`rounded-xl border px-4 py-3 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+                  <p className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? "text-slate-500" : "text-slate-400"}`}>Reporting days</p>
+                  <p className={`text-lg font-bold font-mono mt-1 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{filteredBreakdown.length}</p>
+                </div>
+                <div className={`rounded-xl border px-4 py-3 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+                  <p className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? "text-slate-500" : "text-slate-400"}`}>Average / day</p>
+                  <p className={`text-lg font-bold font-mono mt-1 ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                    {formatPeso(filteredBreakdown.length ? filteredRevenueTotal / filteredBreakdown.length : 0)}
+                  </p>
+                </div>
+                <div className={`rounded-xl border px-4 py-3 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+                  <p className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? "text-slate-500" : "text-slate-400"}`}>Peak day</p>
+                  <p className={`text-sm font-bold mt-1 truncate ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+                    {(() => {
+                      const peak = filteredBreakdown.reduce(
+                        (best: any, item: any) =>
+                          Number(item.revenue) > Number(best?.revenue ?? -Infinity) ? item : best,
+                        filteredBreakdown[0]
+                      );
+                      if (!peak) return "—";
+                      const date = new Date(peak.date + "T00:00:00");
+                      return `${date.toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${formatPeso(Number(peak.revenue) || 0)}`;
+                    })()}
+                  </p>
+                </div>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
