@@ -28,6 +28,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase";
+// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
+// at `loaded` (true kapag tapos na ma-fetch ang access info).
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import {
   Eye,
   TrendingUp,
@@ -582,6 +585,16 @@ export default function ReportsPage() {
   const { isDark } = useTheme();
   const adminName = user?.name || "System Administrator";
 
+  // 🔒 ADMIN ACCESS:
+  //  - canExport: true lang kapag tapos nang mag-load ang access info
+  //    AT may permission (hindi view_only). Ginagamit sa Export Excel Logs
+  //    button at sa handleExportExcelLogs() bilang proteksyon.
+  //  - isViewOnly: true kapag loaded na at walang permission — para sa
+  //    tooltip/message.
+  const { canManage, loaded } = useAdminAccess();
+  const canExport = loaded && canManage;
+  const isViewOnly = loaded && !canManage;
+
   const prevRevenueRef = useRef<number | null>(null);
   const [revenueFlash, setRevenueFlash] = useState(false);
 
@@ -644,7 +657,7 @@ export default function ReportsPage() {
   // transaction list below (enrichedTxList) so the Top-up Excel export
   // tab can show Fee / VAT / Net Amount columns, exactly like the
   // Transactions page's receipt modal already does on-screen. ──
-  const [financialById, setFinancialById] = useState<
+  const [financialById, setFinancialById] = useState
     Record<string, { fee_amount: number | null; vat_amount: number | null; net_amount: number | null }>
   >({});
 
@@ -767,7 +780,7 @@ export default function ReportsPage() {
   // the hover tooltip can dynamically show only the passenger counts for the
   // exact day represented by the hovered revenue bar.
   const passengerBreakdownByDate = React.useMemo(() => {
-    const map = new Map<
+    const map = new Map
       string,
       { total: number; regular: number; student: number; senior: number; pwd: number }
     >();
@@ -854,7 +867,7 @@ export default function ReportsPage() {
   // discounted). Powers the "Discount Collection Analytics" card below
   // and its own Excel export tab. ──
   const fareDiscountDailyBreakdown = React.useMemo(() => {
-    const map = new Map<
+    const map = new Map
       string,
       { total: number; regular: number; student: number; senior: number; pwd: number }
     >();
@@ -1267,6 +1280,11 @@ export default function ReportsPage() {
     navigate("/reports/preview");
   };
 
+  // 🔒 Tooltip para sa Export Excel Logs button
+  const exportButtonTitle = isViewOnly
+    ? "View only — you don't have permission to export logs."
+    : undefined;
+
   // ── EXPORT: one workbook, SIX separate tabs/sheets — "Fare",
   // "Top-up", "Transfers", "Discount Analytics", "Route Summary",
   // "Route Daily" — mirroring the Fare / Top-up / Transfer tabs on the
@@ -1279,6 +1297,10 @@ export default function ReportsPage() {
   // filteredTopupList (which now carries fee_amount/vat_amount/net_amount
   // thanks to enrichedTxList above), matching the Transactions page. ──
   const handleExportExcelLogs = async () => {
+    // 🔒 Guard: bawal mag-export kapag view_only. Proteksyon ito kahit
+    // ma-bypass ang UI (devtools, atbp). Hindi rin magsusulat ng audit log.
+    if (!canExport) return;
+
     const XLSXStyle = await import("xlsx-js-style" as any);
     const { utils, writeFile } = XLSXStyle;
 
@@ -1684,10 +1706,28 @@ export default function ReportsPage() {
               Real-time Stream Active
             </span>
           </div>
+
+          {/* 🔒 View-only notice — maliit lang, nasa header row mismo */}
+          {isViewOnly && (
+            <span className={`hidden md:inline text-[11px] font-semibold ${isDark ? "text-amber-400" : "text-amber-600"}`}>
+              View only — exporting is disabled.
+            </span>
+          )}
+
+          {/* 🔒 Export Excel Logs button — NAKA-GREY OUT (disabled) kapag
+              view_only, hindi tinatanggal sa screen. */}
           <Button
             onClick={handleExportExcelLogs}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm"
+            disabled={!canExport}
+            className={`text-white font-semibold text-xs px-6 transition-colors duration-150 shadow-sm disabled:cursor-not-allowed disabled:opacity-100 ${
+              canExport
+                ? "bg-emerald-600 hover:bg-emerald-700 cursor-pointer"
+                : isDark
+                  ? "bg-slate-700 text-slate-400 hover:bg-slate-700"
+                  : "bg-slate-300 text-slate-500 hover:bg-slate-300"
+            }`}
             data-testid="button-export-excel-logs"
+            title={exportButtonTitle}
           >
             <FileSpreadsheet className="w-4 h-4 mr-2" />
             Export Excel Logs
