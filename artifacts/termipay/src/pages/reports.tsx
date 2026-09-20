@@ -1878,12 +1878,8 @@ export default function ReportsPage() {
                 ))}
               </div>
 
-              {/* ── Compact analytics row ─────────────────────────────────────
-                  Donut + vertical line-chart card sit side-by-side to avoid
-                  wasting vertical space. The Student/Senior/PWD summaries
-                  remain as three individual compact cards underneath. ── */}
+              {/* ── Card type analytics: donut + horizontal line graph ─────── */}
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-stretch">
-                {/* Card Type / registered-user donut */}
                 <div className={`rounded-lg border p-4 ${isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-slate-50/60"}`}>
                   <div className="flex items-center justify-between mb-2">
                     <div>
@@ -1891,171 +1887,52 @@ export default function ReportsPage() {
                       <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Registered users by card type</p>
                     </div>
                   </div>
-
                   {cardTypeDistribution.length === 0 ? (
-                    <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      No registered users found.
-                    </div>
+                    <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>No registered users found.</div>
                   ) : (
                     <div className="h-[300px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <RechartsPieChart>
-                          <Pie
-                            data={cardTypeDistribution}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="48%"
-                            innerRadius={66}
-                            outerRadius={96}
-                            paddingAngle={2}
-                            stroke={isDark ? "#0f172a" : "#ffffff"}
-                            strokeWidth={2}
-                          >
-                            {cardTypeDistribution.map((entry) => (
-                              <Cell key={entry.name} fill={CARD_TYPE_CHART_COLORS[entry.name]} />
-                            ))}
+                          <Pie data={cardTypeDistribution} dataKey="value" nameKey="name" cx="50%" cy="48%" innerRadius={66} outerRadius={96} paddingAngle={2} stroke={isDark ? "#0f172a" : "#ffffff"} strokeWidth={2}>
+                            {cardTypeDistribution.map((entry) => (<Cell key={entry.name} fill={CARD_TYPE_CHART_COLORS[entry.name]} />))}
                           </Pie>
-                          <text x="50%" y="46%" textAnchor="middle" dominantBaseline="middle" fill={isDark ? "#e2e8f0" : "#1e293b"} fontSize="22" fontWeight="700">
-                            {cardTypeDistribution.reduce((sum, item) => sum + item.value, 0)}
-                          </text>
-                          <text x="50%" y="56%" textAnchor="middle" dominantBaseline="middle" fill={isDark ? "#64748b" : "#94a3b8"} fontSize="10" fontWeight="600">
-                            REGISTERED USERS
-                          </text>
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                              border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
-                              borderRadius: "8px",
-                              fontSize: "11px",
-                              fontWeight: "600",
-                            }}
-                            formatter={(value: number, name: string) => {
-                              const total = cardTypeDistribution.reduce((sum, item) => sum + item.value, 0);
-                              const pct = total > 0 ? (value / total) * 100 : 0;
-                              return [`${value} ${value === 1 ? "user" : "users"} (${pct.toFixed(1)}%)`, name];
-                            }}
-                          />
-                          <Legend
-                            verticalAlign="bottom"
-                            height={28}
-                            wrapperStyle={{ fontSize: "11px", fontWeight: 600 }}
-                            formatter={(value: string) => (
-                              <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>
-                            )}
-                          />
+                          <text x="50%" y="46%" textAnchor="middle" dominantBaseline="middle" fill={isDark ? "#e2e8f0" : "#1e293b"} fontSize="22" fontWeight="700">{cardTypeDistribution.reduce((sum, item) => sum + item.value, 0)}</text>
+                          <text x="50%" y="56%" textAnchor="middle" dominantBaseline="middle" fill={isDark ? "#64748b" : "#94a3b8"} fontSize="10" fontWeight="600">REGISTERED USERS</text>
+                          <Tooltip contentStyle={{ backgroundColor: isDark ? "#0f172a" : "#ffffff", border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0", borderRadius: "8px", fontSize: "11px", fontWeight: "600" }} formatter={(value: number, name: string) => { const total = cardTypeDistribution.reduce((sum, item) => sum + item.value, 0); const pct = total > 0 ? (value / total) * 100 : 0; return [`${value} ${value === 1 ? "user" : "users"} (${pct.toFixed(1)}%)`, name]; }} />
+                          <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: "11px", fontWeight: 600 }} formatter={(value: string) => (<span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>)} />
                         </RechartsPieChart>
                       </ResponsiveContainer>
                     </div>
                   )}
                 </div>
 
-                {/* Vertical-space-efficient line graph */}
                 <div className={`rounded-lg border p-4 ${isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-slate-50/60"}`}>
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <h3 className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-300" : "text-slate-600"}`}>Discount Collection Trend</h3>
-                      <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Daily fare collections by card type</p>
+                      <h3 className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-300" : "text-slate-600"}`}>Discount Collection by Card Type</h3>
+                      <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Regular, Student, Senior, and PWD</p>
                     </div>
                   </div>
-
                   {filteredFareDiscountBreakdown.length === 0 ? (
-                    <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      No fare records match the selected filter.
-                    </div>
+                    <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>No fare records match the selected filter.</div>
                   ) : (
                     <div className="h-[300px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={filteredFareDiscountBreakdown} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
-                          <XAxis
-                            dataKey="date"
-                            tickFormatter={(d: string) => {
-                              const date = new Date(d + "T00:00:00");
-                              return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                            }}
-                            stroke={isDark ? "#64748b" : "#94a3b8"}
-                            fontSize={10}
-                            fontWeight="600"
-                            axisLine={false}
-                            tickLine={false}
-                          />
-                          <YAxis
-                            stroke={isDark ? "#64748b" : "#94a3b8"}
-                            fontSize={10}
-                            fontWeight="600"
-                            tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`}
-                            axisLine={false}
-                            tickLine={false}
-                            width={58}
-                          />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                              border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
-                              borderRadius: "8px",
-                              fontSize: "11px",
-                              fontWeight: "600",
-                              boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-                            }}
-                            labelFormatter={(d: string) => {
-                              const date = new Date(d + "T00:00:00");
-                              return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-                            }}
-                            labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }}
-                            formatter={(value: number, name: string) => [formatPeso(Math.abs(value)), name]}
-                          />
-                          <Legend
-                            wrapperStyle={{ fontSize: "10px", fontWeight: 600 }}
-                            formatter={(value: string) => (
-                              <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>
-                            )}
-                          />
-                          <Line type="monotone" dataKey="total" name="Total Collected" stroke={DISCOUNT_LINE_COLORS.total} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
-                          <Line type="monotone" dataKey="regular" name="Regular" stroke={DISCOUNT_LINE_COLORS.regular} strokeWidth={2} strokeDasharray="4 3" dot={false} activeDot={{ r: 3 }} />
-                          <Line type="monotone" dataKey="student" name="Student" stroke={DISCOUNT_LINE_COLORS.student} strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
-                          <Line type="monotone" dataKey="senior" name="Senior" stroke={DISCOUNT_LINE_COLORS.senior} strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
-                          <Line type="monotone" dataKey="pwd" name="PWD" stroke={DISCOUNT_LINE_COLORS.pwd} strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+                          <XAxis dataKey="date" tickFormatter={(d: string) => { const date = new Date(d + "T00:00:00"); return date.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }} stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={10} fontWeight="600" axisLine={false} tickLine={false} />
+                          <YAxis stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={10} fontWeight="600" tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false} width={58} />
+                          <Tooltip contentStyle={{ backgroundColor: isDark ? "#0f172a" : "#ffffff", border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0", borderRadius: "8px", fontSize: "11px", fontWeight: "600", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={(d: string) => { const date = new Date(d + "T00:00:00"); return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }} labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }} formatter={(value: number, name: string) => [formatPeso(Math.abs(value)), name]} />
+                          <Legend wrapperStyle={{ fontSize: "10px", fontWeight: 600 }} formatter={(value: string) => (<span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>)} />
+                          <Line type="monotone" dataKey="regular" name="Regular" stroke={DISCOUNT_LINE_COLORS.regular} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                          <Line type="monotone" dataKey="student" name="Student" stroke={DISCOUNT_LINE_COLORS.student} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                          <Line type="monotone" dataKey="senior" name="Senior" stroke={DISCOUNT_LINE_COLORS.senior} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                          <Line type="monotone" dataKey="pwd" name="PWD" stroke={DISCOUNT_LINE_COLORS.pwd} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
                   )}
                 </div>
-              </div>
-
-              {/* ── One compact card per discount type ─────────────────────── */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {(
-                  [
-                    { kind: "Student" as const, icon: GraduationCap },
-                    { kind: "Senior" as const, icon: HeartPulse },
-                    { kind: "PWD" as const, icon: Accessibility },
-                  ]
-                ).map(({ kind, icon: Icon }) => {
-                  const t = discountSummary.byType[kind];
-                  const sharePct = discountSummary.discountedRevenue > 0
-                    ? (t.revenue / discountSummary.discountedRevenue) * 100
-                    : 0;
-                  const lost = discountSummary.revenueLostByType[kind];
-                  return (
-                    <div key={kind} className={`rounded-lg border px-4 py-3 ${getDiscountBadgeStyle(kind, isDark)}`}>
-                      <div className="flex items-center gap-2">
-                        <Icon size={16} />
-                        <span className={`w-1.5 h-1.5 rounded-full ${getDiscountDotColor(kind)}`} />
-                        <span className="text-xs font-bold uppercase tracking-wide">{kind}</span>
-                      </div>
-                      <div className="text-sm font-mono font-semibold mt-2">
-                        {formatPeso(t.revenue)}
-                        <span className="text-[10px] font-normal opacity-70 ml-1">
-                          ({t.count} {t.count === 1 ? "ride" : "rides"} · {sharePct.toFixed(0)}% of discounts)
-                        </span>
-                      </div>
-                      <div className="text-[11px] font-mono mt-1 opacity-80">
-                        −{formatPeso(lost)} lost to 20% discount
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
 
               {/* Daily breakdown table — exact per-day figures backing the
