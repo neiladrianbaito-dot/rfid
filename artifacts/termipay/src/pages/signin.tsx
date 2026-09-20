@@ -184,7 +184,8 @@ export default function SigninPage() {
 
   return (
     <div
-      className={`min-h-[100dvh] flex items-center justify-center px-3 py-4 sm:p-6 relative overflow-x-hidden ${
+     // BAGO NA
+className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-4 sm:p-6 relative overflow-x-hidden ${
         isDark ? "text-white" : "text-slate-900"
       }`}
     >
