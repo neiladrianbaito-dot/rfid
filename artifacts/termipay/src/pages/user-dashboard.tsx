@@ -575,9 +575,9 @@ export default function PaymongoDashboardPage() {
   }, []);
 
   const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
-    { tab: "home", icon: <Home className="h-5 w-5" />, label: "Home" },
-    { tab: "Transactions", icon: <List className="h-5 w-5" />, label: "Transactions" },
-    { tab: "settings", icon: <Settings className="h-5 w-5" />, label: "Settings" },
+    { tab: "home", icon: <Home className="h-[18px] w-[18px]" />, label: "Home" },
+    { tab: "Transactions", icon: <List className="h-[18px] w-[18px]" />, label: "Transactions" },
+    { tab: "settings", icon: <Settings className="h-[18px] w-[18px]" />, label: "Settings" },
   ];
 
   if (authChecking) {
@@ -585,7 +585,7 @@ export default function PaymongoDashboardPage() {
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[#020617] text-slate-100" : "bg-slate-50 text-slate-800"}`}>
+    <div className={`min-h-[100dvh] ${isDark ? "bg-[#020617] text-slate-100" : "bg-slate-50 text-slate-800"}`}>
       {linkCard.isOpen && <LinkCardModal {...linkCard} />}
       <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
@@ -677,14 +677,14 @@ export default function PaymongoDashboardPage() {
 
       {/* STICKY HEADER */}
       <div ref={headerRef} className={`sticky top-0 z-40 w-full backdrop-blur-md border-b ${isDark ? "bg-[#020617]/95 border-slate-800" : "bg-white/95 border-slate-200"}`}>
-        <div className="mx-auto w-full max-w-6xl px-4 sm:px-8 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
+        <div className="mx-auto w-full max-w-6xl px-3 sm:px-8 py-2 sm:py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2 sm:gap-2.5">
             <img
               src="/calbayog.png"
               alt="Calbayog logo"
-              className="h-9 w-9 rounded-lg object-contain shrink-0"
+              className="h-7 w-7 sm:h-9 sm:w-9 rounded-lg object-contain shrink-0"
             />
-            <h1 className={`text-base font-bold tracking-tight leading-none ${isDark ? "text-white" : "text-slate-900"}`}>
+            <h1 className={`text-sm sm:text-base font-bold tracking-tight leading-none ${isDark ? "text-white" : "text-slate-900"}`}>
               Fare Collection System
             </h1>
           </div>
@@ -727,7 +727,7 @@ export default function PaymongoDashboardPage() {
       </div>
 
       {/* SCROLLABLE CONTENT */}
-      <div className={`mx-auto w-full max-w-6xl px-3 sm:px-8 pb-20 md:pb-8 pt-4 space-y-4 dashboard-content ${
+      <div className={`mx-auto w-full max-w-6xl px-3 sm:px-8 pb-20 md:pb-8 pt-3 sm:pt-4 space-y-3 sm:space-y-4 dashboard-content ${
         linkCard.isOpen ? "is-obscured" : ""
       }`}>
         {error && isLinked && (
@@ -767,7 +767,7 @@ export default function PaymongoDashboardPage() {
           )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="col-span-1 md:col-span-3">
-              <p className={`text-xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+              <p className={`text-base sm:text-xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
                 Welcome back,{" "}
                 <span className={isDark ? "text-emerald-400" : "text-emerald-600"}>
                   {cardDataLoading ? "…" : (displayName?.split(" ")[0] || "User")}
@@ -782,7 +782,7 @@ export default function PaymongoDashboardPage() {
             <Card className={`md:col-span-1 backdrop-blur-md border-t-emerald-500/50 border-t-2 ${
               isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-white"
             }`}>
-              <CardContent className={`pt-4 pb-4 px-4 ${dullClass}`}>
+              <CardContent className={`pt-3 pb-3 px-3.5 sm:pt-4 sm:pb-4 sm:px-4 ${dullClass}`}>
                 {cardDataLoading ? (
                   <div className="space-y-3">
                     <div className="flex justify-between items-start">
@@ -809,7 +809,7 @@ export default function PaymongoDashboardPage() {
                         <PlusCircle className="h-3 w-3 mr-1" /> TOP UP
                       </Button>
                     </div>
-                    <h2 className={`text-4xl font-black tracking-tighter ${isDark ? "text-white" : "text-slate-900"} ${isPulsing ? "balance-pulse" : ""}`}>
+                    <h2 className={`text-3xl sm:text-4xl font-black tracking-tighter ${isDark ? "text-white" : "text-slate-900"} ${isPulsing ? "balance-pulse" : ""}`}>
                       {isLinked ? balanceText : "\u20B1— .—"}
                     </h2>
                     <div className="mt-2 space-y-1">
@@ -1289,7 +1289,7 @@ export default function PaymongoDashboardPage() {
           style={{ top: `${headerHeight}px`, bottom: `${navHeight}px` }}
         >
           <div className={`backdrop-blur-md border-b shrink-0 ${isDark ? "bg-[#020617]/95 border-slate-800/60" : "bg-white/95 border-slate-200"}`}>
-            <p className={`text-sm font-bold flex items-center gap-2 px-4 pt-2.5 ${isDark ? "text-white" : "text-slate-900"}`}>
+            <p className={`text-[13px] font-bold flex items-center gap-2 px-3 pt-2 ${isDark ? "text-white" : "text-slate-900"}`}>
               <List className={`h-4 w-4 ${isDark ? "text-blue-400" : "text-blue-600"}`} />
               Transactions History
             </p>
@@ -1301,7 +1301,7 @@ export default function PaymongoDashboardPage() {
                     <button
                       key={key}
                       onClick={() => setActiveTxTab(key)}
-                      className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[11px] font-bold uppercase tracking-wide transition-colors cursor-pointer border-b-2 -mt-px ${
+                      className={`flex-1 flex items-center justify-center gap-1 py-2 text-[10px] font-bold uppercase tracking-wide transition-colors cursor-pointer border-b-2 -mt-px ${
                         active
                           ? isDark ? "text-emerald-400 border-emerald-400" : "text-emerald-600 border-emerald-600"
                           : isDark ? "text-slate-500 border-transparent" : "text-slate-400 border-transparent"
@@ -1687,7 +1687,7 @@ export default function PaymongoDashboardPage() {
       {/* Mobile Bottom Nav */}
       <nav
         ref={navRef}
-        className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-16 border-t transition-all duration-300 ${
+        className={`fixed bottom-0 left-0 right-0 z-20 flex md:hidden h-14 border-t transition-colors duration-300 ${
           isDark ? "bg-[#020617] border-slate-800/60" : "bg-white border-slate-200"
         } ${
           linkCard.isOpen ? "opacity-0 pointer-events-none blur-sm" : "opacity-100"
