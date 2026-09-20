@@ -72,6 +72,10 @@ import {
 import { useTheme } from "@/hooks/use-theme";
 import { useToast } from "@/hooks/use-toast";
 
+// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
+// at `loaded` (true kapag tapos na ma-fetch ang access info).
+import { useAdminAccess } from "@/hooks/use-admin-access";
+
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 
 const ID_IMAGE_BUCKET = "id-verifications";
@@ -406,6 +410,11 @@ export default function CardRegistrationPage() {
   // keeps both pages reacting identically when the user toggles the theme.
   const { isDark } = useTheme();
 
+  // 🔒 ADMIN ACCESS: `canManage` = false kapag view_only.
+  // `loaded` = true kapag tapos na ma-load ang access info (para hindi
+  // mag-flash ang button habang naglo-load pa).
+  const { canManage, loaded } = useAdminAccess();
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmittingImage, setIsSubmittingImage] = useState(false);
 
@@ -724,6 +733,11 @@ export default function CardRegistrationPage() {
    * OPEN MODAL
    */
   const openModal = useCallback(() => {
+    // 🔒 Safety guard: bawal magbukas ng modal kapag view_only
+    if (!canManage) {
+      return;
+    }
+
     setForm(INITIAL_FORM);
 
     setIdImageFile(null);
@@ -738,7 +752,7 @@ export default function CardRegistrationPage() {
     }
 
     setIsModalOpen(true);
-  }, []);
+  }, [canManage]);
 
   /*
    * CLOSE MODAL
@@ -990,6 +1004,19 @@ export default function CardRegistrationPage() {
     event: React.FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
+
+    // 🔒 Safety guard: kahit ma-bypass ang UI, hindi tutuloy ang submit
+    // kapag view_only ang admin.
+    if (!canManage) {
+      toast({
+        title: "View Only Access",
+        description:
+          "You don't have permission to register cards.",
+        variant: "destructive",
+      });
+
+      return;
+    }
 
     if (isSubmitting) {
       return;
@@ -1300,13 +1327,16 @@ export default function CardRegistrationPage() {
           </p>
         </div>
 
-        <Button
-          onClick={openModal}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Register New Card
-        </Button>
+        {/* 🔒 Add button — makikita lang kapag loaded na at may permission (hindi view_only) */}
+        {loaded && canManage && (
+          <Button
+            onClick={openModal}
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Register New Card
+          </Button>
+        )}
       </div>
 
       {/* RECENT USERS — realtime table (badges, dot colors, LIVE indicator, row pulse, last sync) */}
@@ -1420,547 +1450,548 @@ export default function CardRegistrationPage() {
         </Card>
       </motion.div>
 
-      {/* REGISTRATION MODAL */}
-      <Dialog
-        open={isModalOpen}
-        onOpenChange={(open) => {
-          if (!open && !isSubmitting) {
-            closeModal();
-          }
-        }}
-      >
-        <DialogContent
-          className={`max-h-[92vh] overflow-y-auto sm:max-w-4xl ${
-            isDark
-              ? "border-slate-800 bg-slate-950"
-              : "bg-white"
-          }`}
+      {/* REGISTRATION MODAL — 🔒 hindi na-re-render kapag view_only */}
+      {canManage && (
+        <Dialog
+          open={isModalOpen}
+          onOpenChange={(open) => {
+            if (!open && !isSubmitting) {
+              closeModal();
+            }
+          }}
         >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              Register New RFID Card
-            </DialogTitle>
-          </DialogHeader>
-
-          <form
-            onSubmit={handleSubmit}
-            className="space-y-6"
+          <DialogContent
+            className={`max-h-[92vh] overflow-y-auto sm:max-w-4xl ${
+              isDark
+                ? "border-slate-800 bg-slate-950"
+                : "bg-white"
+            }`}
           >
-            {/* Legend for the red asterisks */}
-            <p
-              className={`text-xs ${
-                isDark ? "text-slate-400" : "text-slate-500"
-              }`}
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                Register New RFID Card
+              </DialogTitle>
+            </DialogHeader>
+
+            <form
+              onSubmit={handleSubmit}
+              className="space-y-6"
             >
-              Fields marked with <RequiredMark /> are required.
-            </p>
+              {/* Legend for the red asterisks */}
+              <p
+                className={`text-xs ${
+                  isDark ? "text-slate-400" : "text-slate-500"
+                }`}
+              >
+                Fields marked with <RequiredMark /> are required.
+              </p>
 
-            {/* CARD INFORMATION */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-cyan-500" />
-
-                <h3 className="font-semibold">
-                  Card Information
-                </h3>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    RFID Card UID
-                    <RequiredMark />
-                  </label>
-
-                  <Input
-                    value={form.cardUid}
-                    onChange={(event) =>
-                      updateForm(
-                        "cardUid",
-                        event.target.value
-                          .toUpperCase()
-                          .replace(/[^A-Z0-9]/g, "")
-                          .slice(0, 8)
-                      )
-                    }
-                    placeholder="8-character UID"
-                    disabled={isSubmitting}
-                    maxLength={8}
-                    inputMode="text"
-                    aria-required="true"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Card Type
-                    <RequiredMark />
-                  </label>
-
-                  <Select
-                    value={form.type}
-                    onValueChange={(value) =>
-                      updateForm(
-                        "type",
-                        value
-                      )
-                    }
-                    disabled={isSubmitting}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-
-                    <SelectContent>
-                      <SelectItem value="Regular">
-                        <span className="flex items-center gap-2">
-                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Regular")}`} />
-                          <span className={getTypeTextColor("Regular", isDark)}>
-                            Regular
-                          </span>
-                        </span>
-                      </SelectItem>
-
-                      <SelectItem value="Student">
-                        <span className="flex items-center gap-2">
-                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Student")}`} />
-                          <span className={getTypeTextColor("Student", isDark)}>
-                            Student
-                          </span>
-                        </span>
-                      </SelectItem>
-
-                      <SelectItem value="Senior">
-                        <span className="flex items-center gap-2">
-                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Senior")}`} />
-                          <span className={getTypeTextColor("Senior", isDark)}>
-                            Senior
-                          </span>
-                        </span>
-                      </SelectItem>
-
-                      <SelectItem value="PWD">
-                        <span className="flex items-center gap-2">
-                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("PWD")}`} />
-                          <span className={getTypeTextColor("PWD", isDark)}>
-                            PWD
-                          </span>
-                        </span>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-
-            {/* ID IMAGE */}
-            {requiresIdImage && (
+              {/* CARD INFORMATION */}
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <IdCard className="h-4 w-4 text-cyan-500" />
+                  <CreditCard className="h-4 w-4 text-cyan-500" />
 
                   <h3 className="font-semibold">
-                    ID Verification
+                    Card Information
                   </h3>
                 </div>
 
-                <div
-                  className={`rounded-xl border p-4 ${
-                    isDark
-                      ? "border-slate-800 bg-slate-900/40"
-                      : "border-slate-200 bg-slate-50"
-                  }`}
-                >
-                  <div className="flex flex-col gap-4 sm:flex-row">
-                    {idImagePreview ? (
-                      <div className="relative">
-                        <img
-                          src={idImagePreview}
-                          alt="ID preview"
-                          className="h-40 w-64 rounded-lg border object-cover"
-                        />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      RFID Card UID
+                      <RequiredMark />
+                    </label>
 
+                    <Input
+                      value={form.cardUid}
+                      onChange={(event) =>
+                        updateForm(
+                          "cardUid",
+                          event.target.value
+                            .toUpperCase()
+                            .replace(/[^A-Z0-9]/g, "")
+                            .slice(0, 8)
+                        )
+                      }
+                      placeholder="8-character UID"
+                      disabled={isSubmitting}
+                      maxLength={8}
+                      inputMode="text"
+                      aria-required="true"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Card Type
+                      <RequiredMark />
+                    </label>
+
+                    <Select
+                      value={form.type}
+                      onValueChange={(value) =>
+                        updateForm(
+                          "type",
+                          value
+                        )
+                      }
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+
+                      <SelectContent>
+                        <SelectItem value="Regular">
+                          <span className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Regular")}`} />
+                            <span className={getTypeTextColor("Regular", isDark)}>
+                              Regular
+                            </span>
+                          </span>
+                        </SelectItem>
+
+                        <SelectItem value="Student">
+                          <span className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Student")}`} />
+                            <span className={getTypeTextColor("Student", isDark)}>
+                              Student
+                            </span>
+                          </span>
+                        </SelectItem>
+
+                        <SelectItem value="Senior">
+                          <span className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Senior")}`} />
+                            <span className={getTypeTextColor("Senior", isDark)}>
+                              Senior
+                            </span>
+                          </span>
+                        </SelectItem>
+
+                        <SelectItem value="PWD">
+                          <span className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("PWD")}`} />
+                            <span className={getTypeTextColor("PWD", isDark)}>
+                              PWD
+                            </span>
+                          </span>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* ID IMAGE */}
+              {requiresIdImage && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <IdCard className="h-4 w-4 text-cyan-500" />
+
+                    <h3 className="font-semibold">
+                      ID Verification
+                    </h3>
+                  </div>
+
+                  <div
+                    className={`rounded-xl border p-4 ${
+                      isDark
+                        ? "border-slate-800 bg-slate-900/40"
+                        : "border-slate-200 bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex flex-col gap-4 sm:flex-row">
+                      {idImagePreview ? (
+                        <div className="relative">
+                          <img
+                            src={idImagePreview}
+                            alt="ID preview"
+                            className="h-40 w-64 rounded-lg border object-cover"
+                          />
+
+                          <button
+                            type="button"
+                            onClick={clearImage}
+                            disabled={isSubmitting}
+                            className={`absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm ${
+                              isDark
+                                ? "border-slate-700 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white text-slate-700"
+                            }`}
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ) : (
                         <button
                           type="button"
-                          onClick={clearImage}
-                          disabled={isSubmitting}
-                          className={`absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm ${
-                            isDark
-                              ? "border-slate-700 bg-slate-900 text-white"
-                              : "border-slate-200 bg-white text-slate-700"
-                          }`}
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          fileInputRef.current?.click()
-                        }
-                        disabled={isSubmitting}
-                        className={`flex h-40 w-full max-w-md flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
-                          isDark
-                            ? "border-slate-700 hover:border-cyan-500 hover:bg-slate-900"
-                            : "border-slate-300 hover:border-cyan-500 hover:bg-white"
-                        }`}
-                      >
-                        <Upload className="mb-2 h-8 w-8 opacity-50" />
-
-                        <span className="text-sm font-medium">
-                          Upload ID Image
-                          <RequiredMark />
-                        </span>
-
-                        <span className="mt-1 text-xs opacity-60">
-                          JPG, PNG, WEBP up to 5 MB
-                        </span>
-                      </button>
-                    )}
-
-                    <div className="flex-1 space-y-2">
-                      <p className="text-sm font-medium">
-                        {form.type} ID
-                        <RequiredMark />
-                      </p>
-
-                      <p
-                        className={`text-sm ${
-                          isDark
-                            ? "text-slate-400"
-                            : "text-slate-500"
-                        }`}
-                      >
-                        Upload a clear image of the valid
-                        identification document for the
-                        selected card type.
-                      </p>
-
-                      <p
-                        className={`text-xs ${
-                          isDark
-                            ? "text-slate-500"
-                            : "text-slate-400"
-                        }`}
-                      >
-                        The image will be uploaded directly
-                        to Supabase Storage. It will not be
-                        sent as Base64 to the API server.
-                      </p>
-
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={
-                          handleImageSelect
-                        }
-                        disabled={isSubmitting}
-                      />
-
-                      {idImageFile && (
-                        <div
-                          className={`rounded-md px-3 py-2 text-xs ${
-                            isDark
-                              ? "bg-slate-800 text-slate-300"
-                              : "bg-white text-slate-600"
-                          }`}
-                        >
-                          {idImageFile.name}
-                          {" • "}
-                          {(
-                            idImageFile.size /
-                            1024 /
-                            1024
-                          ).toFixed(2)}
-                          {" MB"}
-                        </div>
-                      )}
-
-                      {idImageFile && (
-                        <Button
-                          type="button"
-                          variant="outline"
                           onClick={() =>
                             fileInputRef.current?.click()
                           }
                           disabled={isSubmitting}
-                          className="gap-2"
+                          className={`flex h-40 w-full max-w-md flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
+                            isDark
+                              ? "border-slate-700 hover:border-cyan-500 hover:bg-slate-900"
+                              : "border-slate-300 hover:border-cyan-500 hover:bg-white"
+                          }`}
                         >
-                          <Upload className="h-4 w-4" />
-                          Change Image
-                        </Button>
+                          <Upload className="mb-2 h-8 w-8 opacity-50" />
+
+                          <span className="text-sm font-medium">
+                            Upload ID Image
+                            <RequiredMark />
+                          </span>
+
+                          <span className="mt-1 text-xs opacity-60">
+                            JPG, PNG, WEBP up to 5 MB
+                          </span>
+                        </button>
                       )}
+
+                      <div className="flex-1 space-y-2">
+                        <p className="text-sm font-medium">
+                          {form.type} ID
+                          <RequiredMark />
+                        </p>
+
+                        <p
+                          className={`text-sm ${
+                            isDark
+                              ? "text-slate-400"
+                              : "text-slate-500"
+                          }`}
+                        >
+                          Upload a clear image of the valid
+                          identification document for the
+                          selected card type.
+                        </p>
+
+                        <p
+                          className={`text-xs ${
+                            isDark
+                              ? "text-slate-500"
+                              : "text-slate-400"
+                          }`}
+                        >
+                          The image will be uploaded directly
+                          to Supabase Storage. It will not be
+                          sent as Base64 to the API server.
+                        </p>
+
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={
+                            handleImageSelect
+                          }
+                          disabled={isSubmitting}
+                        />
+
+                        {idImageFile && (
+                          <div
+                            className={`rounded-md px-3 py-2 text-xs ${
+                              isDark
+                                ? "bg-slate-800 text-slate-300"
+                                : "bg-white text-slate-600"
+                            }`}
+                          >
+                            {idImageFile.name}
+                            {" • "}
+                            {(
+                              idImageFile.size /
+                              1024 /
+                              1024
+                            ).toFixed(2)}
+                            {" MB"}
+                          </div>
+                        )}
+
+                        {idImageFile && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() =>
+                              fileInputRef.current?.click()
+                            }
+                            disabled={isSubmitting}
+                            className="gap-2"
+                          >
+                            <Upload className="h-4 w-4" />
+                            Change Image
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* PERSONAL INFORMATION */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <UserRound className="h-4 w-4 text-cyan-500" />
+              {/* PERSONAL INFORMATION */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <UserRound className="h-4 w-4 text-cyan-500" />
 
-                <h3 className="font-semibold">
-                  Personal Information
-                </h3>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <label className="text-sm font-medium">
-                    Full Name
-                    <RequiredMark />
-                  </label>
-
-                  <Input
-                    value={form.fullName}
-                    onChange={(event) =>
-                      updateForm(
-                        "fullName",
-                        event.target.value
-                      )
-                    }
-                    placeholder="Enter full name"
-                    disabled={isSubmitting}
-                    aria-required="true"
-                  />
+                  <h3 className="font-semibold">
+                    Personal Information
+                  </h3>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Date of Birth
-                    <RequiredMark />
-                  </label>
-
-                  <div className="relative">
-                    <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50" />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2 sm:col-span-2">
+                    <label className="text-sm font-medium">
+                      Full Name
+                      <RequiredMark />
+                    </label>
 
                     <Input
-                      type="date"
-                      value={form.dob}
+                      value={form.fullName}
                       onChange={(event) =>
                         updateForm(
-                          "dob",
+                          "fullName",
                           event.target.value
                         )
                       }
-                      className="pl-10"
+                      placeholder="Enter full name"
                       disabled={isSubmitting}
                       aria-required="true"
                     />
                   </div>
-                </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Contact Number
-                    <RequiredMark />
-                  </label>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Date of Birth
+                      <RequiredMark />
+                    </label>
 
-                  <Input
-                    value={form.contactNumber}
-                    onChange={(event) =>
-                      updateForm(
-                        "contactNumber",
-                        event.target.value
-                          .replace(/\D/g, "")
-                          .slice(0, 11)
-                      )
-                    }
-                    placeholder="09XXXXXXXXX"
-                    disabled={isSubmitting}
-                    maxLength={11}
-                    inputMode="numeric"
-                    aria-required="true"
-                  />
-                </div>
-              </div>
-            </div>
+                    <div className="relative">
+                      <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50" />
 
-            {/* ADDRESS */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-cyan-500" />
+                      <Input
+                        type="date"
+                        value={form.dob}
+                        onChange={(event) =>
+                          updateForm(
+                            "dob",
+                            event.target.value
+                          )
+                        }
+                        className="pl-10"
+                        disabled={isSubmitting}
+                        aria-required="true"
+                      />
+                    </div>
+                  </div>
 
-                <h3 className="font-semibold">
-                  Address
-                </h3>
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Contact Number
+                      <RequiredMark />
+                    </label>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                <label className="text-sm font-medium">
-  Street Address <span className="text-xs font-normal text-muted-foreground">(Optional)</span>
-</label>
-
-
-                  <Input
-                    value={form.streetAddress}
-                    onChange={(event) =>
-                      updateForm(
-                        "streetAddress",
-                        event.target.value
-                      )
-                    }
-                    placeholder="House number, street, sitio"
-                    disabled={isSubmitting}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Region
-                    <RequiredMark />
-                  </label>
-
-                  <LocationCombobox
-                    options={regions}
-                    value={form.regionCode}
-                    onChange={handleRegionChange}
-                    placeholder="Select region"
-                    loadingPlaceholder="Loading regions..."
-                    loading={loadingRegions}
-                    disabled={isSubmitting || loadingRegions}
-                    isDark={isDark}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Province
-                       <RequiredMark />
-                  </label>
-
-                  <LocationCombobox
-                    options={provinces}
-                    value={form.provinceCode}
-                    onChange={handleProvinceChange}
-                    placeholder="Select province"
-                    loadingPlaceholder="Loading provinces..."
-                    loading={loadingProvinces}
-                    disabled={
-                      isSubmitting ||
-                      !form.regionCode ||
-                      loadingProvinces
-                    }
-                    isDark={isDark}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    City / Municipality
-                    <RequiredMark />
-                  </label>
-
-                  <LocationCombobox
-                    options={cities}
-                    value={form.cityCode}
-                    onChange={handleCityChange}
-                    placeholder="Select city / municipality"
-                    loadingPlaceholder="Loading cities..."
-                    loading={loadingCities}
-                    disabled={
-                      isSubmitting ||
-                      !form.provinceCode ||
-                      loadingCities
-                    }
-                    isDark={isDark}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Barangay
-                    <RequiredMark />
-                  </label>
-
-                  <LocationCombobox
-                    options={barangays}
-                    value={form.barangayCode}
-                    onChange={handleBarangayChange}
-                    placeholder="Select barangay"
-                    loadingPlaceholder="Loading barangays..."
-                    loading={loadingBarangays}
-                    disabled={
-                      isSubmitting ||
-                      !form.cityCode ||
-                      loadingBarangays
-                    }
-                    isDark={isDark}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    ZIP Code
-                       <RequiredMark />
-                  </label>
-
-                  <Input
-                    value={form.zipCode}
-                    onChange={(event) =>
-                      updateForm(
-                        "zipCode",
-                        event.target.value.replace(
-                          /\D/g,
-                          ""
+                    <Input
+                      value={form.contactNumber}
+                      onChange={(event) =>
+                        updateForm(
+                          "contactNumber",
+                          event.target.value
+                            .replace(/\D/g, "")
+                            .slice(0, 11)
                         )
-                      )
-                    }
-                    placeholder="6710"
-                    maxLength={10}
-                    disabled={isSubmitting}
-                  />
+                      }
+                      placeholder="09XXXXXXXXX"
+                      disabled={isSubmitting}
+                      maxLength={11}
+                      inputMode="numeric"
+                      aria-required="true"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* BUTTONS */}
-            <div
-              className={`flex flex-col-reverse gap-3 border-t pt-5 sm:flex-row sm:justify-end ${
-                isDark
-                  ? "border-slate-800"
-                  : "border-slate-200"
-              }`}
-            >
-              <Button
-                type="button"
-                variant="outline"
-                onClick={closeModal}
-                disabled={isSubmitting}
+              {/* ADDRESS */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-cyan-500" />
+
+                  <h3 className="font-semibold">
+                    Address
+                  </h3>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2 sm:col-span-2">
+                    <label className="text-sm font-medium">
+                      Street Address <span className="text-xs font-normal text-muted-foreground">(Optional)</span>
+                    </label>
+
+                    <Input
+                      value={form.streetAddress}
+                      onChange={(event) =>
+                        updateForm(
+                          "streetAddress",
+                          event.target.value
+                        )
+                      }
+                      placeholder="House number, street, sitio"
+                      disabled={isSubmitting}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Region
+                      <RequiredMark />
+                    </label>
+
+                    <LocationCombobox
+                      options={regions}
+                      value={form.regionCode}
+                      onChange={handleRegionChange}
+                      placeholder="Select region"
+                      loadingPlaceholder="Loading regions..."
+                      loading={loadingRegions}
+                      disabled={isSubmitting || loadingRegions}
+                      isDark={isDark}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Province
+                      <RequiredMark />
+                    </label>
+
+                    <LocationCombobox
+                      options={provinces}
+                      value={form.provinceCode}
+                      onChange={handleProvinceChange}
+                      placeholder="Select province"
+                      loadingPlaceholder="Loading provinces..."
+                      loading={loadingProvinces}
+                      disabled={
+                        isSubmitting ||
+                        !form.regionCode ||
+                        loadingProvinces
+                      }
+                      isDark={isDark}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      City / Municipality
+                      <RequiredMark />
+                    </label>
+
+                    <LocationCombobox
+                      options={cities}
+                      value={form.cityCode}
+                      onChange={handleCityChange}
+                      placeholder="Select city / municipality"
+                      loadingPlaceholder="Loading cities..."
+                      loading={loadingCities}
+                      disabled={
+                        isSubmitting ||
+                        !form.provinceCode ||
+                        loadingCities
+                      }
+                      isDark={isDark}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Barangay
+                      <RequiredMark />
+                    </label>
+
+                    <LocationCombobox
+                      options={barangays}
+                      value={form.barangayCode}
+                      onChange={handleBarangayChange}
+                      placeholder="Select barangay"
+                      loadingPlaceholder="Loading barangays..."
+                      loading={loadingBarangays}
+                      disabled={
+                        isSubmitting ||
+                        !form.cityCode ||
+                        loadingBarangays
+                      }
+                      isDark={isDark}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      ZIP Code
+                      <RequiredMark />
+                    </label>
+
+                    <Input
+                      value={form.zipCode}
+                      onChange={(event) =>
+                        updateForm(
+                          "zipCode",
+                          event.target.value.replace(
+                            /\D/g,
+                            ""
+                          )
+                        )
+                      }
+                      placeholder="6710"
+                      maxLength={10}
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* BUTTONS */}
+              <div
+                className={`flex flex-col-reverse gap-3 border-t pt-5 sm:flex-row sm:justify-end ${
+                  isDark
+                    ? "border-slate-800"
+                    : "border-slate-200"
+                }`}
               >
-                Cancel
-              </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={closeModal}
+                  disabled={isSubmitting}
+                >
+                  Cancel
+                </Button>
 
-              <Button
-                type="submit"
-                disabled={isSubmitting}
-                className="gap-2"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
 
-                    {isSubmittingImage
-                      ? "Uploading ID..."
-                      : "Registering..."}
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="h-4 w-4" />
-                    Register Card
-                  </>
-                )}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+                      {isSubmittingImage
+                        ? "Uploading ID..."
+                        : "Registering..."}
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-4 w-4" />
+                      Register Card
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
