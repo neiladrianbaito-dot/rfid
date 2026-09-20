@@ -1092,7 +1092,7 @@ export default function ReportsPage() {
   }, [userList]);
 
   const CARD_TYPE_CHART_COLORS: Record<string, string> = {
-    Regular: "#64748b",
+    Regular: "#ef4444",
     Student: "#3b82f6",
     Senior: "#eab308",
     PWD: "#10b981",
