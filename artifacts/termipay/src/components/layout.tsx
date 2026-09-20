@@ -466,34 +466,27 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // NOTE: requires an UPDATE policy on public.admins that allows an admin to
   // update their own row (matching on id, or on the pre-change username).
   async function syncUsernameToAdmins(newUsername: string, oldUsername: string) {
-    const trimmedNew = newUsername.trim();
-    if (!trimmedNew) throw new Error("Username cannot be empty.");
+  const trimmedNew = newUsername.trim();
+  if (!trimmedNew) throw new Error("Username cannot be empty.");
 
-    let query = supabase.from("admins").update({ username: trimmedNew });
+  const { data, error } = await supabase.rpc("set_admin_username", {
+    p_id: adminId,
+    p_username: oldUsername.trim() || null,
+    p_new_username: trimmedNew,
+  });
 
-    if (adminId !== null) {
-      query = query.eq("id", adminId);
-    } else if (oldUsername.trim()) {
-      query = query.eq("username", oldUsername.trim());
-    } else {
-      throw new Error("Could not save username: no admin id or existing username found for this account.");
-    }
-
-    const { data, error } = await query.select("id");
-
-    if (error) {
-      // Most likely a unique-constraint violation (username already taken)
-      throw new Error(
-        error.code === "23505"
-          ? "That username is already taken."
-          : `Could not save username: ${error.message}`
-      );
-    }
-
-    if (!data || data.length === 0) {
-      throw new Error("Could not save username: no matching admin account was found.");
-    }
+  if (error) {
+    throw new Error(
+      error.code === "23505" || /already exists|duplicate/i.test(error.message)
+        ? "That username is already taken."
+        : `Could not save username: ${error.message}`
+    );
   }
+
+  if (data !== true) {
+    throw new Error("Could not save username: no matching admin account was found.");
+  }
+}
 
   // The avatar lives in its own state so it always displays, even when the
   // `user` object from useAuth doesn't include avatar fields. Sources, in order:
