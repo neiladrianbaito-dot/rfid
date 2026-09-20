@@ -86,6 +86,16 @@ function getRoleLabel(user: any): string {
   return rawRole ? String(rawRole) : "User";
 }
 
+// Reads the username from whichever shape your user object has.
+function getUsername(user: any): string {
+  return (
+    user?.username ||
+    user?.user_metadata?.username ||
+    user?.app_metadata?.username ||
+    ""
+  );
+}
+
 // Reads the avatar public URL from whichever shape your user object has
 // (admins table column, camelCase API field, or Supabase user_metadata).
 function getAvatarUrl(user: any): string | null {
@@ -382,6 +392,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [formData, setFormData] = useState({
     name: user?.name || "",
+    username: getUsername(user),
     currentPassword: "",
     newPassword: "",
   });
@@ -445,6 +456,43 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }
 
     throw new Error("Could not save avatar: no matching admin account was found.");
+  }
+
+  // Saves the new username on the public.admins row directly. Matches the
+  // row the same way syncAvatarToAdmins does: prefer the numeric admin id
+  // (stable even after the username itself changes), and fall back to the
+  // OLD username/email if no id is known.
+  //
+  // NOTE: requires an UPDATE policy on public.admins that allows an admin to
+  // update their own row (matching on id, or on the pre-change username).
+  async function syncUsernameToAdmins(newUsername: string, oldUsername: string) {
+    const trimmedNew = newUsername.trim();
+    if (!trimmedNew) throw new Error("Username cannot be empty.");
+
+    let query = supabase.from("admins").update({ username: trimmedNew });
+
+    if (adminId !== null) {
+      query = query.eq("id", adminId);
+    } else if (oldUsername.trim()) {
+      query = query.eq("username", oldUsername.trim());
+    } else {
+      throw new Error("Could not save username: no admin id or existing username found for this account.");
+    }
+
+    const { data, error } = await query.select("id");
+
+    if (error) {
+      // Most likely a unique-constraint violation (username already taken)
+      throw new Error(
+        error.code === "23505"
+          ? "That username is already taken."
+          : `Could not save username: ${error.message}`
+      );
+    }
+
+    if (!data || data.length === 0) {
+      throw new Error("Could not save username: no matching admin account was found.");
+    }
   }
 
   // The avatar lives in its own state so it always displays, even when the
@@ -554,6 +602,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     if (profileModalOpen) {
       setFormData({
         name: user?.name || "",
+        username: getUsername(user),
         currentPassword: "",
         newPassword: "",
       });
@@ -651,14 +700,27 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }
 
   const handleSaveChanges = async () => {
+    const currentUsername = getUsername(user);
+    const trimmedNewUsername = formData.username.trim();
+
     const wantsPasswordChange = formData.newPassword.trim().length > 0;
     const wantsNameChange = formData.name.trim() !== (user?.name || "").trim();
+    const wantsUsernameChange = trimmedNewUsername !== currentUsername.trim();
     const wantsAvatarChange = !!avatarFile || (removeAvatar && !!currentAvatarUrl);
 
-    if (!wantsNameChange && !wantsPasswordChange && !wantsAvatarChange) {
+    if (!wantsNameChange && !wantsUsernameChange && !wantsPasswordChange && !wantsAvatarChange) {
       toast({
         title: "No Changes Detected",
         description: "No changes detected in your profile.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (wantsUsernameChange && !trimmedNewUsername) {
+      toast({
+        title: "Invalid Username",
+        description: "Username cannot be empty.",
         variant: "destructive",
       });
       return;
@@ -717,13 +779,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         const newAvatarUrl = wantsAvatarChange ? newAvatar?.publicUrl ?? null : undefined;
         const newAvatarPath = wantsAvatarChange ? newAvatar?.path ?? null : undefined;
 
-        // 2) Save name / avatar / password on the Supabase auth user
+        // 2) Save name / username / avatar / password on the Supabase auth user
         const payload: any = {};
         const metadata: Record<string, any> = {};
 
         if (wantsNameChange) {
           metadata.full_name = formData.name.trim();
           metadata.name = formData.name.trim();
+        }
+
+        if (wantsUsernameChange) {
+          metadata.username = trimmedNewUsername;
         }
 
         if (wantsAvatarChange) {
@@ -742,7 +808,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         const { error: updateError } = await supabase.auth.updateUser(payload);
         if (updateError) throw new Error(updateError.message);
 
-        // 3) Save the avatar on the admins row (via RPC)
+        // 3) Save the username on the admins row (must happen before the
+        //    avatar sync below, since that call may look the row up by the
+        //    OLD username)
+        if (wantsUsernameChange) {
+          try {
+            await syncUsernameToAdmins(trimmedNewUsername, currentUsername);
+          } catch (usernameError: any) {
+            // Roll back the auth metadata so it doesn't disagree with admins
+            try {
+              await supabase.auth.updateUser({ data: { username: currentUsername } });
+            } catch {
+              /* best effort */
+            }
+            throw new Error(usernameError?.message || "Could not save the new username.");
+          }
+        }
+
+        // 4) Save the avatar on the admins row (via RPC)
         if (wantsAvatarChange) {
           try {
             await syncAvatarToAdmins(newAvatarUrl ?? null, newAvatarPath ?? null, supabaseSession.user.email);
@@ -757,7 +840,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // 4) Delete the previous picture(s) from the bucket. Only runs after the
+        // 5) Delete the previous picture(s) from the bucket. Only runs after the
         //    admins row points to the new picture.
         if (wantsAvatarChange && avatarSaved) {
           const cleaned = await cleanupOldAvatarFiles(oldStoragePath, newAvatarPath ?? null);
@@ -804,7 +887,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         },
         body: JSON.stringify({
           ...formData,
-          // Backend should save these into admins.avatar_url / admins.avatar_path
+          // Backend should save formData.username into admins.username, and
+          // these into admins.avatar_url / admins.avatar_path
           ...(wantsAvatarChange
             ? {
                 avatarUrl: newAvatar?.publicUrl ?? null,
@@ -819,7 +903,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       if (data?.token) window.localStorage.setItem("termipay_auth_token", data.token);
 
-      // Save the avatar on the admins row (works without any backend change)
+      // Fall back to updating username/avatar on the admins row directly,
+      // in case the legacy backend endpoint above doesn't handle them yet.
+      if (wantsUsernameChange) {
+        await syncUsernameToAdmins(trimmedNewUsername, currentUsername);
+      }
+
       if (wantsAvatarChange) {
         await syncAvatarToAdmins(newAvatar?.publicUrl ?? null, newAvatar?.path ?? null);
         avatarSaved = true;
@@ -1127,14 +1216,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   </DialogTitle>
                   <VisuallyHidden>
                     <DialogDescription>
-                      Update your profile picture, display name, or change your account password.
+                      Update your profile picture, display name, username, or change your account password.
                     </DialogDescription>
                   </VisuallyHidden>
                 </DialogHeader>
 
                 {/* Fixed body — no scroll, no overflow, no resize */}
                 <div className="flex-1 px-5 overflow-hidden">
-                  <div className="flex flex-col gap-4 h-full py-2">
+                  <div className="flex flex-col gap-3 h-full py-2">
                     {/* Avatar upload — fixed 64px box, never changes size */}
                     <div className="flex items-center gap-3">
                       <div className="relative shrink-0">
@@ -1220,17 +1309,46 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       />
                     </div>
 
-                    <div className="space-y-1.5">
-                      <Label className={`text-[10px] uppercase tracking-wide font-semibold transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        Full Name
-                      </Label>
-                      <Input
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        className={`h-9 focus:border-blue-500 focus-visible:ring-blue-500 transition-colors ${
-                          isDark ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"
-                        }`}
-                      />
+                    {/* Full Name + Username sit side by side so the fixed-height
+                        modal doesn't have to grow to fit both fields. */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1.5">
+                        <Label className={`text-[10px] uppercase tracking-wide font-semibold transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          Full Name
+                        </Label>
+                        <Input
+                          value={formData.name}
+                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                          disabled={isUpdating}
+                          className={`h-9 focus:border-blue-500 focus-visible:ring-blue-500 transition-colors ${
+                            isDark ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"
+                          }`}
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className={`text-[10px] uppercase tracking-wide font-semibold transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          Username
+                        </Label>
+                        <Input
+                          value={formData.username}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              // usernames stay lowercase, no spaces
+                              username: e.target.value.replace(/\s+/g, "").toLowerCase(),
+                            })
+                          }
+                          disabled={isUpdating}
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          placeholder="username"
+                          className={`h-9 focus:border-blue-500 focus-visible:ring-blue-500 transition-colors ${
+                            isDark ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"
+                          }`}
+                        />
+                      </div>
                     </div>
 
                     <div
@@ -1243,7 +1361,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         <span className="text-[10.5px] font-semibold uppercase tracking-wide">Authentication Update</span>
                       </div>
                       <p className={`text-[10.5px] leading-relaxed transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        Fill both password fields to change it. Leave blank to update only your name or picture.
+                        Fill both password fields to change it. Leave blank to update only your name, username, or picture.
                       </p>
                       <div className="space-y-1.5">
                         <Label className={`text-[10px] font-medium transition-colors ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -1254,6 +1372,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           placeholder="Required if changing password"
                           value={formData.currentPassword}
                           onChange={(e) => setFormData({ ...formData, currentPassword: e.target.value })}
+                          disabled={isUpdating}
                           className={`h-8 text-xs transition-colors ${
                             isDark
                               ? "bg-slate-900 border-slate-800 text-white placeholder:text-slate-600"
@@ -1270,6 +1389,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           placeholder="Leave blank if not changing"
                           value={formData.newPassword}
                           onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
+                          disabled={isUpdating}
                           className={`h-8 text-xs transition-colors ${
                             isDark
                               ? "bg-slate-900 border-slate-800 text-white placeholder:text-slate-600"
