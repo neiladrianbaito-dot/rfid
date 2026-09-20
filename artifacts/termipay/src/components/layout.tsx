@@ -844,8 +844,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       }`}
     >
       {/* Sidebar — themed blue to match the app's accent color.
-          On desktop, width transitions between w-72 (open) and w-0 (collapsed).
-          On mobile, it stays w-72 but slides in/out with translate-x. */}
+          On desktop, width transitions between w-72 (open) and w-0 (collapsed),
+          so the main content area expands to fill the freed space.
+          On mobile, it stays w-72 but slides in/out with translate-x as an
+          overlay on top of the page. */}
       <aside
         className={`
           fixed inset-y-0 left-0 z-50 border-r print:hidden overflow-hidden
@@ -983,13 +985,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"
           }`}
         >
-          <div className="flex items-center gap-4">
-            <CurrentDateTime isDark={isDark} />
-          </div>
-
+          {/* Left corner: hamburger (3-line) toggle sits right next to the date/time */}
           <div className="flex items-center gap-3">
-            {/* Hamburger — collapses/expands the sidebar (desktop) or opens
-                it as an overlay (mobile). Placed next to the profile group. */}
             <button
               type="button"
               onClick={() => setSidebarOpen((prev) => !prev)}
@@ -1004,6 +1001,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               {sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </button>
 
+            <CurrentDateTime isDark={isDark} />
+          </div>
+
+          {/* Right side: fullscreen, theme toggle, profile */}
+          <div className="flex items-center gap-3">
             {/* Fullscreen toggle */}
             <button
               type="button"
