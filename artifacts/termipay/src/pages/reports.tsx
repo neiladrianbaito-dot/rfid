@@ -1826,10 +1826,15 @@ export default function ReportsPage() {
                   />
                   <Tooltip
                     cursor={{ fill: isDark ? "rgba(96,165,250,0.08)" : "rgba(37,99,235,0.05)" }}
-                    content={({ active, label }) => {
-                      if (!active || !label) return null;
+                    content={({ active, payload }) => {
+                      if (!active || !payload || payload.length === 0) return null;
 
-                      const dateKey = String(label).split("T")[0];
+                      // IMPORTANT: read the exact bar being hovered instead of
+                      // relying on the Tooltip "label" prop.
+                      const hoveredRow = payload[0]?.payload as any;
+                      const dateKey = String(hoveredRow?.date || "").split("T")[0];
+                      if (!dateKey) return null;
+
                       const breakdown = passengerBreakdownByDate.get(dateKey) || {
                         total: 0,
                         regular: 0,
@@ -1837,6 +1842,9 @@ export default function ReportsPage() {
                         senior: 0,
                         pwd: 0,
                       };
+
+                      // Revenue comes directly from the hovered bar's data.
+                      const totalRevenue = Number(hoveredRow?.revenue || 0);
 
                       const date = new Date(`${dateKey}T00:00:00`);
                       const formattedDate = date.toLocaleDateString("en-US", {
@@ -1846,30 +1854,31 @@ export default function ReportsPage() {
                       });
 
                       const rows = [
-                        { label: "Regular", value: breakdown.regular },
-                        { label: "Student", value: breakdown.student },
-                        { label: "Senior", value: breakdown.senior },
-                        { label: "PWD", value: breakdown.pwd },
+                        { label: "Regular", value: breakdown.regular, color: "#64748b" },
+                        { label: "Student", value: breakdown.student, color: "#3b82f6" },
+                        { label: "Senior", value: breakdown.senior, color: "#f59e0b" },
+                        { label: "PWD", value: breakdown.pwd, color: "#10b981" },
                       ];
 
                       return (
                         <div
                           style={{
                             backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                            border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
-                            borderRadius: "8px",
-                            padding: "10px 12px",
-                            fontSize: "11px",
+                            border: isDark ? "1px solid #334155" : "1px solid #cbd5e1",
+                            borderRadius: "10px",
+                            padding: "12px 14px",
+                            fontSize: "12px",
                             fontWeight: 600,
-                            boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-                            minWidth: "170px",
+                            boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                            minWidth: "205px",
                           }}
                         >
                           <div
                             style={{
-                              color: isDark ? "#e2e8f0" : "#1e293b",
-                              marginBottom: "7px",
-                              fontWeight: 700,
+                              color: isDark ? "#f8fafc" : "#0f172a",
+                              marginBottom: "8px",
+                              fontWeight: 800,
+                              fontSize: "13px",
                             }}
                           >
                             {formattedDate}
@@ -1878,11 +1887,23 @@ export default function ReportsPage() {
                           <div
                             style={{
                               color: isDark ? "#60a5fa" : "#2563eb",
-                              marginBottom: "7px",
-                              paddingBottom: "7px",
+                              marginBottom: "8px",
+                              fontWeight: 800,
+                              fontSize: "13px",
+                            }}
+                          >
+                            Total Revenue: {formatPeso(Math.abs(totalRevenue))}
+                          </div>
+
+                          <div
+                            style={{
+                              color: isDark ? "#f1f5f9" : "#1e293b",
+                              marginBottom: "8px",
+                              paddingBottom: "8px",
                               borderBottom: isDark
-                                ? "1px solid #1e293b"
+                                ? "1px solid #334155"
                                 : "1px solid #e2e8f0",
+                              fontWeight: 800,
                             }}
                           >
                             Total Passengers: {breakdown.total.toLocaleString("en-US")}
@@ -1893,17 +1914,40 @@ export default function ReportsPage() {
                               key={row.label}
                               style={{
                                 display: "flex",
+                                alignItems: "center",
                                 justifyContent: "space-between",
-                                gap: "18px",
-                                color: isDark ? "#cbd5e1" : "#475569",
-                                marginTop: "4px",
+                                gap: "16px",
+                                marginTop: "6px",
+                                padding: "4px 6px",
+                                borderRadius: "5px",
+                                backgroundColor: isDark ? `${row.color}18` : `${row.color}10`,
                               }}
                             >
-                              <span>{row.label}</span>
                               <span
                                 style={{
-                                  color: isDark ? "#f8fafc" : "#0f172a",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "7px",
+                                  color: isDark ? "#e2e8f0" : "#334155",
                                   fontWeight: 700,
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    width: "9px",
+                                    height: "9px",
+                                    borderRadius: "50%",
+                                    backgroundColor: row.color,
+                                    display: "inline-block",
+                                    flexShrink: 0,
+                                  }}
+                                />
+                                {row.label}
+                              </span>
+                              <span
+                                style={{
+                                  color: row.color,
+                                  fontWeight: 800,
                                 }}
                               >
                                 {row.value.toLocaleString("en-US")}
