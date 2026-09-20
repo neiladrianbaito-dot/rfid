@@ -32,6 +32,10 @@ import {
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() / balance transfer RPC calls
 
+// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
+// at `loaded` (true kapag tapos na ma-fetch ang access info).
+import { useAdminAccess } from "@/hooks/use-admin-access";
+
 const PAGE_SIZE = 10;
 
 const TYPE_FILTERS = ["All", "Regular", "Student", "Senior", "PWD"] as const;
@@ -577,6 +581,11 @@ function LockedFlipCard({
 
 export default function UserManagementPage() {
   const { isDark } = useTheme();
+
+  // 🔒 ADMIN ACCESS: `canManage` = false kapag view_only.
+  // `loaded` = true kapag tapos na ma-load ang access info.
+  const { canManage, loaded } = useAdminAccess();
+
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>("All");
   // ➕ Status filter state (Active / Inactive / Blocked / Expired)
@@ -635,6 +644,20 @@ export default function UserManagementPage() {
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // 🔒 Safety guard helper — ginagamit sa lahat ng Edit/Delete/Renew/Transfer
+  // handlers. Kapag view_only, magpapakita ng toast at ibabalik ang `true`
+  // para mag-early return ang caller. Proteksyon ito kahit ma-bypass ang UI.
+  const blockIfViewOnly = (): boolean => {
+    if (canManage) return false;
+    toast({
+      title: "View Only Access",
+      description: "You don't have permission to perform this action.",
+      variant: "destructive",
+    });
+    return true;
+  };
+
   const editLabelCls = `text-[11px] font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`;
   const editHeadingCls = `text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`;
   const editInputCls = `h-9 text-sm ${isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"}`;
@@ -829,6 +852,9 @@ export default function UserManagementPage() {
   });
 
   const openEdit = (user: any) => {
+    // 🔒 Guard: bawal mag-edit kapag view_only
+    if (blockIfViewOnly()) return;
+
     setEditUser(user);
 
     const initial = {
@@ -955,6 +981,9 @@ export default function UserManagementPage() {
   };
 
   const handleUpdate = async () => {
+    // 🔒 Guard: bawal mag-save ng edit kapag view_only
+    if (blockIfViewOnly()) return;
+
     if (!editUser || !hasChanges) return;
 
     const normalizedContactNumber = String(editForm.contactNumber || "")
@@ -1079,6 +1108,12 @@ export default function UserManagementPage() {
   // (Database Webhook on DELETE) removes the card's ID images from the
   // id-verifications bucket automatically.
   const confirmDelete = () => {
+    // 🔒 Guard: bawal mag-delete kapag view_only
+    if (blockIfViewOnly()) {
+      setDeleteUser(null);
+      return;
+    }
+
     if (!deleteUser) return;
     deleteMutation.mutate(
       { id: deleteUser.id },
@@ -1091,6 +1126,9 @@ export default function UserManagementPage() {
   // (on top of the disabled buttons) — the dialog simply won't open, and the
   // user gets a toast explaining why.
   const openRenew = (user: any) => {
+    // 🔒 Guard: bawal mag-renew kapag view_only
+    if (blockIfViewOnly()) return;
+
     if (!isCardExpired(user.expirationDate)) {
       toast({
         title: "Card is still valid",
@@ -1110,6 +1148,12 @@ export default function UserManagementPage() {
   // something upstream let a non-expired card slip through, we refuse to
   // fire the renewal here.
   const confirmRenew = async () => {
+    // 🔒 Guard: bawal mag-confirm ng renewal kapag view_only
+    if (blockIfViewOnly()) {
+      setRenewUser(null);
+      return;
+    }
+
     if (!renewUser) return;
 
     if (!isCardExpired(renewUser.expirationDate)) {
@@ -1146,6 +1190,9 @@ export default function UserManagementPage() {
   // ✅ Opens the transfer-balance dialog for a given user (the lost/stolen card).
   // 🚫➕ GUARD: a card with zero balance has nothing to transfer.
   const openTransfer = (user: any) => {
+    // 🔒 Guard: bawal mag-transfer kapag view_only
+    if (blockIfViewOnly()) return;
+
     if ((user.balance || 0) <= 0) {
       toast({
         title: "Nothing to transfer",
@@ -1182,6 +1229,12 @@ export default function UserManagementPage() {
   // target card, and marks the source card as Blocked. We just read back
   // the completed row for the confirmation toast.
   const confirmTransfer = async () => {
+    // 🔒 Guard: bawal mag-confirm ng transfer kapag view_only
+    if (blockIfViewOnly()) {
+      setTransferUser(null);
+      return;
+    }
+
     if (!transferUser || !transferTarget) return;
 
     setIsTransferring(true);
@@ -1581,6 +1634,7 @@ export default function UserManagementPage() {
 
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-1">
+                                {/* 👁 Preview — view-only, laging visible sa lahat ng admin */}
                                 <Button
                                   variant="ghost"
                                   size="icon"
@@ -1590,44 +1644,50 @@ export default function UserManagementPage() {
                                 >
                                   <Eye className="w-3.5 h-3.5" />
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => openRenew(user)}
-                                  disabled={!expired}
-                                  className={`h-8 w-8 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40" : "text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50"}`}
-                                  title={expired ? "Renew card (extend 1 year)" : `Not yet expired — valid until ${formatDate(user.expirationDate)}`}
-                                >
-                                  <RefreshCw className="w-3.5 h-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => openTransfer(user)}
-                                  disabled={(user.balance || 0) <= 0}
-                                  className={`h-8 w-8 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "text-orange-400 hover:text-orange-300 hover:bg-orange-950/40" : "text-orange-500 hover:text-orange-700 hover:bg-orange-50"}`}
-                                  title={(user.balance || 0) > 0 ? "Transfer balance (lost/stolen card)" : "No balance to transfer"}
-                                >
-                                  <ArrowRightLeft className="w-3.5 h-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => openEdit(user)}
-                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
-                                  title="Edit user"
-                                >
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => setDeleteUser(user)}
-                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
-                                  title="Delete user"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </Button>
+
+                                {/* 🔒 Renew / Transfer / Edit / Delete — makikita lang kapag may permission (hindi view_only) */}
+                                {canManage && (
+                                  <>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => openRenew(user)}
+                                      disabled={!expired}
+                                      className={`h-8 w-8 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40" : "text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50"}`}
+                                      title={expired ? "Renew card (extend 1 year)" : `Not yet expired — valid until ${formatDate(user.expirationDate)}`}
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => openTransfer(user)}
+                                      disabled={(user.balance || 0) <= 0}
+                                      className={`h-8 w-8 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "text-orange-400 hover:text-orange-300 hover:bg-orange-950/40" : "text-orange-500 hover:text-orange-700 hover:bg-orange-50"}`}
+                                      title={(user.balance || 0) > 0 ? "Transfer balance (lost/stolen card)" : "No balance to transfer"}
+                                    >
+                                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => openEdit(user)}
+                                      className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
+                                      title="Edit user"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => setDeleteUser(user)}
+                                      className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
+                                      title="Delete user"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </Button>
+                                  </>
+                                )}
                               </div>
                             </TableCell>
                           </TableRow>
@@ -1904,7 +1964,8 @@ export default function UserManagementPage() {
             >
               Close
             </Button>
-            {previewUser && (
+            {/* 🔒 Renew Card button — makikita lang kapag may permission (hindi view_only) */}
+            {canManage && previewUser && (
               <Button
                 onClick={() => {
                   const user = previewUser;
@@ -1927,8 +1988,9 @@ export default function UserManagementPage() {
           the whole modal scrolls (max-h-[92vh] + overflow-y-auto) and the
           Region / Province / City / Barangay fields use the virtualized,
           searchable LocationCombobox instead of Radix <Select>, which is what
-          made long lists (barangays) laggy. */}
-      <Dialog open={!!editUser} onOpenChange={(open) => { if (!open && !isSavingEdit) setEditUser(null); }}>
+          made long lists (barangays) laggy.
+          🔒 `open` ay naka-gate sa canManage — hindi kailanman magbubukas kapag view_only. */}
+      <Dialog open={canManage && !!editUser} onOpenChange={(open) => { if (!open && !isSavingEdit) setEditUser(null); }}>
         <DialogContent
           className={`max-h-[92dvh] overflow-hidden sm:max-w-4xl [&>button]:cursor-pointer ${
             isDark ? "border-slate-800 bg-slate-950 text-slate-200" : "bg-white text-slate-800"
@@ -2258,8 +2320,9 @@ export default function UserManagementPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ✅ Renew Confirmation Dialog — shows current vs. new expiration date */}
-      <AlertDialog open={!!renewUser} onOpenChange={(open) => !open && setRenewUser(null)}>
+      {/* ✅ Renew Confirmation Dialog — shows current vs. new expiration date
+          🔒 `open` naka-gate sa canManage */}
+      <AlertDialog open={canManage && !!renewUser} onOpenChange={(open) => !open && setRenewUser(null)}>
         <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
           <AlertDialogHeader>
             <AlertDialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
@@ -2316,8 +2379,9 @@ export default function UserManagementPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ✅ Transfer Balance Dialog — lost/stolen card: move balance to a replacement card */}
-      <Dialog open={!!transferUser} onOpenChange={(open) => !open && setTransferUser(null)}>
+      {/* ✅ Transfer Balance Dialog — lost/stolen card: move balance to a replacement card
+          🔒 `open` naka-gate sa canManage */}
+      <Dialog open={canManage && !!transferUser} onOpenChange={(open) => !open && setTransferUser(null)}>
         <DialogContent className={`sm:max-w-lg [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
           <DialogHeader>
             <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-orange-500">
@@ -2423,8 +2487,9 @@ export default function UserManagementPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirm */}
-      <AlertDialog open={!!deleteUser} onOpenChange={(open) => !open && setDeleteUser(null)}>
+      {/* Delete Confirm
+          🔒 `open` naka-gate sa canManage */}
+      <AlertDialog open={canManage && !!deleteUser} onOpenChange={(open) => !open && setDeleteUser(null)}>
         <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
           <AlertDialogHeader>
             <AlertDialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
