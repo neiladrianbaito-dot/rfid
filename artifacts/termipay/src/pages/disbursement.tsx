@@ -7,6 +7,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
+// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
+// at `loaded` (true kapag tapos na ma-fetch ang access info).
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import {
   Wallet,
   X,
@@ -212,6 +215,16 @@ export default function DisbursementPage() {
   const { user } = useAuth();
   const { isDark } = useTheme();
   const adminName = user?.name || "System Administrator";
+
+  // 🔒 ADMIN ACCESS:
+  //  - canDisburse: true lang kapag tapos nang mag-load ang access info
+  //    AT may permission (hindi view_only). Ginagamit sa Disburse button,
+  //    sa modal Confirm button, at sa mga handler bilang proteksyon.
+  //  - isViewOnly: true kapag loaded na at walang permission — para sa
+  //    tooltip/message.
+  const { canManage, loaded } = useAdminAccess();
+  const canDisburse = loaded && canManage;
+  const isViewOnly = loaded && !canManage;
 
   // ── filter state (drives which period gets disbursed) ──
   const [filterYear, setFilterYear] = useState<string>("all");
@@ -462,7 +475,17 @@ export default function DisbursementPage() {
     ? `filtered-${filterYear}-${filterMonth}-${filterDay}`
     : `today-${getLocalDateString()}`;
 
+  // 🔒 Tooltip para sa Disburse button, depende kung bakit disabled
+  const disburseButtonTitle = isViewOnly
+    ? "View only — you don't have permission to disburse."
+    : !disburseDateRange
+      ? "Pumili ng Year sa filter para makapag-disburse"
+      : undefined;
+
   const openDisburseModal = () => {
+    // 🔒 Guard: bawal buksan ang disburse modal kapag view_only
+    if (!canDisburse) return;
+
     if (autoCloseTimeoutRef.current) {
       clearTimeout(autoCloseTimeoutRef.current);
       autoCloseTimeoutRef.current = null;
@@ -495,6 +518,13 @@ export default function DisbursementPage() {
   };
 
   const handleSubmitDisbursement = async () => {
+    // 🔒 Guard: bawal mag-disburse kapag view_only. Proteksyon ito kahit
+    // ma-bypass ang UI (hal. Enter key, devtools, atbp).
+    if (!canDisburse) {
+      setDisburseError("View only access — wala kang permission na mag-disburse.");
+      return;
+    }
+
     // ── synchronous double-submit guard — checked and set BEFORE any
     // await, so a second click that fires before the first re-render
     // still gets blocked here. ──
@@ -779,16 +809,32 @@ export default function DisbursementPage() {
           {disburseAmountLabel}: {formatPeso(disburseAmount)}
         </span>
 
+        {/* 🔒 Disburse button — NAKA-GREY OUT (disabled) kapag view_only,
+            hindi tinatanggal sa screen. Naka-grey din kapag wala pang
+            concrete date range. */}
         <Button
           onClick={openDisburseModal}
-          disabled={!disburseDateRange}
-          className="ml-auto bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold h-8 px-4"
+          disabled={!disburseDateRange || !canDisburse}
+          className={`ml-auto text-xs font-semibold h-8 px-4 text-white disabled:cursor-not-allowed disabled:opacity-100 ${
+            canDisburse && disburseDateRange
+              ? "bg-indigo-600 hover:bg-indigo-700"
+              : isDark
+                ? "bg-slate-700 text-slate-400 hover:bg-slate-700"
+                : "bg-slate-300 text-slate-500 hover:bg-slate-300"
+          }`}
           data-testid="button-disburse-revenue"
-          title={!disburseDateRange ? "Pumili ng Year sa filter para makapag-disburse" : undefined}
+          title={disburseButtonTitle}
         >
           Disburse
         </Button>
       </div>
+
+      {/* 🔒 View-only notice sa ilalim ng filter row (maliit lang, hindi nagbabago ng layout) */}
+      {isViewOnly && (
+        <p className={`-mt-6 text-[11px] ${isDark ? "text-amber-400" : "text-amber-600"}`}>
+          View only — disbursing is disabled for your account.
+        </p>
+      )}
 
       {/* ══ DISBURSEMENT HISTORY — REAL data straight from the disbursements
           table (via list-disbursements), i.e. what actually went to Xendit ══ */}
@@ -1113,11 +1159,21 @@ export default function DisbursementPage() {
               >
                 Cancel
               </button>
+
+              {/* 🔒 Confirm button — naka-grey out din kapag view_only (extra
+                  proteksyon, kahit paano pa nabuksan ang modal) */}
               <Button
                 onClick={handleSubmitDisbursement}
-                disabled={isDisbursing}
+                disabled={isDisbursing || !canDisburse}
                 data-testid="button-confirm-disburse"
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-semibold px-4 h-9"
+                title={isViewOnly ? "View only — you don't have permission to disburse." : undefined}
+                className={`text-white text-xs font-semibold px-4 h-9 disabled:cursor-not-allowed ${
+                  canDisburse
+                    ? "bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+                    : isDark
+                      ? "bg-slate-700 text-slate-400 hover:bg-slate-700 disabled:opacity-100"
+                      : "bg-slate-300 text-slate-500 hover:bg-slate-300 disabled:opacity-100"
+                }`}
               >
                 {isDisbursing ? (
                   <>
