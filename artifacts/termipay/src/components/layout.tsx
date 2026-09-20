@@ -25,6 +25,8 @@ import {
   Camera,
   Upload,
   Trash2,
+  Maximize,
+  Minimize,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect, useRef } from "react";
@@ -298,7 +300,41 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { toast } = useToast();
   const { isDark, toggleTheme } = useTheme();
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Sidebar visibility — works for BOTH breakpoints now:
+  //  - Desktop (lg+): true = sidebar shown at its normal width, false = width
+  //    collapses to 0 and the page content expands to fill the freed space.
+  //  - Mobile (<lg): true = sidebar slides in as an overlay, false = hidden
+  //    off-canvas (default).
+  // We pick a sensible default based on the viewport at first render so
+  // desktop starts "open" and mobile starts "closed".
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return window.innerWidth >= 1024;
+  });
+
+  // Fullscreen mode toggle
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  async function toggleFullscreen() {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch (error) {
+      console.warn("Fullscreen toggle failed:", error);
+    }
+  }
+
   const [profileModalOpen, setProfileModalOpen] = useState(false);
 
   const [isUpdating, setIsUpdating] = useState(false);
@@ -807,20 +843,25 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
       }`}
     >
-      {/* Sidebar — themed blue to match the app's accent color */}
+      {/* Sidebar — themed blue to match the app's accent color.
+          On desktop, width transitions between w-72 (open) and w-0 (collapsed).
+          On mobile, it stays w-72 but slides in/out with translate-x. */}
       <aside
         className={`
-          fixed inset-y-0 left-0 z-50 w-72 border-r print:hidden
-          transform transition-transform duration-300 ease-in-out
-          lg:relative lg:translate-x-0
-          ${sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}
+          fixed inset-y-0 left-0 z-50 border-r print:hidden overflow-hidden
+          transition-all duration-300 ease-in-out
+          lg:relative
+          ${sidebarOpen
+            ? "w-72 translate-x-0 shadow-2xl lg:shadow-none lg:translate-x-0"
+            : "w-72 -translate-x-full lg:w-0 lg:translate-x-0 lg:border-r-0"
+          }
           ${isDark
             ? "bg-gradient-to-b from-blue-950 via-slate-950 to-slate-950 border-blue-950"
             : "bg-gradient-to-b from-blue-950 to-slate-900 border-blue-950"
           }
         `}
       >
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full w-72">
           {/* Logo Section */}
           <div className={`p-6 border-b transition-colors ${isDark ? "border-blue-900/50" : "border-blue-900/50"}`}>
             <div className="flex items-center gap-3">
@@ -860,7 +901,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     return (
                       <Link key={item.path} href={item.path}>
                         <div
-                          onClick={() => setSidebarOpen(false)}
+                          onClick={() => {
+                            // On mobile, tapping a nav link should close the overlay.
+                            if (typeof window !== "undefined" && window.innerWidth < 1024) {
+                              setSidebarOpen(false);
+                            }
+                          }}
                           className={`
                             group flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer
                             transition-all duration-150
@@ -938,18 +984,41 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           }`}
         >
           <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              className={isDark ? "lg:hidden text-slate-400 hover:text-white" : "lg:hidden text-slate-500 hover:text-slate-900"}
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-            >
-              {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
-            </Button>
             <CurrentDateTime isDark={isDark} />
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Hamburger — collapses/expands the sidebar (desktop) or opens
+                it as an overlay (mobile). Placed next to the profile group. */}
+            <button
+              type="button"
+              onClick={() => setSidebarOpen((prev) => !prev)}
+              aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+              data-testid="button-sidebar-toggle"
+              className={`flex items-center justify-center w-9 h-9 rounded-full border transition-colors ${
+                isDark
+                  ? "bg-slate-900 border-slate-800 text-blue-400 hover:border-blue-600"
+                  : "bg-white border-slate-200 text-blue-600 hover:border-blue-400"
+              }`}
+            >
+              {sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            </button>
+
+            {/* Fullscreen toggle */}
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+              data-testid="button-fullscreen-toggle"
+              className={`flex items-center justify-center w-9 h-9 rounded-full border transition-colors ${
+                isDark
+                  ? "bg-slate-900 border-slate-800 text-blue-400 hover:border-blue-600"
+                  : "bg-white border-slate-200 text-blue-600 hover:border-blue-400"
+              }`}
+            >
+              {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+            </button>
+
             {/* Theme toggle */}
             <button
               type="button"
