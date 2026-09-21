@@ -12,24 +12,20 @@ type Props = ReturnType<typeof useLinkCard> & {
   onCancel?: () => void;
 };
 
-// ── Card UID prefix config ─────────────────────────────────────────────────
-// All registered cards in the database are stored as "RFID-XXXXXXXX".
-// Instead of asking the user to type the prefix themselves (easy to forget /
-// mistype), we show it as a fixed, non-editable label glued to the left edge
-// of the input, and silently prepend it to whatever they type before it's
-// ever sent to checkCard(). This keeps `input` (the actual state used by the
-// hook to query the DB) always fully-prefixed and correct.
+// ── Card UID config ────────────────────────────────────────────────────────
+// All registered cards are stored as "RFID-XXXXXXXX" (prefix + exactly 8 digits).
+// The prefix is shown as a fixed, non-editable label. The user only types the
+// 8 digits, and we prepend the prefix before it goes into the hook's `input`.
 const CARD_PREFIX = "RFID-";
+const CARD_DIGITS = 8;
 
-// Strips a user-typed or pasted "RFID-" / "rfid" / "RFID" prefix (if any)
-// from raw text, then removes any character that isn't alphanumeric or "_",
-// then uppercases. This means it's safe whether the user types digits only,
-// or pastes the full "RFID-44234234" string — either way it normalizes.
+// Strips any typed/pasted "RFID-" prefix, keeps digits only, max 8.
+// Works for both "44234234" and a pasted "RFID-44234234".
 function sanitizeSuffix(raw: string) {
   return raw
     .replace(/^rfid-?/i, "")
-    .replace(/[^a-zA-Z0-9_]/g, "")
-    .toUpperCase();
+    .replace(/\D/g, "")
+    .slice(0, CARD_DIGITS);
 }
 
 export function LinkCardModal(props: Props) {
@@ -42,13 +38,11 @@ export function LinkCardModal(props: Props) {
   } = props;
   const { onCancel } = props;
 
-  // ✅ Same theme source as the dashboard — the modal now follows the toggle.
+  // Same theme source as the dashboard — the modal follows the toggle.
   const { isDark } = useTheme();
 
-  // ── FIX: "Go back" should just CLOSE the modal — the dashboard is
-  // already sitting behind it, so there's no need to navigate anywhere.
-  // Falls back to onCancel (if provided) or a dashboard redirect only if
-  // setIsOpen isn't available for some reason. ──
+  // "Go back" just CLOSES the modal — the dashboard is already behind it.
+  // Falls back to onCancel, then a dashboard redirect, only if needed.
   const [, setLocation] = useLocation();
   const closeModal = () => {
     if (setIsOpen) { setIsOpen(false); return; }
@@ -60,12 +54,11 @@ export function LinkCardModal(props: Props) {
   const isBlocked  = validation.status === "blocked";
   const isLocked   = validation.status === "locked";
 
-  // Display-only value shown inside the input (the part AFTER "RFID-").
-  // `input` (from the hook) always holds the full "RFID-XXXX" string; this
-  // just strips the prefix back off for rendering in the suffix field.
-  const displaySuffix = input.startsWith(CARD_PREFIX)
-    ? input.slice(CARD_PREFIX.length)
-    : sanitizeSuffix(input);
+  // Display-only value shown inside the input (the 8 digits AFTER "RFID-").
+  const displaySuffix = sanitizeSuffix(
+    input.startsWith(CARD_PREFIX) ? input.slice(CARD_PREFIX.length) : input
+  );
+  const isCardComplete = displaySuffix.length === CARD_DIGITS;
 
   const handleUidChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const suffix = sanitizeSuffix(e.target.value);
@@ -205,12 +198,9 @@ export function LinkCardModal(props: Props) {
                     Card UID
                   </label>
 
-                  {/* ── Fixed "RFID-" prefix glued to the input ──
-                      The prefix is a static label the user can't edit or
-                      delete. Only the suffix (the part after "RFID-") is
-                      typed here. handleUidChange() prepends CARD_PREFIX
-                      automatically and pushes the full "RFID-XXXX" string
-                      into the shared `input` state used by checkCard(). */}
+                  {/* Fixed "RFID-" prefix glued to the input. Only the 8 digits
+                      after it are typed. handleUidChange() prepends CARD_PREFIX
+                      and pushes the full "RFID-XXXXXXXX" string into `input`. */}
                   <div className="relative">
                     <span
                       className={`pointer-events-none select-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm tracking-wide ${
@@ -223,18 +213,23 @@ export function LinkCardModal(props: Props) {
                       value={displaySuffix}
                       onChange={handleUidChange}
                       placeholder="44234234"
+                      inputMode="numeric"
+                      autoComplete="off"
                       style={{ paddingLeft: 60 }}
                       className={`font-mono text-sm h-11 focus-visible:ring-emerald-500/30 ${
                         isDark
                           ? "bg-white/5 border-white/10 text-white placeholder:text-slate-600 focus:border-emerald-500/50"
                           : "bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-emerald-500"
                       }`}
-                      onKeyDown={(e) => e.key === "Enter" && !isChecking && checkCard()}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && !isChecking && isCardComplete && captchaToken && checkCard()
+                      }
                       disabled={isChecking}
                     />
                   </div>
-                  <p className={`text-[9px] sm:text-[10px] mt-1 ${isDark ? "text-slate-600" : "text-slate-400"}`}>
-                    Just type the number/code on your card — "RFID-" is added automatically.
+                  <p className={`text-[9px] sm:text-[10px] mt-1 flex justify-between gap-2 ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+                    <span>Enter the 8-digit number on your card — "RFID-" is added automatically.</span>
+                    <span className="tabular-nums shrink-0">{displaySuffix.length}/{CARD_DIGITS}</span>
                   </p>
                 </div>
 
@@ -294,19 +289,10 @@ export function LinkCardModal(props: Props) {
                   </div>
                 )}
 
-                {isChecking && (
-                  <div className={`flex items-center gap-2 text-[11px] sm:text-xs rounded-lg px-3 py-2.5 border ${
-                    isDark ? "text-slate-400 bg-slate-800/50 border-slate-700" : "text-slate-500 bg-slate-50 border-slate-200"
-                  }`}>
-                    <Loader2 className={`h-4 w-4 animate-spin shrink-0 ${isDark ? "text-emerald-400" : "text-emerald-500"}`} />
-                    <span>Checking card in system...</span>
-                  </div>
-                )}
+                {/* The separate "Checking card in system..." banner was removed.
+                    The spinner inside the Verify button is now the ONLY loader. */}
 
                 <div className="flex flex-col sm:flex-row gap-2">
-                  {/* ✅ FIX: was window.history.back(), then a /dashboard redirect —
-                      both were unnecessary. The dashboard is already open behind
-                      this modal, so "Go back" now simply closes it. */}
                   <button
                     onClick={closeModal}
                     className={`flex-1 inline-flex items-center justify-center gap-2 rounded-md border text-sm px-4 py-2.5 h-11 sm:h-12 transition-colors cursor-pointer ${
@@ -320,7 +306,7 @@ export function LinkCardModal(props: Props) {
                   </button>
                   <Button
                     onClick={checkCard}
-                    disabled={isChecking || !displaySuffix.trim() || !captchaToken}
+                    disabled={isChecking || !isCardComplete || !captchaToken}
                     className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-11 sm:h-12 text-sm transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed shadow-sm shadow-emerald-600/20"
                   >
                     {isChecking
