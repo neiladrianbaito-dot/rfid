@@ -5,7 +5,7 @@ import {
   useDeleteUser,
   getListUsersQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -776,60 +776,20 @@ export default function UserManagementPage() {
     setPage(1);
   }, [search, typeFilter, statusFilter]);
 
-  const {
-    data: users,
-    isLoading,
-    isFetching,
-    refetch: refetchUsers,
-  } = useListUsers(
+  const { data: users, isLoading, refetch: refetchUsers } = useListUsers(
     search ? { search } : undefined,
     {
       query: {
         refetchOnWindowFocus: true,
-        // ✅ Keep the last good page of data on screen while a refetch is
-        // in flight (initial mount, realtime update, window refocus) rather
-        // than clearing back to an empty/loading state in between. This is
-        // the TanStack Query v5 replacement for the old `keepPreviousData`
-        // option and is the main fix for the "blink" on refresh.
-        placeholderData: keepPreviousData,
       },
     }
   );
 
-  // ✅ Debounce realtime-triggered refetches. Realtime channels can emit
-  // several change events in quick succession (e.g. an insert followed by
-  // an update), and each one used to call refetchUsers() immediately,
-  // stacking multiple overlapping refetches and making the table visibly
-  // reset more than once. Collapsing bursts into a single refetch after a
-  // short quiet period gives one smooth update instead of repeated blinks.
-  const realtimeRefetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (realtimeRefetchTimeoutRef.current) {
-        clearTimeout(realtimeRefetchTimeoutRef.current);
-      }
-    };
-  }, []);
-
   useRealtimeRefetch(["users"], () => {
-    if (realtimeRefetchTimeoutRef.current) {
-      clearTimeout(realtimeRefetchTimeoutRef.current);
-    }
-    realtimeRefetchTimeoutRef.current = setTimeout(() => {
-      realtimeRefetchTimeoutRef.current = null;
-      refetchUsers();
-    }, 350);
+    refetchUsers();
   });
 
-  // ✅ Memoized off `users` (the query's actual data reference) instead of
-  // being rebuilt as a brand-new array literal on every render. Before this
-  // fix, `userList` was a new array every render regardless of whether the
-  // data had changed, which made the "sync tracking" effect below fire on
-  // every unrelated re-render (opening a dialog, typing in search, etc.) —
-  // that's what was causing "Last sync" (and the perceived blink) to update
-  // constantly even with no real data change.
-  const userList = useMemo(() => (Array.isArray(users) ? users : []), [users]);
+  const userList = Array.isArray(users) ? users : [];
 
   // Apply the type filter on top of whatever the search endpoint returned
   const typeFilteredList =
@@ -854,12 +814,8 @@ export default function UserManagementPage() {
   const startIndex = (safePage - 1) * PAGE_SIZE;
   const paginatedList = filteredList.slice(startIndex, startIndex + PAGE_SIZE);
 
-  // ✅ Fires strictly when the underlying query data reference changes
-  // (a real fetch actually resolved with new/unchanged data from the
-  // server), not on every component re-render. This is what keeps
-  // "Last sync" and the new-row pulse from updating spuriously.
   useEffect(() => {
-    if (!users || userList.length === 0) return;
+    if (userList.length === 0) return;
     const topId = userList[0]?.id;
 
     if (prevTopIdRef.current !== null && topId !== prevTopIdRef.current) {
@@ -869,7 +825,7 @@ export default function UserManagementPage() {
 
     prevTopIdRef.current = topId;
     setLastUpdated(new Date());
-  }, [users]);
+  }, [userList]);
 
   const updateMutation = useUpdateUser({
     mutation: {
@@ -1441,21 +1397,9 @@ export default function UserManagementPage() {
             <Zap className="text-blue-500" size={16} />
             <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
           </div>
-          {/* ✅ Subtle "Syncing..." replaces the old behavior where a
-              realtime update flashed the whole table back to the skeleton.
-              While a background refetch is happening (isFetching) with
-              data already on screen (!isLoading), we just show a small
-              pulsing dot + label here — the table itself never unmounts. */}
-          {(lastUpdated || (isFetching && !isLoading)) && (
-            <span className={`text-[10px] font-mono pr-1 flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              {isFetching && !isLoading && (
-                <span className="h-1.5 w-1.5 rounded-full bg-blue-500 realtime-dot inline-block" />
-              )}
-              {isFetching && !isLoading
-                ? "Syncing..."
-                : lastUpdated
-                ? `Last sync: ${lastUpdated.toLocaleTimeString()}`
-                : ""}
+          {lastUpdated && (
+            <span className={`text-[10px] font-mono pr-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              Last sync: {lastUpdated.toLocaleTimeString()}
             </span>
           )}
         </div>
@@ -1554,12 +1498,7 @@ export default function UserManagementPage() {
         </CardHeader>
 
         <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4 mt-6 flex flex-col overflow-hidden">
-          {/* ✅ Only show the full skeleton on a genuine first load (no data
-              cached yet). Any subsequent refetch — realtime update, window
-              refocus, search/filter change — keeps the existing table on
-              screen (thanks to placeholderData above) instead of tearing it
-              down, which is what was causing the "blink/reload" feeling. */}
-          {isLoading && userList.length === 0 ? (
+          {isLoading ? (
             <div className="space-y-4 pt-4">
               {Array.from({ length: PAGE_SIZE }).map((_, i) => (
                 <Skeleton key={i} className={`h-16 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />

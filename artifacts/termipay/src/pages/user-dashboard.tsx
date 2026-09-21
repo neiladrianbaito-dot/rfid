@@ -41,6 +41,21 @@ import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 // 🆕 Bottom-nav / page tab type (wasn't declared in this file before)
 type Tab = "home" | "Transactions" | "settings";
 
+// ── 🧊 NO-FLICKER HELPER ────────────────────────────────────────────────────
+// Ikinukumpara ang lumang data at bagong data. Kapag pareho ang laman,
+// ginagamit ang LUMANG reference — kaya walang re-render, walang effect na
+// tumatakbo ulit, at walang nagbabago sa screen. Ito ang pumipigil sa "blink"
+// tuwing may realtime event na walang aktwal na pagbabago sa data ng user
+// (halimbawa: transaction ng ibang user, o parehong balance).
+function sameData(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
 // ── 🔄 REALTIME CARD DATA PROBE ─────────────────────────────────────────────
 // Ang useCardData() ay nagfe-fetch ng user + transactions kapag nagmo-mount
 // lang. Para hindi na kailangan i-refresh ang buong page, ang hook ay
@@ -69,12 +84,15 @@ const CardDataProbe = memo(function CardDataProbe({
   const result = useCardData(cardUid);
 
   useEffect(() => {
-    // Habang wala pang laman ang bagong fetch, huwag munang i-report —
-    // mananatili ang lumang data sa screen.
-    if (result.loading && !result.user) return;
+    // 🧊 Huwag mag-report HABANG naglo-load pa ang fetch. Kapag nire-remount
+    // ang probe, ang unang state ng hook ay kalahating data lang (may user pero
+    // wala pang transactions, o kabaliktaran) — kung ire-report ito, saglit na
+    // mawawala ang laman ng listahan/fee/VAT/net tapos babalik = BLINK.
+    // Hihintayin muna ang kumpletong data, tapos isang beses lang ang update.
+    if (result.loading) return;
     onData(cardUid, result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result.user, result.transactions, result.loading, result.error, result.isPulsing]);
+  }, [result.user, result.transactions, result.loading, result.error]);
 
   return null;
 });
@@ -397,6 +415,13 @@ export default function PaymongoDashboardPage() {
   const { isDark, toggleTheme } = useTheme();
   const { cardUid, setCardUid, authProfile, authChecking } = useDashboardAuth();
 
+  // 🧊 Ipakita LANG ang full-screen "checking auth" sa pinaka-unang load.
+  // Kapag nag-re-check ulit ang auth habang nakabukas na ang dashboard
+  // (hal. token refresh / pagbalik sa tab), hindi na papalitan ang buong
+  // page ng loading screen — iyon ay isang malaking flash.
+  const authResolvedRef = useRef(false);
+  if (!authChecking) authResolvedRef.current = true;
+
   // 🔄 REALTIME CARD DATA
   // Ang user + transactions ay galing sa <CardDataProbe /> (nasa baba, sa JSX)
   // at nire-refresh nito tuwing may realtime event. Ang `uid` ay itinatabi
@@ -408,8 +433,36 @@ export default function PaymongoDashboardPage() {
   } | null>(null);
   const [cardDataKey, setCardDataKey] = useState(0);
 
+  // 🧊 Kapag walang pagbabago sa user/transactions, ibinabalik ang LUMANG
+  // state (walang re-render). Kapag isa lang ang nagbago, ang hindi nagbago
+  // ay nananatiling parehong reference — kaya ang mga effect/memo na
+  // nakadepende rito (transfers, fee/VAT/net, tables) ay hindi tumatakbo
+  // nang walang dahilan.
   const handleCardData = useCallback((uid: CardUidArg, result: CardDataResult) => {
-    setStoredCardData({ uid, result });
+    setStoredCardData((prev) => {
+      if (!prev || prev.uid !== uid) return { uid, result };
+
+      const sameUser = sameData(prev.result.user, result.user);
+      const sameTx = sameData(prev.result.transactions, result.transactions);
+
+      if (
+        sameUser &&
+        sameTx &&
+        prev.result.loading === result.loading &&
+        prev.result.error === result.error
+      ) {
+        return prev;
+      }
+
+      return {
+        uid,
+        result: {
+          ...result,
+          user: sameUser ? prev.result.user : result.user,
+          transactions: sameTx ? prev.result.transactions : result.transactions,
+        },
+      };
+    });
   }, []);
 
   const cardData =
@@ -422,27 +475,8 @@ export default function PaymongoDashboardPage() {
   const loading = cardData ? cardData.loading : true;
   const error = cardData?.error;
 
-  // Balance pulse: sarili nating detection dahil nawawala ang internal
-  // pulse ng hook kapag nire-remount ang probe.
-  const [balancePulse, setBalancePulse] = useState(false);
-  const prevBalanceRef = useRef<number | null>(null);
-  const isPulsing = Boolean(cardData?.isPulsing) || balancePulse;
-
-  useEffect(() => {
-    const next = user ? Number(user.balance ?? 0) : null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    if (next !== null && prevBalanceRef.current !== null && next !== prevBalanceRef.current) {
-      setBalancePulse(true);
-      timer = setTimeout(() => setBalancePulse(false), 1000);
-    }
-
-    prevBalanceRef.current = next;
-
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [user?.balance]);
+  // 🧊 Tinanggal na ang "balance pulse" animation — iyon ang kumukurap
+  // sa balance tuwing may bagong data. Steady na lang ang display.
 
   // Throttled refresh: pinagsasama ang sunod-sunod na events (min 0.5s) at
   // hindi hihigit sa isang refresh kada 3 segundo, para hindi
@@ -552,6 +586,9 @@ export default function PaymongoDashboardPage() {
   // UNANG load — ang mga realtime refresh ay tahimik na nag-a-update ng
   // listahan (walang flash).
   //
+  // 🧊 Ang setTransfers ay hindi na tumatawag ng re-render kapag pareho
+  // lang ang laman ng bagong result at ng lumang listahan.
+  //
   // ── FIXED: dating gumagamit ng FK embed
   // (`users!card_balance_transfers_source_card_id_fkey(...)`) na nag-e-error
   // kapag na-drop ang foreign keys (para manatili ang history kapag may
@@ -561,7 +598,7 @@ export default function PaymongoDashboardPage() {
   // kung meron. ──
   useEffect(() => {
     if (!isLinked || !user?.id) {
-      setTransfers([]);
+      setTransfers((prev) => (prev.length === 0 ? prev : []));
       setTransfersLoading(false);
       return;
     }
@@ -648,7 +685,8 @@ export default function PaymongoDashboardPage() {
         target: resolveCard(row.target_card_id, row.target_card_uid, row.target_full_name),
       }));
 
-      setTransfers(merged);
+      // 🧊 Walang pagbabago → walang update → walang blink
+      setTransfers((prev) => (sameData(prev, merged) ? prev : merged));
       setTransfersLoading(false);
       isFirstLoad = false;
     };
@@ -666,7 +704,18 @@ export default function PaymongoDashboardPage() {
 
   // Fetch fee_amount / vat_amount / net_amount for this card's transactions.
   // Tumatakbo ulit kapag nagbago ang `transactions` (kasama ang realtime refresh).
+  //
+  // 🧊 Hindi na binubura ang lumang fee/VAT/net habang naglo-load ang bago
+  // (dati: nagiging {} muna → "—" ang lahat → babalik = blink). Ngayon,
+  // MINA-MERGE lang ang bagong values sa umiiral, at walang update kapag
+  // pareho lang ang laman.
   useEffect(() => {
+    if (!isLinked) {
+      setFinancialById((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      return;
+    }
+    if (transactions.length === 0) return; // panatilihin ang huling values
+
     let cancelled = false;
     const loadFinancialFields = async () => {
       const ids = transactions
@@ -674,10 +723,8 @@ export default function PaymongoDashboardPage() {
         .filter((id: any) => id != null)
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
-      if (ids.length === 0) {
-        setFinancialById({});
-        return;
-      }
+      if (ids.length === 0) return;
+
       const { data, error: financialError } = await supabase
         .from("transactions")
         .select("id, fee_amount, vat_amount, net_amount")
@@ -687,21 +734,36 @@ export default function PaymongoDashboardPage() {
         console.warn("Unable to load transaction fee/VAT/net fields:", financialError.message);
         return;
       }
-      const next: Record<string, FinancialFields> = {};
-      for (const row of data ?? []) {
-        next[String(row.id)] = {
-          fee_amount: row.fee_amount == null ? null : Number(row.fee_amount),
-          vat_amount: row.vat_amount == null ? null : Number(row.vat_amount),
-          net_amount: row.net_amount == null ? null : Number(row.net_amount),
-        };
-      }
-      setFinancialById(next);
+
+      setFinancialById((prev) => {
+        let changed = false;
+        const next: Record<string, FinancialFields> = { ...prev };
+        for (const row of data ?? []) {
+          const key = String(row.id);
+          const value: FinancialFields = {
+            fee_amount: row.fee_amount == null ? null : Number(row.fee_amount),
+            vat_amount: row.vat_amount == null ? null : Number(row.vat_amount),
+            net_amount: row.net_amount == null ? null : Number(row.net_amount),
+          };
+          const old = prev[key];
+          if (
+            !old ||
+            old.fee_amount !== value.fee_amount ||
+            old.vat_amount !== value.vat_amount ||
+            old.net_amount !== value.net_amount
+          ) {
+            next[key] = value;
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
     };
     loadFinancialFields();
     return () => {
       cancelled = true;
     };
-  }, [transactions]);
+  }, [transactions, isLinked]);
 
   const topupTransactions = useMemo(
     () =>
@@ -794,7 +856,7 @@ export default function PaymongoDashboardPage() {
     { tab: "settings", icon: <Settings className="h-5 w-5" />, label: "Settings" },
   ];
 
-  if (authChecking) {
+  if (authChecking && !authResolvedRef.current) {
     return <AuthCheckingScreen isDark={isDark} slowHint={slowLoadHint} />;
   }
 
@@ -1031,7 +1093,8 @@ export default function PaymongoDashboardPage() {
                         <PlusCircle className="h-3 w-3 mr-1" /> TOP UP
                       </Button>
                     </div>
-                    <h2 className={`text-4xl font-black tracking-tighter ${isDark ? "text-white" : "text-slate-900"} ${isPulsing ? "balance-pulse" : ""}`}>
+                    {/* 🧊 Steady na — walang balance-pulse animation */}
+                    <h2 className={`text-4xl font-black tracking-tighter ${isDark ? "text-white" : "text-slate-900"}`}>
                       {isLinked ? balanceText : "\u20B1— .—"}
                     </h2>
                     <div className="mt-2 space-y-1">
