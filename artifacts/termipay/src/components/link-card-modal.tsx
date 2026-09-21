@@ -12,6 +12,26 @@ type Props = ReturnType<typeof useLinkCard> & {
   onCancel?: () => void;
 };
 
+// ── Card UID prefix config ─────────────────────────────────────────────────
+// All registered cards in the database are stored as "RFID-XXXXXXXX".
+// Instead of asking the user to type the prefix themselves (easy to forget /
+// mistype), we show it as a fixed, non-editable label glued to the left edge
+// of the input, and silently prepend it to whatever they type before it's
+// ever sent to checkCard(). This keeps `input` (the actual state used by the
+// hook to query the DB) always fully-prefixed and correct.
+const CARD_PREFIX = "RFID-";
+
+// Strips a user-typed or pasted "RFID-" / "rfid" / "RFID" prefix (if any)
+// from raw text, then removes any character that isn't alphanumeric or "_",
+// then uppercases. This means it's safe whether the user types digits only,
+// or pastes the full "RFID-44234234" string — either way it normalizes.
+function sanitizeSuffix(raw: string) {
+  return raw
+    .replace(/^rfid-?/i, "")
+    .replace(/[^a-zA-Z0-9_]/g, "")
+    .toUpperCase();
+}
+
 export function LinkCardModal(props: Props) {
   const {
     input, setInput, loading, error, validation, isConfirmStep,
@@ -39,6 +59,19 @@ export function LinkCardModal(props: Props) {
   const isChecking = validation.status === "checking";
   const isBlocked  = validation.status === "blocked";
   const isLocked   = validation.status === "locked";
+
+  // Display-only value shown inside the input (the part AFTER "RFID-").
+  // `input` (from the hook) always holds the full "RFID-XXXX" string; this
+  // just strips the prefix back off for rendering in the suffix field.
+  const displaySuffix = input.startsWith(CARD_PREFIX)
+    ? input.slice(CARD_PREFIX.length)
+    : sanitizeSuffix(input);
+
+  const handleUidChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const suffix = sanitizeSuffix(e.target.value);
+    setInput(CARD_PREFIX + suffix);
+    if (validation.status !== "idle") setValidation({ status: "idle" });
+  };
 
   // ── Responsive reCAPTCHA scaling ──────────────────────────────────────────
   const RECAPTCHA_WIDTH = 304;
@@ -171,22 +204,38 @@ export function LinkCardModal(props: Props) {
                   <label className={`text-[9px] sm:text-[10px] font-bold uppercase block mb-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                     Card UID
                   </label>
-                  <Input
-                    value={input}
-                    onChange={(e) => {
-                      const raw = e.target.value.replace(/[^a-zA-Z0-9-_]/g, "");
-                      setInput(raw);
-                      if (validation.status !== "idle") setValidation({ status: "idle" });
-                    }}
-                    placeholder="Enter your Card UID..."
-                    className={`font-mono text-sm h-11 focus-visible:ring-emerald-500/30 ${
-                      isDark
-                        ? "bg-white/5 border-white/10 text-white placeholder:text-slate-600 focus:border-emerald-500/50"
-                        : "bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-emerald-500"
-                    }`}
-                    onKeyDown={(e) => e.key === "Enter" && !isChecking && checkCard()}
-                    disabled={isChecking}
-                  />
+
+                  {/* ── Fixed "RFID-" prefix glued to the input ──
+                      The prefix is a static label the user can't edit or
+                      delete. Only the suffix (the part after "RFID-") is
+                      typed here. handleUidChange() prepends CARD_PREFIX
+                      automatically and pushes the full "RFID-XXXX" string
+                      into the shared `input` state used by checkCard(). */}
+                  <div className="relative">
+                    <span
+                      className={`pointer-events-none select-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm tracking-wide ${
+                        isDark ? "text-emerald-400/80" : "text-emerald-600/80"
+                      }`}
+                    >
+                      {CARD_PREFIX}
+                    </span>
+                    <Input
+                      value={displaySuffix}
+                      onChange={handleUidChange}
+                      placeholder="44234234"
+                      style={{ paddingLeft: 60 }}
+                      className={`font-mono text-sm h-11 focus-visible:ring-emerald-500/30 ${
+                        isDark
+                          ? "bg-white/5 border-white/10 text-white placeholder:text-slate-600 focus:border-emerald-500/50"
+                          : "bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-emerald-500"
+                      }`}
+                      onKeyDown={(e) => e.key === "Enter" && !isChecking && checkCard()}
+                      disabled={isChecking}
+                    />
+                  </div>
+                  <p className={`text-[9px] sm:text-[10px] mt-1 ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+                    Just type the number/code on your card — "RFID-" is added automatically.
+                  </p>
                 </div>
 
                 <div className="recaptcha-wrapper flex flex-col items-center gap-1 w-full overflow-hidden">
@@ -271,7 +320,7 @@ export function LinkCardModal(props: Props) {
                   </button>
                   <Button
                     onClick={checkCard}
-                    disabled={isChecking || !input.trim() || !captchaToken}
+                    disabled={isChecking || !displaySuffix.trim() || !captchaToken}
                     className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-11 sm:h-12 text-sm transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed shadow-sm shadow-emerald-600/20"
                   >
                     {isChecking
