@@ -175,6 +175,55 @@ function isGcashChannel(tx: any): boolean {
   return GCASH_MARKERS.some((marker) => raw.includes(marker));
 }
 
+// ── Returns the NET amount of a top-up transaction, i.e. what's left
+// AFTER Xendit's fee/VAT is deducted — NOT the gross `amount` the
+// passenger paid.
+//
+// Lookup order:
+//   1) a dedicated net-amount field (snake_case or camelCase variants)
+//   2) gross amount minus fee minus VAT, if fee/VAT fields exist
+//   3) last resort: the gross amount (and a one-time console warning, so
+//      you can tell the net field isn't reaching the frontend)
+//
+// IMPORTANT: if your transactions API uses a different field name for the
+// net amount, add it to the `netRaw` lookup below. Also make sure that
+// field is declared in the transactions response schema in
+// @workspace/api-zod, otherwise Zod strips it before it ever gets here. ──
+let warnedMissingNetAmount = false;
+
+function getTopupNetAmount(tx: any): number {
+  const netRaw =
+    tx.net_amount ??
+    tx.netAmount ??
+    tx.xendit_net_amount ??
+    tx.xenditNetAmount ??
+    tx.amount_net ??
+    null;
+
+  if (netRaw !== null && netRaw !== "" && !isNaN(Number(netRaw))) {
+    return Math.abs(Number(netRaw));
+  }
+
+  const gross = Math.abs(Number(tx.amount) || 0);
+  const feeRaw = tx.fee ?? tx.fee_amount ?? tx.xendit_fee_amount ?? tx.xenditFeeAmount ?? null;
+  const vatRaw = tx.vat ?? tx.vat_amount ?? tx.xendit_vat_amount ?? tx.xenditVatAmount ?? null;
+
+  if (feeRaw !== null || vatRaw !== null) {
+    const fee = Math.abs(Number(feeRaw) || 0);
+    const vat = Math.abs(Number(vatRaw) || 0);
+    return Math.max(0, gross - fee - vat);
+  }
+
+  if (!warnedMissingNetAmount) {
+    warnedMissingNetAmount = true;
+    console.warn(
+      "[Disbursement] Top-up transaction has no net amount / fee fields — falling back to gross amount. Check the transactions API response + Zod schema.",
+      tx
+    );
+  }
+  return gross;
+}
+
 // Returns the transaction's local "YYYY-MM-DD" date key
 function getTxDateKey(tx: any): string | null {
   const ts = tx.timestamp || tx.created_at;
@@ -373,15 +422,16 @@ export default function DisbursementPage() {
 
   const txList = useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
 
-  // ── total amount, ACROSS ALL TIME, that users have topped up
-  // specifically via GCash. Not scoped to the Year/Month/Day filter above
-  // — this is a running lifetime total, separate from the disbursable
-  // fare revenue. ──
+  // ── total NET amount, ACROSS ALL TIME, that users have topped up
+  // specifically via GCash — i.e. after Xendit's fee/VAT is deducted,
+  // NOT the gross amount the passenger paid. Not scoped to the
+  // Year/Month/Day filter above — this is a running lifetime total,
+  // separate from the disbursable fare revenue. ──
   const totalGcashTopups = useMemo(
     () =>
       txList
         .filter((tx: any) => isTopupTransaction(tx) && isGcashChannel(tx))
-        .reduce((sum: number, tx: any) => sum + Math.abs(Number(tx.amount) || 0), 0),
+        .reduce((sum: number, tx: any) => sum + getTopupNetAmount(tx), 0),
     [txList]
   );
 
@@ -739,13 +789,13 @@ export default function DisbursementPage() {
             <div className="min-w-0">
               <p className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                 <Smartphone size={12} className="text-sky-500" />
-                Total GCash Top-ups
+                Total GCash Top-ups (Net)
               </p>
               <p className={`text-xl font-bold font-mono mt-1 ${isDark ? "text-white" : "text-slate-900"}`}>
                 {formatPeso(totalGcashTopups)}
               </p>
               <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Passenger-added balance, all-time — not fare revenue
+                Net amount after fees, all-time — not fare revenue
               </p>
             </div>
           </CardContent>
