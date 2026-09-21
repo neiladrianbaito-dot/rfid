@@ -74,6 +74,11 @@ type CardTransfer = {
   status: string;
   created_at: string;
   completed_at: string | null;
+  // optional snapshot columns (filled automatically when a user is deleted)
+  source_card_uid?: string | null;
+  source_full_name?: string | null;
+  target_card_uid?: string | null;
+  target_full_name?: string | null;
   source: TransferCard | null;
   target: TransferCard | null;
 };
@@ -129,9 +134,12 @@ function cardUidOf(
 function fullNameOf(
   card?: TransferCard | null
 ): string {
+  if (!card) {
+    return "Deleted user";
+  }
   return (
-    card?.full_name ||
-    card?.fullName ||
+    card.full_name ||
+    card.fullName ||
     "Unknown"
   );
 }
@@ -1376,12 +1384,22 @@ export default function TransactionsPage() {
   }, []);
 
 
+  // ── FIXED: load card transfers WITHOUT relying on a foreign-key embed.
+  // The old query used `users!card_balance_transfers_source_card_id_fkey(...)`,
+  // which only works while that FK exists. Since the FKs were dropped (so
+  // history survives user deletion), Supabase returned an error and the
+  // list stayed empty. Now we fetch the transfers with a plain select,
+  // fetch the users separately, and join them here. If a user was deleted,
+  // we fall back to the snapshot columns (source_card_uid, source_full_name,
+  // target_card_uid, target_full_name) if they exist. ──
   useEffect(() => {
     const loadTransfers =
       async () => {
         setTransfersLoading(
           true
         );
+
+        // 1) plain select — also picks up the optional snapshot columns
         const {
           data,
           error,
@@ -1389,28 +1407,7 @@ export default function TransactionsPage() {
           .from(
             "card_balance_transfers"
           )
-          .select(`
-            id,
-            source_card_id,
-            target_card_id,
-            amount,
-            reason,
-            source_balance_before,
-            target_balance_before,
-            status,
-            created_at,
-            completed_at,
-            source:users!card_balance_transfers_source_card_id_fkey(
-              id,
-              card_uid,
-              full_name
-            ),
-            target:users!card_balance_transfers_target_card_id_fkey(
-              id,
-              card_uid,
-              full_name
-            )
-          `)
+          .select("*")
           .order(
             "created_at",
             {
@@ -1418,14 +1415,165 @@ export default function TransactionsPage() {
                 false,
             }
           );
+
         if (
-          !error &&
-          data
+          error ||
+          !data
         ) {
-          setTransfers(
-            data as unknown as CardTransfer[]
+          console.warn(
+            "Unable to load card transfers:",
+            error?.message
           );
+          setTransfersLoading(
+            false
+          );
+          return;
         }
+
+        // 2) fetch all referenced users in ONE query
+        const userIds =
+          Array.from(
+            new Set(
+              data
+                .flatMap(
+                  (
+                    row: any
+                  ) => [
+                    row.source_card_id,
+                    row.target_card_id,
+                  ]
+                )
+                .filter(
+                  (
+                    id: any
+                  ) =>
+                    id != null
+                )
+                .map(
+                  (
+                    id: any
+                  ) =>
+                    Number(
+                      id
+                    )
+                )
+            )
+          );
+
+        const usersById =
+          new Map<
+            number,
+            TransferCard
+          >();
+
+        if (
+          userIds.length >
+          0
+        ) {
+          const {
+            data: usersData,
+            error:
+              usersError,
+          } = await supabase
+            .from("users")
+            .select(
+              "id, card_uid, full_name"
+            )
+            .in(
+              "id",
+              userIds
+            );
+
+          if (
+            usersError
+          ) {
+            console.warn(
+              "Unable to load users for transfers:",
+              usersError.message
+            );
+          } else {
+            for (
+              const u of
+              usersData ??
+              []
+            ) {
+              usersById.set(
+                Number(
+                  u.id
+                ),
+                u as TransferCard
+              );
+            }
+          }
+        }
+
+        // 3) live user first, then saved snapshot (deleted users), else null
+        const resolveCard =
+          (
+            id:
+              | number
+              | null,
+            snapshotUid?:
+              | string
+              | null,
+            snapshotName?:
+              | string
+              | null
+          ): TransferCard | null => {
+            const live =
+              id != null
+                ? usersById.get(
+                    Number(
+                      id
+                    )
+                  )
+                : undefined;
+            if (live) {
+              return live;
+            }
+            if (
+              snapshotUid ||
+              snapshotName
+            ) {
+              return {
+                id: Number(
+                  id
+                ),
+                card_uid:
+                  snapshotUid ??
+                  null,
+                full_name:
+                  snapshotName ??
+                  null,
+              };
+            }
+            return null;
+          };
+
+        const merged: CardTransfer[] =
+          data.map(
+            (
+              row: any
+            ) => ({
+              ...row,
+              source:
+                resolveCard(
+                  row.source_card_id,
+                  row.source_card_uid,
+                  row.source_full_name
+                ),
+              target:
+                resolveCard(
+                  row.target_card_id,
+                  row.target_card_uid,
+                  row.target_full_name
+                ),
+            })
+          );
+
+        setTransfers(
+          merged
+        );
         setTransfersLoading(
           false
         );
