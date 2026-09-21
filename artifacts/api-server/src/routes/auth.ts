@@ -8,16 +8,10 @@ import { createUserToken, verifyUserToken } from "../lib/user-token";
 import { signInSupabaseWithPassword, getSupabaseUserFromToken } from "../lib/supabase";
 import { logAudit } from "../lib/audit-logger";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import {
-  requireAdmin,
-  requireFullAccess,
-  requireSuperAdmin,
-  loadAdminContext,
-  ensurePermissionColumn,
-} from "../middleware/permission-middleware";
 
 const router: IRouter = Router();
 let linkedCardColumnAvailable: boolean | null = null;
+let permissionColumnAvailable: boolean | null = null;
 
 // ── Role helpers ───────────────────────────────────────────────────────────
 function normalizeRole(role: unknown): "staff" | "super_admin" {
@@ -114,6 +108,18 @@ async function ensurePasswordChangedAtColumn(): Promise<void> {
     alter table public.auth_users
     add column if not exists password_changed_at timestamptz
   `);
+}
+
+// ── permission column helper (self-healing migration, mirrors the
+// linked_card_uid pattern above) ─────────────────────────────────────────────
+
+async function ensurePermissionColumn(): Promise<void> {
+  if (permissionColumnAvailable) return;
+  await db.execute(sql`
+    alter table public.admins
+    add column if not exists permission text default 'full_access'
+  `);
+  permissionColumnAvailable = true;
 }
 
 // NOTE: card status is still looked up and returned to the client so the
@@ -516,7 +522,7 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
     // access to the account itself.
     const { blocked: cardBlocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
 
-    // Best-effort avatar lookup — hindi dapat ito mag-fail ng buong request
+    // 🆕 Best-effort avatar lookup — hindi dapat ito mag-fail ng buong request
     // kung walang picture o may isyu sa lookup.
     let avatarUrl: string | null = null;
     try {
@@ -537,7 +543,7 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
         linkedCardUid: user.linked_card_uid ?? "",
         cardBlocked,
         cardStatus,
-        avatarUrl,
+        avatarUrl, // 🆕
       },
     });
   } catch (error) {
@@ -787,13 +793,19 @@ router.post("/auth/user/link-card", async (req, res): Promise<void> => {
 // Lets an admin/staff account remove a card from whichever auth_users
 // account it's linked to, so it becomes available to link to a new/other
 // account (e.g. after a card is reported lost, blocked, or reassigned).
-//
-// WRITE ACTION → guarded by requireFullAccess. A view_only staff member
-// gets a 403 with code VIEW_ONLY, which the frontend turns into a modal.
+// Requires a valid admin token (staff or super_admin) — not user token.
+// Delegates to the shared unlinkCardFromAnyAccount() helper above, which
+// is also called automatically from users.ts whenever a card's status is
+// changed to Blocked/Inactive.
 
-router.post("/admin/users/unlink-card", requireFullAccess, async (req, res): Promise<void> => {
+router.post("/admin/users/unlink-card", async (req, res): Promise<void> => {
   try {
-    const adminUser = req.adminUser!;
+    const token = getBearerToken(req.headers.authorization);
+    const adminUser = token ? verifyAdminToken(token) : null;
+    if (!adminUser) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
 
     const body = req.body as { cardUid?: string };
     const cardUid = typeof body?.cardUid === "string" ? body.cardUid.trim() : "";
@@ -946,8 +958,6 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       return;
     }
 
-    await ensurePermissionColumn();
-
     const [admin] = await db
       .select()
       .from(adminsTable)
@@ -964,14 +974,6 @@ router.post("/auth/login", async (req, res): Promise<void> => {
 
     if (!supabaseUser && !isLegacyAdminValid) {
       res.status(401).json({ success: false, message: "Invalid credentials" });
-      return;
-    }
-
-    if (admin && (admin as any).status === "Disabled") {
-      res.status(403).json({
-        success: false,
-        message: "This account has been disabled. Please contact a Super Admin.",
-      });
       return;
     }
 
@@ -1008,7 +1010,6 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       name: displayName,
       role,
       permission,
-      canManage: !isViewOnly(role, permission),
       token: createAdminToken({
         username: admin?.username ?? normalizedUsername,
         name: displayName,
@@ -1022,9 +1023,6 @@ router.post("/auth/login", async (req, res): Promise<void> => {
 });
 
 // ── UPDATE PROFILE ────────────────────────────────────────────────────────────
-// NOTE: intentionally NOT guarded by requireFullAccess — this only edits the
-// caller's OWN name/username/password. A view_only account must still be able
-// to change its own password.
 
 router.post("/auth/update-profile", async (req, res): Promise<void> => {
   try {
@@ -1138,29 +1136,36 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
 });
 
 // ── ADMIN ME ──────────────────────────────────────────────────────────────────
-// Single source of truth for the frontend's useAdminAccess() hook. Always
-// reads role + permission LIVE from the admins table, never from the token.
 
 router.get("/auth/me", async (req, res): Promise<void> => {
   try {
-    const admin = await loadAdminContext(req.headers.authorization);
-    if (!admin) {
-      res.status(401).json({ error: "Not authenticated", code: "UNAUTHENTICATED" });
+    const token = getBearerToken(req.headers.authorization);
+    if (!token) {
+      res.status(401).json({ error: "Not authenticated" });
       return;
     }
 
-    const validatedUser = GetMeResponse.parse({
-      username: admin.username,
-      name: admin.name ?? admin.username,
-      role: admin.role,
-    });
+    const adminUser = verifyAdminToken(token);
+    if (!adminUser) {
+      res.status(401).json({ error: "Invalid token" });
+      return;
+    }
 
-    res.json({
-      ...validatedUser,
-      permission: admin.permission,
-      canManage: admin.permission === "full_access",
-      isSuperAdmin: admin.role === "super_admin",
+    const role = normalizeRole((adminUser as any).role);
+
+    await ensurePermissionColumn();
+    const adminRaw = await db.execute(sql`
+      select permission from admins where username = ${adminUser.username} limit 1
+    `);
+    const adminRow = extractRows<{ permission: string | null }>(adminRaw)[0];
+    const permission = normalizePermission(adminRow?.permission, role);
+
+    const validatedUser = GetMeResponse.parse({
+      username: adminUser.username,
+      name: adminUser.name,
+      role,
     });
+    res.json({ ...validatedUser, permission });
   } catch (e) {
     console.error("Auth state error:", e);
     res.status(401).json({ error: "Invalid auth state" });
@@ -1168,10 +1173,16 @@ router.get("/auth/me", async (req, res): Promise<void> => {
 });
 
 // ── LIST STAFF (ADMIN) ────────────────────────────────────────────────────────
-// READ-ONLY → any authenticated admin, including view_only staff.
 
-router.get("/admin/staff", requireAdmin, async (req, res): Promise<void> => {
+router.get("/admin/staff", async (req, res): Promise<void> => {
   try {
+    const token = getBearerToken(req.headers.authorization);
+    const adminUser = token ? verifyAdminToken(token) : null;
+    if (!adminUser) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
     await ensurePermissionColumn();
 
     const rows = await db.execute(sql`
@@ -1180,12 +1191,7 @@ router.get("/admin/staff", requireAdmin, async (req, res): Promise<void> => {
       order by created_at desc
     `);
 
-    res.json({
-      success: true,
-      staff: extractRows(rows),
-      canManage: req.adminUser!.permission === "full_access",
-      isSuperAdmin: req.adminUser!.role === "super_admin",
-    });
+    res.json({ success: true, staff: extractRows(rows) });
   } catch (error) {
     console.error("List staff error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -1193,11 +1199,20 @@ router.get("/admin/staff", requireAdmin, async (req, res): Promise<void> => {
 });
 
 // ── CREATE STAFF (ADMIN) ───────────────────────────────────────────────────────
-// Super Admin only, and also blocked for view_only as a belt-and-braces check.
 
-router.post("/admin/staff", requireSuperAdmin, requireFullAccess, async (req, res): Promise<void> => {
+router.post("/admin/staff", async (req, res): Promise<void> => {
   try {
-    const adminUser = req.adminUser!;
+    const token = getBearerToken(req.headers.authorization);
+    const adminUser = token ? verifyAdminToken(token) : null;
+    if (!adminUser) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    if (!isSuperAdmin((adminUser as any).role)) {
+      res.status(403).json({ error: "Only a Super Admin can create staff accounts." });
+      return;
+    }
 
     const body = req.body as {
       username?: string;
@@ -1254,7 +1269,6 @@ router.post("/admin/staff", requireSuperAdmin, requireFullAccess, async (req, re
 });
 
 // ── USER SELF-SERVICE: UNLINK CARD ───────────────────────────────────────────
-
 router.post("/auth/user/unlink-card", async (req, res): Promise<void> => {
   try {
     const currentUser = getUserFromAuthHeader(req.headers.authorization);
@@ -1298,12 +1312,20 @@ router.post("/auth/user/unlink-card", async (req, res): Promise<void> => {
 });
 
 // ── UPDATE STAFF ACCESS (ADMIN) ────────────────────────────────────────────
-// Super Admin only. This is the endpoint that flips a staff account between
-// full_access and view_only.
 
-router.patch("/admin/staff/:id/access", requireSuperAdmin, async (req, res): Promise<void> => {
+router.patch("/admin/staff/:id/access", async (req, res): Promise<void> => {
   try {
-    const adminUser = req.adminUser!;
+    const token = getBearerToken(req.headers.authorization);
+    const adminUser = token ? verifyAdminToken(token) : null;
+    if (!adminUser) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    if (!isSuperAdmin((adminUser as any).role)) {
+      res.status(403).json({ error: "Only a Super Admin can change access levels." });
+      return;
+    }
 
     const targetId = Number(req.params.id);
     if (!Number.isInteger(targetId)) {
@@ -1336,7 +1358,7 @@ router.patch("/admin/staff/:id/access", requireSuperAdmin, async (req, res): Pro
 
     await db.execute(sql`
       update admins
-      set permission = ${permission}, updated_at = now()
+      set permission = ${permission}
       where id = ${targetId}
     `);
 
@@ -1355,11 +1377,20 @@ router.patch("/admin/staff/:id/access", requireSuperAdmin, async (req, res): Pro
 });
 
 // ── DELETE STAFF (ADMIN) ───────────────────────────────────────────────────────
-// Super Admin only.
 
-router.delete("/admin/staff/:id", requireSuperAdmin, async (req, res): Promise<void> => {
+router.delete("/admin/staff/:id", async (req, res): Promise<void> => {
   try {
-    const adminUser = req.adminUser!;
+    const token = getBearerToken(req.headers.authorization);
+    const adminUser = token ? verifyAdminToken(token) : null;
+    if (!adminUser) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    if (!isSuperAdmin((adminUser as any).role)) {
+      res.status(403).json({ error: "Only a Super Admin can remove staff accounts." });
+      return;
+    }
 
     const targetId = Number(req.params.id);
     if (!Number.isInteger(targetId)) {
