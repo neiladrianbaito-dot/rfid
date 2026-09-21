@@ -226,11 +226,6 @@ type CardTransfer = {
   status: string;
   created_at: string;
   completed_at: string | null;
-  // optional snapshot columns (filled automatically when a user is deleted)
-  source_card_uid?: string | null;
-  source_full_name?: string | null;
-  target_card_uid?: string | null;
-  target_full_name?: string | null;
   source: TransferCard | null;
   target: TransferCard | null;
 };
@@ -247,8 +242,7 @@ function transferCardUid(card?: TransferCard | null): string {
 }
 
 function transferCardName(card?: TransferCard | null): string {
-  if (!card) return "Deleted user";
-  return card.full_name || card.fullName || "Unknown";
+  return card?.full_name || card?.fullName || "Unknown";
 }
 
 function transferStatusColorClasses(status: TransferStatus, isDark: boolean): string {
@@ -551,14 +545,6 @@ export default function PaymongoDashboardPage() {
   // 🔄 Realtime na ito dati pa. Ngayon, ang skeleton ay lalabas lang sa
   // UNANG load — ang mga realtime refresh ay tahimik na nag-a-update ng
   // listahan (walang flash).
-  //
-  // ── FIXED: dating gumagamit ng FK embed
-  // (`users!card_balance_transfers_source_card_id_fkey(...)`) na nag-e-error
-  // kapag na-drop ang foreign keys (para manatili ang history kapag may
-  // na-delete na user). Ngayon: plain select muna, tapos hiwalay na query
-  // para sa users, tapos pinagsasama dito. Kung burado na ang user,
-  // gagamitin ang snapshot columns (source_card_uid, source_full_name, atbp.)
-  // kung meron. ──
   useEffect(() => {
     if (!isLinked || !user?.id) {
       setTransfers([]);
@@ -567,89 +553,21 @@ export default function PaymongoDashboardPage() {
     }
     let cancelled = false;
     let isFirstLoad = true;
-
-    // Sariling card info — para laging may pangalan/UID ang sarili mong card
-    // kahit hindi mabasa ang sarili mong row sa users query.
-    const selfId = Number(user.id);
-    const selfCard: TransferCard = {
-      id: selfId,
-      card_uid: user.cardUid ?? null,
-      full_name: user.fullName ?? null,
-    };
-
     const loadTransfers = async () => {
       if (isFirstLoad) setTransfersLoading(true);
-
-      // 1) plain select — walang FK embed. Kasama na rin ang optional
-      //    snapshot columns kung nag-eexist.
       const { data, error: transfersError } = await supabase
         .from("card_balance_transfers")
-        .select("*")
+        .select(`
+          id, source_card_id, target_card_id, amount, reason,
+          source_balance_before, target_balance_before, status,
+          created_at, completed_at,
+          source:users!card_balance_transfers_source_card_id_fkey(id, card_uid, full_name),
+          target:users!card_balance_transfers_target_card_id_fkey(id, card_uid, full_name)
+        `)
         .or(`source_card_id.eq.${user.id},target_card_id.eq.${user.id}`)
         .order("created_at", { ascending: false });
-
-      if (cancelled) return;
-
-      if (transfersError || !data) {
-        console.warn("Unable to load card transfers:", transfersError?.message);
-        setTransfersLoading(false);
-        isFirstLoad = false;
-        return;
-      }
-
-      // 2) kunin ang lahat ng users na kasama sa mga transfer sa ISANG query
-      const userIds = Array.from(
-        new Set(
-          data
-            .flatMap((row: any) => [row.source_card_id, row.target_card_id])
-            .filter((id: any) => id != null)
-            .map((id: any) => Number(id)),
-        ),
-      );
-
-      const usersById = new Map<number, TransferCard>();
-      usersById.set(selfId, selfCard);
-
-      const otherIds = userIds.filter((id) => id !== selfId);
-      if (otherIds.length > 0) {
-        const { data: usersData, error: usersError } = await supabase
-          .from("users")
-          .select("id, card_uid, full_name")
-          .in("id", otherIds);
-
-        if (cancelled) return;
-
-        if (usersError) {
-          console.warn("Unable to load users for transfers:", usersError.message);
-        } else {
-          for (const u of usersData ?? []) {
-            usersById.set(Number(u.id), u as TransferCard);
-          }
-        }
-      }
-
-      // 3) live user muna → snapshot (burado na ang user) → null
-      const resolveCard = (
-        id: number | null,
-        snapshotUid?: string | null,
-        snapshotName?: string | null,
-      ): TransferCard | null => {
-        const live = id != null ? usersById.get(Number(id)) : undefined;
-        if (live) return live;
-        if (snapshotUid || snapshotName) {
-          return { id: Number(id), card_uid: snapshotUid ?? null, full_name: snapshotName ?? null };
-        }
-        return null;
-      };
-
-      const merged: CardTransfer[] = data.map((row: any) => ({
-        ...row,
-        source: resolveCard(row.source_card_id, row.source_card_uid, row.source_full_name),
-        target: resolveCard(row.target_card_id, row.target_card_uid, row.target_full_name),
-      }));
-
-      setTransfers(merged);
-      setTransfersLoading(false);
+      if (!cancelled && !transfersError && data) setTransfers(data as unknown as CardTransfer[]);
+      if (!cancelled) setTransfersLoading(false);
       isFirstLoad = false;
     };
     loadTransfers();
