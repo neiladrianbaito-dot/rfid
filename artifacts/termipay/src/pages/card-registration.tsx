@@ -189,6 +189,27 @@ function RequiredMark() {
   );
 }
 
+// 📐 COMPACT MODAL STYLES — shared by every field in the registration modal
+// so the whole form stays small, aligned, and consistent.
+const MODAL_LABEL_CLASS = "text-xs font-medium leading-none";
+const MODAL_INPUT_CLASS = "h-8 px-2.5 text-xs";
+
+// Small section heading (icon + title) used in the modal.
+function SectionTitle({
+  icon: Icon,
+  text,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  text: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Icon className="h-3.5 w-3.5 text-cyan-500" />
+      <h3 className="text-sm font-semibold leading-none">{text}</h3>
+    </div>
+  );
+}
+
 // 🎨 Card type -> color mapping (old table style)
 // 🟥 Regular  🟦 Student  🟨 Senior  🟩 PWD
 // Card type colors: Regular = red, Student = blue, Senior = orange, PWD = green
@@ -258,8 +279,8 @@ function getTypeTextColor(type: string, isDark: boolean) {
  * off-screen using a spacer div. It also adds type-to-filter search, which
  * makes long lists (barangays especially) much faster to use than scrolling.
  */
-const COMBOBOX_ITEM_HEIGHT = 36;
-const COMBOBOX_LIST_HEIGHT = 260;
+const COMBOBOX_ITEM_HEIGHT = 32;
+const COMBOBOX_LIST_HEIGHT = 220;
 const COMBOBOX_OVERSCAN = 6;
 
 interface LocationComboboxProps {
@@ -331,7 +352,7 @@ function LocationCombobox({
         <button
           type="button"
           disabled={disabled}
-          className={`flex h-9 w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+          className={`flex h-8 w-full items-center justify-between rounded-md border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
             isDark
               ? "border-slate-800 bg-slate-950 text-slate-200"
               : "border-slate-200 bg-white text-slate-900"
@@ -341,22 +362,22 @@ function LocationCombobox({
             {selected?.name ??
               (loading ? loadingPlaceholder ?? "Loading..." : placeholder)}
           </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
         </button>
       </PopoverTrigger>
 
       <PopoverContent
         align="start"
-        className={`w-[--radix-popover-trigger-width] p-0 ${
+        className={`w-[--radix-popover-trigger-width] min-w-[200px] p-0 ${
           isDark ? "border-slate-800 bg-slate-950" : "bg-white"
         }`}
       >
         <div
-          className={`flex items-center gap-2 border-b px-3 py-2 ${
+          className={`flex items-center gap-2 border-b px-3 py-1.5 ${
             isDark ? "border-slate-800" : "border-slate-100"
           }`}
         >
-          <Search className="h-4 w-4 shrink-0 opacity-50" />
+          <Search className="h-3.5 w-3.5 shrink-0 opacity-50" />
           <input
             autoFocus
             value={search}
@@ -369,7 +390,7 @@ function LocationCombobox({
               }
             }}
             placeholder="Search..."
-            className={`w-full bg-transparent text-sm outline-none placeholder:opacity-50 ${
+            className={`w-full bg-transparent text-xs outline-none placeholder:opacity-50 ${
               isDark ? "text-slate-200" : "text-slate-900"
             }`}
           />
@@ -388,7 +409,7 @@ function LocationCombobox({
         >
           {filtered.length === 0 ? (
             <div
-              className={`px-3 py-6 text-center text-sm ${
+              className={`px-3 py-6 text-center text-xs ${
                 isDark ? "text-slate-500" : "text-slate-400"
               }`}
             >
@@ -411,7 +432,7 @@ function LocationCombobox({
                         setOpen(false);
                       }}
                       style={{ height: COMBOBOX_ITEM_HEIGHT }}
-                      className={`flex w-full items-center gap-2 px-3 text-left text-sm transition-colors ${
+                      className={`flex w-full items-center gap-2 px-3 text-left text-xs transition-colors ${
                         isSelected
                           ? isDark
                             ? "bg-cyan-950/40 text-cyan-400"
@@ -422,7 +443,7 @@ function LocationCombobox({
                       }`}
                     >
                       <Check
-                        className={`h-4 w-4 shrink-0 ${
+                        className={`h-3.5 w-3.5 shrink-0 ${
                           isSelected ? "opacity-100" : "opacity-0"
                         }`}
                       />
@@ -1534,7 +1555,17 @@ export default function CardRegistrationPage() {
         </Card>
       </motion.div>
 
-      {/* REGISTRATION MODAL — 🔒 hindi na-re-render kapag view_only */}
+      {/*
+       * REGISTRATION MODAL — 🔒 hindi na-re-render kapag view_only
+       *
+       * 📐 COMPACT / NO-SCROLL LAYOUT
+       *  - Desktop (lg+): 2 columns → LEFT = Card + Personal (+ ID),
+       *    RIGHT = Address. Everything fits on screen, no scrollbar.
+       *  - Smaller screens: single column. If the screen is really short,
+       *    the modal can still scroll, but the scrollbar is hidden so it
+       *    never shows a side scroll bar.
+       *  - Smaller text (text-xs), shorter inputs (h-8), tighter spacing.
+       */}
       {canManage && (
         <Dialog
           open={isModalOpen}
@@ -1545,552 +1576,480 @@ export default function CardRegistrationPage() {
           }}
         >
           <DialogContent
-            className={`max-h-[92vh] overflow-y-auto sm:max-w-4xl ${
+            className={`max-h-[96vh] w-[calc(100vw-1.5rem)] gap-3 overflow-y-auto overflow-x-hidden p-4 sm:max-w-5xl sm:p-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
               isDark
                 ? "border-slate-800 bg-slate-950"
                 : "bg-white"
             }`}
           >
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+            <DialogHeader className="space-y-1 text-left">
+              <DialogTitle className="text-base">
                 Register New RFID Card
               </DialogTitle>
-            </DialogHeader>
 
-            <form
-              onSubmit={handleSubmit}
-              className="space-y-6"
-            >
-              {/* Legend for the red asterisks */}
               <p
-                className={`text-xs ${
+                className={`text-[11px] ${
                   isDark ? "text-slate-400" : "text-slate-500"
                 }`}
               >
                 Fields marked with <RequiredMark /> are required.
               </p>
+            </DialogHeader>
 
-              {/* CARD INFORMATION */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <CreditCard className="h-4 w-4 text-cyan-500" />
+            <form
+              onSubmit={handleSubmit}
+              className="space-y-3"
+            >
+              <div className="grid gap-x-6 gap-y-3 lg:grid-cols-2">
+                {/* ───────────── LEFT COLUMN ───────────── */}
+                <div className="space-y-3">
+                  {/* CARD INFORMATION */}
+                  <section className="space-y-2">
+                    <SectionTitle icon={CreditCard} text="Card Information" />
 
-                  <h3 className="font-semibold">
-                    Card Information
-                  </h3>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      RFID Card UID
-                      <RequiredMark />
-                    </label>
-
-                    <Input
-                      value={form.cardUid}
-                      onChange={(event) =>
-                        updateForm(
-                          "cardUid",
-                          event.target.value
-                            .toUpperCase()
-                            .replace(/[^A-Z0-9]/g, "")
-                            .slice(0, 8)
-                        )
-                      }
-                      placeholder="8-character UID"
-                      disabled={isSubmitting}
-                      maxLength={8}
-                      inputMode="text"
-                      aria-required="true"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Card Type
-                      <RequiredMark />
-                    </label>
-
-                    <Select
-                      value={form.type}
-                      onValueChange={(value) =>
-                        updateForm(
-                          "type",
-                          value
-                        )
-                      }
-                      disabled={isSubmitting}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-
-                      <SelectContent>
-                        <SelectItem value="Regular">
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Regular")}`} />
-                            <span className={getTypeTextColor("Regular", isDark)}>
-                              Regular
-                            </span>
-                          </span>
-                        </SelectItem>
-
-                        <SelectItem value="Student">
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Student")}`} />
-                            <span className={getTypeTextColor("Student", isDark)}>
-                              Student
-                            </span>
-                          </span>
-                        </SelectItem>
-
-                        <SelectItem value="Senior">
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Senior")}`} />
-                            <span className={getTypeTextColor("Senior", isDark)}>
-                              Senior
-                            </span>
-                          </span>
-                        </SelectItem>
-
-                        <SelectItem value="PWD">
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("PWD")}`} />
-                            <span className={getTypeTextColor("PWD", isDark)}>
-                              PWD
-                            </span>
-                          </span>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-
-              {/* ID IMAGE */}
-              {requiresIdImage && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <IdCard className="h-4 w-4 text-cyan-500" />
-
-                    <h3 className="font-semibold">
-                      ID Verification
-                    </h3>
-                  </div>
-
-                  <div
-                    className={`rounded-xl border p-4 ${
-                      isDark
-                        ? "border-slate-800 bg-slate-900/40"
-                        : "border-slate-200 bg-slate-50"
-                    }`}
-                  >
-                    <div className="flex flex-col gap-4 sm:flex-row">
-                      {idImagePreview ? (
-                        <div className="relative">
-                          <img
-                            src={idImagePreview}
-                            alt="ID preview"
-                            className="h-40 w-64 rounded-lg border object-cover"
-                          />
-
-                          <button
-                            type="button"
-                            onClick={clearImage}
-                            disabled={isSubmitting}
-                            className={`absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm ${
-                              isDark
-                                ? "border-slate-700 bg-slate-900 text-white"
-                                : "border-slate-200 bg-white text-slate-700"
-                            }`}
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            fileInputRef.current?.click()
-                          }
-                          disabled={isSubmitting}
-                          className={`flex h-40 w-full max-w-md flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
-                            isDark
-                              ? "border-slate-700 hover:border-cyan-500 hover:bg-slate-900"
-                              : "border-slate-300 hover:border-cyan-500 hover:bg-white"
-                          }`}
-                        >
-                          <Upload className="mb-2 h-8 w-8 opacity-50" />
-
-                          <span className="text-sm font-medium">
-                            Upload ID Image
-                            <RequiredMark />
-                          </span>
-
-                          <span className="mt-1 text-xs opacity-60">
-                            JPG, PNG, WEBP up to 5 MB
-                          </span>
-                        </button>
-                      )}
-
-                      <div className="flex-1 space-y-2">
-                        <p className="text-sm font-medium">
-                          {form.type} ID
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <label className={MODAL_LABEL_CLASS}>
+                          RFID Card UID
                           <RequiredMark />
-                        </p>
+                        </label>
 
-                        <p
-                          className={`text-sm ${
-                            isDark
-                              ? "text-slate-400"
-                              : "text-slate-500"
-                          }`}
-                        >
-                          Upload a clear image of the valid
-                          identification document for the
-                          selected card type.
-                        </p>
+                        <Input
+                          value={form.cardUid}
+                          onChange={(event) =>
+                            updateForm(
+                              "cardUid",
+                              event.target.value
+                                .toUpperCase()
+                                .replace(/[^A-Z0-9]/g, "")
+                                .slice(0, 8)
+                            )
+                          }
+                          placeholder="8-character UID"
+                          disabled={isSubmitting}
+                          maxLength={8}
+                          inputMode="text"
+                          aria-required="true"
+                          className={MODAL_INPUT_CLASS}
+                        />
+                      </div>
 
-                        <p
-                          className={`text-xs ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
-                          The image will be uploaded directly
-                          to Supabase Storage. It will not be
-                          sent as Base64 to the API server.
-                        </p>
+                      <div className="space-y-1.5">
+                        <label className={MODAL_LABEL_CLASS}>
+                          Card Type
+                          <RequiredMark />
+                        </label>
 
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={
-                            handleImageSelect
+                        <Select
+                          value={form.type}
+                          onValueChange={(value) =>
+                            updateForm("type", value)
                           }
                           disabled={isSubmitting}
-                        />
+                        >
+                          <SelectTrigger className={MODAL_INPUT_CLASS}>
+                            <SelectValue />
+                          </SelectTrigger>
 
-                        {idImageFile && (
-                          <div
-                            className={`rounded-md px-3 py-2 text-xs ${
-                              isDark
-                                ? "bg-slate-800 text-slate-300"
-                                : "bg-white text-slate-600"
-                            }`}
-                          >
-                            {idImageFile.name}
-                            {" • "}
-                            {(
-                              idImageFile.size /
-                              1024 /
-                              1024
-                            ).toFixed(2)}
-                            {" MB"}
-                          </div>
-                        )}
-
-                        {idImageFile && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() =>
-                              fileInputRef.current?.click()
-                            }
-                            disabled={isSubmitting}
-                            className="gap-2"
-                          >
-                            <Upload className="h-4 w-4" />
-                            Change Image
-                          </Button>
-                        )}
+                          <SelectContent>
+                            {["Regular", "Student", "Senior", "PWD"].map(
+                              (option) => (
+                                <SelectItem
+                                  key={option}
+                                  value={option}
+                                  className="text-xs"
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <span
+                                      className={`h-2 w-2 rounded-full ${getTypeDotColor(option)}`}
+                                    />
+                                    <span
+                                      className={getTypeTextColor(option, isDark)}
+                                    >
+                                      {option}
+                                    </span>
+                                  </span>
+                                </SelectItem>
+                              )
+                            )}
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
-                  </div>
+                  </section>
+
+                  {/* PERSONAL INFORMATION */}
+                  <section className="space-y-2">
+                    <SectionTitle icon={UserRound} text="Personal Information" />
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <label className={MODAL_LABEL_CLASS}>
+                          Full Name
+                          <RequiredMark />
+                        </label>
+
+                        <Input
+                          value={form.fullName}
+                          onChange={(event) =>
+                            updateForm("fullName", event.target.value)
+                          }
+                          placeholder="Enter full name"
+                          disabled={isSubmitting}
+                          aria-required="true"
+                          className={MODAL_INPUT_CLASS}
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className={MODAL_LABEL_CLASS}>
+                          Date of Birth
+                          <RequiredMark />
+                        </label>
+
+                        <div className="relative">
+                          <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-50" />
+
+                          <Input
+                            type="date"
+                            value={form.dob}
+                            onChange={(event) =>
+                              updateForm("dob", event.target.value)
+                            }
+                            className={`${MODAL_INPUT_CLASS} pl-8`}
+                            disabled={isSubmitting}
+                            aria-required="true"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className={MODAL_LABEL_CLASS}>
+                          Contact Number
+                          <RequiredMark />
+                        </label>
+
+                        <Input
+                          value={form.contactNumber}
+                          onChange={(event) =>
+                            updateForm(
+                              "contactNumber",
+                              event.target.value
+                                .replace(/\D/g, "")
+                                .slice(0, 11)
+                            )
+                          }
+                          placeholder="09XXXXXXXXX"
+                          disabled={isSubmitting}
+                          maxLength={11}
+                          inputMode="numeric"
+                          aria-required="true"
+                          className={MODAL_INPUT_CLASS}
+                        />
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* ID IMAGE — compact horizontal layout (only for Student / Senior / PWD) */}
+                  {requiresIdImage && (
+                    <section className="space-y-2">
+                      <SectionTitle icon={IdCard} text="ID Verification" />
+
+                      <div
+                        className={`flex items-center gap-3 rounded-lg border p-3 ${
+                          isDark
+                            ? "border-slate-800 bg-slate-900/40"
+                            : "border-slate-200 bg-slate-50"
+                        }`}
+                      >
+                        {idImagePreview ? (
+                          <div className="relative shrink-0">
+                            <img
+                              src={idImagePreview}
+                              alt="ID preview"
+                              className="h-20 w-32 rounded-md border object-cover"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={clearImage}
+                              disabled={isSubmitting}
+                              className={`absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border shadow-sm ${
+                                isDark
+                                  ? "border-slate-700 bg-slate-900 text-white"
+                                  : "border-slate-200 bg-white text-slate-700"
+                              }`}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isSubmitting}
+                            className={`flex h-20 w-32 shrink-0 flex-col items-center justify-center rounded-md border-2 border-dashed transition-colors ${
+                              isDark
+                                ? "border-slate-700 hover:border-cyan-500 hover:bg-slate-900"
+                                : "border-slate-300 hover:border-cyan-500 hover:bg-white"
+                            }`}
+                          >
+                            <Upload className="mb-1 h-5 w-5 opacity-50" />
+
+                            <span className="text-[11px] font-medium">
+                              Upload ID
+                              <RequiredMark />
+                            </span>
+
+                            <span className="text-[10px] opacity-60">
+                              Up to 5 MB
+                            </span>
+                          </button>
+                        )}
+
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <p className="text-xs font-medium">
+                            {form.type} ID
+                            <RequiredMark />
+                          </p>
+
+                          <p
+                            className={`text-[11px] leading-snug ${
+                              isDark ? "text-slate-400" : "text-slate-500"
+                            }`}
+                          >
+                            Upload a clear photo of a valid ID (JPG, PNG, WEBP).
+                          </p>
+
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleImageSelect}
+                            disabled={isSubmitting}
+                          />
+
+                          {idImageFile && (
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`min-w-0 flex-1 truncate text-[11px] ${
+                                  isDark ? "text-slate-300" : "text-slate-600"
+                                }`}
+                              >
+                                {idImageFile.name}
+                                {" • "}
+                                {(idImageFile.size / 1024 / 1024).toFixed(2)}
+                                {" MB"}
+                              </span>
+
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isSubmitting}
+                                className="h-7 shrink-0 gap-1.5 px-2 text-[11px]"
+                              >
+                                <Upload className="h-3 w-3" />
+                                Change
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </section>
+                  )}
                 </div>
-              )}
 
-              {/* PERSONAL INFORMATION */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <UserRound className="h-4 w-4 text-cyan-500" />
+                {/* ───────────── RIGHT COLUMN ───────────── */}
+                <section className="space-y-2">
+                  <SectionTitle icon={MapPin} text="Address" />
 
-                  <h3 className="font-semibold">
-                    Personal Information
-                  </h3>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2 sm:col-span-2">
-                    <label className="text-sm font-medium">
-                      Full Name
-                      <RequiredMark />
-                    </label>
-
-                    <Input
-                      value={form.fullName}
-                      onChange={(event) =>
-                        updateForm(
-                          "fullName",
-                          event.target.value
-                        )
-                      }
-                      placeholder="Enter full name"
-                      disabled={isSubmitting}
-                      aria-required="true"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Date of Birth
-                      <RequiredMark />
-                    </label>
-
-                    <div className="relative">
-                      <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50" />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {/* Row 1: Street Address + Region */}
+                    <div className="space-y-1.5">
+                      <label className={MODAL_LABEL_CLASS}>
+                        Street Address{" "}
+                        <span className="font-normal text-muted-foreground">
+                          (Optional)
+                        </span>
+                      </label>
 
                       <Input
-                        type="date"
-                        value={form.dob}
+                        value={form.streetAddress}
                         onChange={(event) =>
-                          updateForm(
-                            "dob",
-                            event.target.value
-                          )
+                          updateForm("streetAddress", event.target.value)
                         }
-                        className="pl-10"
+                        placeholder="House no., street, sitio"
                         disabled={isSubmitting}
-                        aria-required="true"
+                        className={MODAL_INPUT_CLASS}
                       />
                     </div>
-                  </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Contact Number
-                      <RequiredMark />
-                    </label>
+                    <div className="space-y-1.5">
+                      <label className={MODAL_LABEL_CLASS}>
+                        Region
+                        <RequiredMark />
+                      </label>
 
-                    <Input
-                      value={form.contactNumber}
-                      onChange={(event) =>
-                        updateForm(
-                          "contactNumber",
-                          event.target.value
-                            .replace(/\D/g, "")
-                            .slice(0, 11)
-                        )
-                      }
-                      placeholder="09XXXXXXXXX"
-                      disabled={isSubmitting}
-                      maxLength={11}
-                      inputMode="numeric"
-                      aria-required="true"
-                    />
-                  </div>
-                </div>
-              </div>
+                      <LocationCombobox
+                        options={regions}
+                        value={form.regionCode}
+                        onChange={handleRegionChange}
+                        placeholder="Select region"
+                        loadingPlaceholder="Loading regions..."
+                        loading={loadingRegions}
+                        disabled={isSubmitting || loadingRegions}
+                        isDark={isDark}
+                      />
+                    </div>
 
-              {/* ADDRESS */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4 text-cyan-500" />
+                    {/* Row 2: Province + City / Municipality */}
+                    <div className="space-y-1.5">
+                      <label className={MODAL_LABEL_CLASS}>
+                        Province
+                        <RequiredMark />
+                      </label>
 
-                  <h3 className="font-semibold">
-                    Address
-                  </h3>
-                </div>
+                      <LocationCombobox
+                        options={provinces}
+                        value={form.provinceCode}
+                        onChange={handleProvinceChange}
+                        placeholder="Select province"
+                        loadingPlaceholder="Loading provinces..."
+                        loading={loadingProvinces}
+                        disabled={
+                          isSubmitting ||
+                          !form.regionCode ||
+                          loadingProvinces
+                        }
+                        isDark={isDark}
+                      />
+                    </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {/* Row 1: Street Address + Region (equal width) */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Street Address <span className="text-xs font-normal text-muted-foreground">(Optional)</span>
-                    </label>
+                    <div className="space-y-1.5">
+                      <label className={MODAL_LABEL_CLASS}>
+                        City / Municipality
+                        <RequiredMark />
+                      </label>
 
-                    <Input
-                      value={form.streetAddress}
-                      onChange={(event) =>
-                        updateForm(
-                          "streetAddress",
-                          event.target.value
-                        )
-                      }
-                      placeholder="House number, street, sitio"
-                      disabled={isSubmitting}
-                    />
-                  </div>
+                      <LocationCombobox
+                        options={cities}
+                        value={form.cityCode}
+                        onChange={handleCityChange}
+                        placeholder="Select city / municipality"
+                        loadingPlaceholder="Loading cities..."
+                        loading={loadingCities}
+                        disabled={
+                          isSubmitting ||
+                          !form.provinceCode ||
+                          loadingCities
+                        }
+                        isDark={isDark}
+                      />
+                    </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Region
-                      <RequiredMark />
-                    </label>
+                    {/* Row 3: Barangay + ZIP Code */}
+                    <div className="space-y-1.5">
+                      <label className={MODAL_LABEL_CLASS}>
+                        Barangay
+                        <RequiredMark />
+                      </label>
 
-                    <LocationCombobox
-                      options={regions}
-                      value={form.regionCode}
-                      onChange={handleRegionChange}
-                      placeholder="Select region"
-                      loadingPlaceholder="Loading regions..."
-                      loading={loadingRegions}
-                      disabled={isSubmitting || loadingRegions}
-                      isDark={isDark}
-                    />
-                  </div>
+                      <LocationCombobox
+                        options={barangays}
+                        value={form.barangayCode}
+                        onChange={handleBarangayChange}
+                        placeholder="Select barangay"
+                        loadingPlaceholder="Loading barangays..."
+                        loading={loadingBarangays}
+                        disabled={
+                          isSubmitting ||
+                          !form.cityCode ||
+                          loadingBarangays
+                        }
+                        isDark={isDark}
+                      />
+                    </div>
 
-                  {/* Row 2: Province + City / Municipality */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Province
-                      <RequiredMark />
-                    </label>
+                    <div className="space-y-1.5">
+                      <label className={MODAL_LABEL_CLASS}>
+                        ZIP Code
+                        <RequiredMark />
+                      </label>
 
-                    <LocationCombobox
-                      options={provinces}
-                      value={form.provinceCode}
-                      onChange={handleProvinceChange}
-                      placeholder="Select province"
-                      loadingPlaceholder="Loading provinces..."
-                      loading={loadingProvinces}
-                      disabled={
-                        isSubmitting ||
-                        !form.regionCode ||
-                        loadingProvinces
-                      }
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      City / Municipality
-                      <RequiredMark />
-                    </label>
-
-                    <LocationCombobox
-                      options={cities}
-                      value={form.cityCode}
-                      onChange={handleCityChange}
-                      placeholder="Select city / municipality"
-                      loadingPlaceholder="Loading cities..."
-                      loading={loadingCities}
-                      disabled={
-                        isSubmitting ||
-                        !form.provinceCode ||
-                        loadingCities
-                      }
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  {/* Row 3: Barangay + ZIP Code */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Barangay
-                      <RequiredMark />
-                    </label>
-
-                    <LocationCombobox
-                      options={barangays}
-                      value={form.barangayCode}
-                      onChange={handleBarangayChange}
-                      placeholder="Select barangay"
-                      loadingPlaceholder="Loading barangays..."
-                      loading={loadingBarangays}
-                      disabled={
-                        isSubmitting ||
-                        !form.cityCode ||
-                        loadingBarangays
-                      }
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      ZIP Code
-                      <RequiredMark />
-                    </label>
-
-                    <Input
-                      value={form.zipCode}
-                      onChange={(event) =>
-                        updateForm(
-                          "zipCode",
-                          event.target.value.replace(
-                            /\D/g,
-                            ""
+                      <Input
+                        value={form.zipCode}
+                        onChange={(event) =>
+                          updateForm(
+                            "zipCode",
+                            event.target.value.replace(/\D/g, "")
                           )
-                        )
-                      }
-                      placeholder="6710"
-                      maxLength={10}
-                      disabled={isSubmitting}
-                    />
+                        }
+                        placeholder="6710"
+                        maxLength={10}
+                        inputMode="numeric"
+                        disabled={isSubmitting}
+                        className={MODAL_INPUT_CLASS}
+                      />
+                    </div>
+
+                    {/* Row 4: Full Address — auto-filled from the fields above, editable */}
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label className={MODAL_LABEL_CLASS}>
+                        Full Address
+                      </label>
+
+                      <Textarea
+                        value={form.fullAddress}
+                        onChange={(event) =>
+                          updateForm("fullAddress", event.target.value)
+                        }
+                        placeholder="Auto-filled from the fields above — you can still edit it"
+                        disabled={isSubmitting}
+                        rows={2}
+                        className="min-h-0 resize-none px-2.5 py-1.5 text-xs"
+                      />
+
+                      <p
+                        className={`text-[11px] ${
+                          isDark ? "text-slate-500" : "text-slate-400"
+                        }`}
+                      >
+                        Auto-generated from the fields above. You can edit it if needed.
+                      </p>
+                    </div>
                   </div>
-
-                  {/* Row 4: Full Address — auto-filled from the fields above, editable */}
-                  <div className="space-y-2 sm:col-span-2">
-                    <label className="text-sm font-medium">
-                      Full Address
-                    </label>
-
-                    <Textarea
-                      value={form.fullAddress}
-                      onChange={(event) =>
-                        updateForm(
-                          "fullAddress",
-                          event.target.value
-                        )
-                      }
-                      placeholder="Auto-filled from the fields above — you can still edit it"
-                      disabled={isSubmitting}
-                      rows={3}
-                      className="resize-none"
-                    />
-
-                    <p
-                      className={`text-xs ${
-                        isDark ? "text-slate-500" : "text-slate-400"
-                      }`}
-                    >
-                      Auto-generated from Street, Region, Province, City/Municipality, Barangay, and ZIP Code. You can edit it manually if needed.
-                    </p>
-                  </div>
-                </div>
+                </section>
               </div>
 
               {/* BUTTONS */}
               <div
-                className={`flex flex-col-reverse gap-3 border-t pt-5 sm:flex-row sm:justify-end ${
-                  isDark
-                    ? "border-slate-800"
-                    : "border-slate-200"
+                className={`flex justify-end gap-2 border-t pt-3 ${
+                  isDark ? "border-slate-800" : "border-slate-200"
                 }`}
               >
                 <Button
                   type="button"
                   variant="outline"
+                  size="sm"
                   onClick={closeModal}
                   disabled={isSubmitting}
+                  className="h-8 text-xs"
                 >
                   Cancel
                 </Button>
 
                 <Button
                   type="submit"
+                  size="sm"
                   disabled={isSubmitting}
-                  className="gap-2"
+                  className="h-8 gap-1.5 text-xs"
                 >
                   {isSubmitting ? (
                     <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
 
                       {isSubmittingImage
                         ? "Uploading ID..."
@@ -2098,7 +2057,7 @@ export default function CardRegistrationPage() {
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 className="h-4 w-4" />
+                      <CheckCircle2 className="h-3.5 w-3.5" />
                       Register Card
                     </>
                   )}
