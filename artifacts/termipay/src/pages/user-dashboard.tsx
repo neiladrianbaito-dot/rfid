@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import {
   User, Phone, Tag, ShieldCheck, LogOut, PlusCircle, KeyRound, CreditCard, Mail, Home,
@@ -35,8 +35,49 @@ import { USER_AUTH_TOKEN_KEY, unlinkUserCard } from "@/lib/api";
 import { DASHBOARD_STYLES } from "@/lib/dashboard-styles";
 import { supabase } from "@/lib/supabase";
 
+// 🔄 REALTIME: same hook na ginagamit sa admin pages (Card Registration, Layout).
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
+
 // 🆕 Bottom-nav / page tab type (wasn't declared in this file before)
 type Tab = "home" | "Transactions" | "settings";
+
+// ── 🔄 REALTIME CARD DATA PROBE ─────────────────────────────────────────────
+// Ang useCardData() ay nagfe-fetch ng user + transactions kapag nagmo-mount
+// lang. Para hindi na kailangan i-refresh ang buong page, ang hook ay
+// tinatawag sa maliit na invisible component na ito, at nire-remount ito ng
+// page (sa pamamagitan ng `key`) tuwing may realtime event. Kapag nag-remount,
+// muling nagfe-fetch ang hook at ipinapasa ang bagong data pataas.
+//
+// Hindi nagre-remount ang buong page — kaya hindi nagsasara ang mga modal
+// (Top-up, Link Card, atbp.), hindi nagre-reset ang tabs, at hindi nawawala
+// ang tina-type na contact/email. Habang naglo-load ang bagong data, ang
+// lumang data ay nananatiling nakikita (walang skeleton flash).
+type CardDataResult = ReturnType<typeof useCardData>;
+type CardUidArg = Parameters<typeof useCardData>[0];
+
+// Stable empty array — para hindi mag-loop ang mga effect na nakadepende
+// sa `transactions` habang wala pang data.
+const EMPTY_TRANSACTIONS = [] as unknown as CardDataResult["transactions"];
+
+const CardDataProbe = memo(function CardDataProbe({
+  cardUid,
+  onData,
+}: {
+  cardUid: CardUidArg;
+  onData: (uid: CardUidArg, data: CardDataResult) => void;
+}) {
+  const result = useCardData(cardUid);
+
+  useEffect(() => {
+    // Habang wala pang laman ang bagong fetch, huwag munang i-report —
+    // mananatili ang lumang data sa screen.
+    if (result.loading && !result.user) return;
+    onData(cardUid, result);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result.user, result.transactions, result.loading, result.error, result.isPulsing]);
+
+  return null;
+});
 
 // ── 🆕 User Avatar ──────────────────────────────────────────────────────────
 // Real photo (Google login, galing sa Supabase Auth identities via backend)
@@ -349,7 +390,92 @@ export default function PaymongoDashboardPage() {
   const [, setLocation] = useLocation();
   const { isDark, toggleTheme } = useTheme();
   const { cardUid, setCardUid, authProfile, authChecking } = useDashboardAuth();
-  const { user, transactions, loading, error, isPulsing } = useCardData(cardUid);
+
+  // 🔄 REALTIME CARD DATA
+  // Ang user + transactions ay galing sa <CardDataProbe /> (nasa baba, sa JSX)
+  // at nire-refresh nito tuwing may realtime event. Ang `uid` ay itinatabi
+  // kasama ng data para hindi magamit ang data ng lumang card kapag
+  // nag-link / nag-unlink ng ibang card.
+  const [storedCardData, setStoredCardData] = useState<{
+    uid: CardUidArg;
+    result: CardDataResult;
+  } | null>(null);
+  const [cardDataKey, setCardDataKey] = useState(0);
+
+  const handleCardData = useCallback((uid: CardUidArg, result: CardDataResult) => {
+    setStoredCardData({ uid, result });
+  }, []);
+
+  const cardData =
+    storedCardData && storedCardData.uid === cardUid ? storedCardData.result : null;
+
+  const user = cardData?.user;
+  const transactions = cardData?.transactions ?? EMPTY_TRANSACTIONS;
+  // Habang wala pang unang data → loading (skeleton). Pagkatapos nito,
+  // ang lumang data ay nananatili habang nagre-refresh (walang flash).
+  const loading = cardData ? cardData.loading : true;
+  const error = cardData?.error;
+
+  // Balance pulse: sarili nating detection dahil nawawala ang internal
+  // pulse ng hook kapag nire-remount ang probe.
+  const [balancePulse, setBalancePulse] = useState(false);
+  const prevBalanceRef = useRef<number | null>(null);
+  const isPulsing = Boolean(cardData?.isPulsing) || balancePulse;
+
+  useEffect(() => {
+    const next = user ? Number(user.balance ?? 0) : null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    if (next !== null && prevBalanceRef.current !== null && next !== prevBalanceRef.current) {
+      setBalancePulse(true);
+      timer = setTimeout(() => setBalancePulse(false), 1000);
+    }
+
+    prevBalanceRef.current = next;
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [user?.balance]);
+
+  // Throttled refresh: pinagsasama ang sunod-sunod na events (min 0.5s) at
+  // hindi hihigit sa isang refresh kada 3 segundo, para hindi
+  // mag-spam ng API kahit maraming transaction ang pumapasok.
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRefreshAtRef = useRef(0);
+
+  const refreshCardData = useCallback(() => {
+    if (refreshTimerRef.current) return; // may naka-schedule na
+
+    const wait = Math.max(500, 3000 - (Date.now() - lastRefreshAtRef.current));
+
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      lastRefreshAtRef.current = Date.now();
+      setCardDataKey((key) => key + 1);
+    }, wait);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
+
+  // 🔄 Kapag may INSERT / UPDATE / DELETE sa `users` (balance, status, type,
+  // contact) o `transactions` (top-up, fare) → auto-refresh, walang page refresh.
+  useRealtimeRefetch(["users", "transactions"], refreshCardData);
+
+  // 🔄 Fallback: pagbalik sa tab / app (lalo na sa mobile) → refresh din,
+  // kahit may na-miss na realtime event habang nasa background.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshCardData();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refreshCardData]);
+
   const currentBalance = Number(user?.balance || 0);
   const isLinked = Boolean(cardUid);
   const dullClass = !isLinked ? "opacity-40 grayscale pointer-events-none select-none" : "";
@@ -416,6 +542,9 @@ export default function PaymongoDashboardPage() {
   }, [authChecking, cardDataLoading]);
 
   // Fetch this user's card_balance_transfers (sent OR received).
+  // 🔄 Realtime na ito dati pa. Ngayon, ang skeleton ay lalabas lang sa
+  // UNANG load — ang mga realtime refresh ay tahimik na nag-a-update ng
+  // listahan (walang flash).
   useEffect(() => {
     if (!isLinked || !user?.id) {
       setTransfers([]);
@@ -423,8 +552,9 @@ export default function PaymongoDashboardPage() {
       return;
     }
     let cancelled = false;
+    let isFirstLoad = true;
     const loadTransfers = async () => {
-      setTransfersLoading(true);
+      if (isFirstLoad) setTransfersLoading(true);
       const { data, error: transfersError } = await supabase
         .from("card_balance_transfers")
         .select(`
@@ -438,6 +568,7 @@ export default function PaymongoDashboardPage() {
         .order("created_at", { ascending: false });
       if (!cancelled && !transfersError && data) setTransfers(data as unknown as CardTransfer[]);
       if (!cancelled) setTransfersLoading(false);
+      isFirstLoad = false;
     };
     loadTransfers();
 
@@ -452,6 +583,7 @@ export default function PaymongoDashboardPage() {
   }, [isLinked, user?.id]);
 
   // Fetch fee_amount / vat_amount / net_amount for this card's transactions.
+  // Tumatakbo ulit kapag nagbago ang `transactions` (kasama ang realtime refresh).
   useEffect(() => {
     let cancelled = false;
     const loadFinancialFields = async () => {
@@ -586,6 +718,14 @@ export default function PaymongoDashboardPage() {
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#020617] text-slate-100" : "bg-slate-50 text-slate-800"}`}>
+      {/* 🔄 Invisible — nagfe-fetch ng user + transactions, at nire-remount
+          (via key) tuwing may realtime event o pagbabago ng card. */}
+      <CardDataProbe
+        key={`${cardUid ?? ""}:${cardDataKey}`}
+        cardUid={cardUid}
+        onData={handleCardData}
+      />
+
       {linkCard.isOpen && <LinkCardModal {...linkCard} />}
       <TopupModal {...topup} cardUid={cardUid} currentBalance={currentBalance} />
       <ChangePasswordModal {...changePassword} />
