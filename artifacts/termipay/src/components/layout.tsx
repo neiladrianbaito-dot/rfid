@@ -353,19 +353,53 @@ function CurrentDateTime({ isDark }: { isDark: boolean }) {
   );
 }
 
+type LiveAccess = { canManage: boolean; loaded: boolean };
+
+// 🔄 REALTIME ACCESS PROBE
+// Ang Layout ay hindi nagre-remount kapag lumilipat ng page, kaya ang
+// useAdminAccess() sa Layout ay nababasa lang ONCE (kaya kailangan pa ng
+// full page refresh bago mag-view-only ang profile modal). Ang mga page
+// naman ay nagre-remount, kaya sila ang laging tama.
+//
+// Solusyon: ang hook ay tinatawag sa maliit na component na ito, at
+// nire-remount ito ng Layout (sa pamamagitan ng `key`) tuwing may nagbago
+// sa `admins` table. Kapag nag-remount, muling binabasa ng hook ang access
+// at ipinapasa ang bagong value sa Layout — hindi nagre-remount ang buong
+// Layout, kaya hindi nagsasara ang modal at hindi nawawala ang sidebar state.
+function AccessProbe({ onAccess }: { onAccess: (access: LiveAccess) => void }) {
+  const { canManage, loaded } = useAdminAccess();
+
+  useEffect(() => {
+    // Ipinapasa lang kapag tapos nang mag-load, para hindi mag-flash ang
+    // buttons habang naglo-load pa ang bagong access info.
+    if (loaded) onAccess({ canManage, loaded });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage, loaded]);
+
+  return null;
+}
+
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout, isLoggingOut, refetchUser } = useAuth();
   const [location] = useLocation();
   const { toast } = useToast();
   const { isDark, toggleTheme } = useTheme();
 
-  // 🔒 ADMIN ACCESS:
+  // 🔒 ADMIN ACCESS (LIVE):
+  //  - liveAccess: laging updated ang value dahil sa <AccessProbe /> sa baba.
   //  - canEditProfile: true lang kapag tapos nang mag-load ang access info
   //    AT may permission (hindi view_only). Ito ang ginagamit sa lahat ng
   //    profile edit controls at sa handleSaveChanges().
   //  - isViewOnly: true kapag loaded na at walang permission — para sa
   //    "View only" message sa modal.
-  const { canManage, loaded } = useAdminAccess();
+  const [liveAccess, setLiveAccess] = useState<LiveAccess>({
+    canManage: false,
+    loaded: false,
+  });
+  // Tumataas tuwing may nagbago sa `admins` → nire-remount ang AccessProbe.
+  const [accessProbeKey, setAccessProbeKey] = useState(0);
+
+  const { canManage, loaded } = liveAccess;
   const canEditProfile = loaded && canManage;
   const isViewOnly = loaded && !canManage;
 
@@ -542,11 +576,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // Parehong pattern gaya ng ginagamit sa Card Registration page.
   // (Tumatakbo rin ito pagkatapos mismo mag-save ng profile — ligtas ito,
   // isa lang itong refetch at walang ibinabalik na write.)
+  //   • accessProbeKey → muling binabasa ang access (view_only ↔ manage),
+  //     kaya agad na nagla-lock / nag-u-unlock ang profile modal
   useRealtimeRefetch(["admins"], () => {
     Promise.resolve(refetchUser()).catch(() => {
       /* not critical */
     });
     setAvatarRefreshKey((key) => key + 1);
+    setAccessProbeKey((key) => key + 1);
   });
 
   useEffect(() => {
@@ -654,6 +691,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileModalOpen]);
+
+  // 🔒 Kapag naging view_only habang bukas ang modal (realtime), itapon ang
+  // hindi pa nase-save na picture at password na tinype para walang maiwang
+  // "pending" na edit.
+  useEffect(() => {
+    if (!isViewOnly) return;
+
+    resetAvatarSelection();
+    setFormData((current) => ({
+      ...current,
+      name: user?.name || "",
+      username: getUsername(user),
+      currentPassword: "",
+      newPassword: "",
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isViewOnly]);
 
   // Picking a picture only shows a preview. It is uploaded when the user
   // presses "Save Changes".
@@ -1056,6 +1110,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         isDark ? "bg-slate-950 text-slate-200" : "bg-slate-50 text-slate-800"
       }`}
     >
+      {/* 🔄 Invisible — nagre-refresh ng admin access tuwing nagbabago ang key */}
+      <AccessProbe key={accessProbeKey} onAccess={setLiveAccess} />
+
       {/* Sidebar — themed blue to match the app's accent color.
           On desktop, width transitions between w-72 (open) and w-0 (collapsed),
           so the main content area expands to fill the freed space.
