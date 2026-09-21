@@ -442,6 +442,16 @@ export default function PaymongoDashboardPage() {
     setStoredCardData((prev) => {
       if (!prev || prev.uid !== uid) return { uid, result };
 
+      // 🧊 SILENT REFRESH RULE: kapag may naipakita nang user para sa card na
+      // ito, ang bagong fetch ay HINDI puwedeng magpabalik sa "walang user",
+      // "loading", o "error" na estado. Iyon ang nagti-trigger ng skeleton /
+      // warning banner / transfers-skeleton = ang "reload" na nakikita.
+      // Kapag ganoon ang dumating, hawak pa rin ang lumang data at
+      // susubukan ulit sa susunod na realtime event.
+      if (prev.result.user && (!result.user || result.error || result.loading)) {
+        return prev;
+      }
+
       const sameUser = sameData(prev.result.user, result.user);
       const sameTx = sameData(prev.result.transactions, result.transactions);
 
