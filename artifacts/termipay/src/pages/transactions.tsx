@@ -110,6 +110,35 @@ function sameData(a: unknown, b: unknown): boolean {
   }
 }
 
+// Kunin ang listahan kahit array ang response o may wrapper ({ data: [...] }).
+function extractList(value: unknown): any[] | null {
+  if (Array.isArray(value)) return value;
+  const v = value as any;
+  if (v && Array.isArray(v.data)) return v.data;
+  if (v && Array.isArray(v.transactions)) return v.transactions;
+  if (v && Array.isArray(v.items)) return v.items;
+  return null;
+}
+
+// Hanapin ang route ng fare transaction: route_id / routeId, o kung ang
+// transaction mismo ay may origin/destination.
+function findRouteFor(tx: any, routes: FareRoute[]): FareRoute | null {
+  const routeId = tx?.route_id ?? tx?.routeId;
+  if (routeId != null && routeId !== "") {
+    const found = routes.find((route) => route.id === Number(routeId));
+    if (found) return found;
+  }
+  if (tx?.origin || tx?.destination) {
+    return {
+      id: -1,
+      origin: tx.origin ?? "—",
+      destination: tx.destination ?? "—",
+      fare_amount: Number(tx.amount),
+    };
+  }
+  return null;
+}
+
 function normalizeTxType(type?: string | null): TxType {
   const key = (type ?? "").toLowerCase().replace(/[\s_-]/g, "");
   if (key === "fare") return "Fare";
@@ -253,10 +282,7 @@ function ReceiptModal({
   const netAmount = getNetAmount(tx);
   const heroAmount = !isFare && netAmount != null ? formatAmount(netAmount) : originalAmount;
 
-  const matchedRoute =
-    isFare && tx.route_id
-      ? routes.find((route) => route.id === Number(tx.route_id)) ?? null
-      : null;
+  const matchedRoute = isFare ? findRouteFor(tx, routes) : null;
 
   const paymentMethodLabel = !isFare ? formatPaymentMethod(tx.payment_method) : null;
   const paymentMethodLogo = !isFare ? getPaymentMethodLogo(tx.payment_method) : null;
@@ -755,12 +781,11 @@ export default function TransactionsPage() {
   // 🧊 Panatilihin ang huling data habang naglo-load ang bago (hal. nagpalit ng
   // search/status filter). Kaya hindi na nagfla-flash ang skeleton / "No records".
   const lastTransactionsRef = useRef<any[] | null>(null);
-  if (Array.isArray(transactions)) {
-    lastTransactionsRef.current = transactions;
+  const currentList = extractList(transactions);
+  if (currentList) {
+    lastTransactionsRef.current = currentList;
   }
-  const rawTransactionList: any[] = Array.isArray(transactions)
-    ? transactions
-    : lastTransactionsRef.current ?? EMPTY_LIST;
+  const rawTransactionList: any[] = currentList ?? lastTransactionsRef.current ?? EMPTY_LIST;
 
   // Skeleton: unang load lang, kapag wala pang naipakitang data kahit isang beses.
   const showListSkeleton = isLoading && lastTransactionsRef.current === null;
@@ -1198,10 +1223,7 @@ export default function TransactionsPage() {
                             ...(financialById[String(rawTx?.id)] ?? {}),
                           };
 
-                          const matchedRoute =
-                            isFareView && tx.route_id
-                              ? routes.find((route) => route.id === Number(tx.route_id)) ?? null
-                              : null;
+                          const matchedRoute = isFareView ? findRouteFor(tx, routes) : null;
 
                           const paymentMethodLabel = !isFareView
                             ? formatPaymentMethod(tx.payment_method)
@@ -1236,14 +1258,12 @@ export default function TransactionsPage() {
                                     {matchedRoute ? matchedRoute.origin : "—"}
                                   </TableCell>
                                   <TableCell className="w-10 px-0 text-center">
-                                    {matchedRoute && (
-                                      <ArrowLeftRight
-                                        className={`mx-auto h-3.5 w-3.5 ${
-                                          isDark ? "text-slate-500" : "text-slate-400"
-                                        }`}
-                                        aria-label="Both directions"
-                                      />
-                                    )}
+                                    <ArrowLeftRight
+                                      className={`mx-auto h-4 w-4 ${
+                                        isDark ? "text-slate-400" : "text-slate-500"
+                                      }`}
+                                      aria-label="Both directions"
+                                    />
                                   </TableCell>
                                   <TableCell className="text-xs">
                                     {matchedRoute ? matchedRoute.destination : "—"}
