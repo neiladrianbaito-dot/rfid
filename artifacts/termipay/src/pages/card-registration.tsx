@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/card";
 
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -109,6 +110,40 @@ async function fetchPsgc(path: string): Promise<PsgcOption[]> {
   return normalizePsgc(data);
 }
 
+// 🧩 Builds the human-readable full address string from the individual
+// street / region / province / city / barangay / zip fields. Used both to
+// auto-fill the "Full Address" textarea, and as a fallback when submitting
+// in case the textarea was somehow left empty.
+function buildFullAddress(fields: {
+  streetAddress: string;
+  barangayName: string;
+  cityName: string;
+  provinceName: string;
+  regionName: string;
+  zipCode: string;
+}): string {
+  const {
+    streetAddress,
+    barangayName,
+    cityName,
+    provinceName,
+    regionName,
+    zipCode,
+  } = fields;
+
+  return [
+    streetAddress.trim(),
+    barangayName,
+    cityName,
+    provinceName,
+    regionName && zipCode
+      ? `${regionName} ${zipCode}`
+      : regionName || zipCode,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
 const INITIAL_FORM = {
   cardUid: "",
   fullName: "",
@@ -130,6 +165,9 @@ const INITIAL_FORM = {
 
   barangayCode: "",
   barangayName: "",
+
+  // 📝 Auto-generated (but user-editable) full address textarea value.
+  fullAddress: "",
 };
 
 function SuccessTitle({ text }: { text: string }) {
@@ -730,6 +768,39 @@ export default function CardRegistrationPage() {
   }, [form.cityCode, toast]);
 
   /*
+   * AUTO-FILL FULL ADDRESS
+   *
+   * Every time the street address or any of the location dropdowns change,
+   * rebuild the "Full Address" textarea value automatically. The textarea
+   * itself stays editable (onChange calls updateForm("fullAddress", ...)),
+   * but any dropdown change will re-sync it — this matches "auto-fill based
+   * on the selected dropdowns" behavior.
+   */
+  useEffect(() => {
+    const computed = buildFullAddress({
+      streetAddress: form.streetAddress,
+      barangayName: form.barangayName,
+      cityName: form.cityName,
+      provinceName: form.provinceName,
+      regionName: form.regionName,
+      zipCode: form.zipCode,
+    });
+
+    setForm((current) => ({
+      ...current,
+      fullAddress: computed,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    form.streetAddress,
+    form.barangayName,
+    form.cityName,
+    form.provinceName,
+    form.regionName,
+    form.zipCode,
+  ]);
+
+  /*
    * OPEN MODAL
    */
   const openModal = useCallback(() => {
@@ -1150,19 +1221,22 @@ export default function CardRegistrationPage() {
       const idImagePath =
         uploadedImage?.publicUrl ?? null;
 
-      const fullAddress = [
-        form.streetAddress.trim(),
-        form.barangayName,
-        form.cityName,
-        form.provinceName,
-        form.regionName &&
-        form.zipCode
-          ? `${form.regionName} ${form.zipCode}`
-          : form.regionName ||
-            form.zipCode,
-      ]
-        .filter(Boolean)
-        .join(", ");
+      /*
+       * FULL ADDRESS
+       * Uses the (auto-filled, but user-editable) textarea value.
+       * Falls back to a freshly computed string in the unlikely case the
+       * textarea is empty.
+       */
+      const fullAddress =
+        form.fullAddress.trim() ||
+        buildFullAddress({
+          streetAddress: form.streetAddress,
+          barangayName: form.barangayName,
+          cityName: form.cityName,
+          provinceName: form.provinceName,
+          regionName: form.regionName,
+          zipCode: form.zipCode,
+        });
 
       /*
        * REGISTER USER
@@ -1833,7 +1907,8 @@ export default function CardRegistrationPage() {
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2 sm:col-span-2">
+                  {/* Row 1: Street Address + Region (equal width) */}
+                  <div className="space-y-2">
                     <label className="text-sm font-medium">
                       Street Address <span className="text-xs font-normal text-muted-foreground">(Optional)</span>
                     </label>
@@ -1869,6 +1944,7 @@ export default function CardRegistrationPage() {
                     />
                   </div>
 
+                  {/* Row 2: Province + City / Municipality */}
                   <div className="space-y-2">
                     <label className="text-sm font-medium">
                       Province
@@ -1913,6 +1989,7 @@ export default function CardRegistrationPage() {
                     />
                   </div>
 
+                  {/* Row 3: Barangay + ZIP Code */}
                   <div className="space-y-2">
                     <label className="text-sm font-medium">
                       Barangay
@@ -1956,6 +2033,35 @@ export default function CardRegistrationPage() {
                       maxLength={10}
                       disabled={isSubmitting}
                     />
+                  </div>
+
+                  {/* Row 4: Full Address — auto-filled from the fields above, editable */}
+                  <div className="space-y-2 sm:col-span-2">
+                    <label className="text-sm font-medium">
+                      Full Address
+                    </label>
+
+                    <Textarea
+                      value={form.fullAddress}
+                      onChange={(event) =>
+                        updateForm(
+                          "fullAddress",
+                          event.target.value
+                        )
+                      }
+                      placeholder="Auto-filled from the fields above — you can still edit it"
+                      disabled={isSubmitting}
+                      rows={3}
+                      className="resize-none"
+                    />
+
+                    <p
+                      className={`text-xs ${
+                        isDark ? "text-slate-500" : "text-slate-400"
+                      }`}
+                    >
+                      Auto-generated from Street, Region, Province, City/Municipality, Barangay, and ZIP Code. You can edit it manually if needed.
+                    </p>
                   </div>
                 </div>
               </div>
