@@ -51,6 +51,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTheme } from "@/hooks/use-theme";
+import { useQueryClient } from "@tanstack/react-query";
 
 // 🔄 REALTIME: same hook na ginagamit sa Card Registration / Transactions page.
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
@@ -353,6 +354,16 @@ function CurrentDateTime({ isDark }: { isDark: boolean }) {
   );
 }
 
+// Kinukuha ang react-query client nang hindi nagko-crash kung sakaling
+// walang QueryClientProvider sa itaas ng Layout.
+function useSafeQueryClient() {
+  try {
+    return useQueryClient();
+  } catch {
+    return null;
+  }
+}
+
 type LiveAccess = { canManage: boolean; loaded: boolean };
 
 // 🔄 REALTIME ACCESS PROBE
@@ -384,6 +395,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { toast } = useToast();
   const { isDark, toggleTheme } = useTheme();
+  const queryClient = useSafeQueryClient();
 
   // 🔒 ADMIN ACCESS (LIVE):
   //  - liveAccess: laging updated ang value dahil sa <AccessProbe /> sa baba.
@@ -569,6 +581,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // object (kaya hindi na kailangan i-refresh ang buong page).
   const [avatarRefreshKey, setAvatarRefreshKey] = useState(0);
 
+  // 🔄 REFRESH LAYOUT — muling binabasa ang lahat ng galing sa server:
+  //   • refetchUser()      → pangalan, username, role
+  //   • avatarRefreshKey   → profile picture
+  //   • accessProbeKey     → view_only ↔ manage permission
+  //   • invalidateQueries  → anumang react-query data (kasama ang access
+  //                          kung react-query ang gamit ng useAdminAccess)
+  // Tinatawag ito (1) tuwing may realtime event sa `admins`, at (2) tuwing
+  // ki-click ang profile para buksan ang modal — kaya laging sariwa ang
+  // laman ng modal pagbukas, kahit hindi nag-refresh ang page.
+  function refreshLayout() {
+    Promise.resolve(refetchUser()).catch(() => {
+      /* not critical */
+    });
+    setAvatarRefreshKey((key) => key + 1);
+    setAccessProbeKey((key) => key + 1);
+    queryClient?.invalidateQueries();
+  }
+
   // 🔄 REALTIME: pag may INSERT / UPDATE / DELETE sa `admins` table —
   //   • refetchUser()  → napapalitan agad ang pangalan, username at role
   //     sa header at sa profile modal
@@ -579,11 +609,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   //   • accessProbeKey → muling binabasa ang access (view_only ↔ manage),
   //     kaya agad na nagla-lock / nag-u-unlock ang profile modal
   useRealtimeRefetch(["admins"], () => {
-    Promise.resolve(refetchUser()).catch(() => {
-      /* not critical */
-    });
-    setAvatarRefreshKey((key) => key + 1);
-    setAccessProbeKey((key) => key + 1);
+    refreshLayout();
   });
 
   useEffect(() => {
@@ -1315,7 +1341,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </p>
             </div>
 
-            <Dialog open={profileModalOpen} onOpenChange={setProfileModalOpen}>
+            <Dialog
+              open={profileModalOpen}
+              onOpenChange={(open) => {
+                // 🔄 Pag ki-click ang profile → auto-refresh ang layout
+                // (user info, avatar, at view_only/manage access).
+                if (open) refreshLayout();
+                setProfileModalOpen(open);
+              }}
+            >
               <DialogTrigger asChild>
                 <motion.div
                   whileHover={{ scale: 1.05 }}
