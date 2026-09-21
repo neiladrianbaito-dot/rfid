@@ -10,7 +10,6 @@ import {
   Clock,
   Smartphone,
   SearchX,
-  Loader2,
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import { motion } from "framer-motion";
@@ -37,8 +36,22 @@ interface TransactionBreakdown {
   timestamp: string;
 }
 
-const MAX_POLL_ATTEMPTS = 6; // ~12 seconds of polling
-const POLL_INTERVAL_MS = 2000;
+// Poll faster so the data shows up sooner (~10 seconds max).
+const MAX_POLL_ATTEMPTS = 15;
+const POLL_INTERVAL_MS = 700;
+
+// ── Skeleton placeholder ────────────────────────────────────────────────────
+// Same height as the text it replaces, so nothing moves when data arrives.
+function Skeleton({ isDark, className = "w-16" }: { isDark: boolean; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block h-3.5 rounded animate-pulse ${className} ${
+        isDark ? "bg-slate-700/70" : "bg-slate-200"
+      }`}
+    />
+  );
+}
 
 export default function GCashPaymentSuccessPage() {
   const { isDark } = useTheme();
@@ -55,9 +68,9 @@ export default function GCashPaymentSuccessPage() {
   const amountParam = params.get("amount");
   const fallbackAmount = Math.abs(Number(amountParam) || 0);
   const paidAtParam = params.get("paidAt");
-  const fallbackPaidAt = paidAtParam ? new Date(paidAtParam) : new Date();
+  const fallbackPaidAt = paidAtParam ? new Date(paidAtParam) : null;
 
-  // ✅ Walang laman o invalid ang params (di galing sa Xendit / direct visit
+  // Walang laman o invalid ang params (di galing sa Xendit / direct visit
   // sa URL na walang token) → hindi valid na payment confirmation ito.
   const isValidPaymentData =
     !!referenceNo &&
@@ -72,10 +85,10 @@ export default function GCashPaymentSuccessPage() {
       : "Page Not Found — TermiPay";
   }, [isValidPaymentData]);
 
-  // Fetch the authoritative fee/vat/net breakdown from Supabase, since the
-  // webhook (which inserts the row and computes these) may still be in
-  // flight when the browser lands here from Xendit's redirect. Poll a few
-  // times before giving up and just showing the gross amount.
+  // Fetch the authoritative fee/vat/net breakdown from Supabase. The webhook
+  // (which inserts the row and computes these) may still be in flight when the
+  // browser lands here, so poll a few times. Loading only finishes once the
+  // row is COMPLETE (or we run out of attempts), so all values appear together.
   useEffect(() => {
     if (!isValidPaymentData || !referenceNo) {
       setIsLoadingTxn(false);
@@ -84,39 +97,50 @@ export default function GCashPaymentSuccessPage() {
 
     let cancelled = false;
     let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     const fetchTxn = async () => {
-      const { data, error } = await supabase
-        .from("transactions")
-        .select("amount, fee_amount, vat_amount, net_amount, timestamp")
-        .eq("external_id", referenceNo)
-        .maybeSingle();
+      let row: TransactionBreakdown | null = null;
+
+      try {
+        const { data, error } = await supabase
+          .from("transactions")
+          .select("amount, fee_amount, vat_amount, net_amount, timestamp")
+          .eq("external_id", referenceNo)
+          .maybeSingle();
+
+        if (error) console.error("Failed to fetch transaction breakdown:", error);
+        row = (data as TransactionBreakdown | null) ?? null;
+      } catch (err) {
+        console.error("Failed to fetch transaction breakdown:", err);
+      }
 
       if (cancelled) return;
 
-      if (error) {
-        console.error("Failed to fetch transaction breakdown:", error);
-      }
+      if (row) setTxn(row);
 
-      if (data) {
-        setTxn(data as TransactionBreakdown);
+      const isComplete =
+        !!row &&
+        row.fee_amount !== null &&
+        row.vat_amount !== null &&
+        row.net_amount !== null;
+
+      attempts += 1;
+
+      if (isComplete || attempts >= MAX_POLL_ATTEMPTS) {
+        // Done: either we have everything, or we give up and show "Pending".
         setIsLoadingTxn(false);
         return;
       }
 
-      attempts += 1;
-      if (attempts < MAX_POLL_ATTEMPTS) {
-        setTimeout(fetchTxn, POLL_INTERVAL_MS);
-      } else {
-        // Webhook hasn't landed yet — fall back to showing gross amount only.
-        setIsLoadingTxn(false);
-      }
+      timer = setTimeout(fetchTxn, POLL_INTERVAL_MS);
     };
 
     fetchTxn();
 
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [isValidPaymentData, referenceNo]);
 
@@ -130,7 +154,7 @@ export default function GCashPaymentSuccessPage() {
     }
   };
 
-  // ✅ 404 fallback — kapag walang valid token/payment data mula sa Xendit
+  // 404 fallback — kapag walang valid token/payment data mula sa Xendit
   if (!isValidPaymentData) {
     return (
       <div
@@ -193,14 +217,47 @@ export default function GCashPaymentSuccessPage() {
     );
   }
 
-  // Prefer values fetched from Supabase (authoritative); fall back to the
-  // gross amount from the URL if the webhook hasn't landed yet.
+  // Prefer values fetched from Supabase (authoritative); the gross amount from
+  // the URL is the same number, so the big amount never changes or jumps.
   const displayAmount = txn?.amount ?? fallbackAmount;
   const feeAmount = txn?.fee_amount ?? null;
   const vatAmount = txn?.vat_amount ?? null;
   const netAmount = txn?.net_amount ?? null;
-  const displayPaidAt = txn?.timestamp ? new Date(txn.timestamp) : fallbackPaidAt;
-  const hasBreakdown = feeAmount !== null && vatAmount !== null && netAmount !== null;
+  const paidAt = txn?.timestamp ? new Date(txn.timestamp) : fallbackPaidAt;
+
+  const labelMuted = isDark ? "text-slate-400" : "text-slate-500";
+  const valueStrong = isDark ? "text-slate-200" : "text-slate-800";
+
+  // One helper for every value that comes from the database. While loading it
+  // is a same-size skeleton; when loaded, ALL of them fade in together.
+  const renderMoney = (value: number | null, skeletonWidth = "w-16") => {
+    if (isLoadingTxn) return <Skeleton isDark={isDark} className={skeletonWidth} />;
+    if (value === null) {
+      return (
+        <span className={`fade-in italic ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+          Pending
+        </span>
+      );
+    }
+    return <span className="fade-in">{formatPeso(value)}</span>;
+  };
+
+  const renderDate = () => {
+    if (isLoadingTxn) return <Skeleton isDark={isDark} className="w-24" />;
+    if (!paidAt || Number.isNaN(paidAt.getTime())) {
+      return <span className="fade-in">—</span>;
+    }
+    return (
+      <span className="fade-in">
+        {paidAt.toLocaleString("en-US", {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })}
+      </span>
+    );
+  };
 
   return (
     <div
@@ -216,6 +273,16 @@ export default function GCashPaymentSuccessPage() {
           100% { transform: scale(1); opacity: 1; }
         }
         .check-pop { animation: check-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+        @keyframes fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        .fade-in { animation: fade-in 0.25s ease-out both; }
+
+        @media (prefers-reduced-motion: reduce) {
+          .check-pop, .fade-in { animation: none; }
+        }
       `}</style>
 
       <motion.div
@@ -250,7 +317,7 @@ export default function GCashPaymentSuccessPage() {
             >
               Payment Successful
             </CardTitle>
-            <p className={`text-xs sm:text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            <p className={`text-xs sm:text-sm mt-1 ${labelMuted}`}>
               Your fare has been paid via GCash
             </p>
           </CardHeader>
@@ -279,108 +346,85 @@ export default function GCashPaymentSuccessPage() {
             {/* Divider */}
             <div className={`h-px w-full mb-4 ${isDark ? "bg-slate-800" : "bg-slate-200"}`} />
 
-            {/* Fee / VAT / Net breakdown */}
-            {isLoadingTxn ? (
-              <div className="flex items-center justify-center gap-2 py-3 mb-1">
-                <Loader2 size={14} className={`animate-spin ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  Kinukuha ang transaction breakdown...
-                </span>
-              </div>
-            ) : hasBreakdown ? (
-              <div
-                className={`rounded-lg p-3 mb-4 space-y-2 ${
-                  isDark ? "bg-slate-800/50" : "bg-slate-50"
+            {/* Fee / VAT / Net breakdown.
+                ALWAYS rendered with the same structure, so its height is fixed
+                from the first paint. Only the values inside swap from skeleton
+                → real numbers (or "Pending"), so the card never grows/jumps. */}
+            <div
+              className={`rounded-lg p-3 mb-4 space-y-2 ${
+                isDark ? "bg-slate-800/50" : "bg-slate-50"
+              }`}
+              aria-busy={isLoadingTxn}
+            >
+              <p
+                className={`text-[10px] font-semibold uppercase tracking-widest mb-1 ${
+                  isDark ? "text-slate-500" : "text-slate-400"
                 }`}
               >
-                <p
-                  className={`text-[10px] font-semibold uppercase tracking-widest mb-1 ${
-                    isDark ? "text-slate-500" : "text-slate-400"
-                  }`}
-                >
-                  Transaction Breakdown
-                </p>
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs sm:text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                    Transaction Amount
-                  </span>
-                  <span className={`text-xs sm:text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                    {formatPeso(displayAmount)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs sm:text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                    Transaction Fee
-                  </span>
-                  <span className={`text-xs sm:text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                    {formatPeso(feeAmount as number)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs sm:text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                    Transaction VAT
-                  </span>
-                  <span className={`text-xs sm:text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                    {formatPeso(vatAmount as number)}
-                  </span>
-                </div>
-                <div className={`h-px w-full my-1 ${isDark ? "bg-slate-700" : "bg-slate-200"}`} />
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs sm:text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                    Net Amount Credited
-                  </span>
-                  <span className="text-xs sm:text-sm font-bold text-emerald-500">
-                    {formatPeso(netAmount as number)}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <p className={`text-[11px] text-center mb-4 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Available na ang fee at VAT breakdown sa iyong transaction history sa loob ng ilang minuto.
+                Transaction Breakdown
               </p>
-            )}
+              <div className="flex items-center justify-between min-h-[20px]">
+                <span className={`text-xs sm:text-sm ${labelMuted}`}>Transaction Amount</span>
+                <span className={`text-xs sm:text-sm font-medium ${valueStrong}`}>
+                  {formatPeso(displayAmount)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between min-h-[20px]">
+                <span className={`text-xs sm:text-sm ${labelMuted}`}>Transaction Fee</span>
+                <span className={`text-xs sm:text-sm font-medium ${valueStrong}`}>
+                  {renderMoney(feeAmount)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between min-h-[20px]">
+                <span className={`text-xs sm:text-sm ${labelMuted}`}>Transaction VAT</span>
+                <span className={`text-xs sm:text-sm font-medium ${valueStrong}`}>
+                  {renderMoney(vatAmount)}
+                </span>
+              </div>
+              <div className={`h-px w-full my-1 ${isDark ? "bg-slate-700" : "bg-slate-200"}`} />
+              <div className="flex items-center justify-between min-h-[20px]">
+                <span className={`text-xs sm:text-sm font-semibold ${valueStrong}`}>
+                  Net Amount Credited
+                </span>
+                <span className="text-xs sm:text-sm font-bold text-emerald-500">
+                  {renderMoney(netAmount, "w-20")}
+                </span>
+              </div>
+            </div>
 
             {/* Details list */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className={`flex items-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <span className={`flex items-center gap-2 text-sm ${labelMuted}`}>
                   <Smartphone size={15} /> Payment Method
                 </span>
-                <span className={`text-sm font-semibold flex items-center gap-1.5 ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                <span className={`text-sm font-semibold flex items-center gap-1.5 ${valueStrong}`}>
                   <img
                     src="/gcash.svg"
                     alt="GCash"
+                    width={48}
+                    height={48}
+                    decoding="async"
                     className="h-10 w-10 sm:h-12 sm:w-12 object-contain"
                   />
                   GCash
                 </span>
               </div>
 
-              <div className="flex items-center justify-between">
-                <span className={`flex items-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <div className="flex items-center justify-between min-h-[20px]">
+                <span className={`flex items-center gap-2 text-sm ${labelMuted}`}>
                   <Clock size={15} /> Date &amp; Time
                 </span>
-                <span className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                  {displayPaidAt.toLocaleString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </span>
+                <span className={`text-sm font-semibold ${valueStrong}`}>{renderDate()}</span>
               </div>
 
               <div className="flex items-center justify-between">
-                <span className={`shrink-0 text-xs sm:text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Reference No.
-                </span>
+                <span className={`shrink-0 text-xs sm:text-sm ${labelMuted}`}>Reference No.</span>
                 <button
                   onClick={handleCopy}
                   title={referenceNo || ""}
                   className={`flex items-center gap-1.5 min-w-0 max-w-[65%] text-xs sm:text-sm font-mono font-semibold rounded px-1.5 py-0.5 transition-colors ${
-                    isDark
-                      ? "text-blue-400 hover:bg-slate-800"
-                      : "text-blue-600 hover:bg-slate-100"
+                    isDark ? "text-blue-400 hover:bg-slate-800" : "text-blue-600 hover:bg-slate-100"
                   }`}
                   data-testid="button-copy-reference"
                 >
@@ -390,13 +434,20 @@ export default function GCashPaymentSuccessPage() {
               </div>
             </div>
 
-            {copied && (
-              <p className="text-right text-[11px] text-emerald-500 mt-1 -mb-2">Copied!</p>
-            )}
+            {/* "Copied!" — space is ALWAYS reserved and only the opacity
+                changes, so showing it no longer pushes the layout down. */}
+            <p
+              aria-live="polite"
+              className={`h-4 mt-1 text-right text-[11px] leading-4 text-emerald-500 transition-opacity duration-200 ${
+                copied ? "opacity-100" : "opacity-0"
+              }`}
+            >
+              Copied!
+            </p>
 
             {/* Powered by note */}
             <div
-              className={`flex items-center justify-center gap-1.5 mt-6 text-[10px] font-semibold uppercase tracking-widest ${
+              className={`flex items-center justify-center gap-1.5 mt-4 text-[10px] font-semibold uppercase tracking-widest ${
                 isDark ? "text-slate-600" : "text-slate-400"
               }`}
             >
@@ -404,7 +455,10 @@ export default function GCashPaymentSuccessPage() {
               <img
                 src="/xendit.png"
                 alt="Xendit"
-                className="h-3.5 w-auto max-w-[60px] object-contain"
+                width={60}
+                height={14}
+                decoding="async"
+                className="h-3.5 w-[60px] object-contain object-left"
               />
             </div>
 
