@@ -10,17 +10,23 @@ import webhookRouter from "./webhook";
 import paymongoDashboardRouter from "./paymongoDashboard";
 import passwordResetRouter from "./password-reset.router";
 import { requireAuth } from "../middleware/require-auth";
-import activeRouteRouter from "./activeRoute"; // ← add import
-import publicRoutesRouter from "./publicRoutes"; // ← dagdag
-import auditRouter from "./audit"; // ← NEW: export audit logging route
-
+import activeRouteRouter from "./activeRoute";
+import publicRoutesRouter from "./publicRoutes";
+import auditRouter from "./audit";
+import { blockWritesForViewOnly } from "../middleware/permission-middleware";
 
 const router: IRouter = Router();
+
+// 0. VIEW-ONLY GUARD — must be mounted BEFORE any router that defines
+//    /admin/* paths (authRouter has /admin/staff, /admin/users/unlink-card).
+//    GET/HEAD/OPTIONS pass through untouched so view_only staff can still
+//    read everything; POST/PATCH/PUT/DELETE get a 403 with code VIEW_ONLY.
+router.use("/admin", blockWritesForViewOnly);
 
 // 1. Public Routes (No Login Required)
 router.use(healthRouter);
 router.use(authRouter);
-router.use(activeRouteRouter);  // ← add dito, bago ang requireAuth
+router.use(activeRouteRouter);  // ← bago ang requireAuth
 router.use(passwordResetRouter);
 router.use(rfidRouter);
 router.use(publicRoutesRouter);
@@ -31,10 +37,13 @@ router.use("/webhook", webhookRouter);
 
 // 3. Protected Routes (Login Required)
 router.use(requireAuth);
+router.use(blockWritesForViewOnly); // ← IDAGDAG ITO — sakop ang lahat ng POST/PATCH/PUT/DELETE
+                                     //    sa users/transactions/fareRoutes/dashboard/audit,
+                                     //    kahit ano pang path prefix ang gamitin nila
 router.use(usersRouter);
 router.use(transactionsRouter);
 router.use(fareRoutesRouter);
 router.use(dashboardRouter);
-router.use(auditRouter); // ← NEW: /audit/log-export, requires admin auth token
+router.use(auditRouter);
 
 export default router;

@@ -74,7 +74,11 @@ import { useTheme } from "@/hooks/use-theme";
 import { useToast } from "@/hooks/use-toast";
 
 // 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
-// at `loaded` (true kapag tapos na ma-fetch ang access info).
+// at `loaded` (true kapag tapos na ma-fetch ang access info). Ito ay UI
+// polish LANG — pinipili nito kung ano ang ipapakita sa screen. Ang tunay
+// na proteksyon ay nasa server (requireFullAccess middleware), kaya kahit
+// ma-bypass ang UI na ito, hindi tutuloy ang aktwal na request. Tingnan
+// ang createMutation.onError sa baba para sa server-side na 403 handling.
 import { useAdminAccess } from "@/hooks/use-admin-access";
 
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
@@ -450,7 +454,8 @@ export default function CardRegistrationPage() {
 
   // 🔒 ADMIN ACCESS: `canManage` = false kapag view_only.
   // `loaded` = true kapag tapos na ma-load ang access info (para hindi
-  // mag-flash ang button habang naglo-load pa).
+  // mag-flash ang button habang naglo-load pa). Ito ay client-side hint
+  // LANG para sa UI — ang totoong pader ay nasa server.
   const { canManage, loaded } = useAdminAccess();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -534,17 +539,39 @@ export default function CardRegistrationPage() {
           error?.status ??
           error?.response?.data?.status;
 
-        const message: string =
+        // 🔒 SERVER-ENFORCED PERMISSION CHECK — this is the real gate.
+        // If somehow the UI let a view_only staff member reach this point
+        // (e.g. stale state, direct API call, race condition), the backend
+        // middleware (requireFullAccess) rejects the write and replies with
+        // 403 + code "VIEW_ONLY". We surface that message verbatim instead
+        // of the generic "Registration Failed" text, and never blame it on
+        // bad input.
+        const code: string | undefined =
+          error?.response?.data?.code ?? error?.data?.code;
+
+        const serverMessage: string =
           error?.response?.data?.message ??
           error?.response?.data?.error ??
           error?.message ??
           "";
 
+        if (status === 403 && (code === "VIEW_ONLY" || code === "SUPER_ADMIN_ONLY")) {
+          toast({
+            title: code === "VIEW_ONLY" ? "View Only Access" : "Not Allowed",
+            description:
+              serverMessage ||
+              "Your account does not have permission to perform this action.",
+            variant: "destructive",
+          });
+
+          return;
+        }
+
         if (status === 409) {
           toast({
             title: "Card Already Registered",
             description:
-              message ||
+              serverMessage ||
               "This RFID card UID is already registered.",
             variant: "destructive",
           });
@@ -556,7 +583,7 @@ export default function CardRegistrationPage() {
           toast({
             title: "Invalid Registration",
             description:
-              message ||
+              serverMessage ||
               "Please check the information you entered.",
             variant: "destructive",
           });
@@ -567,7 +594,7 @@ export default function CardRegistrationPage() {
         toast({
           title: "Registration Failed",
           description:
-            message ||
+            serverMessage ||
             "Unable to register the card. Please try again.",
           variant: "destructive",
         });
@@ -804,7 +831,10 @@ export default function CardRegistrationPage() {
    * OPEN MODAL
    */
   const openModal = useCallback(() => {
-    // 🔒 Safety guard: bawal magbukas ng modal kapag view_only
+    // 🔒 Client-side hint lang ito: bawal magbukas ng modal kapag view_only.
+    // Kung may paraan man na ma-bypass ito, hindi pa rin tutuloy ang
+    // submit dahil sa server-side check sa handleSubmit at sa 403 handler
+    // sa itaas.
     if (!canManage) {
       return;
     }
@@ -1076,8 +1106,12 @@ export default function CardRegistrationPage() {
   ) {
     event.preventDefault();
 
-    // 🔒 Safety guard: kahit ma-bypass ang UI, hindi tutuloy ang submit
-    // kapag view_only ang admin.
+    // 🔒 Client-side hint lang: kahit ma-bypass ang UI, hindi tutuloy ang
+    // submit kapag view_only ang admin. Ito ay para hindi na mag-abala pa
+    // ng upload/network call kung alam na natin na tatanggihan ito. Ang
+    // TUNAY na proteksyon ay ang requireFullAccess middleware sa server —
+    // tingnan ang onError sa itaas para sa 403 handling kung sakaling may
+    // makalusot pa rin.
     if (!canManage) {
       toast({
         title: "View Only Access",
@@ -1309,6 +1343,9 @@ export default function CardRegistrationPage() {
 
       /*
        * REMOVE ORPHAN IMAGE IF API REGISTRATION FAILS
+       * (kasama na rito ang case kung na-reject ng server dahil view_only —
+       * kailangan pa rin tanggalin ang na-upload na image sa Supabase para
+       * walang naiwang orphan file)
        */
       if (uploadedImagePath) {
         try {
@@ -1325,6 +1362,10 @@ export default function CardRegistrationPage() {
         }
       }
 
+      // Note: kapag may error.response (galing sa API, kasama na ang 403
+      // VIEW_ONLY), ang toast ay ginagawa na sa loob ng createMutation's
+      // onError sa itaas — hindi na kailangan dito uli, para hindi
+      // duplicate ang toast.
       const message =
         error?.response?.data?.message ??
         error?.response?.data?.error ??
