@@ -52,6 +52,9 @@ import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTheme } from "@/hooks/use-theme";
 
+// 🔄 REALTIME: same hook na ginagamit sa Card Registration / Transactions page.
+import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
+
 // 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
 // at `loaded` (true kapag tapos na ma-fetch ang access info).
 import { useAdminAccess } from "@/hooks/use-admin-access";
@@ -526,6 +529,26 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // still be deleted.
   const currentAvatarStoragePath = currentAvatarPath || getStoragePathFromUrl(currentAvatarUrl);
 
+  // 🔄 REALTIME: tumataas ang bilang na ito tuwing may nagbago sa `admins`
+  // table. Nasa dependency list ng avatar effect sa baba, kaya muling
+  // binabasa ang avatar galing sa database kahit hindi nagbago ang `user`
+  // object (kaya hindi na kailangan i-refresh ang buong page).
+  const [avatarRefreshKey, setAvatarRefreshKey] = useState(0);
+
+  // 🔄 REALTIME: pag may INSERT / UPDATE / DELETE sa `admins` table —
+  //   • refetchUser()  → napapalitan agad ang pangalan, username at role
+  //     sa header at sa profile modal
+  //   • avatarRefreshKey → napapalitan agad ang profile picture
+  // Parehong pattern gaya ng ginagamit sa Card Registration page.
+  // (Tumatakbo rin ito pagkatapos mismo mag-save ng profile — ligtas ito,
+  // isa lang itong refetch at walang ibinabalik na write.)
+  useRealtimeRefetch(["admins"], () => {
+    Promise.resolve(refetchUser()).catch(() => {
+      /* not critical */
+    });
+    setAvatarRefreshKey((key) => key + 1);
+  });
+
   useEffect(() => {
     let cancelled = false;
 
@@ -586,7 +609,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, canEditProfile]);
+  }, [user, canEditProfile, avatarRefreshKey]);
 
   // Keep the header avatar in sync right after supabase.auth.updateUser()
   useEffect(() => {
@@ -616,7 +639,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // Reset the form when the modal opens, and drop any unsaved picture
   // selection when it closes. Only depends on the modal state, so a background
-  // refetch of `user` can't wipe what you're typing or the picture you picked.
+  // refetch of `user` (including the realtime one above) can't wipe what
+  // you're typing or the picture you picked.
   useEffect(() => {
     if (profileModalOpen) {
       setFormData({
