@@ -74,11 +74,15 @@ import { useTheme } from "@/hooks/use-theme";
 import { useToast } from "@/hooks/use-toast";
 
 // 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
-// at `loaded` (true kapag tapos na ma-fetch ang access info). Ito ay UI
-// polish LANG — pinipili nito kung ano ang ipapakita sa screen. Ang tunay
-// na proteksyon ay nasa server (requireFullAccess middleware), kaya kahit
-// ma-bypass ang UI na ito, hindi tutuloy ang aktwal na request. Tingnan
-// ang createMutation.onError sa baba para sa server-side na 403 handling.
+// at `loaded` (true kapag tapos na ma-fetch ang access info).
+//
+// ⚠️ TESTING MODE: `canManage` ay GINAGAMIT LANG dito para ipakita ang
+// "View Only" badge — HINDI na ito ginagamit para i-disable ang button o
+// itago ang modal. Layunin nito para makita ang ACTUAL na 403 message na
+// isasauli ng backend (requireFullAccess middleware) kapag nag-submit ang
+// isang view_only staff, sa halip na basta i-block sa UI layer bago pa
+// man umabot sa server. Ang server ang tunay na gate — ito ay open na
+// buong daan papunta dito para ma-verify natin yun.
 import { useAdminAccess } from "@/hooks/use-admin-access";
 
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
@@ -453,9 +457,12 @@ export default function CardRegistrationPage() {
   const { isDark } = useTheme();
 
   // 🔒 ADMIN ACCESS: `canManage` = false kapag view_only.
-  // `loaded` = true kapag tapos na ma-load ang access info (para hindi
-  // mag-flash ang button habang naglo-load pa). Ito ay client-side hint
-  // LANG para sa UI — ang totoong pader ay nasa server.
+  // `loaded` = true kapag tapos na ma-load ang access info.
+  //
+  // ⚠️ TESTING MODE: ginagamit LANG ito para sa "View Only" badge sa
+  // header. Hindi na ito ginagamit para i-block ang button, ang modal, o
+  // ang submit — layunin nito para dumaan ang request papunta sa server
+  // at doon makita ang aktwal na 403 message na sinasagot ng backend.
   const { canManage, loaded } = useAdminAccess();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -539,13 +546,11 @@ export default function CardRegistrationPage() {
           error?.status ??
           error?.response?.data?.status;
 
-        // 🔒 SERVER-ENFORCED PERMISSION CHECK — this is the real gate.
-        // If somehow the UI let a view_only staff member reach this point
-        // (e.g. stale state, direct API call, race condition), the backend
-        // middleware (requireFullAccess) rejects the write and replies with
-        // 403 + code "VIEW_ONLY". We surface that message verbatim instead
-        // of the generic "Registration Failed" text, and never blame it on
-        // bad input.
+        // 🔒 SERVER-ENFORCED PERMISSION CHECK — ito na ang aktwal na
+        // message na ibinalik ng requireFullAccess middleware sa backend
+        // kapag view_only ang gumawa ng request. Ipinapakita natin ito
+        // nang buo, hindi na-hardcode sa frontend, para makumpirma na
+        // totoong gumagana ang backend guard.
         const code: string | undefined =
           error?.response?.data?.code ?? error?.data?.code;
 
@@ -557,13 +562,24 @@ export default function CardRegistrationPage() {
 
         if (status === 403 && (code === "VIEW_ONLY" || code === "SUPER_ADMIN_ONLY")) {
           toast({
-            title: code === "VIEW_ONLY" ? "View Only Access" : "Not Allowed",
+            title: code === "VIEW_ONLY" ? "View Only Access (from server)" : "Not Allowed",
             description:
               serverMessage ||
               "Your account does not have permission to perform this action.",
             variant: "destructive",
           });
 
+          return;
+        }
+
+        if (status === 403) {
+          // Fallback: 403 pero walang kilalang code — ipakita pa rin ang
+          // aktwal na server message sa halip na generic text.
+          toast({
+            title: "Access Denied",
+            description: serverMessage || "You don't have permission to do this.",
+            variant: "destructive",
+          });
           return;
         }
 
@@ -829,16 +845,12 @@ export default function CardRegistrationPage() {
 
   /*
    * OPEN MODAL
+   *
+   * ⚠️ TESTING MODE: tinanggal ang canManage guard dito. Bubukas na ang
+   * modal kahit view_only ang admin, para makapag-punan sila ng form at
+   * ma-submit — doon lalabas ang aktwal na 403 mula sa backend.
    */
   const openModal = useCallback(() => {
-    // 🔒 Client-side hint lang ito: bawal magbukas ng modal kapag view_only.
-    // Kung may paraan man na ma-bypass ito, hindi pa rin tutuloy ang
-    // submit dahil sa server-side check sa handleSubmit at sa 403 handler
-    // sa itaas.
-    if (!canManage) {
-      return;
-    }
-
     setForm(INITIAL_FORM);
 
     setIdImageFile(null);
@@ -853,7 +865,7 @@ export default function CardRegistrationPage() {
     }
 
     setIsModalOpen(true);
-  }, [canManage]);
+  }, []);
 
   /*
    * CLOSE MODAL
@@ -1100,28 +1112,18 @@ export default function CardRegistrationPage() {
 
   /*
    * SUBMIT
+   *
+   * ⚠️ TESTING MODE: tinanggal ang maagang client-side `if (!canManage)
+   * return` na dating pumipigil bago pa man mag-fire ang request. Ngayon,
+   * kahit view_only, tutuloy ang request papunta sa API — kung view_only
+   * nga siya, ang requireFullAccess middleware sa BACKEND ang tatanggi
+   * nito (403), at ang message mula doon ang lalabas via toast (tingnan
+   * ang createMutation.onError sa itaas).
    */
   async function handleSubmit(
     event: React.FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
-
-    // 🔒 Client-side hint lang: kahit ma-bypass ang UI, hindi tutuloy ang
-    // submit kapag view_only ang admin. Ito ay para hindi na mag-abala pa
-    // ng upload/network call kung alam na natin na tatanggihan ito. Ang
-    // TUNAY na proteksyon ay ang requireFullAccess middleware sa server —
-    // tingnan ang onError sa itaas para sa 403 handling kung sakaling may
-    // makalusot pa rin.
-    if (!canManage) {
-      toast({
-        title: "View Only Access",
-        description:
-          "You don't have permission to register cards.",
-        variant: "destructive",
-      });
-
-      return;
-    }
 
     if (isSubmitting) {
       return;
@@ -1442,15 +1444,18 @@ export default function CardRegistrationPage() {
           </p>
         </div>
 
-        {/* Register button remains visible; view-only users see it disabled. */}
+        {/*
+          ⚠️ TESTING MODE: laging naka-enable ang button ngayon, kahit
+          view_only. Ang "View Only" badge ay indicator/info na lang —
+          hindi na ito nagbablock. Ang totoong tanggi ay galing na sa
+          backend 403 response, makikita sa toast pagkatapos mag-submit.
+        */}
         {loaded && (
           <div className="flex items-center gap-2">
             <Button
               onClick={openModal}
-              disabled={!canManage}
-              aria-disabled={!canManage}
-              className={`gap-2 ${!canManage ? "cursor-not-allowed opacity-50" : ""}`}
-              title={!canManage ? "View Only" : "Register a new card"}
+              className="gap-2"
+              title="Register a new card"
             >
               <Plus className="h-4 w-4" />
               Register New Card
@@ -1575,580 +1580,584 @@ export default function CardRegistrationPage() {
         </Card>
       </motion.div>
 
-      {/* REGISTRATION MODAL — 🔒 hindi na-re-render kapag view_only */}
-      {canManage && (
-        <Dialog
-          open={isModalOpen}
-          onOpenChange={(open) => {
-            if (!open && !isSubmitting) {
-              closeModal();
-            }
-          }}
+      {/*
+        REGISTRATION MODAL
+        ⚠️ TESTING MODE: laging naka-render, wala nang `{canManage && (...)}`
+        gate. Ang view_only staff ay makakabukas at makakapunan ng form,
+        pero pag nag-submit, ang backend ang tatanggi at ang server message
+        ang lalabas sa toast.
+      */}
+      <Dialog
+        open={isModalOpen}
+        onOpenChange={(open) => {
+          if (!open && !isSubmitting) {
+            closeModal();
+          }
+        }}
+      >
+        <DialogContent
+          className={`max-h-[92vh] overflow-y-auto sm:max-w-4xl ${
+            isDark
+              ? "border-slate-800 bg-slate-950"
+              : "bg-white"
+          }`}
         >
-          <DialogContent
-            className={`max-h-[92vh] overflow-y-auto sm:max-w-4xl ${
-              isDark
-                ? "border-slate-800 bg-slate-950"
-                : "bg-white"
-            }`}
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              Register New RFID Card
+            </DialogTitle>
+          </DialogHeader>
+
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-6"
           >
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                Register New RFID Card
-              </DialogTitle>
-            </DialogHeader>
-
-            <form
-              onSubmit={handleSubmit}
-              className="space-y-6"
+            {/* Legend for the red asterisks */}
+            <p
+              className={`text-xs ${
+                isDark ? "text-slate-400" : "text-slate-500"
+              }`}
             >
-              {/* Legend for the red asterisks */}
-              <p
-                className={`text-xs ${
-                  isDark ? "text-slate-400" : "text-slate-500"
-                }`}
-              >
-                Fields marked with <RequiredMark /> are required.
-              </p>
+              Fields marked with <RequiredMark /> are required.
+            </p>
 
-              {/* CARD INFORMATION */}
+            {/* CARD INFORMATION */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-4 w-4 text-cyan-500" />
+
+                <h3 className="font-semibold">
+                  Card Information
+                </h3>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    RFID Card UID
+                    <RequiredMark />
+                  </label>
+
+                  <Input
+                    value={form.cardUid}
+                    onChange={(event) =>
+                      updateForm(
+                        "cardUid",
+                        event.target.value
+                          .toUpperCase()
+                          .replace(/[^A-Z0-9]/g, "")
+                          .slice(0, 8)
+                      )
+                    }
+                    placeholder="8-character UID"
+                    disabled={isSubmitting}
+                    maxLength={8}
+                    inputMode="text"
+                    aria-required="true"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Card Type
+                    <RequiredMark />
+                  </label>
+
+                  <Select
+                    value={form.type}
+                    onValueChange={(value) =>
+                      updateForm(
+                        "type",
+                        value
+                      )
+                    }
+                    disabled={isSubmitting}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+
+                    <SelectContent>
+                      <SelectItem value="Regular">
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Regular")}`} />
+                          <span className={getTypeTextColor("Regular", isDark)}>
+                            Regular
+                          </span>
+                        </span>
+                      </SelectItem>
+
+                      <SelectItem value="Student">
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Student")}`} />
+                          <span className={getTypeTextColor("Student", isDark)}>
+                            Student
+                          </span>
+                        </span>
+                      </SelectItem>
+
+                      <SelectItem value="Senior">
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Senior")}`} />
+                          <span className={getTypeTextColor("Senior", isDark)}>
+                            Senior
+                          </span>
+                        </span>
+                      </SelectItem>
+
+                      <SelectItem value="PWD">
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${getTypeDotColor("PWD")}`} />
+                          <span className={getTypeTextColor("PWD", isDark)}>
+                            PWD
+                          </span>
+                        </span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* ID IMAGE */}
+            {requiresIdImage && (
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <CreditCard className="h-4 w-4 text-cyan-500" />
+                  <IdCard className="h-4 w-4 text-cyan-500" />
 
                   <h3 className="font-semibold">
-                    Card Information
+                    ID Verification
                   </h3>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      RFID Card UID
-                      <RequiredMark />
-                    </label>
+                <div
+                  className={`rounded-xl border p-4 ${
+                    isDark
+                      ? "border-slate-800 bg-slate-900/40"
+                      : "border-slate-200 bg-slate-50"
+                  }`}
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row">
+                    {idImagePreview ? (
+                      <div className="relative">
+                        <img
+                          src={idImagePreview}
+                          alt="ID preview"
+                          className="h-40 w-64 rounded-lg border object-cover"
+                        />
 
-                    <Input
-                      value={form.cardUid}
-                      onChange={(event) =>
-                        updateForm(
-                          "cardUid",
-                          event.target.value
-                            .toUpperCase()
-                            .replace(/[^A-Z0-9]/g, "")
-                            .slice(0, 8)
-                        )
-                      }
-                      placeholder="8-character UID"
-                      disabled={isSubmitting}
-                      maxLength={8}
-                      inputMode="text"
-                      aria-required="true"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Card Type
-                      <RequiredMark />
-                    </label>
-
-                    <Select
-                      value={form.type}
-                      onValueChange={(value) =>
-                        updateForm(
-                          "type",
-                          value
-                        )
-                      }
-                      disabled={isSubmitting}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-
-                      <SelectContent>
-                        <SelectItem value="Regular">
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Regular")}`} />
-                            <span className={getTypeTextColor("Regular", isDark)}>
-                              Regular
-                            </span>
-                          </span>
-                        </SelectItem>
-
-                        <SelectItem value="Student">
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Student")}`} />
-                            <span className={getTypeTextColor("Student", isDark)}>
-                              Student
-                            </span>
-                          </span>
-                        </SelectItem>
-
-                        <SelectItem value="Senior">
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("Senior")}`} />
-                            <span className={getTypeTextColor("Senior", isDark)}>
-                              Senior
-                            </span>
-                          </span>
-                        </SelectItem>
-
-                        <SelectItem value="PWD">
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${getTypeDotColor("PWD")}`} />
-                            <span className={getTypeTextColor("PWD", isDark)}>
-                              PWD
-                            </span>
-                          </span>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-
-              {/* ID IMAGE */}
-              {requiresIdImage && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <IdCard className="h-4 w-4 text-cyan-500" />
-
-                    <h3 className="font-semibold">
-                      ID Verification
-                    </h3>
-                  </div>
-
-                  <div
-                    className={`rounded-xl border p-4 ${
-                      isDark
-                        ? "border-slate-800 bg-slate-900/40"
-                        : "border-slate-200 bg-slate-50"
-                    }`}
-                  >
-                    <div className="flex flex-col gap-4 sm:flex-row">
-                      {idImagePreview ? (
-                        <div className="relative">
-                          <img
-                            src={idImagePreview}
-                            alt="ID preview"
-                            className="h-40 w-64 rounded-lg border object-cover"
-                          />
-
-                          <button
-                            type="button"
-                            onClick={clearImage}
-                            disabled={isSubmitting}
-                            className={`absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm ${
-                              isDark
-                                ? "border-slate-700 bg-slate-900 text-white"
-                                : "border-slate-200 bg-white text-slate-700"
-                            }`}
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ) : (
                         <button
                           type="button"
+                          onClick={clearImage}
+                          disabled={isSubmitting}
+                          className={`absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border shadow-sm ${
+                            isDark
+                              ? "border-slate-700 bg-slate-900 text-white"
+                              : "border-slate-200 bg-white text-slate-700"
+                          }`}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          fileInputRef.current?.click()
+                        }
+                        disabled={isSubmitting}
+                        className={`flex h-40 w-full max-w-md flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
+                          isDark
+                            ? "border-slate-700 hover:border-cyan-500 hover:bg-slate-900"
+                            : "border-slate-300 hover:border-cyan-500 hover:bg-white"
+                        }`}
+                      >
+                        <Upload className="mb-2 h-8 w-8 opacity-50" />
+
+                        <span className="text-sm font-medium">
+                          Upload ID Image
+                          <RequiredMark />
+                        </span>
+
+                        <span className="mt-1 text-xs opacity-60">
+                          JPG, PNG, WEBP up to 5 MB
+                        </span>
+                      </button>
+                    )}
+
+                    <div className="flex-1 space-y-2">
+                      <p className="text-sm font-medium">
+                        {form.type} ID
+                        <RequiredMark />
+                      </p>
+
+                      <p
+                        className={`text-sm ${
+                          isDark
+                            ? "text-slate-400"
+                            : "text-slate-500"
+                        }`}
+                      >
+                        Upload a clear image of the valid
+                        identification document for the
+                        selected card type.
+                      </p>
+
+                      <p
+                        className={`text-xs ${
+                          isDark
+                            ? "text-slate-500"
+                            : "text-slate-400"
+                        }`}
+                      >
+                        The image will be uploaded directly
+                        to Supabase Storage. It will not be
+                        sent as Base64 to the API server.
+                      </p>
+
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={
+                          handleImageSelect
+                        }
+                        disabled={isSubmitting}
+                      />
+
+                      {idImageFile && (
+                        <div
+                          className={`rounded-md px-3 py-2 text-xs ${
+                            isDark
+                              ? "bg-slate-800 text-slate-300"
+                              : "bg-white text-slate-600"
+                          }`}
+                        >
+                          {idImageFile.name}
+                          {" • "}
+                          {(
+                            idImageFile.size /
+                            1024 /
+                            1024
+                          ).toFixed(2)}
+                          {" MB"}
+                        </div>
+                      )}
+
+                      {idImageFile && (
+                        <Button
+                          type="button"
+                          variant="outline"
                           onClick={() =>
                             fileInputRef.current?.click()
                           }
                           disabled={isSubmitting}
-                          className={`flex h-40 w-full max-w-md flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
-                            isDark
-                              ? "border-slate-700 hover:border-cyan-500 hover:bg-slate-900"
-                              : "border-slate-300 hover:border-cyan-500 hover:bg-white"
-                          }`}
+                          className="gap-2"
                         >
-                          <Upload className="mb-2 h-8 w-8 opacity-50" />
-
-                          <span className="text-sm font-medium">
-                            Upload ID Image
-                            <RequiredMark />
-                          </span>
-
-                          <span className="mt-1 text-xs opacity-60">
-                            JPG, PNG, WEBP up to 5 MB
-                          </span>
-                        </button>
+                          <Upload className="h-4 w-4" />
+                          Change Image
+                        </Button>
                       )}
-
-                      <div className="flex-1 space-y-2">
-                        <p className="text-sm font-medium">
-                          {form.type} ID
-                          <RequiredMark />
-                        </p>
-
-                        <p
-                          className={`text-sm ${
-                            isDark
-                              ? "text-slate-400"
-                              : "text-slate-500"
-                          }`}
-                        >
-                          Upload a clear image of the valid
-                          identification document for the
-                          selected card type.
-                        </p>
-
-                        <p
-                          className={`text-xs ${
-                            isDark
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                          }`}
-                        >
-                          The image will be uploaded directly
-                          to Supabase Storage. It will not be
-                          sent as Base64 to the API server.
-                        </p>
-
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={
-                            handleImageSelect
-                          }
-                          disabled={isSubmitting}
-                        />
-
-                        {idImageFile && (
-                          <div
-                            className={`rounded-md px-3 py-2 text-xs ${
-                              isDark
-                                ? "bg-slate-800 text-slate-300"
-                                : "bg-white text-slate-600"
-                            }`}
-                          >
-                            {idImageFile.name}
-                            {" • "}
-                            {(
-                              idImageFile.size /
-                              1024 /
-                              1024
-                            ).toFixed(2)}
-                            {" MB"}
-                          </div>
-                        )}
-
-                        {idImageFile && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() =>
-                              fileInputRef.current?.click()
-                            }
-                            disabled={isSubmitting}
-                            className="gap-2"
-                          >
-                            <Upload className="h-4 w-4" />
-                            Change Image
-                          </Button>
-                        )}
-                      </div>
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* PERSONAL INFORMATION */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <UserRound className="h-4 w-4 text-cyan-500" />
+            {/* PERSONAL INFORMATION */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <UserRound className="h-4 w-4 text-cyan-500" />
 
-                  <h3 className="font-semibold">
-                    Personal Information
-                  </h3>
+                <h3 className="font-semibold">
+                  Personal Information
+                </h3>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium">
+                    Full Name
+                    <RequiredMark />
+                  </label>
+
+                  <Input
+                    value={form.fullName}
+                    onChange={(event) =>
+                      updateForm(
+                        "fullName",
+                        event.target.value
+                      )
+                    }
+                    placeholder="Enter full name"
+                    disabled={isSubmitting}
+                    aria-required="true"
+                  />
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2 sm:col-span-2">
-                    <label className="text-sm font-medium">
-                      Full Name
-                      <RequiredMark />
-                    </label>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Date of Birth
+                    <RequiredMark />
+                  </label>
+
+                  <div className="relative">
+                    <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50" />
 
                     <Input
-                      value={form.fullName}
+                      type="date"
+                      value={form.dob}
                       onChange={(event) =>
                         updateForm(
-                          "fullName",
+                          "dob",
                           event.target.value
                         )
                       }
-                      placeholder="Enter full name"
+                      className="pl-10"
                       disabled={isSubmitting}
                       aria-required="true"
                     />
                   </div>
+                </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Date of Birth
-                      <RequiredMark />
-                    </label>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Contact Number
+                    <RequiredMark />
+                  </label>
 
-                    <div className="relative">
-                      <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50" />
-
-                      <Input
-                        type="date"
-                        value={form.dob}
-                        onChange={(event) =>
-                          updateForm(
-                            "dob",
-                            event.target.value
-                          )
-                        }
-                        className="pl-10"
-                        disabled={isSubmitting}
-                        aria-required="true"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Contact Number
-                      <RequiredMark />
-                    </label>
-
-                    <Input
-                      value={form.contactNumber}
-                      onChange={(event) =>
-                        updateForm(
-                          "contactNumber",
-                          event.target.value
-                            .replace(/\D/g, "")
-                            .slice(0, 11)
-                        )
-                      }
-                      placeholder="09XXXXXXXXX"
-                      disabled={isSubmitting}
-                      maxLength={11}
-                      inputMode="numeric"
-                      aria-required="true"
-                    />
-                  </div>
+                  <Input
+                    value={form.contactNumber}
+                    onChange={(event) =>
+                      updateForm(
+                        "contactNumber",
+                        event.target.value
+                          .replace(/\D/g, "")
+                          .slice(0, 11)
+                      )
+                    }
+                    placeholder="09XXXXXXXXX"
+                    disabled={isSubmitting}
+                    maxLength={11}
+                    inputMode="numeric"
+                    aria-required="true"
+                  />
                 </div>
               </div>
+            </div>
 
-              {/* ADDRESS */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4 text-cyan-500" />
+            {/* ADDRESS */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-cyan-500" />
 
-                  <h3 className="font-semibold">
-                    Address
-                  </h3>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {/* Row 1: Street Address + Region (equal width) */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Street Address <span className="text-xs font-normal text-muted-foreground">(Optional)</span>
-                    </label>
-
-                    <Input
-                      value={form.streetAddress}
-                      onChange={(event) =>
-                        updateForm(
-                          "streetAddress",
-                          event.target.value
-                        )
-                      }
-                      placeholder="House number, street, sitio"
-                      disabled={isSubmitting}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Region
-                      <RequiredMark />
-                    </label>
-
-                    <LocationCombobox
-                      options={regions}
-                      value={form.regionCode}
-                      onChange={handleRegionChange}
-                      placeholder="Select region"
-                      loadingPlaceholder="Loading regions..."
-                      loading={loadingRegions}
-                      disabled={isSubmitting || loadingRegions}
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  {/* Row 2: Province + City / Municipality */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Province
-                      <RequiredMark />
-                    </label>
-
-                    <LocationCombobox
-                      options={provinces}
-                      value={form.provinceCode}
-                      onChange={handleProvinceChange}
-                      placeholder="Select province"
-                      loadingPlaceholder="Loading provinces..."
-                      loading={loadingProvinces}
-                      disabled={
-                        isSubmitting ||
-                        !form.regionCode ||
-                        loadingProvinces
-                      }
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      City / Municipality
-                      <RequiredMark />
-                    </label>
-
-                    <LocationCombobox
-                      options={cities}
-                      value={form.cityCode}
-                      onChange={handleCityChange}
-                      placeholder="Select city / municipality"
-                      loadingPlaceholder="Loading cities..."
-                      loading={loadingCities}
-                      disabled={
-                        isSubmitting ||
-                        !form.provinceCode ||
-                        loadingCities
-                      }
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  {/* Row 3: Barangay + ZIP Code */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      Barangay
-                      <RequiredMark />
-                    </label>
-
-                    <LocationCombobox
-                      options={barangays}
-                      value={form.barangayCode}
-                      onChange={handleBarangayChange}
-                      placeholder="Select barangay"
-                      loadingPlaceholder="Loading barangays..."
-                      loading={loadingBarangays}
-                      disabled={
-                        isSubmitting ||
-                        !form.cityCode ||
-                        loadingBarangays
-                      }
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">
-                      ZIP Code
-                      <RequiredMark />
-                    </label>
-
-                    <Input
-                      value={form.zipCode}
-                      onChange={(event) =>
-                        updateForm(
-                          "zipCode",
-                          event.target.value.replace(
-                            /\D/g,
-                            ""
-                          )
-                        )
-                      }
-                      placeholder="6710"
-                      maxLength={10}
-                      disabled={isSubmitting}
-                    />
-                  </div>
-
-                  {/* Row 4: Full Address — auto-filled from the fields above, editable */}
-                  <div className="space-y-2 sm:col-span-2">
-                    <label className="text-sm font-medium">
-                      Full Address
-                    </label>
-
-                    <Textarea
-                      value={form.fullAddress}
-                      onChange={(event) =>
-                        updateForm(
-                          "fullAddress",
-                          event.target.value
-                        )
-                      }
-                      placeholder="Auto-filled from the fields above — you can still edit it"
-                      disabled={isSubmitting}
-                      rows={3}
-                      className="resize-none"
-                    />
-
-                    <p
-                      className={`text-xs ${
-                        isDark ? "text-slate-500" : "text-slate-400"
-                      }`}
-                    >
-                      Auto-generated from Street, Region, Province, City/Municipality, Barangay, and ZIP Code. You can edit it manually if needed.
-                    </p>
-                  </div>
-                </div>
+                <h3 className="font-semibold">
+                  Address
+                </h3>
               </div>
 
-              {/* BUTTONS */}
-              <div
-                className={`flex flex-col-reverse gap-3 border-t pt-5 sm:flex-row sm:justify-end ${
-                  isDark
-                    ? "border-slate-800"
-                    : "border-slate-200"
-                }`}
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* Row 1: Street Address + Region (equal width) */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Street Address <span className="text-xs font-normal text-muted-foreground">(Optional)</span>
+                  </label>
+
+                  <Input
+                    value={form.streetAddress}
+                    onChange={(event) =>
+                      updateForm(
+                        "streetAddress",
+                        event.target.value
+                      )
+                    }
+                    placeholder="House number, street, sitio"
+                    disabled={isSubmitting}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Region
+                    <RequiredMark />
+                  </label>
+
+                  <LocationCombobox
+                    options={regions}
+                    value={form.regionCode}
+                    onChange={handleRegionChange}
+                    placeholder="Select region"
+                    loadingPlaceholder="Loading regions..."
+                    loading={loadingRegions}
+                    disabled={isSubmitting || loadingRegions}
+                    isDark={isDark}
+                  />
+                </div>
+
+                {/* Row 2: Province + City / Municipality */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Province
+                    <RequiredMark />
+                  </label>
+
+                  <LocationCombobox
+                    options={provinces}
+                    value={form.provinceCode}
+                    onChange={handleProvinceChange}
+                    placeholder="Select province"
+                    loadingPlaceholder="Loading provinces..."
+                    loading={loadingProvinces}
+                    disabled={
+                      isSubmitting ||
+                      !form.regionCode ||
+                      loadingProvinces
+                    }
+                    isDark={isDark}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    City / Municipality
+                    <RequiredMark />
+                  </label>
+
+                  <LocationCombobox
+                    options={cities}
+                    value={form.cityCode}
+                    onChange={handleCityChange}
+                    placeholder="Select city / municipality"
+                    loadingPlaceholder="Loading cities..."
+                    loading={loadingCities}
+                    disabled={
+                      isSubmitting ||
+                      !form.provinceCode ||
+                      loadingCities
+                    }
+                    isDark={isDark}
+                  />
+                </div>
+
+                {/* Row 3: Barangay + ZIP Code */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Barangay
+                    <RequiredMark />
+                  </label>
+
+                  <LocationCombobox
+                    options={barangays}
+                    value={form.barangayCode}
+                    onChange={handleBarangayChange}
+                    placeholder="Select barangay"
+                    loadingPlaceholder="Loading barangays..."
+                    loading={loadingBarangays}
+                    disabled={
+                      isSubmitting ||
+                      !form.cityCode ||
+                      loadingBarangays
+                    }
+                    isDark={isDark}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    ZIP Code
+                    <RequiredMark />
+                  </label>
+
+                  <Input
+                    value={form.zipCode}
+                    onChange={(event) =>
+                      updateForm(
+                        "zipCode",
+                        event.target.value.replace(
+                          /\D/g,
+                          ""
+                        )
+                      )
+                    }
+                    placeholder="6710"
+                    maxLength={10}
+                    disabled={isSubmitting}
+                  />
+                </div>
+
+                {/* Row 4: Full Address — auto-filled from the fields above, editable */}
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium">
+                    Full Address
+                  </label>
+
+                  <Textarea
+                    value={form.fullAddress}
+                    onChange={(event) =>
+                      updateForm(
+                        "fullAddress",
+                        event.target.value
+                      )
+                    }
+                    placeholder="Auto-filled from the fields above — you can still edit it"
+                    disabled={isSubmitting}
+                    rows={3}
+                    className="resize-none"
+                  />
+
+                  <p
+                    className={`text-xs ${
+                      isDark ? "text-slate-500" : "text-slate-400"
+                    }`}
+                  >
+                    Auto-generated from Street, Region, Province, City/Municipality, Barangay, and ZIP Code. You can edit it manually if needed.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* BUTTONS */}
+            <div
+              className={`flex flex-col-reverse gap-3 border-t pt-5 sm:flex-row sm:justify-end ${
+                isDark
+                  ? "border-slate-800"
+                  : "border-slate-200"
+              }`}
+            >
+              <Button
+                type="button"
+                variant="outline"
+                onClick={closeModal}
+                disabled={isSubmitting}
               >
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={closeModal}
-                  disabled={isSubmitting}
-                >
-                  Cancel
-                </Button>
+                Cancel
+              </Button>
 
-                <Button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="gap-2"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
+              <Button
+                type="submit"
+                disabled={isSubmitting}
+                className="gap-2"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
 
-                      {isSubmittingImage
-                        ? "Uploading ID..."
-                        : "Registering..."}
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="h-4 w-4" />
-                      Register Card
-                    </>
-                  )}
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
-      )}
+                    {isSubmittingImage
+                      ? "Uploading ID..."
+                      : "Registering..."}
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    Register Card
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
