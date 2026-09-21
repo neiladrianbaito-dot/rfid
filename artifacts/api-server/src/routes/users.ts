@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
-import { db, usersTable, transactionsTable } from "@workspace/db";
+import { db, usersTable } from "@workspace/db";
 import {
   ListUsersQueryParams,
   ListUsersResponse,
@@ -201,6 +201,15 @@ function isDuplicateKeyError(error: unknown): boolean {
   if (causeMessage.includes("duplicate key") || causeMessage.includes("unique constraint"))
     return true;
   return false;
+}
+
+// Postgres 23503 = foreign_key_violation. Used by DELETE /users/:id when a
+// FK still links the user to its transaction history.
+function isForeignKeyError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const err = error as Record<string, unknown>;
+  const cause = err.cause as Record<string, unknown> | undefined;
+  return err.code === "23503" || cause?.code === "23503";
 }
 
 const EMAIL_JOIN = sql`
@@ -409,16 +418,9 @@ router.get("/users/:id", async (req, res): Promise<void> => {
   }
 });
 
-// =============================================================================
-// FIX: PATCH /users/:id — audit log dapat mag-log ng ACTUAL changed values
-// (old -> new), hindi lang listahan ng column names na pinasa sa request.
-//
-// Paano gamitin: palitan mo yung buong `router.patch("/users/:id", ...)`
-// block sa file mo ng version sa baba. Walang ibang binago sa file —
-// same pa rin yung imports, ibang routes, atbp.
-// =============================================================================
-
 // ── PATCH /users/:id ───────────────────────────────────────────────────────────
+// Audit log records the ACTUAL changed values (old -> new), not just the
+// list of column names that were sent in the request.
 router.patch("/users/:id", async (req, res): Promise<void> => {
   try {
     const { hasType, columns } = await detectUsersColumns();
@@ -437,10 +439,8 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
     // @workspace/api-zod declares them — see the note at the top of this file.
     const body = parsed.data as typeof parsed.data & Record<string, unknown>;
 
-    // ── NEW: fetch the CURRENT row BEFORE applying any update ───────────────
-    // Kailangan natin ito para malaman kung ano talaga yung dating value
-    // ng bawat column, para ma-diff natin later kung ano ba ang TALAGANG
-    // nagbago (hindi lang kung ano ang pinasa sa request body).
+    // Fetch the CURRENT row BEFORE applying any update, so we can diff
+    // what actually changed (not just what was passed in the request body).
     const beforeResult = await db.execute(sql`
       select
         full_name        as "fullName",
@@ -461,8 +461,6 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
     }
 
     // Map: db column name -> the value it had BEFORE this update.
-    // Uses the same "field" aliases as OPTIONAL_USER_COLUMNS + the base
-    // columns, so we can compare apples to apples against `updates` below.
     const beforeByCol: Record<string, unknown> = {
       full_name: beforeRow.fullName,
       contact_number: beforeRow.contactNumber,
@@ -500,9 +498,9 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
       return;
     }
 
-    // ── NEW: filter down to ACTUALLY changed fields (old !== new) ───────────
-    // Compare as strings para hindi tayo maloko ng type mismatch
-    // (null vs "", number vs numeric string, atbp).
+    // Filter down to ACTUALLY changed fields (old !== new).
+    // Compare as strings so type mismatches (null vs "", number vs numeric
+    // string, etc.) don't cause false positives.
     const actuallyChanged = updates.filter(({ col, val }) => {
       const oldVal = beforeByCol[col] ?? null;
       const newVal = val ?? null;
@@ -537,7 +535,7 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
       return;
     }
 
-    // ➕ Auto-unlink: if this update just blocked or deactivated the card,
+    // Auto-unlink: if this update just blocked or deactivated the card,
     // strip it from whatever auth_users account currently has it linked
     // so it becomes immediately available to relink to a different card.
     // This must run BEFORE the email lookup below so the response
@@ -567,7 +565,8 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
     const emailRow = extractRows<{ email: string | null }>(emailResult)[0];
     userRow.email = emailRow?.email ?? null; // correctly null now if we just auto-unlinked above
 
-    // ── NEW: log lang kung may talagang nagbago, at ilagay yung OLD -> NEW ──
+    // Only write an audit entry if something really changed, and include
+    // OLD -> NEW values. No-op updates produce no audit log at all.
     if (actuallyChanged.length > 0) {
       const changesSummary = actuallyChanged
         .map(({ col }) => {
@@ -585,10 +584,6 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
         details: `updated user: ${userRow.fullName} (card ${userRow.cardUid}) — ${changesSummary}`,
       });
     }
-    // kung actuallyChanged.length === 0, WALANG audit log na isusulat —
-    // ito yung nag-aayos sa mga duplicate/no-op UPDATE entries na paulit-ulit
-    // mong nakikita (hal. yung Shun KIddo record na sunod-sunod pero pareho
-    // lang laging laman).
 
     res.json(UpdateUserResponse.parse(formatUser(userRow)));
   } catch (error) {
@@ -596,7 +591,11 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
     res.status(500).json({ error: "Failed to update user" });
   }
 });
+
 // ── DELETE /users/:id ──────────────────────────────────────────────────────────
+// FIX: deletes ONLY the user row. Transactions (top-up, fare, card transfer)
+// and card_balance_transfers are historical data and are left untouched —
+// they keep their card_uid / card ids so history stays readable.
 router.delete("/users/:id", async (req, res): Promise<void> => {
   try {
     const params = DeleteUserParams.safeParse(req.params);
@@ -605,36 +604,18 @@ router.delete("/users/:id", async (req, res): Promise<void> => {
       return;
     }
 
-    let deletedUserInfo: { fullName: string; cardUid: string } | null = null;
+    // Single atomic statement: delete the user row and get back what was
+    // deleted (for the audit log).
+    const [deletedUser] = await db
+      .delete(usersTable)
+      .where(eq(usersTable.id, params.data.id))
+      .returning({
+        id: usersTable.id,
+        cardUid: usersTable.cardUid,
+        fullName: usersTable.fullName,
+      });
 
-    const deleted = await db.transaction(async (tx) => {
-      const [existingUser] = await tx
-        .select({ id: usersTable.id, cardUid: usersTable.cardUid, fullName: usersTable.fullName })
-        .from(usersTable)
-        .where(eq(usersTable.id, params.data.id))
-        .limit(1);
-
-      if (!existingUser) return false;
-
-      deletedUserInfo = { fullName: existingUser.fullName, cardUid: existingUser.cardUid };
-
-      // Remove any card balance transfers referencing this user as source or target
-      await tx.execute(sql`
-        delete from card_balance_transfers
-        where source_card_id = ${existingUser.id}
-           or target_card_id = ${existingUser.id}
-      `);
-
-      await tx
-        .delete(transactionsTable)
-        .where(eq(transactionsTable.cardUid, existingUser.cardUid));
-
-      await tx.delete(usersTable).where(eq(usersTable.id, params.data.id));
-
-      return true;
-    });
-
-    if (!deleted) {
+    if (!deletedUser) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -643,12 +624,23 @@ router.delete("/users/:id", async (req, res): Promise<void> => {
       user: getActorFromRequest(req.headers.authorization),
       action: "DELETE",
       entity: "User",
-      details: `deleted user: ${deletedUserInfo?.fullName} (card ${deletedUserInfo?.cardUid})`,
+      details: `deleted user: ${deletedUser.fullName} (card ${deletedUser.cardUid}) — transaction history kept`,
     });
 
     res.sendStatus(204);
   } catch (error) {
     console.error("Delete user error:", error);
+
+    // A foreign key still points at users, so Postgres refused the delete.
+    // Means the FK constraints haven't been dropped yet (run the SQL migration).
+    if (isForeignKeyError(error)) {
+      res.status(409).json({
+        error:
+          "Cannot delete user: a database foreign key still links this user to its transaction history. Drop those FK constraints so history can be kept.",
+      });
+      return;
+    }
+
     res.status(500).json({ error: "Failed to delete user" });
   }
 });
