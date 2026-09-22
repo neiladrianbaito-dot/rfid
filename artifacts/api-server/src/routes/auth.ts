@@ -7,6 +7,7 @@ import { createAdminToken, verifyAdminToken } from "../lib/admin-token";
 import { createUserToken, verifyUserToken } from "../lib/user-token";
 import { signInSupabaseWithPassword, getSupabaseUserFromToken } from "../lib/supabase";
 import { logAudit } from "../lib/audit-logger";
+import { getEffectivePermissions } from "../lib/permissions";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import {
   requireAdmin,
@@ -1155,11 +1156,14 @@ router.get("/auth/me", async (req, res): Promise<void> => {
       role: admin.role,
     });
 
+    const permissions = await getEffectivePermissions(admin.role); // ← new
+
     res.json({
       ...validatedUser,
       permission: admin.permission,
       canManage: admin.permission === "full_access",
       isSuperAdmin: admin.role === "super_admin",
+      permissions, // ← new: { "user.delete": false, "fare.route.add": false, ... }
     });
   } catch (e) {
     console.error("Auth state error:", e);
