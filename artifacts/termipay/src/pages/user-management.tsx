@@ -980,7 +980,9 @@ export default function UserManagementPage() {
     return data.publicUrl;
   };
 
-  const handleUpdate = async () => {
+  
+
+   const handleUpdate = async () => {
     // 🔒 Guard: bawal mag-save ng edit kapag view_only
     if (blockIfViewOnly()) return;
 
@@ -1093,10 +1095,27 @@ export default function UserManagementPage() {
         }
       }
 
+      // Pull the message out of whatever shape the error comes in, then
+      // strip a leading "HTTP <status>:" / "HTTP <status> :" prefix so the
+      // toast shows a clean message instead of the raw wire-format string.
+      const rawMessage: string =
+        error?.response?.data?.message ??
+        error?.response?.data?.error ??
+        error?.message ??
+        "";
+
+      const cleanedMessage = rawMessage.replace(/^\s*HTTP\s*\d{3}\s*:\s*/i, "").trim();
+
+      const isForbidden =
+        error?.response?.status === 403 ||
+        error?.status === 403 ||
+        error?.response?.data?.code === "FORBIDDEN" ||
+        error?.response?.data?.code === "VIEW_ONLY";
+
       toast({
-        title: "Failed to update user",
+        title: isForbidden ? "Permission Denied" : "Failed to update user",
         description:
-          error?.message || "Unable to update the user or ID image.",
+          cleanedMessage || "Unable to update the user or ID image.",
         variant: "destructive",
       });
     } finally {
