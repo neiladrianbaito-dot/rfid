@@ -13,6 +13,7 @@ import { requireAuth } from "../middleware/require-auth";
 import activeRouteRouter from "./activeRoute";
 import publicRoutesRouter from "./publicRoutes";
 import auditRouter from "./audit";
+import permissionsRouter from "./permissions"; // ← BAGO — yung /admin/permissions/mine route
 import { blockWritesForViewOnly } from "../middleware/permission-middleware";
 
 const router: IRouter = Router();
@@ -45,5 +46,8 @@ router.use(transactionsRouter);
 router.use(fareRoutesRouter);
 router.use(dashboardRouter);
 router.use(auditRouter);
+router.use(permissionsRouter); // ← BAGO — GET lang naman ito, pero kailangan pa rin ng
+                                //    requireAuth kaya dito siya isinama, kasama ng iba
+                                //    pang /admin/* routers
 
 export default router;
