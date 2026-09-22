@@ -2,7 +2,6 @@ import type { Request, Response, NextFunction } from "express";
 import { sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { verifyAdminToken } from "../lib/admin-token";
-import { isPermitted, type PermissionKey } from "../lib/permissions";
 
 export const VIEW_ONLY_MESSAGE =
   "Your account is set to View Only. You can browse records, but adding, editing, and deleting are disabled. Please contact a Super Admin if you need access.";
@@ -231,38 +230,4 @@ export async function blockWritesForViewOnly(
     return;
   }
   return requireFullAccess(req, res, next);
-}
-
-/**
- * Fine-grained permission check (e.g. "user.delete"). Assumes requireAdmin
- * (or requireFullAccess/requireSuperAdmin) already ran and populated
- * req.adminUser — same convention as every other guard in this file.
- *
- * Usage:
- *   router.delete("/admin/users/:id", requireAdmin, requirePermission("user.delete"), handler)
- *
- * On failure this returns the same shape as the other guards
- * (403 + { error, code }) so existing frontend error handling keyed off
- * `code === "FORBIDDEN"` works without new plumbing.
- */
-export function requirePermission(key: PermissionKey) {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const adminUser = req.adminUser;
-    if (!adminUser) {
-      res.status(401).json({ error: "Not authenticated", code: "UNAUTHENTICATED" });
-      return;
-    }
-
-    const allowed = await isPermitted(adminUser.role, key);
-    if (!allowed) {
-      res.status(403).json({
-        error: "You do not have permission to perform this action. Please contact your administrator",
-        code: "FORBIDDEN",
-        permission: key,
-      });
-      return;
-    }
-
-    next();
-  };
 }
