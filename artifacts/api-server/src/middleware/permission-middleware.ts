@@ -256,7 +256,7 @@ export function requirePermission(key: PermissionKey) {
     const allowed = await isPermitted(adminUser.role, key);
     if (!allowed) {
       res.status(403).json({
-        error: "You do not have permission to perform this action.",
+        error: "You do not have permission to perform this action. Please contact your administrator",
         code: "FORBIDDEN",
         permission: key,
       });
