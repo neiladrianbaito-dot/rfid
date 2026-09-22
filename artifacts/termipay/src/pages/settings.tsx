@@ -38,7 +38,7 @@ import {
   Camera, Upload, Eye, Pencil,
 } from "lucide-react";
 // ── NEW: granular permission matrix section (requirement #3) ─────────────
-import { PermissionMatrixCard } from "@/components/PermissionMatrixCard";
+import { PermissionMatrixCard } from "@/components/Permissionmatrixcard";
 
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
