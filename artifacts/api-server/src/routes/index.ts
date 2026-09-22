@@ -13,7 +13,7 @@ import { requireAuth } from "../middleware/require-auth";
 import activeRouteRouter from "./activeRoute";
 import publicRoutesRouter from "./publicRoutes";
 import auditRouter from "./audit";
-import permissionsRouter from "./permissions"; // ← BAGO — yung /admin/permissions/mine route
+import adminPermissionsRouter from "./admin-permissions";
 import { blockWritesForViewOnly } from "../middleware/permission-middleware";
 
 const router: IRouter = Router();
@@ -27,7 +27,7 @@ router.use("/admin", blockWritesForViewOnly);
 // 1. Public Routes (No Login Required)
 router.use(healthRouter);
 router.use(authRouter);
-router.use(activeRouteRouter);  // ← bago ang requireAuth
+router.use(activeRouteRouter); // ← bago ang requireAuth
 router.use(passwordResetRouter);
 router.use(rfidRouter);
 router.use(publicRoutesRouter);
@@ -46,8 +46,6 @@ router.use(transactionsRouter);
 router.use(fareRoutesRouter);
 router.use(dashboardRouter);
 router.use(auditRouter);
-router.use(permissionsRouter); // ← BAGO — GET lang naman ito, pero kailangan pa rin ng
-                                //    requireAuth kaya dito siya isinama, kasama ng iba
-                                //    pang /admin/* routers
+router.use(adminPermissionsRouter);
 
 export default router;
