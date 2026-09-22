@@ -16,7 +16,6 @@ import {
 import { verifyAdminToken } from "../lib/admin-token";
 import { logAudit } from "../lib/audit-logger";
 import { unlinkCardFromAnyAccount } from "./auth"; // adjust path if your auth routes file has a different name/location
-import { requireAdmin, requirePermission } from "../middleware/permission-middleware";
 
 const router: IRouter = Router();
 
@@ -31,14 +30,6 @@ const router: IRouter = Router();
 // writes them correctly. `.parse()` drops unknown keys by default instead
 // of throwing, so this failure mode is silent — test it after wiring both
 // sides up.
-//
-// ⚠️ ALSO IMPORTANT — this file previously had NO requireAdmin guard on any
-// route. verifyAdminToken() was only ever used inside getActorFromRequest()
-// to label the audit-log entry, never to block a request. requireAdmin +
-// requirePermission have now been added to POST/PATCH/DELETE below — confirm
-// the permission keys ("user.create", "user.edit", "user.delete") exist in
-// your permission_catalog before deploying, and confirm the import path for
-// requireAdmin above is correct for your project.
 // ============================================================================
 
 // Column name (snake_case in DB) <-> body/response field name (camelCase)
@@ -230,9 +221,6 @@ const EMAIL_JOIN = sql`
 `;
 
 // ── GET /users/recent ──────────────────────────────────────────────────────────
-// Read-only — no requirePermission gate, matching the reference pattern's
-// treatment of GET routes. Add requireAdmin here too if reads should also
-// require an authenticated admin session.
 router.get("/users/recent", async (_req, res): Promise<void> => {
   try {
     const { hasType, columns } = await detectUsersColumns();
@@ -304,11 +292,7 @@ router.get("/users", async (req, res): Promise<void> => {
 });
 
 // ── POST /users ────────────────────────────────────────────────────────────────
-// Creates the user row AND registers the card UID in one call — there's no
-// separate /card/create endpoint in this file, so this is mapped to
-// "user.create" rather than "user.card.create". Rename if your catalog
-// already has a more specific key for combined user+card registration.
-router.post("/users", requireAdmin, requirePermission("user.create"), async (req, res): Promise<void> => {
+router.post("/users", async (req, res): Promise<void> => {
   console.log("[POST /users] raw body:", req.body);
 
   const parsed = CreateUserBody.safeParse(req.body);
@@ -437,7 +421,7 @@ router.get("/users/:id", async (req, res): Promise<void> => {
 // ── PATCH /users/:id ───────────────────────────────────────────────────────────
 // Audit log records the ACTUAL changed values (old -> new), not just the
 // list of column names that were sent in the request.
-router.patch("/users/:id", requireAdmin, requirePermission("user.edit"), async (req, res): Promise<void> => {
+router.patch("/users/:id", async (req, res): Promise<void> => {
   try {
     const { hasType, columns } = await detectUsersColumns();
     const params = UpdateUserParams.safeParse(req.params);
@@ -612,7 +596,7 @@ router.patch("/users/:id", requireAdmin, requirePermission("user.edit"), async (
 // FIX: deletes ONLY the user row. Transactions (top-up, fare, card transfer)
 // and card_balance_transfers are historical data and are left untouched —
 // they keep their card_uid / card ids so history stays readable.
-router.delete("/users/:id", requireAdmin, requirePermission("user.delete"), async (req, res): Promise<void> => {
+router.delete("/users/:id", async (req, res): Promise<void> => {
   try {
     const params = DeleteUserParams.safeParse(req.params);
     if (!params.success) {

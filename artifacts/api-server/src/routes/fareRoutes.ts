@@ -13,24 +13,8 @@ import {
 } from "@workspace/api-zod";
 import { verifyAdminToken } from "../lib/admin-token";
 import { logAudit } from "../lib/audit-logger";
-import { requireAdmin, requirePermission } from "../middleware/permission-middleware";
 
 const router: IRouter = Router();
-
-// ============================================================================
-// ⚠️ IMPORTANT — this file previously had NO requireAdmin guard on any route.
-// verifyAdminToken() was only ever used inside getActorFromRequest() to label
-// the audit-log entry, never to block a request. requireAdmin +
-// requirePermission have now been added to POST/PATCH/DELETE below — confirm
-// the permission keys ("fare.route.add", "fare.route.edit",
-// "fare.route.activate", "fare.route.delete") exist in your
-// permission_catalog before deploying, and confirm the import path for
-// requireAdmin above is correct for your project.
-//
-// GET /routes and GET /routes/active are left unguarded: the latter is
-// explicitly commented as a public endpoint in the original file, and GET
-// /routes has no obvious permission key in the reference pattern either.
-// ============================================================================
 
 function formatRoute(r: typeof fareRoutesTable.$inferSelect) {
   return {
@@ -81,7 +65,7 @@ router.get("/routes", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/routes", requireAdmin, requirePermission("fare.route.add"), async (req, res): Promise<void> => {
+router.post("/routes", async (req, res): Promise<void> => {
   const parsed = CreateRouteBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -138,7 +122,7 @@ router.get("/routes/active", async (_req, res): Promise<void> => {
 // same pa rin yung ibang routes (POST, GET, DELETE, toggle).
 // =============================================================================
 
-router.patch("/routes/:id", requireAdmin, requirePermission("fare.route.edit"), async (req, res): Promise<void> => {
+router.patch("/routes/:id", async (req, res): Promise<void> => {
   const params = UpdateRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -221,7 +205,7 @@ router.patch("/routes/:id", requireAdmin, requirePermission("fare.route.edit"), 
   }
 });
 
-router.delete("/routes/:id", requireAdmin, requirePermission("fare.route.delete"), async (req, res): Promise<void> => {
+router.delete("/routes/:id", async (req, res): Promise<void> => {
   const params = DeleteRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -266,7 +250,7 @@ router.delete("/routes/:id", requireAdmin, requirePermission("fare.route.delete"
   }
 });
 
-router.patch("/routes/:id/toggle", requireAdmin, requirePermission("fare.route.activate"), async (req, res): Promise<void> => {
+router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
   const params = ToggleRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
