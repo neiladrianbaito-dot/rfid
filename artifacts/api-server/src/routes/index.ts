@@ -15,7 +15,6 @@ import publicRoutesRouter from "./publicRoutes";
 import auditRouter from "./audit";
 import adminPermissionsRouter from "./admin-permissions";
 import { blockWritesForViewOnly } from "../middleware/permission-middleware";
-import { blockStaffIfRouteLocked } from "../middleware/route-lock-middleware"; // ← DINAGDAG: Bagong guard natin
 
 const router: IRouter = Router();
 
@@ -28,6 +27,7 @@ router.use("/admin", blockWritesForViewOnly);
 // 1. Public Routes (No Login Required)
 router.use(healthRouter);
 router.use(authRouter);
+router.use(activeRouteRouter); // ← bago ang requireAuth
 router.use(passwordResetRouter);
 router.use(rfidRouter);
 router.use(publicRoutesRouter);
@@ -38,13 +38,9 @@ router.use("/webhook", webhookRouter);
 
 // 3. Protected Routes (Login Required)
 router.use(requireAuth);
-router.use(blockWritesForViewOnly); // ← sakop ang lahat ng POST/PATCH/PUT/DELETE sa protected area
-
-// 4. Admin Lock Execution (Dito dadaan ang activation bago pumasok sa mismong router)
-router.use(blockStaffIfRouteLocked); // ← DINAGDAG: Proteksyon para sa route locking system
-
-// 5. Mount Active and Main Protected Routers
-router.use(activeRouteRouter);      // ← INILIPAT DITO: Para may auth context (`req.adminUser`) at protektado ng lock
+router.use(blockWritesForViewOnly); // ← IDAGDAG ITO — sakop ang lahat ng POST/PATCH/PUT/DELETE
+                                     //    sa users/transactions/fareRoutes/dashboard/audit,
+                                     //    kahit ano pang path prefix ang gamitin nila
 router.use(usersRouter);
 router.use(transactionsRouter);
 router.use(fareRoutesRouter);
