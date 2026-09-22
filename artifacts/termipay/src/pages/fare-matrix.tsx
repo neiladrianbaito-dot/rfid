@@ -539,7 +539,19 @@ export default function FareMatrixPage() {
 
     if (error) {
       console.error("deactivate_route error:", error);
-      toast({ title: "Failed to update route status", variant: "destructive" });
+
+      const isForbidden =
+        error?.code === "42501" || // postgres insufficient_privilege
+        error?.code === "FORBIDDEN" ||
+        error?.code === "VIEW_ONLY" ||
+        /permission|forbidden|view.?only/i.test(error?.message ?? "");
+
+      toast({
+        title: isForbidden ? "Permission Denied" : "Failed to update route status",
+        description: isForbidden ? error?.message : undefined,
+        variant: "destructive",
+      });
+
       setIsTogglePending(false);
       setPendingRouteId(null);
       return;
@@ -552,8 +564,18 @@ export default function FareMatrixPage() {
       });
       if (reverseError) {
         console.error("deactivate_route (reverse) error:", reverseError);
+
+        const isReverseForbidden =
+          reverseError?.code === "42501" ||
+          reverseError?.code === "FORBIDDEN" ||
+          reverseError?.code === "VIEW_ONLY" ||
+          /permission|forbidden|view.?only/i.test(reverseError?.message ?? "");
+
         toast({
-          title: "Deactivated, but couldn't deactivate the return direction",
+          title: isReverseForbidden
+            ? "Permission Denied (Return Direction)"
+            : "Deactivated, but couldn't deactivate the return direction",
+          description: isReverseForbidden ? reverseError?.message : undefined,
           variant: "destructive",
         });
       }
