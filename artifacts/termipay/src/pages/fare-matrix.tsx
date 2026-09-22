@@ -122,6 +122,26 @@ type Device = {
   // updated_at removed — column does not exist on this table
 };
 
+// 🔒 NEW: Supabase RPC calls (activate_route / deactivate_route) return their
+// own { error } shape — not the axios-style error object the REST mutations
+// (create/update/delete) throw. This normalizes both so the toggle handlers
+// below can show the same "Permission Denied" toast the other handlers do,
+// instead of falling through to a generic "Failed to..." message when the
+// RPC rejects a view_only caller server-side.
+function getRpcErrorInfo(error: any): { cleanedMessage: string; isForbidden: boolean } {
+  const rawMessage: string = error?.message ?? error?.details ?? "";
+  const cleanedMessage = rawMessage.replace(/^\s*HTTP\s*\d{3}\s*:\s*/i, "").trim();
+
+  const isForbidden =
+    error?.code === "42501" || // Postgres insufficient_privilege
+    error?.code === "FORBIDDEN" ||
+    error?.code === "VIEW_ONLY" ||
+    error?.status === 403 ||
+    /view[\s_-]?only|permission denied|forbidden|not authorized|unauthorized/i.test(rawMessage);
+
+  return { cleanedMessage, isForbidden };
+}
+
 export default function FareMatrixPage() {
   const { isDark } = useTheme();
   const { user } = useAuth(); // ⬅️ NEW: current logged-in admin
@@ -472,7 +492,17 @@ export default function FareMatrixPage() {
 
     if (error) {
       console.error("activate_route error:", error);
-      toast({ title: "Failed to activate route", variant: "destructive" });
+      // 🔒 NEW: surface "Permission Denied" the same way Add/Edit/Delete do
+      // when the RPC rejects a view_only caller server-side, instead of the
+      // generic "Failed to activate route" message.
+      const { cleanedMessage, isForbidden } = getRpcErrorInfo(error);
+      toast({
+        title: isForbidden ? "Permission Denied" : "Failed to activate route",
+        description: isForbidden
+          ? "You don't have permission to perform this action."
+          : cleanedMessage || "Unable to activate the route.",
+        variant: "destructive",
+      });
       setIsTogglePending(false);
       setPendingRouteId(null);
       return;
@@ -489,8 +519,14 @@ export default function FareMatrixPage() {
       });
       if (reverseError) {
         console.error("activate_route (reverse) error:", reverseError);
+        const { isForbidden: reverseIsForbidden } = getRpcErrorInfo(reverseError);
         toast({
-          title: "Route activated, but couldn't activate the return direction",
+          title: reverseIsForbidden
+            ? "Permission Denied"
+            : "Route activated, but couldn't activate the return direction",
+          description: reverseIsForbidden
+            ? "You don't have permission to perform this action."
+            : undefined,
           variant: "destructive",
         });
       }
@@ -539,7 +575,15 @@ export default function FareMatrixPage() {
 
     if (error) {
       console.error("deactivate_route error:", error);
-      toast({ title: "Failed to update route status", variant: "destructive" });
+      // 🔒 NEW: same Permission Denied handling as activate/add/edit/delete
+      const { cleanedMessage, isForbidden } = getRpcErrorInfo(error);
+      toast({
+        title: isForbidden ? "Permission Denied" : "Failed to update route status",
+        description: isForbidden
+          ? "You don't have permission to perform this action."
+          : cleanedMessage || "Unable to update the route status.",
+        variant: "destructive",
+      });
       setIsTogglePending(false);
       setPendingRouteId(null);
       return;
@@ -552,8 +596,14 @@ export default function FareMatrixPage() {
       });
       if (reverseError) {
         console.error("deactivate_route (reverse) error:", reverseError);
+        const { isForbidden: reverseIsForbidden } = getRpcErrorInfo(reverseError);
         toast({
-          title: "Deactivated, but couldn't deactivate the return direction",
+          title: reverseIsForbidden
+            ? "Permission Denied"
+            : "Deactivated, but couldn't deactivate the return direction",
+          description: reverseIsForbidden
+            ? "You don't have permission to perform this action."
+            : undefined,
           variant: "destructive",
         });
       }
