@@ -607,12 +607,32 @@ export default function FareMatrixPage() {
           />
         ),
       });
-    } catch (error) {
-      toast({ title: "Failed to add route", variant: "destructive" });
+    } catch (error: any) {
+      console.error("Add route error:", error);
+
+      const rawMessage: string =
+        error?.response?.data?.message ??
+        error?.response?.data?.error ??
+        error?.message ??
+        "";
+
+      const cleanedMessage = rawMessage.replace(/^\s*HTTP\s*\d{3}\s*:\s*/i, "").trim();
+
+      const isForbidden =
+        error?.response?.status === 403 ||
+        error?.status === 403 ||
+        error?.response?.data?.code === "FORBIDDEN" ||
+        error?.response?.data?.code === "VIEW_ONLY";
+
+      toast({
+        title: isForbidden ? "Permission Denied" : "Failed to add route",
+        description: cleanedMessage || "Unable to add the route.",
+        variant: "destructive",
+      });
     }
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     // 🔒 Guard: bawal mag-delete kapag view_only
     if (blockIfViewOnly()) {
       setDeleteRoute(null);
@@ -620,13 +640,36 @@ export default function FareMatrixPage() {
     }
 
     if (!deleteRoute) return;
-    deleteMutation.mutate(
-      { id: deleteRoute.id },
-      { onSettled: () => setDeleteRoute(null) }
-    );
-  };
 
-  const handleUpdate = () => {
+    try {
+      await deleteMutation.mutateAsync({ id: deleteRoute.id });
+    } catch (error: any) {
+      console.error("Delete route error:", error);
+
+      const rawMessage: string =
+        error?.response?.data?.message ??
+        error?.response?.data?.error ??
+        error?.message ??
+        "";
+
+      const cleanedMessage = rawMessage.replace(/^\s*HTTP\s*\d{3}\s*:\s*/i, "").trim();
+
+      const isForbidden =
+        error?.response?.status === 403 ||
+        error?.status === 403 ||
+        error?.response?.data?.code === "FORBIDDEN" ||
+        error?.response?.data?.code === "VIEW_ONLY";
+
+      toast({
+        title: isForbidden ? "Permission Denied" : "Failed to delete route",
+        description: cleanedMessage || "Unable to delete the route.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteRoute(null);
+    }
+  };
+   const handleUpdate = async () => {
     // 🔒 Guard: bawal mag-save ng edit kapag view_only
     if (blockIfViewOnly()) return;
 
@@ -638,10 +681,35 @@ export default function FareMatrixPage() {
       toast({ title: "Please fill in all fields", variant: "destructive" });
       return;
     }
-    updateMutation.mutate({
-      id: editRoute.id,
-      data: { origin, destination, fareAmount: fare },
-    });
+
+    try {
+      await updateMutation.mutateAsync({
+        id: editRoute.id,
+        data: { origin, destination, fareAmount: fare },
+      });
+    } catch (error: any) {
+      console.error("Update route error:", error);
+
+      const rawMessage: string =
+        error?.response?.data?.message ??
+        error?.response?.data?.error ??
+        error?.message ??
+        "";
+
+      const cleanedMessage = rawMessage.replace(/^\s*HTTP\s*\d{3}\s*:\s*/i, "").trim();
+
+      const isForbidden =
+        error?.response?.status === 403 ||
+        error?.status === 403 ||
+        error?.response?.data?.code === "FORBIDDEN" ||
+        error?.response?.data?.code === "VIEW_ONLY";
+
+      toast({
+        title: isForbidden ? "Permission Denied" : "Failed to update route",
+        description: cleanedMessage || "Unable to update the route.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
