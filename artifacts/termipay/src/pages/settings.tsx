@@ -37,8 +37,6 @@ import {
   Loader2, ShieldCheck, Trash2, RefreshCw, Crown, ShieldAlert,
   Camera, Upload, Eye, Pencil,
 } from "lucide-react";
-// ── NEW: granular permission matrix section (requirement #3) ─────────────
-import { PermissionMatrixCard } from "@/components/Permissionmatrixcard";
 
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
@@ -853,11 +851,6 @@ export default function SettingsPage() {
           </p>
         </div>
       )}
-
-      {/* ── NEW: Permission Matrix — requirement #3. Super Admin only;
-          renders nothing for Staff since the matrix itself is a
-          Super-Admin-only control surface. ────────────────────────────── */}
-      <PermissionMatrixCard isSuperAdmin={isSuperAdmin} />
 
       {/* Staff List */}
       <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden relative min-h-0 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
