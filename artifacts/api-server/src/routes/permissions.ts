@@ -1,86 +1,42 @@
-import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { Router, type IRouter } from "express";
+import { verifyAdminToken } from "../lib/admin-token";
+import { getEffectivePermissions } from "../lib/permissions";
 
-// ── Permission keys ──────────────────────────────────────────────────────
-// Keep this list in sync with db/002_permission_matrix.sql's
-// permission_catalog seed. It exists as a TS union so route files get
-// autocomplete + a compile error if they typo a key, instead of a string
-// that silently never matches.
-export const PERMISSION_KEYS = [
-  "user.card.create",
-  "user.card.disable",
-  "user.edit",
-  "user.delete",
-  "fare.route.add",
-  "fare.route.edit",
-  "fare.route.activate",
-  "fare.route.delete",
-  "reports.download.pdf",
-  "reports.download.excel",
-  "disbursement.trigger",
-] as const;
+const router: IRouter = Router();
 
-export type PermissionKey = (typeof PERMISSION_KEYS)[number];
-
-function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
-  if (!result) return [];
-  if (Array.isArray(result)) return result as T[];
-  const r = result as Record<string, unknown>;
-  if (Array.isArray(r.rows)) return r.rows as T[];
-  return [];
+function getBearerToken(authorization?: string): string | null {
+  if (!authorization) return null;
+  const [scheme, token] = authorization.split(" ");
+  if (scheme?.toLowerCase() !== "bearer" || !token) return null;
+  return token;
 }
 
-// ── In-memory cache ──────────────────────────────────────────────────────
-// The matrix changes rarely (a super admin flips a checkbox occasionally)
-// but is read on nearly every write request, so cache it and invalidate on
-// write. A TTL is kept as a safety net against multi-instance deployments
-// where one instance's cache doesn't see another instance's write.
-type Matrix = Record<string, Partial<Record<PermissionKey, boolean>>>;
+// ── GET /admin/permissions/mine ─────────────────────────────────────────────
+// Returns the full key→boolean map for the CALLING staff member's own role,
+// so the frontend can grey out buttons without one round-trip per action.
+// This is intentionally NOT gated by requirePermission — every authenticated
+// staff member needs to know their own permissions, otherwise the UI can't
+// render at all. It's still gated by "is this a valid admin session" though.
+router.get("/admin/permissions/mine", async (req, res): Promise<void> => {
+  try {
+    const token = getBearerToken(req.headers.authorization);
+    if (!token) {
+      res.status(401).json({ error: "Missing or malformed Authorization header" });
+      return;
+    }
 
-let cache: Matrix | null = null;
-let cacheLoadedAt = 0;
-const CACHE_TTL_MS = 30_000;
+    const adminUser = verifyAdminToken(token);
+    if (!adminUser) {
+      res.status(401).json({ error: "Invalid or expired session" });
+      return;
+    }
 
-export function invalidatePermissionCache(): void {
-  cache = null;
-}
-
-export async function loadPermissionMatrix(): Promise<Matrix> {
-  if (cache && Date.now() - cacheLoadedAt < CACHE_TTL_MS) return cache;
-
-  const rows = extractRows<{ role: string; permission_key: string; allowed: boolean }>(
-    await db.execute(sql`select role, permission_key, allowed from role_permissions`)
-  );
-
-  const matrix: Matrix = {};
-  for (const row of rows) {
-    matrix[row.role] ??= {};
-    matrix[row.role][row.permission_key as PermissionKey] = row.allowed;
+    const permissions = await getEffectivePermissions(adminUser.role);
+    res.json({ role: adminUser.role, permissions });
+  } catch (error) {
+    console.error("[GET /admin/permissions/mine] error:", error);
+    res.status(500).json({ error: "Failed to fetch permissions" });
   }
+});
 
-  cache = matrix;
-  cacheLoadedAt = Date.now();
-  return matrix;
-}
-
-// ── Effective-permission check ───────────────────────────────────────────
-// super_admin is ALWAYS allowed, regardless of what's stored in the table —
-// this mirrors the existing normalizePermission() belt-and-braces pattern
-// in auth.ts, so a bad row in role_permissions can never lock out every
-// super admin.
-export async function isPermitted(role: string, key: PermissionKey): Promise<boolean> {
-  if (role === "super_admin") return true;
-  const matrix = await loadPermissionMatrix();
-  return matrix[role]?.[key] === true;
-}
-
-// Returns the full key→boolean map for one role, used by GET /auth/me and
-// GET /admin/permissions/mine so the frontend can decide what to
-// disable without one round-trip per button.
-export async function getEffectivePermissions(role: string): Promise<Record<PermissionKey, boolean>> {
-  const result = {} as Record<PermissionKey, boolean>;
-  for (const key of PERMISSION_KEYS) {
-    result[key] = await isPermitted(role, key);
-  }
-  return result;
-}
+export default router;

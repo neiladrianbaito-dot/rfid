@@ -13,9 +13,7 @@ import {
 } from "@workspace/api-zod";
 import { verifyAdminToken } from "../lib/admin-token";
 import { logAudit } from "../lib/audit-logger";
-// TODO: confirm this import path matches wherever requireAdmin actually lives in your codebase.
-import { requireAdmin } from "../middleware/admin-auth";
-import { requirePermission } from "../middleware/permission-middleware";
+import { requireAdmin, requirePermission } from "../middleware/permission-middleware";
 
 const router: IRouter = Router();
 
