@@ -109,23 +109,6 @@ function SuccessTitle({ text }: { text: string }) {
   );
 }
 
-// 🔒 Shared helper: figures out whether a Supabase RPC error is a
-// permission-denied / view_only style error, and pulls a clean message out
-// of it. Supabase RPC calls return `{ data, error }` instead of throwing —
-// so this checks postgres error codes (42501 = insufficient_privilege) and
-// custom codes/messages your `deactivate_route` / `activate_route` SQL
-// functions might raise (e.g. via `RAISE EXCEPTION ... USING ERRCODE`).
-function getSupabaseErrorInfo(error: any): { isForbidden: boolean; message: string } {
-  const rawMessage: string = error?.message ?? error?.details ?? error?.hint ?? "";
-  const isForbidden =
-    error?.code === "42501" || // postgres insufficient_privilege
-    error?.code === "FORBIDDEN" ||
-    error?.code === "VIEW_ONLY" ||
-    /permission|forbidden|view.?only/i.test(rawMessage);
-
-  return { isForbidden, message: rawMessage.trim() };
-}
-
 // ✅ Device type coming from Supabase `devices` table
 // NOTE: `location` column removed — it does not exist on this table.
 type Device = {
@@ -489,19 +472,7 @@ export default function FareMatrixPage() {
 
     if (error) {
       console.error("activate_route error:", error);
-
-      // 🔒 403 / permission-denied handling — supabase.rpc returns an error
-      // object instead of throwing, so we check postgres/RLS error shapes.
-      const { isForbidden, message } = getSupabaseErrorInfo(error);
-
-      toast({
-        title: isForbidden ? "Permission Denied" : "Failed to activate route",
-        description: isForbidden
-          ? message || "You don't have permission to activate this route."
-          : message || "Unable to activate the route.",
-        variant: "destructive",
-      });
-
+      toast({ title: "Failed to activate route", variant: "destructive" });
       setIsTogglePending(false);
       setPendingRouteId(null);
       return;
@@ -518,16 +489,8 @@ export default function FareMatrixPage() {
       });
       if (reverseError) {
         console.error("activate_route (reverse) error:", reverseError);
-
-        // 🔒 403 / permission-denied handling for the reverse-direction call
-        const { isForbidden: isReverseForbidden, message: reverseMessage } =
-          getSupabaseErrorInfo(reverseError);
-
         toast({
-          title: isReverseForbidden
-            ? "Permission Denied (Return Direction)"
-            : "Route activated, but couldn't activate the return direction",
-          description: isReverseForbidden ? reverseMessage : undefined,
+          title: "Route activated, but couldn't activate the return direction",
           variant: "destructive",
         });
       }
@@ -576,19 +539,7 @@ export default function FareMatrixPage() {
 
     if (error) {
       console.error("deactivate_route error:", error);
-
-      // 🔒 403 / permission-denied handling — supabase.rpc returns an error
-      // object instead of throwing, so we check postgres/RLS error shapes.
-      const { isForbidden, message } = getSupabaseErrorInfo(error);
-
-      toast({
-        title: isForbidden ? "Permission Denied" : "Failed to update route status",
-        description: isForbidden
-          ? message || "You don't have permission to deactivate this route."
-          : message || "Unable to update the route status.",
-        variant: "destructive",
-      });
-
+      toast({ title: "Failed to update route status", variant: "destructive" });
       setIsTogglePending(false);
       setPendingRouteId(null);
       return;
@@ -601,16 +552,8 @@ export default function FareMatrixPage() {
       });
       if (reverseError) {
         console.error("deactivate_route (reverse) error:", reverseError);
-
-        // 🔒 403 / permission-denied handling for the reverse-direction call
-        const { isForbidden: isReverseForbidden, message: reverseMessage } =
-          getSupabaseErrorInfo(reverseError);
-
         toast({
-          title: isReverseForbidden
-            ? "Permission Denied (Return Direction)"
-            : "Deactivated, but couldn't deactivate the return direction",
-          description: isReverseForbidden ? reverseMessage : undefined,
+          title: "Deactivated, but couldn't deactivate the return direction",
           variant: "destructive",
         });
       }
@@ -726,8 +669,7 @@ export default function FareMatrixPage() {
       setDeleteRoute(null);
     }
   };
-
-  const handleUpdate = async () => {
+   const handleUpdate = async () => {
     // 🔒 Guard: bawal mag-save ng edit kapag view_only
     if (blockIfViewOnly()) return;
 
