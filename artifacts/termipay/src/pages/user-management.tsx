@@ -1126,7 +1126,10 @@ export default function UserManagementPage() {
   // ✅ Deleting the user row is enough — the "cleanup-id-images" Edge Function
   // (Database Webhook on DELETE) removes the card's ID images from the
   // id-verifications bucket automatically.
-  const confirmDelete = () => {
+    // ✅ Deleting the user row is enough — the "cleanup-id-images" Edge Function
+  // (Database Webhook on DELETE) removes the card's ID images from the
+  // id-verifications bucket automatically.
+  const confirmDelete = async () => {
     // 🔒 Guard: bawal mag-delete kapag view_only
     if (blockIfViewOnly()) {
       setDeleteUser(null);
@@ -1134,10 +1137,34 @@ export default function UserManagementPage() {
     }
 
     if (!deleteUser) return;
-    deleteMutation.mutate(
-      { id: deleteUser.id },
-      { onSettled: () => setDeleteUser(null) },
-    );
+
+    try {
+      await deleteMutation.mutateAsync({ id: deleteUser.id });
+    } catch (error: any) {
+      console.error("Delete user error:", error);
+
+      const rawMessage: string =
+        error?.response?.data?.message ??
+        error?.response?.data?.error ??
+        error?.message ??
+        "";
+
+      const cleanedMessage = rawMessage.replace(/^\s*HTTP\s*\d{3}\s*:\s*/i, "").trim();
+
+      const isForbidden =
+        error?.response?.status === 403 ||
+        error?.status === 403 ||
+        error?.response?.data?.code === "FORBIDDEN" ||
+        error?.response?.data?.code === "VIEW_ONLY";
+
+      toast({
+        title: isForbidden ? "Permission Denied" : "Failed to delete user",
+        description: cleanedMessage || "Unable to delete the user.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteUser(null);
+    }
   };
 
   // ✅ Opens the renewal confirmation dialog for a given user.
