@@ -21,15 +21,24 @@ const router: IRouter = Router();
 // ⚠️ IMPORTANT — this file previously had NO requireAdmin guard on any route.
 // verifyAdminToken() was only ever used inside getActorFromRequest() to label
 // the audit-log entry, never to block a request. requireAdmin +
-// requirePermission have now been added to POST/PATCH/DELETE below — confirm
-// the permission keys ("fare.route.add", "fare.route.edit",
+// requirePermission have now been added to POST/PUT/PATCH(activate)/DELETE
+// below — confirm the permission keys ("fare.route.add", "fare.route.edit",
 // "fare.route.activate", "fare.route.delete") exist in your
 // permission_catalog before deploying, and confirm the import path for
 // requireAdmin above is correct for your project.
 //
-// GET /routes and GET /routes/active are left unguarded: the latter is
-// explicitly commented as a public endpoint in the original file, and GET
-// /routes has no obvious permission key in the reference pattern either.
+// ROUTE PATHS/METHODS CHANGED per requested pattern:
+//   POST   /routes            -> POST   /admin/fare/routes
+//   PATCH  /routes/:id        -> PUT    /admin/fare/routes/:id
+//   DELETE /routes/:id        -> DELETE /admin/fare/routes/:id
+//   PATCH  /routes/:id/toggle -> PATCH  /admin/fare/routes/:id/activate
+//
+// GET /routes and GET /routes/active are left unguarded and at their
+// original paths: the latter is explicitly commented as a public endpoint
+// in the original file, and neither was part of the requested pattern.
+// If you want these under /admin/fare too for consistency, say so and I'll
+// update them (and check whether any frontend/client code references the
+// old paths before you deploy this).
 // ============================================================================
 
 function formatRoute(r: typeof fareRoutesTable.$inferSelect) {
@@ -81,7 +90,7 @@ router.get("/routes", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/routes", requireAdmin, requirePermission("fare.route.add"), async (req, res): Promise<void> => {
+router.post("/admin/fare/routes", requireAdmin, requirePermission("fare.route.add"), async (req, res): Promise<void> => {
   const parsed = CreateRouteBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -107,12 +116,12 @@ router.post("/routes", requireAdmin, requirePermission("fare.route.add"), async 
         details: `created route: ${route.origin} → ${route.destination} (₱${Number(route.fareAmount)})`,
       });
     } catch (auditError) {
-      console.error("[POST /routes] audit log failed:", auditError);
+      console.error("[POST /admin/fare/routes] audit log failed:", auditError);
     }
 
     res.status(201).json(formatRoute(route));
   } catch (error) {
-    console.error("[POST /routes] error:", error);
+    console.error("[POST /admin/fare/routes] error:", error);
     res.status(500).json({ error: "Failed to create route" });
   }
 });
@@ -130,15 +139,15 @@ router.get("/routes/active", async (_req, res): Promise<void> => {
 });
 
 // =============================================================================
-// FIX: PATCH /routes/:id — audit log dapat mag-log ng ACTUAL changed values
-// (old -> new), hindi lang listahan ng column names.
+// FIX: PUT /admin/fare/routes/:id — audit log dapat mag-log ng ACTUAL changed
+// values (old -> new), hindi lang listahan ng column names.
 //
-// Paano gamitin: palitan mo yung buong `router.patch("/routes/:id", ...)`
+// Paano gamitin: palitan mo yung buong `router.put("/admin/fare/routes/:id", ...)`
 // block sa routes file mo ng version sa baba. Wala ibang binago —
-// same pa rin yung ibang routes (POST, GET, DELETE, toggle).
+// same pa rin yung ibang routes (POST, GET, DELETE, activate).
 // =============================================================================
 
-router.patch("/routes/:id", requireAdmin, requirePermission("fare.route.edit"), async (req, res): Promise<void> => {
+router.put("/admin/fare/routes/:id", requireAdmin, requirePermission("fare.route.edit"), async (req, res): Promise<void> => {
   const params = UpdateRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -207,7 +216,7 @@ router.patch("/routes/:id", requireAdmin, requirePermission("fare.route.edit"), 
           details: `updated route: ${route.origin} → ${route.destination} — ${changesSummary}`,
         });
       } catch (auditError) {
-        console.error("[PATCH /routes/:id] audit log failed:", auditError);
+        console.error("[PUT /admin/fare/routes/:id] audit log failed:", auditError);
       }
     }
     // kung walang laman yung `changed` (walang talagang nagbagong value),
@@ -216,12 +225,12 @@ router.patch("/routes/:id", requireAdmin, requirePermission("fare.route.edit"), 
 
     res.json(UpdateRouteResponse.parse(formatRoute(route)));
   } catch (error) {
-    console.error("[PATCH /routes/:id] error:", error);
+    console.error("[PUT /admin/fare/routes/:id] error:", error);
     res.status(500).json({ error: "Failed to update route" });
   }
 });
 
-router.delete("/routes/:id", requireAdmin, requirePermission("fare.route.delete"), async (req, res): Promise<void> => {
+router.delete("/admin/fare/routes/:id", requireAdmin, requirePermission("fare.route.delete"), async (req, res): Promise<void> => {
   const params = DeleteRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -247,12 +256,12 @@ router.delete("/routes/:id", requireAdmin, requirePermission("fare.route.delete"
         details: `deleted route: ${route.origin} → ${route.destination} (₱${Number(route.fareAmount)})`,
       });
     } catch (auditError) {
-      console.error("[DELETE /routes/:id] audit log failed:", auditError);
+      console.error("[DELETE /admin/fare/routes/:id] audit log failed:", auditError);
     }
 
     res.sendStatus(204);
   } catch (error) {
-    console.error("[DELETE /routes/:id] delete failed:", error);
+    console.error("[DELETE /admin/fare/routes/:id] delete failed:", error);
 
     if (isForeignKeyViolation(error)) {
       res.status(409).json({
@@ -266,7 +275,7 @@ router.delete("/routes/:id", requireAdmin, requirePermission("fare.route.delete"
   }
 });
 
-router.patch("/routes/:id/toggle", requireAdmin, requirePermission("fare.route.activate"), async (req, res): Promise<void> => {
+router.patch("/admin/fare/routes/:id/activate", requireAdmin, requirePermission("fare.route.activate"), async (req, res): Promise<void> => {
   const params = ToggleRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -338,12 +347,12 @@ router.patch("/routes/:id/toggle", requireAdmin, requirePermission("fare.route.a
           : `deactivated route: ${route.origin} → ${route.destination}`,
       });
     } catch (auditError) {
-      console.error("[PATCH /routes/:id/toggle] audit log failed:", auditError);
+      console.error("[PATCH /admin/fare/routes/:id/activate] audit log failed:", auditError);
     }
 
     res.json(ToggleRouteResponse.parse(formatRoute(route)));
   } catch (error) {
-    console.error("[PATCH /routes/:id/toggle] error:", error);
+    console.error("[PATCH /admin/fare/routes/:id/activate] error:", error);
     res.status(500).json({ error: "Failed to toggle route" });
   }
 });
