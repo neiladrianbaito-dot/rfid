@@ -5,7 +5,7 @@
 // type declaration stays in one place.)
 // ─────────────────────────────────────────────────────────────────────────
 import type { Request, Response, NextFunction } from "express";
-import { isPermitted, type PermissionKey } from "../lib/permissions";
+import { isPermitted, type PermissionKey } from "../permissions";
 
 // requireAdmin already runs first in every route below (it's what
 // populates req.adminUser) — requirePermission assumes it has, exactly
