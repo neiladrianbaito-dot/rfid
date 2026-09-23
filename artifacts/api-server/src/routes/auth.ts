@@ -18,7 +18,15 @@ import {
 // 🔒 NEW: per-role granular permission map (Permission Matrix), attached to
 // GET /auth/me below so the frontend's usePermissions() hook — and the
 // create-disbursement Edge Function's server-side check — can read it.
-import { getEffectivePermissions } from "../lib/permissions";
+// Also used by GET/PATCH /admin/permissions below, which expose and edit
+// the raw matrix (all roles × all keys) for the Super Admin screen.
+import {
+  getEffectivePermissions,
+  loadPermissionMatrix,
+  invalidatePermissionCache,
+  PERMISSION_KEYS,
+  type PermissionKey,
+} from "../lib/permissions";
 
 const router: IRouter = Router();
 let linkedCardColumnAvailable: boolean | null = null;
@@ -1184,6 +1192,84 @@ router.get("/auth/me", async (req, res): Promise<void> => {
   } catch (e) {
     console.error("Auth state error:", e);
     res.status(401).json({ error: "Invalid auth state" });
+  }
+});
+
+// ── GET PERMISSION MATRIX (ADMIN) ───────────────────────────────────────────
+// Super Admin only. Returns the RAW matrix (all roles × all permission
+// keys) straight from role_permissions, for the Super Admin screen that
+// edits it. This is deliberately different from GET /auth/me's
+// `permissions` field, which only resolves the CALLER's own role and
+// always forces super_admin to all-true — that would hide the actual
+// stored rows from an editing UI.
+
+router.get("/admin/permissions", requireSuperAdmin, async (req, res): Promise<void> => {
+  try {
+    const matrix = await loadPermissionMatrix();
+    res.json({
+      success: true,
+      keys: PERMISSION_KEYS,
+      matrix,
+    });
+  } catch (error) {
+    console.error("Get permission matrix error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── UPDATE PERMISSION MATRIX (ADMIN) ────────────────────────────────────────
+// Super Admin only. Flips a single (role, permission_key) cell in
+// role_permissions and invalidates the in-memory cache in lib/permissions.ts
+// so the change takes effect immediately instead of after CACHE_TTL_MS.
+//
+// NOTE: assumes role_permissions has a unique/composite-PK constraint on
+// (role, permission_key) — matching db/002_permission_matrix.sql's seed —
+// so the upsert below can target it via ON CONFLICT. If that constraint has
+// a different name/shape, swap in `on conflict on constraint <name>` or an
+// explicit update-then-insert-if-missing instead.
+
+router.patch("/admin/permissions", requireSuperAdmin, async (req, res): Promise<void> => {
+  try {
+    const adminUser = req.adminUser!;
+    const body = req.body as { role?: string; permissionKey?: string; allowed?: boolean };
+
+    const role = typeof body?.role === "string" ? body.role.trim() : "";
+    const permissionKey = body?.permissionKey;
+    const allowed = body?.allowed;
+
+    if (!role || typeof permissionKey !== "string" || typeof allowed !== "boolean") {
+      res.status(400).json({ error: "role, permissionKey, and allowed (boolean) are required" });
+      return;
+    }
+    if (!PERMISSION_KEYS.includes(permissionKey as PermissionKey)) {
+      res.status(400).json({ error: `Unknown permission key: ${permissionKey}` });
+      return;
+    }
+    if (role === "super_admin") {
+      res.status(400).json({ error: "super_admin is always fully permitted and cannot be edited" });
+      return;
+    }
+
+    await db.execute(sql`
+      insert into role_permissions (role, permission_key, allowed)
+      values (${role}, ${permissionKey}, ${allowed})
+      on conflict (role, permission_key) do update
+      set allowed = excluded.allowed
+    `);
+
+    invalidatePermissionCache();
+
+    await logAudit({
+      user: adminUser.username,
+      action: "UPDATE",
+      entity: "Permission",
+      details: `${adminUser.username} set ${role}.${permissionKey} = ${allowed}`,
+    });
+
+    res.json({ success: true, role, permissionKey, allowed });
+  } catch (error) {
+    console.error("Update permission matrix error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
