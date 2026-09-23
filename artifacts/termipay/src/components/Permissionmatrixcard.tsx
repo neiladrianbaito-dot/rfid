@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -113,7 +113,7 @@ export function PermissionMatrixCard({ isSuperAdmin }: { isSuperAdmin: boolean }
   if (!isSuperAdmin) return null;
 
   return (
-    <Card className={`shadow-sm ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+    <Card className={`shadow-sm relative overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400 rounded-t-xl" />
       <CardHeader className={`pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
         <div className="flex items-center gap-2">
@@ -156,8 +156,8 @@ export function PermissionMatrixCard({ isSuperAdmin }: { isSuperAdmin: boolean }
               </thead>
               <tbody>
                 {grouped.map(([module, rows]) => (
-                  <>
-                    <tr key={`${module}-header`} className={isDark ? "bg-slate-950/40" : "bg-slate-50/60"}>
+                  <Fragment key={module}>
+                    <tr className={isDark ? "bg-slate-950/40" : "bg-slate-50/60"}>
                       <td
                         colSpan={ROLES.length + 1}
                         className={`px-6 py-2 text-[11px] font-bold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-600"}`}
@@ -186,7 +186,7 @@ export function PermissionMatrixCard({ isSuperAdmin }: { isSuperAdmin: boolean }
                         })}
                       </tr>
                     ))}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
