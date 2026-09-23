@@ -3,9 +3,9 @@ import { useLocation } from "wouter";
 import { useGetReportSummary, useListTransactions } from "@workspace/api-client-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch"; // ⚠️ adjust path to match where you saved that hook
-// 🔒 PERMISSION MATRIX: granular, per-module permission check.
-import { usePermissions } from "@/hooks/use-permissions";
-import { RestrictedButton } from "@/components/RestrictedButton";
+// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
+// at `loaded` (true kapag tapos na ma-fetch ang access info).
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Printer, Loader2, Wallet, Plus, Minus, RotateCcw, CheckCircle2 } from "lucide-react";
 
@@ -135,9 +135,9 @@ export default function ReportPreviewPage() {
   //    at sa handlePrint() bilang proteksyon.
   //  - isViewOnly: true kapag loaded na at walang permission — para sa
   //    tooltip/message at para i-block ang Ctrl+P / browser print.
-  const { can, loaded } = usePermissions();
-  const canPrint = loaded && can("reports.download.pdf");
-  const isViewOnly = loaded && !canPrint;
+  const { canManage, loaded } = useAdminAccess();
+  const canPrint = loaded && canManage;
+  const isViewOnly = loaded && !canManage;
 
   const [zoom, setZoom] = React.useState(ZOOM_DEFAULT);
   const zoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, z + ZOOM_STEP));
@@ -154,24 +154,12 @@ export default function ReportPreviewPage() {
     };
   }, []);
 
-  const handlePrint = async () => {
+  const handlePrint = () => {
+    // 🔒 Guard: bawal mag-print / mag-save as PDF kapag view_only.
+    // Proteksyon ito kahit ma-bypass ang UI (devtools, atbp).
+    if (!canPrint) return;
+
     if (isPreparingPrint) return; // guard against double-clicks
-
-    // 🔒 Backend check — real server-side enforcement, not just the
-    // local `canPrint` flag.
-    try {
-      const authRes = await fetch(`${normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null)}/api/admin/reports/authorize/pdf`, {
-        method: "POST",
-        headers: (() => {
-          const token = window.localStorage.getItem("termipay_auth_token");
-          return token ? { Authorization: `Bearer ${token}` } : {};
-        })(),
-      });
-      if (!authRes.ok) return;
-    } catch {
-      return;
-    }
-
     setIsPreparingPrint(true);
 
     logExportAudit({
@@ -435,12 +423,16 @@ export default function ReportPreviewPage() {
 
             {/* 🔒 Print button — NAKA-GREY OUT (disabled) kapag view_only,
                 hindi tinatanggal sa screen. */}
-            <RestrictedButton
-              permission="reports.download.pdf"
+            <Button
               onClick={handlePrint}
-              disabled={isPreparingPrint}
-              className="bg-blue-700 hover:bg-blue-600 active:bg-blue-800 text-white font-black uppercase text-xs tracking-widest"
+              disabled={isPreparingPrint || !canPrint}
+              className={`font-black uppercase text-xs tracking-widest text-white transition-colors duration-150 disabled:cursor-not-allowed ${
+                canPrint
+                  ? "bg-blue-700 hover:bg-blue-600 active:bg-blue-800 cursor-pointer hover:shadow-lg hover:shadow-blue-500/30 disabled:opacity-70"
+                  : "bg-slate-300 text-slate-500 hover:bg-slate-300 disabled:opacity-100"
+              }`}
               data-testid="button-print"
+              title={printButtonTitle}
             >
               {isPreparingPrint ? (
                 <>
@@ -453,7 +445,7 @@ export default function ReportPreviewPage() {
                   Print / Save as PDF
                 </>
               )}
-            </RestrictedButton>
+            </Button>
           </div>
         </div>
 
