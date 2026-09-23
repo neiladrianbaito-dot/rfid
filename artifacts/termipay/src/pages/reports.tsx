@@ -1679,7 +1679,29 @@ export default function ReportsPage() {
       data-testid="reports-page"
     >
       <style>{`
-        html, body { overflow-x: hidden !important; }
+        html {
+          overflow-x: hidden !important;
+          overflow-y: scroll !important;
+          scrollbar-gutter: stable;
+          scrollbar-width: none;
+        }
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar {
+          width: 0 !important;
+          height: 0 !important;
+          display: none !important;
+        }
+        body {
+          overflow-x: hidden !important;
+          overflow-y: scroll !important;
+          scrollbar-width: none;
+          scrollbar-gutter: stable;
+        }
+        #root {
+          min-width: 0 !important;
+          max-width: 100% !important;
+          overflow-x: hidden !important;
+        }
         @keyframes card-pulse {
           0%   { box-shadow: 0 0 0 rgba(16,185,129,0); }
           50%  { box-shadow: 0 0 0 4px rgba(16,185,129,0.15); }
@@ -1690,7 +1712,21 @@ export default function ReportsPage() {
           from { opacity: 0; transform: translateY(6px); }
           to   { opacity: 1; transform: translateY(0); }
         }
-        .tab-content-enter { animation: tab-fade-in 0.35s ease-out; }
+        .tab-content-enter {
+          animation: tab-fade-in 0.25s ease-out;
+          min-width: 0;
+          max-width: 100%;
+          will-change: opacity, transform;
+        }
+        .reports-scrollbar-hidden {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .reports-scrollbar-hidden::-webkit-scrollbar {
+          display: none;
+          width: 0;
+          height: 0;
+        }
       `}</style>
 
       {/* ══ HEADER ══ */}
@@ -1758,7 +1794,10 @@ export default function ReportsPage() {
           tabs sit tucked slightly lower with a hover lift animation. Same
           one-tab-visible pattern as the Top-up / Fare / Transfer switch on
           the Transactions page. ══ */}
-      <div className={`relative flex items-end gap-1 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+      <div
+        className={`relative flex flex-wrap items-end gap-1 border-b min-w-0 w-full ${isDark ? "border-slate-800" : "border-slate-200"}`}
+        style={{ overflowX: "hidden", scrollbarWidth: "none" }}
+      >
         {REPORT_TABS.map(({ key, label, icon: Icon }) => {
           const active = activeTab === key;
           return (
