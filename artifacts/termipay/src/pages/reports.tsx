@@ -602,6 +602,7 @@ export default function ReportsPage() {
   const [filterYear, setFilterYear] = useState<string>("all");
   const [filterMonth, setFilterMonth] = useState<string>("all");
   const [filterDay, setFilterDay] = useState<string>("all");
+  const [filterMode, setFilterMode] = useState<"year" | "month" | "week" | "day" | "all">("all");
 
   // ── which report section tab is showing: Daily Revenue Breakdown,
   // Discount Collection Analytics, or Detailed Revenue Log — same
@@ -911,17 +912,76 @@ export default function ReportsPage() {
     return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [txList, sanitizedBreakdown]);
 
-  const isFilterActive = filterYear !== "all" || filterMonth !== "all" || filterDay !== "all";
+  const getTodayParts = () => {
+    const now = new Date();
+    return {
+      year: String(now.getFullYear()),
+      month: String(now.getMonth() + 1).padStart(2, "0"),
+      day: String(now.getDate()).padStart(2, "0"),
+    };
+  };
+
+  const getWeekRange = () => {
+    const now = new Date();
+    const day = now.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(now.getDate() + mondayOffset);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    const toKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return { start: toKey(start), end: toKey(end) };
+  };
+
+  const isFilterActive = filterMode !== "all";
 
   const resetFilters = () => {
+    setFilterMode("all");
     setFilterYear("all");
     setFilterMonth("all");
     setFilterDay("all");
   };
 
-  const handleYearChange = (value: string) => setFilterYear(value);
-  const handleMonthChange = (value: string) => setFilterMonth(value);
-  const handleDayChange = (value: string) => setFilterDay(value);
+  const applyQuickFilter = (mode: "year" | "month" | "week" | "day") => {
+    const today = getTodayParts();
+    setFilterMode(mode);
+
+    if (mode === "year") {
+      setFilterYear(today.year);
+      setFilterMonth("all");
+      setFilterDay("all");
+    } else if (mode === "month") {
+      setFilterYear(today.year);
+      setFilterMonth(today.month);
+      setFilterDay("all");
+    } else if (mode === "day") {
+      setFilterYear(today.year);
+      setFilterMonth(today.month);
+      setFilterDay(today.day);
+    } else {
+      // Week uses the current Monday-Sunday range. The date-range predicate
+      // below handles the actual seven-day filtering.
+      setFilterYear("all");
+      setFilterMonth("all");
+      setFilterDay("all");
+    }
+  };
+
+  const matchesQuickFilter = (dateKey: string) => {
+    if (!isFilterActive) return true;
+    if (filterMode === "week") {
+      const { start, end } = getWeekRange();
+      return dateKey >= start && dateKey <= end;
+    }
+    const parts = splitDateString(dateKey);
+    if (!parts) return false;
+    if (filterYear !== "all" && parts.year !== filterYear) return false;
+    if (filterMonth !== "all" && parts.month !== filterMonth) return false;
+    if (filterDay !== "all" && parts.day !== filterDay) return false;
+    return true;
+  };
 
   // ── the actual source used for chart + table: full aggregated data
   // when a filter is active, otherwise report's short window ──
@@ -937,6 +997,18 @@ export default function ReportsPage() {
   const filteredBreakdown = React.useMemo(() => {
     if (!isFilterActive) return baseBreakdown;
 
+    if (filterMode === "week") {
+      const { start, end } = getWeekRange();
+      const dates: string[] = [];
+      const cursor = new Date(`${start}T00:00:00`);
+      const last = new Date(`${end}T00:00:00`);
+      while (cursor <= last) {
+        dates.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`);
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return dates.map((date) => ({ date, revenue: revenueByDate.get(date) || 0 }));
+    }
+
     const fullRange = generateDateRange(filterYear, filterMonth, filterDay);
     if (fullRange) {
       return fullRange.map((date) => ({
@@ -945,15 +1017,7 @@ export default function ReportsPage() {
       }));
     }
 
-    // No year selected (Month and/or Day only, across all years) — keep
-    // the previous "only show days that exist" behavior.
-    return baseBreakdown.filter((d: any) => {
-      const parts = splitDateString(d.date);
-      if (!parts) return false;
-      if (filterMonth !== "all" && parts.month !== filterMonth) return false;
-      if (filterDay !== "all" && parts.day !== filterDay) return false;
-      return true;
-    });
+    return baseBreakdown.filter((d: any) => matchesQuickFilter(d.date));
   }, [baseBreakdown, filterYear, filterMonth, filterDay, isFilterActive, revenueByDate]);
 
   // Same "always render the complete calendar range when a Year is
@@ -961,6 +1025,18 @@ export default function ReportsPage() {
   // Regular/Student/Senior/PWD discount breakdown.
   const filteredFareDiscountBreakdown = React.useMemo(() => {
     if (!isFilterActive) return fareDiscountDailyBreakdown;
+
+    if (filterMode === "week") {
+      const { start, end } = getWeekRange();
+      const dates: string[] = [];
+      const cursor = new Date(`${start}T00:00:00`);
+      const last = new Date(`${end}T00:00:00`);
+      while (cursor <= last) {
+        dates.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`);
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return dates.map((date) => fareDiscountByDate.get(date) || { date, total: 0, regular: 0, student: 0, senior: 0, pwd: 0 });
+    }
 
     const fullRange = generateDateRange(filterYear, filterMonth, filterDay);
     if (fullRange) {
@@ -970,13 +1046,7 @@ export default function ReportsPage() {
       });
     }
 
-    return fareDiscountDailyBreakdown.filter((d) => {
-      const parts = splitDateString(d.date);
-      if (!parts) return false;
-      if (filterMonth !== "all" && parts.month !== filterMonth) return false;
-      if (filterDay !== "all" && parts.day !== filterDay) return false;
-      return true;
-    });
+    return fareDiscountDailyBreakdown.filter((d) => matchesQuickFilter(d.date));
   }, [fareDiscountDailyBreakdown, fareDiscountByDate, filterYear, filterMonth, filterDay, isFilterActive]);
 
   // ── filtered transactions (drives the Fare / Top-up export tabs) —
@@ -989,10 +1059,8 @@ export default function ReportsPage() {
     return enrichedTxList.filter((tx: any) => {
       const parts = getTxDateParts(tx);
       if (!parts) return false;
-      if (filterYear !== "all" && parts.year !== filterYear) return false;
-      if (filterMonth !== "all" && parts.month !== filterMonth) return false;
-      if (filterDay !== "all" && parts.day !== filterDay) return false;
-      return true;
+      const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
+      return matchesQuickFilter(dateKey);
     });
   }, [enrichedTxList, filterYear, filterMonth, filterDay, isFilterActive]);
 
@@ -1251,10 +1319,8 @@ export default function ReportsPage() {
     return transfers.filter((t: any) => {
       const parts = getTxDateParts(t);
       if (!parts) return false;
-      if (filterYear !== "all" && parts.year !== filterYear) return false;
-      if (filterMonth !== "all" && parts.month !== filterMonth) return false;
-      if (filterDay !== "all" && parts.day !== filterDay) return false;
-      return true;
+      const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
+      return matchesQuickFilter(dateKey);
     });
   }, [transfers, filterYear, filterMonth, filterDay, isFilterActive]);
 
@@ -1266,15 +1332,16 @@ export default function ReportsPage() {
   // Human-readable label for the currently active filter, e.g. "September 2026"
   const filterLabel = React.useMemo(() => {
     if (!isFilterActive) return "";
-    const parts: string[] = [];
-    if (filterDay !== "all") parts.push(filterDay);
-    if (filterMonth !== "all") {
-      const m = MONTH_OPTIONS.find((mo) => mo.value === filterMonth);
-      parts.push(m ? m.label : filterMonth);
+    const today = getTodayParts();
+    if (filterMode === "year") return today.year;
+    if (filterMode === "month") {
+      const m = MONTH_OPTIONS.find((mo) => mo.value === today.month);
+      return `${m ? m.label : today.month} ${today.year}`;
     }
-    if (filterYear !== "all") parts.push(filterYear);
-    return parts.join(" ");
-  }, [isFilterActive, filterYear, filterMonth, filterDay]);
+    if (filterMode === "day") return `${today.month}/${today.day}/${today.year}`;
+    const { start, end } = getWeekRange();
+    return `${start} – ${end}`;
+  }, [isFilterActive, filterMode]);
 
   const handleOpenPreview = () => {
     navigate("/reports/preview");
@@ -1310,11 +1377,7 @@ export default function ReportsPage() {
       hour: "2-digit", minute: "2-digit", second: "2-digit",
     });
 
-    const filenameSuffix = isFilterActive
-      ? `-${[filterYear !== "all" ? filterYear : null, filterMonth !== "all" ? filterMonth : null, filterDay !== "all" ? filterDay : null]
-          .filter(Boolean)
-          .join("-")}`
-      : "";
+    const filenameSuffix = isFilterActive ? `-${filterMode}` : "";
 
     logExportAudit({
       entity: "Transaction Logs",
@@ -1611,62 +1674,51 @@ export default function ReportsPage() {
   // the chart/table content. Same Year/Month/Day selects + Reset button.
   // ══════════════════════════════════════════════════════════════════════
   const renderFilterBar = () => (
-    <div className="flex items-center gap-1.5">
-      <Filter size={12} className={isDark ? "text-slate-500" : "text-slate-400"} />
-
-      <select
-        value={filterYear}
-        onChange={(e) => handleYearChange(e.target.value)}
-        data-testid="select-filter-year"
-        className={`h-7 rounded-md border px-2 text-[11px] font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-          isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-700"
-        }`}
-      >
-        <option value="all">Year</option>
-        {availableYears.map((y) => (
-          <option key={y} value={y}>{y}</option>
-        ))}
-      </select>
-
-      <select
-        value={filterMonth}
-        onChange={(e) => handleMonthChange(e.target.value)}
-        data-testid="select-filter-month"
-        className={`h-7 rounded-md border px-2 text-[11px] font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-          isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-700"
-        }`}
-      >
-        <option value="all">Month</option>
-        {MONTH_OPTIONS.map((m) => (
-          <option key={m.value} value={m.value}>{m.label}</option>
-        ))}
-      </select>
-
-      <select
-        value={filterDay}
-        onChange={(e) => handleDayChange(e.target.value)}
-        data-testid="select-filter-day"
-        className={`h-7 rounded-md border px-2 text-[11px] font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-          isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-700"
-        }`}
-      >
-        <option value="all">Day</option>
-        {DAY_OPTIONS.map((d) => (
-          <option key={d.value} value={d.value}>{d.label}</option>
-        ))}
-      </select>
-
+    <div
+      className={`inline-flex items-center gap-1 rounded-xl border p-1 shadow-sm ${
+        isDark ? "border-slate-800 bg-slate-950/80" : "border-slate-200 bg-slate-50"
+      }`}
+      data-testid="report-date-filter-buttons"
+    >
+      <Filter size={12} className={`mx-1 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+      {([
+        ["year", "Year"],
+        ["month", "Month"],
+        ["week", "Week"],
+        ["day", "Day"],
+      ] as const).map(([mode, label]) => {
+        const active = filterMode === mode;
+        return (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => applyQuickFilter(mode)}
+            data-testid={`button-filter-${mode}`}
+            className={`h-7 min-w-[48px] rounded-lg px-2.5 text-[11px] font-semibold transition-all duration-200 ${
+              active
+                ? isDark
+                  ? "bg-blue-500 text-white shadow-sm"
+                  : "bg-blue-600 text-white shadow-sm"
+                : isDark
+                  ? "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                  : "text-slate-500 hover:bg-white hover:text-slate-800"
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
       {isFilterActive && (
         <button
           type="button"
           onClick={resetFilters}
           data-testid="button-reset-filters"
-          className={`h-7 flex items-center gap-1 px-2 rounded-md text-[11px] font-semibold transition-colors ${
-            isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+          title="Clear date filter"
+          className={`ml-0.5 flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
+            isDark ? "text-slate-500 hover:bg-slate-800 hover:text-white" : "text-slate-400 hover:bg-white hover:text-slate-800"
           }`}
         >
           <RotateCcw size={11} />
-          Reset
         </button>
       )}
     </div>
