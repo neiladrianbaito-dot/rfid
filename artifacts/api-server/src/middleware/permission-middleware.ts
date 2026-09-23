@@ -2,7 +2,6 @@ import type { Request, Response, NextFunction } from "express";
 import { sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { verifyAdminToken } from "../lib/admin-token";
-import { isPermitted, type PermissionKey } from "../lib/permissions";
 
 export const VIEW_ONLY_MESSAGE =
   "Your account is set to View Only. You can browse records, but adding, editing, and deleting are disabled. Please contact a Super Admin if you need access.";
@@ -211,36 +210,6 @@ export async function requireSuperAdmin(
     console.error("requireSuperAdmin error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-}
-
-/**
- * Fine-grained permission check (e.g. "user.delete", "reports.export").
- * Assumes requireAdmin (or another guard that populates req.adminUser)
- * already ran — same convention as requireFullAccess/requireSuperAdmin.
- *
- * Usage:
- *   router.delete("/admin/users/:id", requireAdmin, requirePermission("user.delete"), handler)
- */
-export function requirePermission(key: PermissionKey) {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const adminUser = req.adminUser;
-    if (!adminUser) {
-      res.status(401).json({ error: "Not authenticated", code: "UNAUTHENTICATED" });
-      return;
-    }
-
-    const allowed = await isPermitted(adminUser.role, key);
-    if (!allowed) {
-      res.status(403).json({
-        error: "You do not have permission to perform this action.",
-        code: "FORBIDDEN",
-        permission: key,
-      });
-      return;
-    }
-
-    next();
-  };
 }
 
 /**

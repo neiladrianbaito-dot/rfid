@@ -1,68 +1,60 @@
-import { forwardRef } from "react";
-import { Button, type ButtonProps } from "@/components/ui/button";
-import { usePermissions, type PermissionKey } from "@/hooks/use-permissions";
-import { useContactAdminModal } from "@/components/ContactAdminModal";
-import { cn } from "@/lib/utils";
+import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ShieldAlert } from "lucide-react";
+import { useTheme } from "@/hooks/use-theme";
 
-type RestrictedButtonProps = ButtonProps & {
-  /** Permission key from the backend matrix, e.g. "user.delete" */
-  permission: PermissionKey;
-};
+// ── ContactAdminModal ────────────────────────────────────────────────────
+// One shared modal for the whole app, rather than one Dialog instance per
+// RestrictedButton. Mount <ContactAdminProvider> once near the app root
+// (next to your other providers), and any RestrictedButton anywhere in the
+// tree can trigger it via useContactAdminModal().open().
+const ContactAdminModalContext = createContext<{ open: () => void } | null>(null);
 
-// ── RestrictedButton ─────────────────────────────────────────────────────
-// Drop-in replacement for <Button>. This is the ONE place that implements
-// the global rule: never hide a restricted action, always show it
-// disabled, and clicking it explains why instead of doing nothing.
-//
-//   <RestrictedButton permission="user.delete" onClick={handleDelete}>
-//     Delete
-//   </RestrictedButton>
-//
-// If the admin doesn't have "user.delete": the button renders disabled
-// (opacity + not-allowed cursor, no pointer-events-none — a disabled
-// native <button> already ignores clicks, so we handle the "explain why"
-// click via a wrapping span instead, see below), and clicking anywhere on
-// it opens the shared "Please contact administrator" modal instead of
-// calling onClick.
-export const RestrictedButton = forwardRef<HTMLButtonElement, RestrictedButtonProps>(
-  ({ permission, onClick, className, disabled, children, ...props }, ref) => {
-    const { can, loaded } = usePermissions();
-    const { open } = useContactAdminModal();
-
-    // While permissions are still loading, don't flash an enabled button
-    // that then locks — but also don't punish the user with the modal for
-    // a click during that ~one network round trip.
-    const permitted = loaded ? can(permission) : true;
-    const isDisabled = disabled || !permitted;
-
-    return (
-      // A truly-disabled <button> swallows all click events, including
-      // ones we'd want to catch to show the modal — so the disabled state
-      // is applied visually + via aria, and the click gate happens in the
-      // handler instead of relying on the native `disabled` attribute.
-      <Button
-        ref={ref}
-        type="button"
-        aria-disabled={isDisabled}
-        data-restricted={!permitted || undefined}
-        onClick={(e) => {
-          if (!permitted) {
-            e.preventDefault();
-            open();
-            return;
-          }
-          if (disabled) return;
-          onClick?.(e);
-        }}
-        className={cn(
-          !permitted && "opacity-50 cursor-not-allowed hover:opacity-50",
-          className
-        )}
-        {...props}
-      >
-        {children}
-      </Button>
-    );
+export function useContactAdminModal() {
+  const ctx = useContext(ContactAdminModalContext);
+  if (!ctx) {
+    throw new Error("useContactAdminModal must be used within <ContactAdminProvider>");
   }
-);
-RestrictedButton.displayName = "RestrictedButton";
+  return ctx;
+}
+
+export function ContactAdminProvider({ children }: { children: ReactNode }) {
+  const { isDark } = useTheme();
+  const [isOpen, setIsOpen] = useState(false);
+  const open = useCallback(() => setIsOpen(true), []);
+
+  return (
+    <ContactAdminModalContext.Provider value={{ open }}>
+      {children}
+      <AlertDialog open={isOpen} onOpenChange={setIsOpen}>
+        <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+              <ShieldAlert className="text-amber-500" size={18} />
+              Restricted Action
+            </AlertDialogTitle>
+            <AlertDialogDescription className={`text-sm leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Please contact administrator
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => setIsOpen(false)}
+              className="bg-blue-600 text-white hover:bg-blue-700 font-semibold text-xs cursor-pointer"
+            >
+              Got it
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </ContactAdminModalContext.Provider>
+  );
+}

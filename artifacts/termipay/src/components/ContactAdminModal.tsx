@@ -1,60 +1,123 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { ShieldAlert } from "lucide-react";
-import { useTheme } from "@/hooks/use-theme";
+import { useEffect, useState, type ReactNode } from "react";
+import { registerAccessDeniedHandler, type ApiErrorCode } from "../lib/api-client";
 
-// ── ContactAdminModal ────────────────────────────────────────────────────
-// One shared modal for the whole app, rather than one Dialog instance per
-// RestrictedButton. Mount <ContactAdminProvider> once near the app root
-// (next to your other providers), and any RestrictedButton anywhere in the
-// tree can trigger it via useContactAdminModal().open().
-const ContactAdminModalContext = createContext<{ open: () => void } | null>(null);
+/**
+ * Mount this ONCE, high up in your app tree (e.g. inside your admin layout
+ * or in App.tsx wrapping the router):
+ *
+ *   <AccessDeniedProvider>
+ *     <RouterProvider router={router} />
+ *   </AccessDeniedProvider>
+ *
+ * Any 403 from apiFetch() with code VIEW_ONLY / SUPER_ADMIN_ONLY will pop
+ * this modal automatically — no per-page wiring needed.
+ */
+export function AccessDeniedProvider({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [code, setCode] = useState<ApiErrorCode>("VIEW_ONLY");
 
-export function useContactAdminModal() {
-  const ctx = useContext(ContactAdminModalContext);
-  if (!ctx) {
-    throw new Error("useContactAdminModal must be used within <ContactAdminProvider>");
-  }
-  return ctx;
-}
+  useEffect(() => {
+    registerAccessDeniedHandler((msg, c) => {
+      setMessage(msg);
+      setCode(c);
+      setOpen(true);
+    });
+  }, []);
 
-export function ContactAdminProvider({ children }: { children: ReactNode }) {
-  const { isDark } = useTheme();
-  const [isOpen, setIsOpen] = useState(false);
-  const open = useCallback(() => setIsOpen(true), []);
+  const title = code === "SUPER_ADMIN_ONLY" ? "Super Admin Only" : "View Only Access";
 
   return (
-    <ContactAdminModalContext.Provider value={{ open }}>
+    <>
       {children}
-      <AlertDialog open={isOpen} onOpenChange={setIsOpen}>
-        <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
-          <AlertDialogHeader>
-            <AlertDialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
-              <ShieldAlert className="text-amber-500" size={18} />
-              Restricted Action
-            </AlertDialogTitle>
-            <AlertDialogDescription className={`text-sm leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              Please contact administrator
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={() => setIsOpen(false)}
-              className="bg-blue-600 text-white hover:bg-blue-700 font-semibold text-xs cursor-pointer"
+
+      {open && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="access-denied-title"
+          onClick={() => setOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(15, 23, 42, 0.55)",
+            backdropFilter: "blur(2px)",
+            padding: "1rem",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: "26rem",
+              background: "#fff",
+              borderRadius: "0.9rem",
+              boxShadow: "0 20px 45px rgba(0,0,0,0.25)",
+              padding: "1.5rem",
+              fontFamily: "inherit",
+            }}
+          >
+            <div
+              style={{
+                width: "2.75rem",
+                height: "2.75rem",
+                borderRadius: "999px",
+                background: "#FEF3C7",
+                color: "#B45309",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "1.35rem",
+                marginBottom: "0.9rem",
+              }}
+            >
+              ⚠
+            </div>
+
+            <h2
+              id="access-denied-title"
+              style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "#0F172A" }}
+            >
+              {title}
+            </h2>
+
+            <p
+              style={{
+                margin: "0.5rem 0 1.25rem",
+                fontSize: "0.9rem",
+                lineHeight: 1.55,
+                color: "#475569",
+              }}
+            >
+              {message}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              style={{
+                width: "100%",
+                padding: "0.65rem 1rem",
+                borderRadius: "0.6rem",
+                border: "none",
+                background: "#0F172A",
+                color: "#fff",
+                fontWeight: 600,
+                fontSize: "0.9rem",
+                cursor: "pointer",
+              }}
             >
               Got it
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </ContactAdminModalContext.Provider>
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
+
+export default AccessDeniedProvider;

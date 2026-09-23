@@ -13,10 +13,6 @@ import {
 } from "@workspace/api-zod";
 import { verifyAdminToken } from "../lib/admin-token";
 import { logAudit } from "../lib/audit-logger";
-// 🔒 NEW: auth + granular permission guards for the write endpoints below.
-// requireAdmin populates req.adminUser (needed by requirePermission);
-// requirePermission checks the Permission Matrix for the caller's role.
-import { requireAdmin, requirePermission } from "../middleware/permission-middleware";
 
 const router: IRouter = Router();
 
@@ -30,11 +26,6 @@ function formatRoute(r: typeof fareRoutesTable.$inferSelect) {
 // ── Who's making this request? ──────────────────────────────────────────────
 // Same pattern as users.ts — best-effort actor resolution for the audit
 // trail. Falls back to "unknown" rather than blocking the request.
-//
-// NOTE: this is only used for the audit-log string now. Actual
-// authorization is enforced by requireAdmin + requirePermission below,
-// which populate req.adminUser and reject the request before the handler
-// body ever runs — getActorFromRequest() is not a security check.
 
 function getBearerToken(authorization?: string): string | null {
   if (!authorization) return null;
@@ -64,7 +55,6 @@ function isForeignKeyViolation(error: unknown): boolean {
   return false;
 }
 
-// ── GET /routes — read-only, no permission guard needed ─────────────────────
 router.get("/routes", async (_req, res): Promise<void> => {
   try {
     const routes = await db.select().from(fareRoutesTable);
@@ -75,8 +65,7 @@ router.get("/routes", async (_req, res): Promise<void> => {
   }
 });
 
-// ── POST /routes — Add Route. 🔒 requires "fare.route.add" ──────────────────
-router.post("/routes", requireAdmin, requirePermission("fare.route.add"), async (req, res): Promise<void> => {
+router.post("/routes", async (req, res): Promise<void> => {
   const parsed = CreateRouteBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -112,9 +101,7 @@ router.post("/routes", requireAdmin, requirePermission("fare.route.add"), async 
   }
 });
 
-// Public endpoint — no auth required. Used by the fare terminal / reader
-// device to fetch which route is currently live, so this intentionally
-// stays open (unchanged).
+// Public endpoint — no auth required
 router.get("/routes/active", async (_req, res): Promise<void> => {
   try {
     const routes = await db.select().from(fareRoutesTable)
@@ -126,10 +113,16 @@ router.get("/routes/active", async (_req, res): Promise<void> => {
   }
 });
 
-// ── PATCH /routes/:id — Edit Route. 🔒 requires "fare.route.edit" ───────────
-// Audit log records the ACTUAL changed values (old -> new), not just the
-// list of column names that were sent in the request.
-router.patch("/routes/:id", requireAdmin, requirePermission("fare.route.edit"), async (req, res): Promise<void> => {
+// =============================================================================
+// FIX: PATCH /routes/:id — audit log dapat mag-log ng ACTUAL changed values
+// (old -> new), hindi lang listahan ng column names.
+//
+// Paano gamitin: palitan mo yung buong `router.patch("/routes/:id", ...)`
+// block sa routes file mo ng version sa baba. Wala ibang binago —
+// same pa rin yung ibang routes (POST, GET, DELETE, toggle).
+// =============================================================================
+
+router.patch("/routes/:id", async (req, res): Promise<void> => {
   const params = UpdateRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -149,7 +142,7 @@ router.patch("/routes/:id", requireAdmin, requirePermission("fare.route.edit"), 
   if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
 
   try {
-    // ── kunin muna yung CURRENT row bago i-update, para may old values
+    // ── NEW: kunin muna yung CURRENT row bago i-update, para may old values
     // tayong maicompare later. Drizzle na mismo yung nagbibigay ng typed row.
     const [beforeRoute] = await db
       .select()
@@ -172,7 +165,7 @@ router.patch("/routes/:id", requireAdmin, requirePermission("fare.route.edit"), 
       return;
     }
 
-    // ── i-diff lang yung fields kung saan old !== new ────────────────────
+    // ── NEW: i-diff lang yung fields kung saan old !== new ──────────────────
     // (String comparison para hindi maloko ng type mismatch, e.g.
     // fareAmount na "45" vs "45.00" o boolean vs string).
     const changed = Object.entries(updateData).filter(([col, newVal]) => {
@@ -212,8 +205,7 @@ router.patch("/routes/:id", requireAdmin, requirePermission("fare.route.edit"), 
   }
 });
 
-// ── DELETE /routes/:id — Delete Route. 🔒 requires "fare.route.delete" ──────
-router.delete("/routes/:id", requireAdmin, requirePermission("fare.route.delete"), async (req, res): Promise<void> => {
+router.delete("/routes/:id", async (req, res): Promise<void> => {
   const params = DeleteRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -258,18 +250,18 @@ router.delete("/routes/:id", requireAdmin, requirePermission("fare.route.delete"
   }
 });
 
-// ── PATCH /routes/:id/toggle — Activate/Deactivate Route.
-// 🔒 requires "fare.route.activate" (covers both directions of the toggle;
-// deactivating is the inverse action of the same privileged operation) ──────
-router.patch("/routes/:id/toggle", requireAdmin, requirePermission("fare.route.activate"), async (req, res): Promise<void> => {
+router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
   const params = ToggleRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
 
-  // accept an optional deviceId from the request body so the linked
-  // RFID reader actually gets persisted when a route is activated.
+  // ✅ FIX: accept an optional deviceId from the request body so the linked
+  // RFID reader actually gets persisted when a route is activated. Before
+  // this, the toggle endpoint only ever flipped isActive and silently
+  // dropped any deviceId the frontend sent — that's why device_id stayed
+  // null in fare_routes no matter what was selected in the Activate modal.
   //
   // NOTE: if you have a Zod schema for this body (e.g. ToggleRouteBody),
   // swap the manual read below for a proper `ToggleRouteBody.safeParse(req.body)`
