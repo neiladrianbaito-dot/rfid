@@ -16,6 +16,10 @@ import {
 import { verifyAdminToken } from "../lib/admin-token";
 import { logAudit } from "../lib/audit-logger";
 import { unlinkCardFromAnyAccount } from "./auth"; // adjust path if your auth routes file has a different name/location
+// 🔒 NEW: auth + granular permission guards for the write endpoints below.
+// requireAdmin populates req.adminUser (needed by requirePermission);
+// requirePermission checks the Permission Matrix for the caller's role.
+import { requireAdmin, requirePermission } from "../middleware/permission-middleware";
 
 const router: IRouter = Router();
 
@@ -89,6 +93,10 @@ function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
 }
 
 // ── Who's making this request? ──────────────────────────────────────────────
+// NOTE: this is only used for the audit-log string now. Actual
+// authorization is enforced by requireAdmin + requirePermission below,
+// which populate req.adminUser and reject the request before the handler
+// body ever runs — getActorFromRequest() is not a security check.
 function getBearerToken(authorization?: string): string | null {
   if (!authorization) return null;
   const [scheme, token] = authorization.split(" ");
@@ -220,7 +228,7 @@ const EMAIL_JOIN = sql`
     and lower(trim(a.linked_card_uid)) <> 'none'
 `;
 
-// ── GET /users/recent ──────────────────────────────────────────────────────────
+// ── GET /users/recent — read-only, no permission guard needed ───────────────
 router.get("/users/recent", async (_req, res): Promise<void> => {
   try {
     const { hasType, columns } = await detectUsersColumns();
@@ -250,7 +258,7 @@ router.get("/users/recent", async (_req, res): Promise<void> => {
   }
 });
 
-// ── GET /users ─────────────────────────────────────────────────────────────────
+// ── GET /users — read-only, no permission guard needed ───────────────────────
 router.get("/users", async (req, res): Promise<void> => {
   try {
     const { hasType, columns } = await detectUsersColumns();
@@ -291,8 +299,8 @@ router.get("/users", async (req, res): Promise<void> => {
   }
 });
 
-// ── POST /users ────────────────────────────────────────────────────────────────
-router.post("/users", async (req, res): Promise<void> => {
+// ── POST /users — Register/Create Card UID. 🔒 requires "user.card.create" ──
+router.post("/users", requireAdmin, requirePermission("user.card.create"), async (req, res): Promise<void> => {
   console.log("[POST /users] raw body:", req.body);
 
   const parsed = CreateUserBody.safeParse(req.body);
@@ -376,7 +384,7 @@ router.post("/users", async (req, res): Promise<void> => {
   }
 });
 
-// ── GET /users/:id ─────────────────────────────────────────────────────────────
+// ── GET /users/:id — read-only, no permission guard needed ───────────────────
 router.get("/users/:id", async (req, res): Promise<void> => {
   try {
     const params = GetUserParams.safeParse(req.params);
@@ -418,10 +426,11 @@ router.get("/users/:id", async (req, res): Promise<void> => {
   }
 });
 
-// ── PATCH /users/:id ───────────────────────────────────────────────────────────
+// ── PATCH /users/:id — Edit User (also covers disabling/blocking a card
+// via status change). 🔒 requires "user.edit" ────────────────────────────────
 // Audit log records the ACTUAL changed values (old -> new), not just the
 // list of column names that were sent in the request.
-router.patch("/users/:id", async (req, res): Promise<void> => {
+router.patch("/users/:id", requireAdmin, requirePermission("user.edit"), async (req, res): Promise<void> => {
   try {
     const { hasType, columns } = await detectUsersColumns();
     const params = UpdateUserParams.safeParse(req.params);
@@ -540,6 +549,13 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
     // so it becomes immediately available to relink to a different card.
     // This must run BEFORE the email lookup below so the response
     // reflects the unlink right away instead of showing stale data.
+    //
+    // NOTE: this path is reached through PATCH /users/:id (gated above by
+    // "user.edit"). If you want disabling a card to require the separate
+    // "user.card.disable" permission instead of/in addition to
+    // "user.edit", add a second requirePermission("user.card.disable")
+    // check here, conditioned on `shouldAutoUnlink` being true, before
+    // this block runs.
     const statusChangedTo = parsed.data.status?.trim();
     const shouldAutoUnlink =
       statusChangedTo === "Blocked" || statusChangedTo === "Inactive";
@@ -592,11 +608,11 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
   }
 });
 
-// ── DELETE /users/:id ──────────────────────────────────────────────────────────
-// FIX: deletes ONLY the user row. Transactions (top-up, fare, card transfer)
+// ── DELETE /users/:id — Delete User. 🔒 requires "user.delete" ───────────────
+// Deletes ONLY the user row. Transactions (top-up, fare, card transfer)
 // and card_balance_transfers are historical data and are left untouched —
 // they keep their card_uid / card ids so history stays readable.
-router.delete("/users/:id", async (req, res): Promise<void> => {
+router.delete("/users/:id", requireAdmin, requirePermission("user.delete"), async (req, res): Promise<void> => {
   try {
     const params = DeleteUserParams.safeParse(req.params);
     if (!params.success) {

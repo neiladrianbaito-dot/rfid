@@ -28,9 +28,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase";
-// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
-// at `loaded` (true kapag tapos na ma-fetch ang access info).
-import { useAdminAccess } from "@/hooks/use-admin-access";
+import { usePermissions } from "@/hooks/use-permissions";
+import { RestrictedButton } from "@/components/RestrictedButton";
 import {
   Eye,
   TrendingUp,
@@ -585,15 +584,16 @@ export default function ReportsPage() {
   const { isDark } = useTheme();
   const adminName = user?.name || "System Administrator";
 
-  // 🔒 ADMIN ACCESS:
-  //  - canExport: true lang kapag tapos nang mag-load ang access info
-  //    AT may permission (hindi view_only). Ginagamit sa Export Excel Logs
-  //    button at sa handleExportExcelLogs() bilang proteksyon.
-  //  - isViewOnly: true kapag loaded na at walang permission — para sa
+  // 🔒 PERMISSIONS: usePermissions() exposes `can(permission)` against the
+  // new Permission Matrix, plus `loaded` (true kapag tapos nang ma-fetch
+  // ang access info).
+  //  - canExport: true lang kapag tapos nang mag-load ang access info AT
+  //    may "reports.download.excel" permission ang admin.
+  //  - isViewOnly: true kapag loaded na at wala ang permission — para sa
   //    tooltip/message.
-  const { canManage, loaded } = useAdminAccess();
-  const canExport = loaded && canManage;
-  const isViewOnly = loaded && !canManage;
+  const { can, loaded } = usePermissions();
+  const canExport = loaded && can("reports.download.excel");
+  const isViewOnly = loaded && !canExport;
 
   const prevRevenueRef = useRef<number | null>(null);
   const [revenueFlash, setRevenueFlash] = useState(false);
@@ -1297,9 +1297,20 @@ export default function ReportsPage() {
   // filteredTopupList (which now carries fee_amount/vat_amount/net_amount
   // thanks to enrichedTxList above), matching the Transactions page. ──
   const handleExportExcelLogs = async () => {
-    // 🔒 Guard: bawal mag-export kapag view_only. Proteksyon ito kahit
-    // ma-bypass ang UI (devtools, atbp). Hindi rin magsusulat ng audit log.
-    if (!canExport) return;
+    // 🔒 Backend check — even if the frontend flag is somehow stale/
+    // bypassed, this call actually enforces the permission server-side.
+    try {
+      const authRes = await fetch(`${normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null)}/api/admin/reports/authorize/excel`, {
+        method: "POST",
+        headers: (() => {
+          const token = window.localStorage.getItem("termipay_auth_token");
+          return token ? { Authorization: `Bearer ${token}` } : {};
+        })(),
+      });
+      if (!authRes.ok) return;
+    } catch {
+      return;
+    }
 
     const XLSXStyle = await import("xlsx-js-style" as any);
     const { utils, writeFile } = XLSXStyle;
@@ -1714,24 +1725,18 @@ export default function ReportsPage() {
             </span>
           )}
 
-          {/* 🔒 Export Excel Logs button — NAKA-GREY OUT (disabled) kapag
-              view_only, hindi tinatanggal sa screen. */}
-          <Button
+          {/* 🔒 Export Excel Logs button — RestrictedButton handles its own
+              disabled/grey-out styling + "contact administrator" messaging
+              based on the "reports.download.excel" permission. */}
+          <RestrictedButton
+            permission="reports.download.excel"
             onClick={handleExportExcelLogs}
-            disabled={!canExport}
-            className={`text-white font-semibold text-xs px-6 transition-colors duration-150 shadow-sm disabled:cursor-not-allowed disabled:opacity-100 ${
-              canExport
-                ? "bg-emerald-600 hover:bg-emerald-700 cursor-pointer"
-                : isDark
-                  ? "bg-slate-700 text-slate-400 hover:bg-slate-700"
-                  : "bg-slate-300 text-slate-500 hover:bg-slate-300"
-            }`}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-6"
             data-testid="button-export-excel-logs"
-            title={exportButtonTitle}
           >
             <FileSpreadsheet className="w-4 h-4 mr-2" />
             Export Excel Logs
-          </Button>
+          </RestrictedButton>
           <Button
             onClick={handleOpenPreview}
             className={`font-semibold text-xs px-6 cursor-pointer transition-colors duration-150 shadow-sm border ${

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ContactAdminProvider } from "@/components/ContactAdminModal";
 import NotFound from "@/pages/not-found";
 import PaymongoTopup from "@/pages/Paymongo-Topup";
 import PaymongoDashboardPage from "@/pages/user-dashboard";
@@ -162,15 +163,17 @@ const queryClient = new QueryClient({
 });
 
 function App() {
-  // Removed useEffect — setup already done at module level abovey
+  // Removed useEffect — setup already done at module level above
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={(import.meta.env.BASE_URL || "").replace(/\/$/, "")}>
-          <AppRouter />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
+      <ContactAdminProvider>
+        <TooltipProvider>
+          <WouterRouter base={(import.meta.env.BASE_URL || "").replace(/\/$/, "")}>
+            <AppRouter />
+          </WouterRouter>
+          <Toaster />
+        </TooltipProvider>
+      </ContactAdminProvider>
     </QueryClientProvider>
   );
 }

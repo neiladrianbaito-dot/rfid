@@ -37,6 +37,8 @@ import {
   Loader2, ShieldCheck, Trash2, RefreshCw, Crown, ShieldAlert,
   Camera, Upload, Eye, Pencil,
 } from "lucide-react";
+// ── NEW: granular permission matrix section (requirement #3) ─────────────
+import { PermissionMatrixCard } from "@/components/PermissionMatrixCard";
 
 function normalizeApiBaseUrl(rawUrl?: string | null): string {
   const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
@@ -540,43 +542,13 @@ export default function SettingsPage() {
   const [deleteTarget, setDeleteTarget] = useState<StaffUser | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  // ── Access-level (permission) change — Super Admin only, staff rows
-  // only. Calls PATCH /admin/staff/:id/access, same endpoint the backend
-  // already exposes for this. ──────────────────────────────────────────────
-  const [updatingPermissionId, setUpdatingPermissionId] = useState<number | null>(null);
-
-  async function handlePermissionChange(target: StaffUser, nextPermission: PermissionLevel) {
-    if (target.permission === nextPermission) return;
-    if (target.role === "super_admin") return; // backend rejects this anyway
-
-    setUpdatingPermissionId(target.id);
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/admin/staff/${target.id}/access`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify({ permission: nextPermission }),
-      });
-
-      const data = await parseJsonSafe(response);
-      if (!response.ok) throw new Error(data.error || "Failed to update access level");
-
-      setStaff((prev) =>
-        prev.map((s) => (s.id === target.id ? { ...s, permission: nextPermission } : s))
-      );
-
-      toast({
-        title: "Access Updated",
-        description: `${target.full_name} can now ${nextPermission === "view_only" ? "only view" : "view, edit, and delete"} records.`,
-      });
-    } catch (error: any) {
-      toast({ title: "Failed to Update Access", description: error.message, variant: "destructive" });
-    } finally {
-      setUpdatingPermissionId(null);
-    }
-  }
+  // NOTE: per-account Access (Full Access / View Only) editing was removed
+  // from this page — module-level permissions are now controlled entirely
+  // through the Permission Matrix above, which applies per ROLE (Staff /
+  // Super Admin) rather than per individual account. `admins.permission`
+  // stays in the DB for now (still read below to show a static badge, and
+  // some older endpoints like unlink-card still check it server-side) but
+  // it's no longer editable from this UI.
 
   // ── Edit-picture modal for an EXISTING staff row. Opened by clicking an
   // account's avatar (Super Admin only). Same upload/cleanup logic as
@@ -794,7 +766,7 @@ export default function SettingsPage() {
     }
   };
 
-  const columnCount = 5 + (canManage ? 1 : 0); // Name, Username, Role, Access, Date Added [, Actions]
+  const columnCount = 4 + (canManage ? 1 : 0); // Name, Username, Role, Date Added [, Actions]
 
   return (
     <div className={`space-y-8 h-full min-h-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}>
@@ -852,6 +824,11 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* ── NEW: Permission Matrix — requirement #3. Super Admin only;
+          renders nothing for Staff since the matrix itself is a
+          Super-Admin-only control surface. ────────────────────────────── */}
+      <PermissionMatrixCard isSuperAdmin={isSuperAdmin} />
+
       {/* Staff List */}
       <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden relative min-h-0 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
@@ -908,7 +885,6 @@ export default function SettingsPage() {
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Name</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Username</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Role</TableHead>
-                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Access</TableHead>
                     <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date Added</TableHead>
                     {canManage && (
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
@@ -968,47 +944,6 @@ export default function SettingsPage() {
                             {s.role === "super_admin" ? <Crown className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
                             {roleLabel(s.role)}
                           </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {s.role === "super_admin" ? (
-                            <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${permissionBadgeClass("full_access", isDark)}`}>
-                              <Pencil className="w-3 h-3" />
-                              Full Access
-                            </Badge>
-                          ) : canManage ? (
-                            <Select
-                              value={s.permission}
-                              onValueChange={(v) => handlePermissionChange(s, v as PermissionLevel)}
-                              disabled={updatingPermissionId === s.id}
-                            >
-                              <SelectTrigger
-                                className={`h-7 w-[132px] text-[11px] gap-1 cursor-pointer ${
-                                  isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"
-                                }`}
-                              >
-                                {updatingPermissionId === s.id ? (
-                                  <span className="flex items-center gap-1.5">
-                                    <Loader2 className="w-3 h-3 animate-spin" /> Saving...
-                                  </span>
-                                ) : (
-                                  <SelectValue />
-                                )}
-                              </SelectTrigger>
-                              <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                                <SelectItem value="full_access">
-                                  <span className="flex items-center gap-1.5"><Pencil className="w-3 h-3" /> Full Access</span>
-                                </SelectItem>
-                                <SelectItem value="view_only">
-                                  <span className="flex items-center gap-1.5"><Eye className="w-3 h-3" /> View Only</span>
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <Badge variant="outline" className={`text-[10px] font-semibold gap-1 ${permissionBadgeClass(s.permission, isDark)}`}>
-                              {s.permission === "view_only" ? <Eye className="w-3 h-3" /> : <Pencil className="w-3 h-3" />}
-                              {permissionLabel(s.permission)}
-                            </Badge>
-                          )}
                         </TableCell>
                         <TableCell className={`text-xs font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                           {new Date(s.created_at).toLocaleDateString()}
@@ -1178,31 +1113,13 @@ export default function SettingsPage() {
               </Select>
             </div>
 
-            {/* Access level only matters for Staff — a Super Admin is
-                always forced to full_access on the backend, so hide the
-                control entirely when that role is selected to avoid
-                implying it does anything. */}
-            {form.role === "staff" && (
-              <div className="space-y-2 sm:col-span-2">
-                <Label className={`text-xs uppercase tracking-wide font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Access Level
-                </Label>
-                <Select value={form.permission} onValueChange={(v) => setForm({ ...form, permission: v as PermissionLevel })}>
-                  <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-600"}>
-                    <SelectItem value="full_access">
-                      <span className="flex items-center gap-1.5"><Pencil className="w-3 h-3" /> Full Access — can view, edit, and delete</span>
-                    </SelectItem>
-                    <SelectItem value="view_only">
-                      <span className="flex items-center gap-1.5"><Eye className="w-3 h-3" /> View Only — can view records only</span>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
           </div>
+
+          {form.role === "staff" && (
+            <p className={`text-xs -mt-2 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+              What this Staff account can do is controlled by the Permission Matrix above, not per-account here.
+            </p>
+          )}
 
           <div className={`p-3 rounded-lg border flex items-start gap-2 ${isDark ? "bg-blue-950/20 border-blue-900" : "bg-blue-50/60 border-blue-100"}`}>
             <ShieldCheck size={14} className={`mt-0.5 shrink-0 ${isDark ? "text-blue-400" : "text-blue-700"}`} />

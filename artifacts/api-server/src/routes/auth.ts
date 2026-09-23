@@ -15,6 +15,10 @@ import {
   loadAdminContext,
   ensurePermissionColumn,
 } from "../middleware/permission-middleware";
+// 🔒 NEW: per-role granular permission map (Permission Matrix), attached to
+// GET /auth/me below so the frontend's usePermissions() hook — and the
+// create-disbursement Edge Function's server-side check — can read it.
+import { getEffectivePermissions } from "../lib/permissions";
 
 const router: IRouter = Router();
 let linkedCardColumnAvailable: boolean | null = null;
@@ -790,6 +794,11 @@ router.post("/auth/user/link-card", async (req, res): Promise<void> => {
 //
 // WRITE ACTION → guarded by requireFullAccess. A view_only staff member
 // gets a 403 with code VIEW_ONLY, which the frontend turns into a modal.
+//
+// (This still runs off the old full_access/view_only switch rather than
+// the Permission Matrix. If you want it under the matrix instead, swap
+// requireFullAccess for requirePermission("user.card.disable") — see the
+// note in server/routes/users.ts's PATCH /users/:id handler.)
 
 router.post("/admin/users/unlink-card", requireFullAccess, async (req, res): Promise<void> => {
   try {
@@ -1138,8 +1147,11 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
 });
 
 // ── ADMIN ME ──────────────────────────────────────────────────────────────────
-// Single source of truth for the frontend's useAdminAccess() hook. Always
-// reads role + permission LIVE from the admins table, never from the token.
+// Single source of truth for the frontend's useAdminAccess() / usePermissions()
+// hooks, AND for server-side callers (like the create-disbursement Edge
+// Function) that verify a caller's permission by hitting this endpoint.
+// Always reads role + permission LIVE from the admins table / Permission
+// Matrix, never from the token.
 
 router.get("/auth/me", async (req, res): Promise<void> => {
   try {
@@ -1155,11 +1167,19 @@ router.get("/auth/me", async (req, res): Promise<void> => {
       role: admin.role,
     });
 
+    // 🔒 NEW: per-module granular permissions from the Permission Matrix,
+    // e.g. { "user.delete": false, "fare.route.add": false,
+    // "reports.download.excel": true, "disbursement.trigger": false, ... }.
+    // super_admin always comes back all-true (see isPermitted() in
+    // server/lib/permissions.ts).
+    const permissions = await getEffectivePermissions(admin.role);
+
     res.json({
       ...validatedUser,
       permission: admin.permission,
       canManage: admin.permission === "full_access",
       isSuperAdmin: admin.role === "super_admin",
+      permissions,
     });
   } catch (e) {
     console.error("Auth state error:", e);
@@ -1300,6 +1320,12 @@ router.post("/auth/user/unlink-card", async (req, res): Promise<void> => {
 // ── UPDATE STAFF ACCESS (ADMIN) ────────────────────────────────────────────
 // Super Admin only. This is the endpoint that flips a staff account between
 // full_access and view_only.
+//
+// NOTE: this still governs the old blunt full_access/view_only switch
+// (admins.permission), which is now superseded for the four gated
+// modules by the Permission Matrix. It's left in place because
+// requireFullAccess / requireSuperAdmin elsewhere (e.g. staff account
+// management itself, just below) still read it.
 
 router.patch("/admin/staff/:id/access", requireSuperAdmin, async (req, res): Promise<void> => {
   try {
