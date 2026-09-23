@@ -1228,51 +1228,47 @@ router.get("/admin/permissions", requireSuperAdmin, async (req, res): Promise<vo
 // a different name/shape, swap in `on conflict on constraint <name>` or an
 // explicit update-then-insert-if-missing instead.
 
-router.patch("/admin/permissions", requireSuperAdmin, async (req, res): Promise<void> => {
+router.get("/admin/permissions", requireSuperAdmin, async (req, res): Promise<void> => {
   try {
-    const adminUser = req.adminUser!;
-    const body = req.body as { role?: string; permissionKey?: string; allowed?: boolean };
+    const [matrix, catalogRaw] = await Promise.all([
+      loadPermissionMatrix(),
+      db.execute(sql`
+        select permission_key, label, module, sort_order
+        from permission_catalog
+        order by module, sort_order
+      `),
+    ]);
 
-    const role = typeof body?.role === "string" ? body.role.trim() : "";
-    const permissionKey = body?.permissionKey;
-    const allowed = body?.allowed;
+    const catalog = extractRows<{
+      permission_key: string;
+      label: string;
+      module: string;
+      sort_order: number;
+    }>(catalogRaw);
 
-    if (!role || typeof permissionKey !== "string" || typeof allowed !== "boolean") {
-      res.status(400).json({ error: "role, permissionKey, and allowed (boolean) are required" });
-      return;
+    // Flatten the Matrix (role -> key -> boolean) into the flat rules array
+    // the frontend's PermissionMatrixCard expects.
+    const rules: { role: string; permission_key: string; allowed: boolean }[] = [];
+    for (const role of Object.keys(matrix)) {
+      for (const key of Object.keys(matrix[role])) {
+        rules.push({
+          role,
+          permission_key: key,
+          allowed: matrix[role][key as PermissionKey] === true,
+        });
+      }
     }
-    if (!PERMISSION_KEYS.includes(permissionKey as PermissionKey)) {
-      res.status(400).json({ error: `Unknown permission key: ${permissionKey}` });
-      return;
-    }
-    if (role === "super_admin") {
-      res.status(400).json({ error: "super_admin is always fully permitted and cannot be edited" });
-      return;
-    }
 
-    await db.execute(sql`
-      insert into role_permissions (role, permission_key, allowed)
-      values (${role}, ${permissionKey}, ${allowed})
-      on conflict (role, permission_key) do update
-      set allowed = excluded.allowed
-    `);
-
-    invalidatePermissionCache();
-
-    await logAudit({
-      user: adminUser.username,
-      action: "UPDATE",
-      entity: "Permission",
-      details: `${adminUser.username} set ${role}.${permissionKey} = ${allowed}`,
+    res.json({
+      success: true,
+      catalog,
+      rules,
     });
-
-    res.json({ success: true, role, permissionKey, allowed });
   } catch (error) {
-    console.error("Update permission matrix error:", error);
+    console.error("Get permission matrix error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 // ── LIST STAFF (ADMIN) ────────────────────────────────────────────────────────
 // READ-ONLY → any authenticated admin, including view_only staff.
 
