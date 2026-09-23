@@ -13,19 +13,22 @@ type Props = ReturnType<typeof useLinkCard> & {
 };
 
 // ── Card UID config ────────────────────────────────────────────────────────
-// All registered cards are stored as "RFID-XXXXXXXX" (prefix + exactly 8 digits).
-// The prefix is shown as a fixed, non-editable label. The user only types the
-// 8 digits, and we prepend the prefix before it goes into the hook's `input`.
+// All registered cards are stored as "RFID-XXXXXXXX" (prefix + exactly 8
+// alphanumeric characters). The prefix is shown as a fixed, non-editable
+// label. The user only types the 8 characters, and we prepend the prefix
+// before it goes into the hook's `input`.
 const CARD_PREFIX = "RFID-";
 const CARD_DIGITS = 8;
 
-// Strips any typed/pasted "RFID-" prefix, keeps digits only, max 8.
-// Works for both "44234234" and a pasted "RFID-44234234".
+// Strips any typed/pasted "RFID-" prefix, keeps letters and numbers only
+// (max 8 characters), and uppercases everything for consistency.
+// Works for both "44AB1234" and a pasted "RFID-44ab1234".
 function sanitizeSuffix(raw: string) {
   return raw
     .replace(/^rfid-?/i, "")
-    .replace(/\D/g, "")
-    .slice(0, CARD_DIGITS);
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, CARD_DIGITS)
+    .toUpperCase();
 }
 
 export function LinkCardModal(props: Props) {
@@ -54,7 +57,7 @@ export function LinkCardModal(props: Props) {
   const isBlocked  = validation.status === "blocked";
   const isLocked   = validation.status === "locked";
 
-  // Display-only value shown inside the input (the 8 digits AFTER "RFID-").
+  // Display-only value shown inside the input (the 8 characters AFTER "RFID-").
   const displaySuffix = sanitizeSuffix(
     input.startsWith(CARD_PREFIX) ? input.slice(CARD_PREFIX.length) : input
   );
@@ -198,9 +201,10 @@ export function LinkCardModal(props: Props) {
                     Card UID
                   </label>
 
-                  {/* Fixed "RFID-" prefix glued to the input. Only the 8 digits
-                      after it are typed. handleUidChange() prepends CARD_PREFIX
-                      and pushes the full "RFID-XXXXXXXX" string into `input`. */}
+                  {/* Fixed "RFID-" prefix glued to the input. Only the 8
+                      alphanumeric characters after it are typed.
+                      handleUidChange() prepends CARD_PREFIX and pushes the
+                      full "RFID-XXXXXXXX" string into `input`. */}
                   <div className="relative">
                     <span
                       className={`pointer-events-none select-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm tracking-wide ${
@@ -212,9 +216,11 @@ export function LinkCardModal(props: Props) {
                     <Input
                       value={displaySuffix}
                       onChange={handleUidChange}
-                      placeholder="44234234"
-                      inputMode="numeric"
+                      placeholder="44AB1234"
+                      inputMode="text"
                       autoComplete="off"
+                      autoCapitalize="characters"
+                      spellCheck={false}
                       style={{ paddingLeft: 60 }}
                       className={`font-mono text-sm h-11 focus-visible:ring-emerald-500/30 ${
                         isDark
@@ -228,7 +234,7 @@ export function LinkCardModal(props: Props) {
                     />
                   </div>
                   <p className={`text-[9px] sm:text-[10px] mt-1 flex justify-between gap-2 ${isDark ? "text-slate-600" : "text-slate-400"}`}>
-                    <span>Enter the 8-digit number on your card — "RFID-" is added automatically.</span>
+                    <span>Enter the 8-character code on your card — "RFID-" is added automatically.</span>
                     <span className="tabular-nums shrink-0">{displaySuffix.length}/{CARD_DIGITS}</span>
                   </p>
                 </div>
