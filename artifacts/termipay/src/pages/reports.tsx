@@ -1674,8 +1674,8 @@ export default function ReportsPage() {
 
   return (
     <div
-      className={`space-y-8 h-full flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`}
-      style={{ overflowX: "hidden", maxWidth: "100%", boxSizing: "border-box" }}
+      className={`space-y-8 h-full min-w-0 flex flex-col reports-scrollbar-hidden ${isDark ? "text-slate-200" : "text-slate-800"}`}
+      style={{ overflowX: "hidden", overflowY: "visible", maxWidth: "100%", minWidth: 0, boxSizing: "border-box" }}
       data-testid="reports-page"
     >
       <style>{`
@@ -1713,19 +1713,20 @@ export default function ReportsPage() {
           to   { opacity: 1; transform: translateY(0); }
         }
         .tab-content-enter {
-          animation: tab-fade-in 0.25s ease-out;
+          animation: tab-fade-in 0.18s ease-out;
           min-width: 0;
           max-width: 100%;
+          overflow-x: hidden;
           will-change: opacity, transform;
         }
         .reports-scrollbar-hidden {
-          scrollbar-width: none;
-          -ms-overflow-style: none;
+          scrollbar-width: none !important;
+          -ms-overflow-style: none !important;
         }
         .reports-scrollbar-hidden::-webkit-scrollbar {
-          display: none;
-          width: 0;
-          height: 0;
+          display: none !important;
+          width: 0 !important;
+          height: 0 !important;
         }
       `}</style>
 
