@@ -567,7 +567,7 @@ function safeSheetName(name: string): string {
   return name.replace(/[:\\/?*\[\]]/g, "-").slice(0, 31);
 }
 
-// 🆕 Report-tab definitions for the GCash-style underline tab bar, moved
+// 🆕 Report-tab definitions for the modern folder-style tab bar, moved
 // to the very top of the page (right under the page header, above the
 // summary cards) instead of sitting between the cards and the tab
 // content below.
@@ -1686,6 +1686,11 @@ export default function ReportsPage() {
           100% { box-shadow: 0 0 0 rgba(16,185,129,0); }
         }
         .card-pulse { animation: card-pulse 0.8s ease-in-out; }
+        @keyframes tab-fade-in {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .tab-content-enter { animation: tab-fade-in 0.35s ease-out; }
       `}</style>
 
       {/* ══ HEADER ══ */}
@@ -1747,14 +1752,13 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* ══ TAB SWITCH — moved to the very top, right under the page header
-          and above the summary cards. GCash-style flat underline tabs
-          (line indicator on the active tab, no pill/card background)
-          instead of the old segmented pill control. Daily Revenue
-          Breakdown / Discount Collection Analytics / Detailed Revenue Log /
-          Route Performance — same one-tab-visible pattern as the
-          Top-up / Fare / Transfer switch on the Transactions page. ══ */}
-      <div className={`flex items-center gap-6 overflow-x-auto border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+      {/* ══ TAB SWITCH — modern folder-style tabs. Active tab lifts up and
+          visually merges with the card panel below it (bottom border
+          matches the card background, erasing the divider line), inactive
+          tabs sit tucked slightly lower with a hover lift animation. Same
+          one-tab-visible pattern as the Top-up / Fare / Transfer switch on
+          the Transactions page. ══ */}
+      <div className={`relative flex items-end gap-1 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
         {REPORT_TABS.map(({ key, label, icon: Icon }) => {
           const active = activeTab === key;
           return (
@@ -1762,14 +1766,38 @@ export default function ReportsPage() {
               key={key}
               onClick={() => setActiveTab(key)}
               data-testid={`button-tab-${key}`}
-              className={`relative flex items-center gap-1.5 pb-2.5 -mb-px whitespace-nowrap text-xs font-semibold transition-colors cursor-pointer border-b-2 ${
-                active
-                  ? isDark ? "text-blue-400 border-blue-400" : "text-blue-600 border-blue-600"
-                  : isDark ? "text-slate-500 border-transparent hover:text-slate-300" : "text-slate-400 border-transparent hover:text-slate-600"
-              }`}
+              className={`group relative flex items-center gap-2 px-4 py-2.5 text-xs font-semibold whitespace-nowrap
+                rounded-t-xl border transition-all duration-300 ease-out cursor-pointer
+                ${active
+                  ? `-mb-px translate-y-0 z-10 shadow-[0_-6px_16px_rgba(0,0,0,0.07)] ${
+                      isDark
+                        ? "bg-slate-900 border-slate-800 border-b-slate-900 text-blue-400"
+                        : "bg-white border-slate-200 border-b-white text-blue-600"
+                    }`
+                  : `translate-y-1 opacity-70 hover:opacity-100 hover:translate-y-0.5 border-transparent ${
+                      isDark
+                        ? "text-slate-500 hover:text-slate-300 hover:bg-slate-900/50"
+                        : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                    }`
+                }`}
             >
-              <Icon className="w-3.5 h-3.5" />
+              <span
+                className={`flex items-center justify-center w-6 h-6 rounded-lg transition-colors duration-300 ${
+                  active
+                    ? isDark ? "bg-blue-500/15 text-blue-400" : "bg-blue-50 text-blue-600"
+                    : "bg-transparent"
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+              </span>
               {label}
+              {active && (
+                <span
+                  className={`absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full animate-pulse ${
+                    isDark ? "bg-blue-400" : "bg-blue-500"
+                  }`}
+                />
+              )}
             </button>
           );
         })}
@@ -1821,7 +1849,7 @@ export default function ReportsPage() {
           header row now carries the title AND the inline filter dropdowns
           together, so the filter doesn't add its own spacing block. ══ */}
       {activeTab === "chart" && (
-      <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+      <Card className={`tab-content-enter shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
         <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -2023,7 +2051,7 @@ export default function ReportsPage() {
           bar chart style used on the "Daily Revenue Breakdown" tab. The
           daily table is kept below the chart for exact per-day figures. */}
       {activeTab === "discount" && (
-      <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+      <Card className={`tab-content-enter shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-600 via-indigo-500 to-transparent" />
         <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -2207,7 +2235,7 @@ export default function ReportsPage() {
           Year/Month/Day filter, rendered inline in this card's header row
           next to the title. */}
       {activeTab === "routes" && (
-      <Card className={`shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+      <Card className={`tab-content-enter shadow-sm overflow-hidden relative flex-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-amber-500 to-transparent" />
         <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -2437,7 +2465,7 @@ export default function ReportsPage() {
 
       {/* ══ DATA TABLE ══ */}
       {activeTab === "log" && (
-      <Card className={`shadow-sm flex-1 flex flex-col overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+      <Card className={`tab-content-enter shadow-sm flex-1 flex flex-col overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3 flex-wrap">
