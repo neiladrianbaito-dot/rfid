@@ -272,10 +272,21 @@ export default function DashboardPage() {
       {/* Revenue Area Chart */}
       <Card className={`shadow-sm relative overflow-hidden transition-colors ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <CardHeader className={`border-b transition-colors ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-          <CardTitle className={`text-sm font-bold flex items-center gap-2 transition-colors ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-            <div className="w-2 h-2 rounded-full bg-blue-500" />
-            Revenue Stream Projection
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className={`text-sm font-bold flex items-center gap-2 transition-colors ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+              <div className="w-2 h-2 rounded-full bg-blue-500" />
+              Revenue Stream Projection
+            </CardTitle>
+            <span
+              className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-1 rounded-full border ${
+                isDark
+                  ? "bg-blue-950/40 border-blue-900 text-blue-400"
+                  : "bg-blue-50 border-blue-100 text-blue-700"
+              }`}
+            >
+              7 Day Revenue
+            </span>
+          </div>
         </CardHeader>
         <CardContent className="pt-10">
           {trendLoading ? (
