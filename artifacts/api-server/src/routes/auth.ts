@@ -1375,7 +1375,7 @@ router.delete("/admin/staff/:id", requireSuperAdmin, async (req, res): Promise<v
 
     if (selfAdmin && selfAdmin.id === targetId) {
       res.status(400).json({ error: "You cannot remove your own account" });
-      return;
+      return;Z
     }
 
     const targetRaw = await db.execute(sql`
