@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 // ── Permission keys ──────────────────────────────────────────────────────
 // Keep this list in sync with db/002_permission_matrix.sql's
-// permission_catalog seed. It exists as a TS union so route files get
+// role_permissions seed. It exists as a TS union so route files get
 // autocomplete + a compile error if they typo a key, instead of a string
 // that silently never matches.
 export const PERMISSION_KEYS = [
@@ -21,6 +21,31 @@ export const PERMISSION_KEYS = [
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
+
+// ── Catalog metadata ──────────────────────────────────────────────────────
+// There's no permission_catalog table in the DB — role_permissions only
+// stores role/permission_key/allowed flags, no labels or modules. So the
+// display metadata for the Permission Matrix UI (GET /admin/permissions)
+// lives here in code, right next to PERMISSION_KEYS, so the two can't drift
+// out of sync. Add a row here whenever a key is added to PERMISSION_KEYS.
+export const PERMISSION_CATALOG: {
+  permission_key: PermissionKey;
+  label: string;
+  module: string;
+  sort_order: number;
+}[] = [
+  { permission_key: "user.card.create",       label: "Create card",            module: "Users",        sort_order: 1 },
+  { permission_key: "user.card.disable",      label: "Disable / unlink card",  module: "Users",        sort_order: 2 },
+  { permission_key: "user.edit",              label: "Edit user",              module: "Users",        sort_order: 3 },
+  { permission_key: "user.delete",            label: "Delete user",            module: "Users",        sort_order: 4 },
+  { permission_key: "fare.route.add",         label: "Add fare route",         module: "Fare Routes",  sort_order: 1 },
+  { permission_key: "fare.route.edit",        label: "Edit fare route",        module: "Fare Routes",  sort_order: 2 },
+  { permission_key: "fare.route.activate",    label: "Activate fare route",    module: "Fare Routes",  sort_order: 3 },
+  { permission_key: "fare.route.delete",      label: "Delete fare route",      module: "Fare Routes",  sort_order: 4 },
+  { permission_key: "reports.download.pdf",   label: "Download PDF reports",   module: "Reports",      sort_order: 1 },
+  { permission_key: "reports.download.excel", label: "Download Excel reports", module: "Reports",      sort_order: 2 },
+  { permission_key: "disbursement.trigger",   label: "Trigger disbursement",   module: "Disbursement", sort_order: 1 },
+];
 
 function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
   if (!result) return [];
