@@ -141,20 +141,22 @@ const TX_CSS = `
   background: transparent;
 }
 
-/* Tab strip: transparent, no padding — first tab starts at the left edge. */
+/* Tab strip: visible Chrome-style tabs with a clear divider. */
 .tp-tabs {
   position: relative;
-  z-index: 2;
+  z-index: 4;
   display: flex;
   flex: none;
   flex-wrap: nowrap;
   align-items: flex-end;
-  gap: 0;
+  gap: 2px;
   padding: 0;
   background: transparent;
   overflow-x: auto;
   scrollbar-width: none;
+  border-bottom: 1px solid var(--tp-border);
 }
+
 .tp-tabs::-webkit-scrollbar { display: none; }
 
 .tp-tab {
@@ -163,25 +165,56 @@ const TX_CSS = `
   align-items: center;
   gap: 8px;
   padding: 10px 18px;
-  margin-bottom: 0;
+  margin-bottom: -1px;
   font: inherit;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   color: var(--tp-muted);
-  background: transparent;
-  border: 0;                    /* no border at all — nothing left to draw a line */
+  background: var(--tp-bg);
+  border: 1px solid transparent;
+  border-bottom-color: var(--tp-border);
   border-radius: 12px 12px 0 0;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
-.tp-tab:hover { color: var(--tp-text); }
+
+.tp-tab:hover {
+  color: var(--tp-text);
+  background: var(--tp-bg);
+  border-color: var(--tp-divider);
+  border-bottom-color: var(--tp-border);
+}
+
 .tp-tab[aria-selected="true"] {
   color: var(--tp-accent);
-  background: var(--tp-bg);     /* same fill as the panel below it — merges into one shape */
-  z-index: 3;
+  background: var(--tp-bg);
+  border-color: var(--tp-border);
+  border-bottom-color: var(--tp-bg);
+  box-shadow:
+    0 -1px 0 rgba(24, 24, 27, 0.02),
+    0 1px 4px rgba(24, 24, 27, 0.10);
+  z-index: 5;
 }
+
+/* Clear accent line at the top of the active tab. */
+.tp-tab[aria-selected="true"]::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: -1px;
+  height: 2px;
+  border-radius: 999px 999px 0 0;
+  background: var(--tp-accent);
+}
+
 .tp-tab svg { width: 14px; height: 14px; flex: none; }
+
 .tp-count {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
@@ -189,13 +222,15 @@ const TX_CSS = `
   border-radius: 6px;
   color: var(--tp-muted);
   border: 1px solid var(--tp-divider);
+  background: transparent;
 }
+
 .tp-tab[aria-selected="true"] .tp-count {
   color: var(--tp-accent);
   border-color: var(--tp-border);
 }
 
-/* Body: the one white panel. Square top-left so the first tab sits flush. */
+/* Body: clean white panel with a subtle outline and shadow. */
 .tp-body {
   position: relative;
   z-index: 1;
@@ -208,10 +243,34 @@ const TX_CSS = `
   overflow: hidden;
   background: var(--tp-bg);
   color: var(--tp-text);
-  border: 0;                    /* no border anywhere on the body — tabs and panel read as one piece */
+  border: 1px solid var(--tp-border);
+  border-top: 0;
   border-radius: 0 var(--tp-radius) var(--tp-radius) var(--tp-radius);
   box-shadow: var(--tp-shadow);
 }
+
+.tp[data-theme="dark"] .tp-tabs {
+  border-bottom-color: var(--tp-border);
+}
+
+.tp[data-theme="dark"] .tp-tab {
+  background: var(--tp-bg);
+}
+
+.tp[data-theme="dark"] .tp-tab:hover {
+  border-color: var(--tp-divider);
+  border-bottom-color: var(--tp-border);
+}
+
+.tp[data-theme="dark"] .tp-tab[aria-selected="true"] {
+  border-color: var(--tp-border);
+  border-bottom-color: var(--tp-bg);
+  box-shadow:
+    0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 1px 5px rgba(0, 0, 0, 0.35);
+}
+
+/* Body toolbar remains clean; the panel outline provides the folder edge. */
 
 /* Toolbar (LIVE badge / search / status filter) — a plain row with a
    divider, not a nested card header. */
