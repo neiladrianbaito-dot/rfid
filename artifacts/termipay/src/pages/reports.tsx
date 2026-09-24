@@ -56,6 +56,10 @@ import {
   Sparkles,
   TrendingDown,
   ArrowLeftRight,
+  // 🆕 for the Peak Ridership tab
+  Clock,
+  CalendarDays,
+  Flame,
 } from "lucide-react";
 
 // ══════════════════════════════════════════════════════════════════════
@@ -632,6 +636,84 @@ const ROUTE_FORECAST_DAYS = 7;
 // How many of the busiest routes get their own line on the chart.
 const ROUTE_CHART_TOP_N = 5;
 
+// 🆕 Peak Ridership tab constants ─────────────────────────────────────
+// Weeks start on Monday everywhere on this page (see getWeekRange), so the
+// weekday arrays below are Monday-first. Convert JS getDay() (Sun=0) with
+// `(getDay() + 6) % 7`.
+const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+// How many of the busiest hours get a ranking chip under the highlights.
+const PEAK_TOP_HOURS_N = 5;
+// Bar colors: normal bars vs. the single busiest bar.
+const PEAK_BAR_COLOR = "#3b82f6";
+const PEAK_DAY_BAR_COLOR = "#6366f1";
+const PEAK_HIGHLIGHT_COLOR = "#f59e0b";
+
+// 0 -> "12 AM", 13 -> "1 PM"
+function formatHourLabel(hour: number): string {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12} ${hour < 12 ? "AM" : "PM"}`;
+}
+
+// 17 -> "5 PM – 6 PM"
+function formatHourRange(hour: number): string {
+  return `${formatHourLabel(hour)} – ${formatHourLabel((hour + 1) % 24)}`;
+}
+
+// 0 -> "12a", 13 -> "1p" (tight labels for the heatmap header)
+function formatHourCompact(hour: number): string {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}${hour < 12 ? "a" : "p"}`;
+}
+
+// Shared tooltip for both Peak Ridership bar charts (hour + weekday).
+function PeakTooltip({
+  active,
+  payload,
+  isDark,
+  kind,
+}: {
+  active?: boolean;
+  payload?: any[];
+  isDark: boolean;
+  kind: "hour" | "day";
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const row = payload[0]?.payload as any;
+  if (!row) return null;
+
+  return (
+    <div
+      style={{
+        backgroundColor: isDark ? "#0f172a" : "#ffffff",
+        border: isDark ? "1px solid #334155" : "1px solid #e4e4e7",
+        borderRadius: "10px",
+        padding: "10px 12px",
+        fontSize: "12px",
+        fontWeight: 600,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+        minWidth: "180px",
+      }}
+    >
+      <div style={{ color: isDark ? "#f8fafc" : "#0f172a", fontWeight: 800, fontSize: "13px", marginBottom: "6px" }}>
+        {kind === "hour" ? row.range : row.name}
+      </div>
+      <div style={{ color: isDark ? "#60a5fa" : "#2563eb", fontWeight: 800 }}>
+        {Number(row.rides).toLocaleString("en-US")} {row.rides === 1 ? "ride" : "rides"}
+      </div>
+      <div style={{ color: isDark ? "#cbd5e1" : "#334155", marginTop: "4px" }}>
+        {Number(row.avgPerDay).toFixed(1)} rides {kind === "hour" ? "per day" : `per ${row.name}`}
+      </div>
+      <div style={{ color: isDark ? "#cbd5e1" : "#334155", marginTop: "2px" }}>
+        {Number(row.sharePct).toFixed(1)}% of all rides
+      </div>
+      <div style={{ color: isDark ? "#94a3b8" : "#64748b", marginTop: "2px" }}>
+        Revenue: {formatPeso(Number(row.revenue) || 0)}
+      </div>
+    </div>
+  );
+}
+
 // ➕ Standard PH statutory discount rate for Student/Senior/PWD fares
 // (20% off). Used to back-calculate how much revenue was foregone by
 // honoring the discount: if a rider paid `discounted = full * 0.8`,
@@ -1078,12 +1160,14 @@ function safeSheetName(name: string): string {
 
 // 🆕 Report-tab definitions for the tab strip at the top of the master
 // container (rendered by <ReportsPanel>).
-type ReportTab = "chart" | "discount" | "log" | "routes";
+// 🆕 "peak" = Peak Ridership (busiest hour of the day + busiest day of the week).
+type ReportTab = "chart" | "discount" | "log" | "routes" | "peak";
 const REPORT_TABS: { key: ReportTab; label: string; icon: typeof PieChart }[] = [
   { key: "chart", label: "Daily Revenue Breakdown", icon: PieChart },
   { key: "discount", label: "Discount Collection Analytics", icon: Percent },
   { key: "log", label: "Detailed Revenue Log", icon: FileText },
   { key: "routes", label: "Route Performance", icon: RouteIcon },
+  { key: "peak", label: "Peak Ridership", icon: Clock },
 ];
 
 export default function ReportsPage() {
@@ -1112,11 +1196,12 @@ export default function ReportsPage() {
   const [filterMode, setFilterMode] = useState<"year" | "month" | "week" | "day" | "all">("all");
 
   // ── which report section tab is showing: Daily Revenue Breakdown,
-  // Discount Collection Analytics, or Detailed Revenue Log — same
-  // one-tab-visible-at-a-time pattern as the Top-up / Fare / Transfer
-  // switch on the Transactions page. The Year/Month/Day filter below
-  // is rendered inline in each section's header row, next to the title,
-  // and applies to whichever tab is active. ──
+  // Discount Collection Analytics, Detailed Revenue Log, Route
+  // Performance, or Peak Ridership — same one-tab-visible-at-a-time
+  // pattern as the Top-up / Fare / Transfer switch on the Transactions
+  // page. The Year/Month/Day filter below is rendered inline in each
+  // section's header row, next to the title, and applies to whichever
+  // tab is active. ──
   const [activeTab, setActiveTab] = useState<ReportTab>("chart");
 
   const { data: report, isLoading, refetch: refetchReport } = useGetReportSummary({
@@ -1853,6 +1938,113 @@ export default function ReportsPage() {
     return { routeChartData: data, routeChartSeries: series };
   }, [topRoutesForChart, routePeriodDates, routeDailyMap]);
 
+  // ══════════════════════════════════════════════════════════════════════
+  // 🆕 PEAK RIDERSHIP — anong oras at anong araw pinakamaraming sumasakay.
+  // Every Fare transaction = one ride, so we bucket the filtered Fare list
+  // by (a) hour of day (0–23, local time), (b) day of week (Mon–Sun), and
+  // (c) both at once for the day × hour heatmap. Same Year/Month/Week/Day
+  // filter as every other tab (it reads filteredFareList).
+  //
+  // Averages ("rides per day" / "per Monday") divide by the number of
+  // calendar days that have actually happened in the period — future days
+  // in a Year/Month filter are skipped so they don't drag the average
+  // down. (Falls back to the full range if nothing has happened yet.)
+  // ══════════════════════════════════════════════════════════════════════
+  const peakStats = React.useMemo(() => {
+    const hourRides: number[] = Array(24).fill(0);
+    const hourRevenue: number[] = Array(24).fill(0);
+    const dayRides: number[] = Array(7).fill(0);
+    const dayRevenue: number[] = Array(7).fill(0);
+    const heat: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+
+    filteredFareList.forEach((tx: any) => {
+      const ts = tx.timestamp || tx.created_at;
+      if (!ts) return;
+      const dt = new Date(ts);
+      if (isNaN(dt.getTime())) return;
+      const hour = dt.getHours();
+      const dayIdx = (dt.getDay() + 6) % 7; // Monday = 0 … Sunday = 6
+      const amount = Math.abs(Number(tx.amount) || 0);
+
+      hourRides[hour] += 1;
+      hourRevenue[hour] += amount;
+      dayRides[dayIdx] += 1;
+      dayRevenue[dayIdx] += amount;
+      heat[dayIdx][hour] += 1;
+    });
+
+    // Denominators for the averages (only days that have already happened).
+    const todayKey = getLocalDateString();
+    const elapsedDates = routePeriodDates.filter((d) => d <= todayKey);
+    const datesForAvg = elapsedDates.length > 0 ? elapsedDates : routePeriodDates;
+    const dayCount = datesForAvg.length || 1;
+    const dayOccurrences: number[] = Array(7).fill(0);
+    datesForAvg.forEach((date) => {
+      const dt = new Date(`${date}T00:00:00`);
+      dayOccurrences[(dt.getDay() + 6) % 7] += 1;
+    });
+
+    const totalRides = hourRides.reduce((s, v) => s + v, 0);
+
+    const hours = hourRides.map((rides, hour) => ({
+      hour,
+      label: formatHourLabel(hour),
+      range: formatHourRange(hour),
+      rides,
+      revenue: hourRevenue[hour],
+      avgPerDay: rides / dayCount,
+      sharePct: totalRides > 0 ? (rides / totalRides) * 100 : 0,
+      rank: 0,
+    }));
+
+    const days = dayRides.map((rides, idx) => ({
+      dayIdx: idx,
+      name: WEEKDAY_NAMES[idx],
+      short: WEEKDAY_SHORT[idx],
+      rides,
+      revenue: dayRevenue[idx],
+      occurrences: dayOccurrences[idx],
+      avgPerDay: rides / Math.max(1, dayOccurrences[idx]),
+      sharePct: totalRides > 0 ? (rides / totalRides) * 100 : 0,
+      rank: 0,
+    }));
+
+    // Rank 1 = busiest. Rows with zero rides stay unranked (0).
+    const rankedHours = [...hours].sort((a, b) => b.rides - a.rides);
+    rankedHours.forEach((h, i) => {
+      h.rank = h.rides > 0 ? i + 1 : 0;
+    });
+    const rankedDays = [...days].sort((a, b) => b.rides - a.rides);
+    rankedDays.forEach((d, i) => {
+      d.rank = d.rides > 0 ? i + 1 : 0;
+    });
+
+    // Busiest single day × hour slot (e.g. "Friday, 5 PM – 6 PM").
+    let heatMax = 0;
+    let peakSlot: { dayIdx: number; hour: number; rides: number } | null = null;
+    heat.forEach((row, dayIdx) => {
+      row.forEach((count, hour) => {
+        if (count > heatMax) {
+          heatMax = count;
+          peakSlot = { dayIdx, hour, rides: count };
+        }
+      });
+    });
+
+    return {
+      hours,
+      days,
+      heat,
+      heatMax,
+      peakSlot: peakSlot as { dayIdx: number; hour: number; rides: number } | null,
+      totalRides,
+      dayCount,
+      peakHour: totalRides > 0 ? rankedHours[0] : null,
+      peakDay: totalRides > 0 ? rankedDays[0] : null,
+      topHours: rankedHours.filter((h) => h.rides > 0).slice(0, PEAK_TOP_HOURS_N),
+    };
+  }, [filteredFareList, routePeriodDates]);
+
   // ── filtered transfers, same date-filter rule as transactions above,
   // driving the "Transfers" export tab. ──
   const filteredTransfersList = React.useMemo(() => {
@@ -1893,17 +2085,20 @@ export default function ReportsPage() {
     ? "View only — you don't have permission to export logs."
     : undefined;
 
-  // ── EXPORT: one workbook, SIX separate tabs/sheets — "Fare",
+  // ── EXPORT: one workbook, EIGHT separate tabs/sheets — "Fare",
   // "Top-up", "Transfers", "Discount Analytics", "Route Summary",
-  // "Route Daily" — mirroring the Fare / Top-up / Transfer tabs on the
-  // Transactions page plus the Discount Collection Analytics and Route
-  // Performance tabs on this page. Discount Analytics and Route Daily now
+  // "Route Daily", "Peak Hours", "Peak Days" — mirroring the
+  // Fare / Top-up / Transfer tabs on the Transactions page plus the
+  // Discount Collection Analytics, Route Performance and Peak Ridership
+  // tabs on this page. Discount Analytics and Route Daily now
   // both pull from the FULL zero-filled calendar range (same data the
   // on-screen charts use) instead of only the days that happen to have a
   // transaction, so no date gets silently dropped from the export.
   // 🆕 Top-up now also gets Fee / VAT / Net Amount columns, sourced from
   // filteredTopupList (which now carries fee_amount/vat_amount/net_amount
-  // thanks to enrichedTxList above), matching the Transactions page. ──
+  // thanks to enrichedTxList above), matching the Transactions page.
+  // 🆕 Peak Hours (all 24 hours) and Peak Days (Mon–Sun) come straight
+  // from peakStats, so the export always matches the on-screen charts. ──
   const handleExportExcelLogs = async () => {
     // 🔒 Guard: bawal mag-export kapag view_only. Proteksyon ito kahit
     // ma-bypass ang UI (devtools, atbp). Hindi rin magsusulat ng audit log.
@@ -1923,7 +2118,7 @@ export default function ReportsPage() {
     logExportAudit({
       entity: "Transaction Logs",
       format: "Excel",
-      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — 6 separate tabs: Fare, Top-up, Transfers, Discount Analytics, Route Summary, Route Daily${
+      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — 8 separate tabs: Fare, Top-up, Transfers, Discount Analytics, Route Summary, Route Daily, Peak Hours, Peak Days${
         isFilterActive ? ` [Filtered: ${filterLabel}]` : ""
       }`,
     });
@@ -2104,9 +2299,43 @@ export default function ReportsPage() {
       counts: routeDailyMap.get(date) || new Map<number, { count: number; revenue: number }>(),
     }));
 
+    // ── 🆕 Peak Ridership — Peak Hours. One row per hour of the day
+    // (all 24, chronological, zero-filled) straight from `peakStats.hours`
+    // so the sheet matches the on-screen bar chart exactly. "Avg Rides /
+    // Day" adds up to the average total rides per day, so it gets a
+    // total; "Rank" is 1 = busiest hour ("—" when the hour had no rides). ──
+    const peakHourColumns: SheetColumn[] = [
+      { header: "Hour", width: 20, get: (h: any) => h.range },
+      { header: "Total Rides", width: 14, get: (h: any) => h.rides.toLocaleString("en-US"),
+        total: (rows) => rows.reduce((s: number, h: any) => s + h.rides, 0).toLocaleString("en-US") },
+      { header: "Avg Rides / Day", width: 16, get: (h: any) => h.avgPerDay.toFixed(1),
+        total: (rows) => rows.reduce((s: number, h: any) => s + h.avgPerDay, 0).toFixed(1) },
+      { header: "Share of Rides", width: 16, get: (h: any) => `${h.sharePct.toFixed(1)}%`,
+        total: (rows) => `${rows.reduce((s: number, h: any) => s + h.sharePct, 0).toFixed(1)}%` },
+      { header: "Total Revenue (PHP)", width: 20, get: (h: any) => peso2(h.revenue),
+        total: (rows) => peso2(rows.reduce((s: number, h: any) => s + h.revenue, 0)) },
+      { header: "Rank (by rides)", width: 16, get: (h: any) => (h.rank > 0 ? String(h.rank) : "—") },
+    ];
+
+    // ── 🆕 Peak Ridership — Peak Days. One row per weekday, Monday first.
+    // "Avg Rides / Day" here is per occurrence of that weekday in the
+    // period (e.g. average rides on a Monday), so it is NOT summed. ──
+    const peakDayColumns: SheetColumn[] = [
+      { header: "Day of Week", width: 18, get: (d: any) => d.name },
+      { header: "Days in Period", width: 16, get: (d: any) => String(d.occurrences) },
+      { header: "Total Rides", width: 14, get: (d: any) => d.rides.toLocaleString("en-US"),
+        total: (rows) => rows.reduce((s: number, d: any) => s + d.rides, 0).toLocaleString("en-US") },
+      { header: "Avg Rides / Day", width: 16, get: (d: any) => d.avgPerDay.toFixed(1) },
+      { header: "Share of Rides", width: 16, get: (d: any) => `${d.sharePct.toFixed(1)}%`,
+        total: (rows) => `${rows.reduce((s: number, d: any) => s + d.sharePct, 0).toFixed(1)}%` },
+      { header: "Total Revenue (PHP)", width: 20, get: (d: any) => peso2(d.revenue),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.revenue, 0)) },
+      { header: "Rank (by rides)", width: 16, get: (d: any) => (d.rank > 0 ? String(d.rank) : "—") },
+    ];
+
     const filterSuffix = isFilterActive ? ` — Filtered: ${filterLabel}` : "";
 
-    // ── build the 6 tabs, one worksheet each ──
+    // ── build the 8 tabs, one worksheet each ──
     const fareSheet = buildSingleSheet(utils, {
       generatedAt,
       adminName,
@@ -2190,6 +2419,30 @@ export default function ReportsPage() {
       },
     });
 
+    const peakHoursSheet = buildSingleSheet(utils, {
+      generatedAt,
+      adminName,
+      subtitle: `Peak Ridership — By Hour of Day${filterSuffix}`,
+      block: {
+        title: `PEAK RIDERSHIP — BY HOUR (${peakStats.totalRides.toLocaleString("en-US")} RIDES)`,
+        bandColor: "0891B2",
+        columns: peakHourColumns,
+        rows: peakStats.hours,
+      },
+    });
+
+    const peakDaysSheet = buildSingleSheet(utils, {
+      generatedAt,
+      adminName,
+      subtitle: `Peak Ridership — By Day of Week${filterSuffix}`,
+      block: {
+        title: `PEAK RIDERSHIP — BY DAY OF WEEK (${peakStats.totalRides.toLocaleString("en-US")} RIDES)`,
+        bandColor: "0E7490",
+        columns: peakDayColumns,
+        rows: peakStats.days,
+      },
+    });
+
     const workbook = utils.book_new();
     utils.book_append_sheet(workbook, fareSheet, safeSheetName("Fare"));
     utils.book_append_sheet(workbook, topupSheet, safeSheetName("Top-up"));
@@ -2197,6 +2450,8 @@ export default function ReportsPage() {
     utils.book_append_sheet(workbook, discountSheet, safeSheetName("Discount Analytics"));
     utils.book_append_sheet(workbook, routeSummarySheet, safeSheetName("Route Summary"));
     utils.book_append_sheet(workbook, routeDailySheet, safeSheetName("Route Daily"));
+    utils.book_append_sheet(workbook, peakHoursSheet, safeSheetName("Peak Hours"));
+    utils.book_append_sheet(workbook, peakDaysSheet, safeSheetName("Peak Days"));
 
     workbook.Props = {
       Title: "Transaction Logs",
@@ -2899,6 +3154,291 @@ export default function ReportsPage() {
                       ))}
                     </TableBody>
                   </Table>
+                </div>
+              </div>
+            )}
+          </ReportSection>
+        )}
+
+        {/* ══ 🆕 PEAK RIDERSHIP ══
+            Anong oras at anong araw pinakamaraming sumasakay. Fare rides
+            only (1 Fare transaction = 1 passenger ride), bucketed by hour
+            of day, day of week, and both at once (heatmap). Same
+            Year/Month/Week/Day filter as the other tabs. Times are shown
+            in the browser's local time (PH time for PH admins). */}
+        {activeTab === "peak" && (
+          <ReportSection
+            title="Peak Ridership"
+            icon={Clock}
+            iconClassName="text-cyan-500"
+            filterLabel={isFilterActive ? filterLabel : undefined}
+            filterBar={renderFilterBar()}
+            meta={
+              <>
+                <Sparkles size={11} className="text-amber-500" />
+                Fare rides only · Busiest hour &amp; day
+              </>
+            }
+          >
+            {isLoading ? (
+              <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-zinc-100"}`} />
+            ) : peakStats.totalRides === 0 ? (
+              <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                No Fare rides match the selected filter.
+              </div>
+            ) : (
+              <div className="rp-divided">
+                {/* ── Highlights: peak hour · busiest day · busiest slot ── */}
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Peak hour */}
+                    <div className="rp-well flex items-center gap-4">
+                      <div className={`w-11 h-11 rounded-lg flex items-center justify-center flex-none ${
+                        isDark ? "bg-amber-900/50 text-amber-400" : "bg-amber-100 text-amber-600"
+                      }`}>
+                        <Clock size={22} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                          Peak Hour {isFilterActive ? `(${filterLabel})` : "(All-time)"}
+                        </p>
+                        <p className={`text-lg font-bold tracking-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
+                          {peakStats.peakHour?.range}
+                        </p>
+                        <p className={`text-[11px] font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {peakStats.peakHour?.rides.toLocaleString("en-US")} rides · {peakStats.peakHour?.avgPerDay.toFixed(1)}/day · {peakStats.peakHour?.sharePct.toFixed(0)}% of rides
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Busiest day of week */}
+                    <div className="rp-well flex items-center gap-4">
+                      <div className={`w-11 h-11 rounded-lg flex items-center justify-center flex-none ${
+                        isDark ? "bg-indigo-950/60 text-indigo-400" : "bg-indigo-50 text-indigo-600"
+                      }`}>
+                        <CalendarDays size={22} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                          Busiest Day {isFilterActive ? `(${filterLabel})` : "(All-time)"}
+                        </p>
+                        <p className={`text-lg font-bold tracking-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
+                          {peakStats.peakDay?.name}
+                        </p>
+                        <p className={`text-[11px] font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {peakStats.peakDay?.rides.toLocaleString("en-US")} rides · {peakStats.peakDay?.avgPerDay.toFixed(1)} per {peakStats.peakDay?.name} · {peakStats.peakDay?.sharePct.toFixed(0)}% of rides
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Busiest single day + hour slot */}
+                    <div className="rp-well flex items-center gap-4">
+                      <div className={`w-11 h-11 rounded-lg flex items-center justify-center flex-none ${
+                        isDark ? "bg-rose-950/60 text-rose-400" : "bg-rose-50 text-rose-600"
+                      }`}>
+                        <Flame size={22} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                          Busiest Time Slot
+                        </p>
+                        <p className={`text-lg font-bold tracking-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
+                          {peakStats.peakSlot
+                            ? `${WEEKDAY_NAMES[peakStats.peakSlot.dayIdx]}, ${formatHourRange(peakStats.peakSlot.hour)}`
+                            : "—"}
+                        </p>
+                        <p className={`text-[11px] font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {peakStats.peakSlot ? `${peakStats.peakSlot.rides.toLocaleString("en-US")} rides in that slot` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Top hours ranking chips (the #1 hour is the highlight above) */}
+                  {peakStats.topHours.length > 1 && (
+                    <div className="flex flex-wrap gap-3">
+                      {peakStats.topHours.slice(1).map((h) => (
+                        <div
+                          key={h.hour}
+                          className="rp-well flex items-center gap-3"
+                          style={{ padding: "10px 16px" }}
+                        >
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold flex-none ${
+                            isDark ? "bg-slate-700 text-slate-300" : "bg-zinc-300 text-zinc-700"
+                          }`}>
+                            {h.rank}
+                          </div>
+                          <div>
+                            <div className={`text-xs font-bold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {h.range}
+                            </div>
+                            <div className={`text-[11px] font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {h.rides.toLocaleString("en-US")} rides · {h.avgPerDay.toFixed(1)}/day · {h.sharePct.toFixed(0)}% share
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Charts: rides by hour of day + rides by day of week ── */}
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-stretch">
+                  <div className="rp-well">
+                    <div className="mb-2">
+                      <h3 className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-300" : "text-slate-600"}`}>Rides by Hour of Day</h3>
+                      <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Fare rides in each hour · busiest hour highlighted</p>
+                    </div>
+                    <div className="h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={peakStats.hours} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#27272a" : "#e4e4e7"} vertical={false} />
+                          <XAxis
+                            dataKey="hour"
+                            interval={1}
+                            tickFormatter={(h: number) => formatHourCompact(h)}
+                            stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={10} fontWeight="600" axisLine={false} tickLine={false}
+                          />
+                          <YAxis
+                            allowDecimals={false}
+                            stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={10} fontWeight="600" axisLine={false} tickLine={false}
+                            width={40}
+                          />
+                          <Tooltip
+                            cursor={{ fill: isDark ? "rgba(96,165,250,0.08)" : "rgba(37,99,235,0.05)" }}
+                            content={(props: any) => <PeakTooltip {...props} isDark={isDark} kind="hour" />}
+                          />
+                          <Bar dataKey="rides" radius={[4, 4, 0, 0]}>
+                            {peakStats.hours.map((h) => (
+                              <Cell
+                                key={`hour-${h.hour}`}
+                                fill={peakStats.peakHour && h.hour === peakStats.peakHour.hour ? PEAK_HIGHLIGHT_COLOR : PEAK_BAR_COLOR}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="rp-well">
+                    <div className="mb-2">
+                      <h3 className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-300" : "text-slate-600"}`}>Rides by Day of Week</h3>
+                      <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Fare rides per weekday · busiest day highlighted</p>
+                    </div>
+                    <div className="h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={peakStats.days} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#27272a" : "#e4e4e7"} vertical={false} />
+                          <XAxis
+                            dataKey="short"
+                            stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
+                          />
+                          <YAxis
+                            allowDecimals={false}
+                            stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={10} fontWeight="600" axisLine={false} tickLine={false}
+                            width={40}
+                          />
+                          <Tooltip
+                            cursor={{ fill: isDark ? "rgba(96,165,250,0.08)" : "rgba(37,99,235,0.05)" }}
+                            content={(props: any) => <PeakTooltip {...props} isDark={isDark} kind="day" />}
+                          />
+                          <Bar dataKey="rides" radius={[4, 4, 0, 0]}>
+                            {peakStats.days.map((d) => (
+                              <Cell
+                                key={`day-${d.dayIdx}`}
+                                fill={peakStats.peakDay && d.dayIdx === peakStats.peakDay.dayIdx ? PEAK_HIGHLIGHT_COLOR : PEAK_DAY_BAR_COLOR}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Heatmap: every weekday × every hour ── */}
+                <div className="rp-well">
+                  <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                    <div>
+                      <h3 className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-300" : "text-slate-600"}`}>Day × Hour Heatmap</h3>
+                      <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                        Darker = more rides · amber outline marks the busiest slot
+                      </p>
+                    </div>
+                    <div className={`flex items-center gap-2 text-[10px] font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      <span>Fewer</span>
+                      <div
+                        style={{
+                          width: 90,
+                          height: 8,
+                          borderRadius: 4,
+                          background: "linear-gradient(to right, rgba(37,99,235,0.12), rgba(37,99,235,0.95))",
+                        }}
+                      />
+                      <span>More</span>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <div
+                      style={{
+                        minWidth: 760,
+                        display: "grid",
+                        gridTemplateColumns: "88px repeat(24, minmax(0, 1fr))",
+                        gap: 3,
+                      }}
+                    >
+                      <div />
+                      {Array.from({ length: 24 }, (_, h) => (
+                        <div
+                          key={`heat-head-${h}`}
+                          className={`text-center text-[9px] font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}
+                        >
+                          {formatHourCompact(h)}
+                        </div>
+                      ))}
+
+                      {WEEKDAY_NAMES.map((dayName, d) => (
+                        <React.Fragment key={dayName}>
+                          <div className={`text-[11px] font-semibold flex items-center ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                            {dayName}
+                          </div>
+                          {peakStats.heat[d].map((count, h) => {
+                            const intensity = peakStats.heatMax > 0 ? count / peakStats.heatMax : 0;
+                            const isPeakSlot =
+                              !!peakStats.peakSlot && peakStats.peakSlot.dayIdx === d && peakStats.peakSlot.hour === h;
+                            return (
+                              <div
+                                key={`${d}-${h}`}
+                                title={`${dayName}, ${formatHourRange(h)} — ${count} ${count === 1 ? "ride" : "rides"}`}
+                                style={{
+                                  height: 28,
+                                  borderRadius: 5,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  backgroundColor:
+                                    count > 0
+                                      ? `rgba(37, 99, 235, ${(0.12 + intensity * 0.83).toFixed(3)})`
+                                      : isDark
+                                        ? "#26262b"
+                                        : "#f4f4f5",
+                                  color: intensity > 0.5 ? "#ffffff" : isDark ? "#cbd5e1" : "#334155",
+                                  outline: isPeakSlot ? `2px solid ${PEAK_HIGHLIGHT_COLOR}` : "none",
+                                  outlineOffset: -1,
+                                }}
+                              >
+                                {count > 0 ? count : ""}
+                              </div>
+                            );
+                          })}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
