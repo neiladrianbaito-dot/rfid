@@ -1802,6 +1802,28 @@ export default function UserManagementPage() {
                         className="relative h-full w-full flex flex-col justify-between"
                         style={{ padding: 30 }}
                       >
+                        {/* ➕ NEW: small "Non-transferable" tag for discounted
+                            card types (Student/Senior/PWD). Absolutely
+                            positioned above the header row's own box so the
+                            logo circle + "Fare Collection System" text below
+                            it keep their exact original position/size — this
+                            tag just floats in the top margin above them. */}
+                        {theme.isLight && (
+                          <div
+                            className="absolute uppercase font-bold"
+                            style={{
+                              top: 10,
+                              left: 30,
+                              fontSize: 8,
+                              letterSpacing: 0.6,
+                              color: theme.accent,
+                              lineHeight: 1,
+                            }}
+                          >
+                            Non-Transferable
+                          </div>
+                        )}
+
                         {/* Header / logo badge — ENLARGED: 44px -> 62px, gap bumped for balance */}
                         <div className="flex items-center" style={{ gap: 16 }}>
                           <div
