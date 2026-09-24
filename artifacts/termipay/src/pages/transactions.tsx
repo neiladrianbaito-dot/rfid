@@ -180,7 +180,7 @@ const TX_CSS = `
 .tp-tab[aria-selected="true"] {
   color: var(--tp-accent);
   background: var(--tp-bg);     /* the only white outside the body */
-  border-color: var(--tp-border);
+  border-color: transparent;    /* no seam where the tab meets the panel */
   padding-bottom: 11px;
   z-index: 3;
 }
