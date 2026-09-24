@@ -1815,10 +1815,10 @@ export default function UserManagementPage() {
                               top: 10,
                               left: 0,
                               right: 0,
-                              fontSize: 6.5,
+                              fontSize: 11,
                               letterSpacing: 0.5,
                               color: theme.accent,
-                              lineHeight: 1,
+                              lineHeight: 1.3,
                             }}
                           >
                             Non-Transferable
