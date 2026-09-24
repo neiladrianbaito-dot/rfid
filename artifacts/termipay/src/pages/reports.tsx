@@ -1752,54 +1752,64 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* ══ REPORT FOLDER TABS — Chrome-style unified tab bar ══ */}
+      {/* ══ REPORT FOLDER TABS — full-width clean tab strip ══ */}
       <div
-        className={`relative flex items-end gap-1 w-full border-b ${isDark ? "border-slate-700" : "border-slate-200"}`}
-        style={{ overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}
+        className="relative w-full overflow-hidden rounded-t-xl border border-slate-200 bg-white shadow-sm"
       >
-        {REPORT_TABS.map(({ key, label, icon: Icon }) => {
-          const active = activeTab === key;
-          const activeText = key === "chart"
-            ? (isDark ? "text-blue-400" : "text-blue-600")
-            : key === "discount"
-              ? (isDark ? "text-purple-400" : "text-purple-600")
-              : key === "log"
-                ? (isDark ? "text-emerald-400" : "text-emerald-600")
-                : (isDark ? "text-orange-400" : "text-orange-600");
-          const activeBorder = key === "chart"
-            ? "border-blue-500"
-            : key === "discount"
-              ? "border-purple-500"
-              : key === "log"
-                ? "border-emerald-500"
-                : "border-orange-500";
-          const topBg = key === "chart"
-            ? "bg-blue-500"
-            : key === "discount"
-              ? "bg-purple-500"
-              : key === "log"
-                ? "bg-emerald-500"
-                : "bg-orange-500";
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setActiveTab(key)}
-              data-testid={`button-tab-${key}`}
-              className={`group relative flex items-center gap-2 px-5 py-3 text-xs font-semibold whitespace-nowrap rounded-t-xl border border-b-0 transition-all duration-200 cursor-pointer -mb-px ${
-                active
-                  ? `${isDark ? "bg-slate-900" : "bg-white"} ${activeText} ${activeBorder} z-20 shadow-[0_-3px_10px_rgba(15,23,42,0.06)]`
-                  : `${isDark ? "border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-900/60" : "border-transparent text-slate-400 hover:text-slate-600 hover:bg-slate-50"} z-10`
-              }`}
-            >
-              {active && <span className={`absolute left-0 right-0 top-0 h-[3px] rounded-t-xl ${topBg}`} />}
-              <span className={`flex items-center justify-center w-6 h-6 rounded-md ${active ? (isDark ? "bg-white/5" : "bg-slate-50") : "bg-transparent"}`}>
-                <Icon className={`w-3.5 h-3.5 ${active ? activeText : isDark ? "text-slate-500" : "text-slate-400"}`} />
-              </span>
-              <span>{label}</span>
-            </button>
-          );
-        })}
+        <div className="flex w-full items-stretch">
+          {REPORT_TABS.map(({ key, label, icon: Icon }) => {
+            const active = activeTab === key;
+            const activeText = key === "chart"
+              ? "text-blue-600"
+              : key === "discount"
+                ? "text-purple-600"
+                : key === "log"
+                  ? "text-emerald-600"
+                  : "text-orange-600";
+            const topBg = key === "chart"
+              ? "bg-blue-500"
+              : key === "discount"
+                ? "bg-purple-500"
+                : key === "log"
+                  ? "bg-emerald-500"
+                  : "bg-orange-500";
+            const hoverText = key === "chart"
+              ? "hover:text-blue-600"
+              : key === "discount"
+                ? "hover:text-purple-600"
+                : key === "log"
+                  ? "hover:text-emerald-600"
+                  : "hover:text-orange-600";
+
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setActiveTab(key)}
+                data-testid={`button-tab-${key}`}
+                className={`relative flex min-w-0 flex-1 items-center justify-center gap-2 border-b-2 px-3 py-3.5 text-xs font-semibold transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset ${
+                  active
+                    ? `${activeText} bg-white border-transparent`
+                    : `text-slate-400 bg-white border-transparent ${hoverText} hover:bg-slate-50/70`
+                }`}
+              >
+                {active && (
+                  <span
+                    className={`absolute left-0 right-0 top-0 h-[3px] ${topBg}`}
+                  />
+                )}
+
+                <Icon
+                  className={`h-4 w-4 shrink-0 ${
+                    active ? activeText : "text-slate-400"
+                  }`}
+                />
+
+                <span className="truncate">{label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ══ SUMMARY CARDS — only rendered on the "Daily Revenue Breakdown"
@@ -1848,7 +1858,7 @@ export default function ReportsPage() {
           header row now carries the title AND the inline filter dropdowns
           together, so the filter doesn't add its own spacing block. ══ */}
       {activeTab === "chart" && (
-      <Card className={`tab-content-enter shadow-sm overflow-hidden relative flex-1 rounded-b-xl rounded-t-none border ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+      <Card className={`tab-content-enter shadow-sm overflow-hidden relative flex-1 rounded-b-xl rounded-t-none border-x border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3 flex-wrap">
@@ -2049,7 +2059,7 @@ export default function ReportsPage() {
           bar chart style used on the "Daily Revenue Breakdown" tab. The
           daily table is kept below the chart for exact per-day figures. */}
       {activeTab === "discount" && (
-      <Card className={`tab-content-enter shadow-sm overflow-hidden relative flex-1 rounded-b-xl rounded-t-none border ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+      <Card className={`tab-content-enter shadow-sm overflow-hidden relative flex-1 rounded-b-xl rounded-t-none border-x border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3 flex-wrap">
@@ -2232,7 +2242,7 @@ export default function ReportsPage() {
           Year/Month/Day filter, rendered inline in this card's header row
           next to the title. */}
       {activeTab === "routes" && (
-      <Card className={`tab-content-enter shadow-sm overflow-hidden relative flex-1 rounded-b-xl rounded-t-none border ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+      <Card className={`tab-content-enter shadow-sm overflow-hidden relative flex-1 rounded-b-xl rounded-t-none border-x border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <CardHeader className={`border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3 flex-wrap">
@@ -2461,7 +2471,7 @@ export default function ReportsPage() {
 
       {/* ══ DATA TABLE ══ */}
       {activeTab === "log" && (
-      <Card className={`tab-content-enter shadow-sm flex-1 flex flex-col overflow-hidden rounded-b-xl rounded-t-none border ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+      <Card className={`tab-content-enter shadow-sm flex-1 flex flex-col overflow-hidden rounded-b-xl rounded-t-none border-x border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3 flex-wrap">
