@@ -34,11 +34,29 @@ interface TransactionBreakdown {
   vat_amount: number | null;
   net_amount: number | null;
   timestamp: string;
+  payment_method: string | null;
 }
 
 // Poll faster so the data shows up sooner (~10 seconds max).
 const MAX_POLL_ATTEMPTS = 15;
 const POLL_INTERVAL_MS = 700;
+
+// ── Payment method display ──────────────────────────────────────────────────
+// Key = lowercase ng payment_method na sine-save ng webhook sa transactions.
+// Ilagay ang mga logo sa /public folder (hal. /public/maya.svg).
+// Kung walang logo file, automatic na itatago ang image at text lang ang lalabas.
+const PAYMENT_METHODS: Record<string, { label: string; logo: string | null }> = {
+  gcash: { label: "GCash", logo: "/gcash.svg" },
+  maya: { label: "Maya", logo: "/maya.svg" },
+  grabpay: { label: "GrabPay", logo: "/grabpay.svg" },
+  shopeepay: { label: "ShopeePay", logo: "/shopeepay.svg" },
+};
+
+function getPaymentMethodInfo(method: string | null | undefined) {
+  if (!method) return null;
+  const known = PAYMENT_METHODS[method.trim().toLowerCase()];
+  return known ?? { label: method, logo: null };
+}
 
 // ── Skeleton placeholder ────────────────────────────────────────────────────
 // Same height as the text it replaces, so nothing moves when data arrives.
@@ -49,6 +67,23 @@ function Skeleton({ isDark, className = "w-16" }: { isDark: boolean; className?:
       className={`inline-block h-3.5 rounded animate-pulse ${className} ${
         isDark ? "bg-slate-700/70" : "bg-slate-200"
       }`}
+    />
+  );
+}
+
+// Logo na nagtatago kapag walang image file
+function MethodLogo({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <img
+      src={src}
+      alt={alt}
+      width={48}
+      height={48}
+      decoding="async"
+      onError={() => setFailed(true)}
+      className="h-10 w-10 sm:h-12 sm:w-12 object-contain"
     />
   );
 }
@@ -85,10 +120,11 @@ export default function GCashPaymentSuccessPage() {
       : "Page Not Found — TermiPay";
   }, [isValidPaymentData]);
 
-  // Fetch the authoritative fee/vat/net breakdown from Supabase. The webhook
-  // (which inserts the row and computes these) may still be in flight when the
-  // browser lands here, so poll a few times. Loading only finishes once the
-  // row is COMPLETE (or we run out of attempts), so all values appear together.
+  // Fetch the authoritative fee/vat/net breakdown + payment method from
+  // Supabase. The webhook (which inserts the row and computes these) may still
+  // be in flight when the browser lands here, so poll a few times. Loading only
+  // finishes once the row is COMPLETE (or we run out of attempts), so all
+  // values appear together.
   useEffect(() => {
     if (!isValidPaymentData || !referenceNo) {
       setIsLoadingTxn(false);
@@ -105,7 +141,7 @@ export default function GCashPaymentSuccessPage() {
       try {
         const { data, error } = await supabase
           .from("transactions")
-          .select("amount, fee_amount, vat_amount, net_amount, timestamp")
+          .select("amount, fee_amount, vat_amount, net_amount, timestamp, payment_method")
           .eq("external_id", referenceNo)
           .maybeSingle();
 
@@ -225,6 +261,9 @@ export default function GCashPaymentSuccessPage() {
   const netAmount = txn?.net_amount ?? null;
   const paidAt = txn?.timestamp ? new Date(txn.timestamp) : fallbackPaidAt;
 
+  // Payment method galing sa database (GCash, Maya, etc.)
+  const methodInfo = getPaymentMethodInfo(txn?.payment_method);
+
   const labelMuted = isDark ? "text-slate-400" : "text-slate-500";
   const valueStrong = isDark ? "text-slate-200" : "text-slate-800";
 
@@ -255,6 +294,22 @@ export default function GCashPaymentSuccessPage() {
           hour: "numeric",
           minute: "2-digit",
         })}
+      </span>
+    );
+  };
+
+  // Payment method: skeleton habang naglo-load, tapos logo + label
+  const renderPaymentMethod = () => {
+    if (isLoadingTxn && !methodInfo) {
+      return <Skeleton isDark={isDark} className="w-20" />;
+    }
+    if (!methodInfo) {
+      return <span className="fade-in">—</span>;
+    }
+    return (
+      <span className="fade-in flex items-center gap-1.5">
+        {methodInfo.logo && <MethodLogo src={methodInfo.logo} alt={methodInfo.label} />}
+        {methodInfo.label}
       </span>
     );
   };
@@ -318,7 +373,9 @@ export default function GCashPaymentSuccessPage() {
               Payment Successful
             </CardTitle>
             <p className={`text-xs sm:text-sm mt-1 ${labelMuted}`}>
-              Your fare has been paid via GCash
+              {methodInfo
+                ? `Your fare has been paid via ${methodInfo.label}`
+                : "Your fare has been paid"}
             </p>
           </CardHeader>
 
@@ -394,20 +451,12 @@ export default function GCashPaymentSuccessPage() {
 
             {/* Details list */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between min-h-[20px]">
                 <span className={`flex items-center gap-2 text-sm ${labelMuted}`}>
                   <Smartphone size={15} /> Payment Method
                 </span>
-                <span className={`text-sm font-semibold flex items-center gap-1.5 ${valueStrong}`}>
-                  <img
-                    src="/gcash.svg"
-                    alt="GCash"
-                    width={48}
-                    height={48}
-                    decoding="async"
-                    className="h-10 w-10 sm:h-12 sm:w-12 object-contain"
-                  />
-                  GCash
+                <span className={`text-sm font-semibold ${valueStrong}`}>
+                  {renderPaymentMethod()}
                 </span>
               </div>
 
