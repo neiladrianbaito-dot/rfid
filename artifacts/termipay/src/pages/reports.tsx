@@ -314,266 +314,46 @@ body:has(.rp-page) {
   background: transparent;
 }
 
-/* Modern date-filter trigger + Xendit-style popover */
-.rp-date-filter {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  z-index: 20;
-}
-
-.rp-date-filter-trigger {
+/* Filter bar (Year / Month / Week / Day) */
+.rp-filter {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 12px;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--rp-muted);
+  gap: 4px;
+  padding: 4px;
   background: var(--rp-tile);
   border: 1px solid var(--rp-border);
-  border-radius: 9px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  border-radius: 12px;
 }
-
-.rp-date-filter-trigger:hover,
-.rp-date-filter-trigger[aria-expanded="true"] {
-  color: var(--rp-text);
-  border-color: #cbd5e1;
-  background: var(--rp-bg);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
-}
-
-.rp-date-filter-trigger.is-active {
-  color: var(--rp-accent);
-  border-color: color-mix(in srgb, var(--rp-accent) 35%, var(--rp-border));
-  background: color-mix(in srgb, var(--rp-accent) 6%, var(--rp-bg));
-}
-
-.rp-date-filter-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--rp-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rp-accent) 12%, transparent);
-}
-
-.rp-date-filter-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  width: min(360px, calc(100vw - 32px));
-  padding: 16px;
-  background: var(--rp-bg);
-  border: 1px solid var(--rp-border);
-  border-radius: 14px;
-  box-shadow:
-    0 4px 12px rgba(15, 23, 42, 0.08),
-    0 18px 45px rgba(15, 23, 42, 0.14);
-  z-index: 100;
-  animation: rp-filter-pop 0.14s ease-out;
-}
-
-.rp-date-filter-popover-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--rp-divider);
-}
-
-.rp-date-filter-popover-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--rp-text);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.rp-date-filter-popover-title svg {
-  color: var(--rp-accent);
-}
-
-.rp-date-filter-popover-head p {
-  margin: 4px 0 0;
-  color: var(--rp-muted);
-  font-size: 10px;
-  line-height: 1.45;
-}
-
-.rp-date-filter-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  flex: none;
-  margin-top: -2px;
+.rp-filter-btn {
+  min-width: 48px;
+  height: 28px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--rp-muted);
   background: transparent;
   border: 0;
-  border-radius: 7px;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.rp-date-filter-close:hover {
-  color: var(--rp-text);
-  background: var(--rp-divider);
-}
-
-.rp-date-filter-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr 0.85fr;
-  gap: 9px;
-  padding: 15px 0;
-}
-
-.rp-date-filter-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.rp-date-filter-field > span {
-  color: var(--rp-muted);
-  font-size: 10px;
-  font-weight: 650;
-}
-
-.rp-date-filter-field select {
-  width: 100%;
-  height: 34px;
-  min-width: 0;
-  padding: 0 28px 0 9px;
-  color: var(--rp-text);
-  background: var(--rp-tile);
-  border: 1px solid var(--rp-border);
   border-radius: 8px;
-  outline: none;
-  font: inherit;
-  font-size: 11px;
   cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
-
-.rp-date-filter-field select:hover,
-.rp-date-filter-field select:focus {
-  border-color: #a1a1aa;
-}
-
-.rp-date-filter-field select:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.rp-date-filter-quick {
-  padding: 13px 0;
-  border-top: 1px solid var(--rp-divider);
-}
-
-.rp-date-filter-quick-label {
-  margin-bottom: 8px;
-  color: var(--rp-muted);
-  font-size: 10px;
-  font-weight: 650;
-}
-
-.rp-date-filter-quick-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-}
-
-.rp-date-filter-quick-btn {
-  height: 30px;
-  padding: 0 7px;
-  color: var(--rp-muted);
-  background: var(--rp-tile);
-  border: 1px solid var(--rp-border);
-  border-radius: 7px;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.rp-date-filter-quick-btn:hover {
-  color: var(--rp-accent);
-  border-color: color-mix(in srgb, var(--rp-accent) 30%, var(--rp-border));
-}
-
-.rp-date-filter-quick-btn.is-selected {
-  color: var(--rp-accent);
-  background: color-mix(in srgb, var(--rp-accent) 7%, var(--rp-bg));
-  border-color: color-mix(in srgb, var(--rp-accent) 35%, var(--rp-border));
-}
-
-.rp-date-filter-footer {
-  display: flex;
+.rp-filter-btn:hover { color: var(--rp-accent); }
+.rp-filter-btn[aria-pressed="true"] { color: #fff; background: var(--rp-accent); }
+.rp[data-theme="dark"] .rp-filter-btn[aria-pressed="true"] { color: #0b1220; }
+.rp-filter-reset {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-top: 13px;
-  border-top: 1px solid var(--rp-divider);
-}
-
-.rp-date-filter-clear,
-.rp-date-filter-apply {
-  height: 34px;
-  padding: 0 12px;
-  border-radius: 8px;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.rp-date-filter-clear {
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   color: var(--rp-muted);
   background: transparent;
-  border: 1px solid transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
 }
-
-.rp-date-filter-clear:hover:not(:disabled) {
-  color: var(--rp-text);
-  background: var(--rp-divider);
-}
-
-.rp-date-filter-clear:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.rp-date-filter-apply {
-  color: #fff;
-  background: var(--rp-accent);
-  border: 1px solid var(--rp-accent);
-  box-shadow: 0 2px 5px rgba(37, 99, 235, 0.2);
-}
-
-.rp-date-filter-apply:hover {
-  filter: brightness(0.96);
-}
-
-.rp[data-theme="dark"] .rp-date-filter-popover {
-  box-shadow:
-    0 4px 12px rgba(0, 0, 0, 0.35),
-    0 18px 45px rgba(0, 0, 0, 0.5);
-}
-
-@keyframes rp-filter-pop {
-  from { opacity: 0; transform: translateY(-4px) scale(0.985); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
+.rp-filter-reset:hover { color: var(--rp-accent); }
 
 /* 7. MOTION + A11Y ---------------------------------------------------------- */
 @keyframes rp-swap {
@@ -583,106 +363,6 @@ body:has(.rp-page) {
 .rp-body-enter { animation: rp-swap 0.16s ease-out; }
 
 .rp-tab:focus-visible,
-/* Existing filter bar — preserved. The popup is added beside it. */
-.rp-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  min-height: 32px;
-  padding: 3px;
-  border: 1px solid var(--rp-border);
-  border-radius: 8px;
-  background: var(--rp-panel);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-}
-.rp-filter-btn {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--rp-muted);
-  border-radius: 6px;
-  padding: 5px 9px;
-  font-size: 10px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background .15s ease, color .15s ease;
-}
-.rp-filter-btn:hover {
-  background: var(--rp-soft);
-  color: var(--rp-text);
-}
-.rp-filter-btn[aria-pressed="true"] {
-  background: #2563eb;
-  color: #fff;
-}
-.rp-filter-reset {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--rp-muted);
-  cursor: pointer;
-}
-.rp-filter-reset:hover {
-  background: var(--rp-soft);
-  color: var(--rp-text);
-}
-.rp-filter-additional {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-.rp-filter-popup-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--rp-border);
-  border-radius: 8px;
-  background: var(--rp-panel);
-  color: var(--rp-text);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
-  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
-}
-.rp-filter-popup-trigger:hover,
-.rp-filter-popup-trigger[aria-expanded="true"] {
-  border-color: #93c5fd;
-  background: var(--rp-soft);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, .08);
-}
-.rp-filter-popup-trigger.is-active {
-  color: #2563eb;
-  border-color: #93c5fd;
-  background: #eff6ff;
-}
-.rp-filter-popup-trigger .rp-filter-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: #2563eb;
-}
-.rp-filter-layout {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.rp-filter-popup-wrap { position: relative; }
-.rp[data-theme="dark"] .rp-filter { background: #0f172a; border-color: #334155; }
-.rp[data-theme="dark"] .rp-filter-popup-trigger { background: #0f172a; border-color: #334155; color: #e2e8f0; }
-.rp[data-theme="dark"] .rp-filter-popup-trigger.is-active { background: rgba(37, 99, 235, .15); border-color: #1d4ed8; color: #60a5fa; }
-.rp[data-theme="dark"] .rp-filter-btn { color: #94a3b8; }
-.rp[data-theme="dark"] .rp-filter-btn:hover,
-.rp[data-theme="dark"] .rp-filter-reset:hover { background: #1e293b; color: #f8fafc; }
-
 .rp-filter-btn:focus-visible,
 .rp-filter-reset:focus-visible {
   outline: 2px solid var(--rp-accent);
@@ -842,257 +522,48 @@ const FILTER_MODES = [
   ["day", "Day"],
 ] as const;
 
-type DateFilterBarProps = {
-  mode: FilterMode;
-  isActive: boolean;
-  filterYear: string;
-  filterMonth: string;
-  filterDay: string;
-  availableYears: string[];
-  onApply: (year: string, month: string, day: string) => void;
-  onQuickSelect: (mode: "year" | "month" | "week" | "day") => void;
-  onReset: () => void;
-};
-
 export function DateFilterBar({
   mode,
   isActive,
-  filterYear,
-  filterMonth,
-  filterDay,
-  availableYears,
-  onApply,
-  onQuickSelect,
+  onSelect,
   onReset,
-}: DateFilterBarProps) {
-  const [open, setOpen] = useState(false);
-  const [draftYear, setDraftYear] = useState(filterYear);
-  const [draftMonth, setDraftMonth] = useState(filterMonth);
-  const [draftDay, setDraftDay] = useState(filterDay);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-
-    setDraftYear(filterYear);
-    setDraftMonth(filterMonth);
-    setDraftDay(filterDay);
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open, filterYear, filterMonth, filterDay]);
-
-  const today = new Date();
-  const currentYear = String(today.getFullYear());
-  const years = Array.from(new Set([
-    currentYear,
-    ...availableYears,
-    filterYear !== "all" ? filterYear : "",
-    draftYear !== "all" ? draftYear : "",
-  ].filter(Boolean))).sort((a, b) => b.localeCompare(a));
-
-  const months = MONTH_OPTIONS;
-  const daysInSelectedMonth = draftYear !== "all" && draftMonth !== "all"
-    ? new Date(Number(draftYear), Number(draftMonth), 0).getDate()
-    : 31;
-  const days = Array.from({ length: daysInSelectedMonth }, (_, i) => String(i + 1).padStart(2, "0"));
-
-  const activeFilterText = (() => {
-    if (!isActive) return "Filter";
-    if (mode === "week") return "This week";
-    if (filterYear !== "all" && filterMonth !== "all" && filterDay !== "all") {
-      const monthName = MONTH_OPTIONS.find((m) => m.value === filterMonth)?.label || filterMonth;
-      return `${monthName} ${Number(filterDay)}, ${filterYear}`;
-    }
-    if (filterYear !== "all" && filterMonth !== "all") {
-      const monthName = MONTH_OPTIONS.find((m) => m.value === filterMonth)?.label || filterMonth;
-      return `${monthName} ${filterYear}`;
-    }
-    if (filterYear !== "all") return filterYear;
-    return "Filtered";
-  })();
-
-  const handleApply = () => {
-    if (draftYear === "all") {
-      onReset();
-    } else {
-      onApply(draftYear, draftMonth, draftDay);
-    }
-    setOpen(false);
-  };
-
-  const handleClear = () => {
-    onReset();
-    setDraftYear("all");
-    setDraftMonth("all");
-    setDraftDay("all");
-    setOpen(false);
-  };
-
-  const handleQuick = (quickMode: "year" | "month" | "week" | "day") => {
-    onQuickSelect(quickMode);
-    setOpen(false);
-  };
-
-  const handleYearChange = (value: string) => {
-    setDraftYear(value);
-    if (value === "all") {
-      setDraftMonth("all");
-      setDraftDay("all");
-    }
-  };
-
-  const handleMonthChange = (value: string) => {
-    setDraftMonth(value);
-    if (value === "all") setDraftDay("all");
-  };
-
+}: {
+  mode: FilterMode;
+  isActive: boolean;
+  onSelect: (mode: "year" | "month" | "week" | "day") => void;
+  onReset: () => void;
+}) {
   return (
-    <div className="rp-filter-layout">
-      {/* EXISTING FILTER BUTTONS ARE PRESERVED. This is an additional popup trigger. */}
-      <div ref={rootRef} className="rp-filter-popup-wrap" data-testid="report-date-filter-popup">
+    <div className="rp-filter" data-testid="report-date-filter-buttons">
+      <Filter size={12} style={{ margin: "0 4px", color: "var(--rp-muted)" }} aria-hidden="true" />
+      {FILTER_MODES.map(([m, label]) => (
+        <button
+          key={m}
+          type="button"
+          className="rp-filter-btn"
+          aria-pressed={mode === m}
+          data-testid={`button-filter-${m}`}
+          onClick={() => onSelect(m)}
+        >
+          {label}
+        </button>
+      ))}
+      {isActive && (
         <button
           type="button"
-          className={`rp-filter-popup-trigger ${isActive ? "is-active" : ""}`}
-          aria-expanded={open}
-          aria-haspopup="dialog"
-          data-testid="button-open-date-filter"
-          onClick={() => setOpen((value) => !value)}
-          title="Open date filter"
+          className="rp-filter-reset"
+          title="Clear date filter"
+          aria-label="Clear date filter"
+          data-testid="button-reset-filters"
+          onClick={onReset}
         >
-          <Filter size={13} aria-hidden="true" />
-          <span>{activeFilterText}</span>
-          {isActive && <span className="rp-filter-dot" aria-hidden="true" />}
+          <RotateCcw size={11} />
         </button>
-
-        {open && (
-          <div className="rp-date-filter-popover" role="dialog" aria-label="Date filter">
-            <div className="rp-date-filter-popover-head">
-              <div>
-                <div className="rp-date-filter-popover-title">
-                  <Filter size={14} aria-hidden="true" />
-                  Date filter
-                </div>
-                <p>Select year, month, and day</p>
-              </div>
-              <button
-                type="button"
-                className="rp-date-filter-close"
-                onClick={() => setOpen(false)}
-                aria-label="Close date filter"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="rp-date-filter-fields">
-              <label className="rp-date-filter-field">
-                <span>Year</span>
-                <select value={draftYear} onChange={(e) => handleYearChange(e.target.value)}>
-                  <option value="all">All years</option>
-                  {years.map((year) => <option key={year} value={year}>{year}</option>)}
-                </select>
-              </label>
-
-              <label className="rp-date-filter-field">
-                <span>Month</span>
-                <select
-                  value={draftMonth}
-                  onChange={(e) => handleMonthChange(e.target.value)}
-                  disabled={draftYear === "all"}
-                >
-                  <option value="all">All months</option>
-                  {months.map((month) => <option key={month.value} value={month.value}>{month.label}</option>)}
-                </select>
-              </label>
-
-              <label className="rp-date-filter-field">
-                <span>Day</span>
-                <select
-                  value={draftDay}
-                  onChange={(e) => setDraftDay(e.target.value)}
-                  disabled={draftYear === "all" || draftMonth === "all"}
-                >
-                  <option value="all">All days</option>
-                  {days.map((day) => <option key={day} value={day}>{Number(day)}</option>)}
-                </select>
-              </label>
-            </div>
-
-            <div className="rp-date-filter-quick">
-              <span className="rp-date-filter-quick-label">Quick filter</span>
-              <div className="rp-date-filter-quick-grid">
-                {FILTER_MODES.map(([quickMode, label]) => (
-                  <button
-                    key={quickMode}
-                    type="button"
-                    className={`rp-date-filter-quick-btn ${mode === quickMode ? "is-selected" : ""}`}
-                    onClick={() => handleQuick(quickMode)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="rp-date-filter-footer">
-              <button type="button" className="rp-date-filter-clear" onClick={handleClear} disabled={!isActive}>
-                Clear
-              </button>
-              <button type="button" className="rp-date-filter-apply" onClick={handleApply}>
-                Apply filter
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ORIGINAL BAR — NOT REMOVED */}
-      <div className="rp-filter" data-testid="report-date-filter-buttons">
-        <Filter size={12} style={{ margin: "0 4px", color: "var(--rp-muted)" }} aria-hidden="true" />
-        {FILTER_MODES.map(([m, label]) => (
-          <button
-            key={m}
-            type="button"
-            className="rp-filter-btn"
-            aria-pressed={mode === m}
-            data-testid={`button-filter-${m}`}
-            onClick={() => onQuickSelect(m)}
-          >
-            {label}
-          </button>
-        ))}
-        {isActive && (
-          <button
-            type="button"
-            className="rp-filter-reset"
-            title="Clear date filter"
-            aria-label="Clear date filter"
-            data-testid="button-reset-filters"
-            onClick={onReset}
-          >
-            <RotateCcw size={11} />
-          </button>
-        )}
-      </div>
+      )}
     </div>
   );
 }
+
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -2707,33 +2178,11 @@ export default function ReportsPage() {
   // to the title, so it doesn't add its own vertical block above the
   // chart/table content.
   // ══════════════════════════════════════════════════════════════════════
-  const applyDateSelection = (year: string, month: string, day: string) => {
-    let nextMode: FilterMode = "all";
-
-    if (year !== "all" && month === "all" && day === "all") {
-      nextMode = "year";
-    } else if (year !== "all" && month !== "all" && day === "all") {
-      nextMode = "month";
-    } else if (year !== "all" && month !== "all" && day !== "all") {
-      nextMode = "day";
-    }
-
-    setFilterYear(year);
-    setFilterMonth(month);
-    setFilterDay(day);
-    setFilterMode(nextMode);
-  };
-
   const renderFilterBar = () => (
     <DateFilterBar
       mode={filterMode}
       isActive={isFilterActive}
-      filterYear={filterYear}
-      filterMonth={filterMonth}
-      filterDay={filterDay}
-      availableYears={availableYears}
-      onApply={applyDateSelection}
-      onQuickSelect={applyQuickFilter}
+      onSelect={applyQuickFilter}
       onReset={resetFilters}
     />
   );
