@@ -78,11 +78,11 @@ const REPORTS_CSS = `
 
 /* 1. TOKENS ---------------------------------------------------------------- */
 .rp {
-  --rp-bg: #f4f4f5;            /* main panel: soft gray instead of white   */
-  --rp-strip: #e4e4e7;         /* tab strip, one step darker               */
-  --rp-tile: #ececee;          /* inset tiles (stats, filter bar)          */
-  --rp-border: #d4d4d8;
-  --rp-divider: #e4e4e7;
+  --rp-bg: #ffffff;            /* main panel: pure white                   */
+  --rp-strip: #f4f4f5;         /* tab strip, faint gray so the folder reads */
+  --rp-tile: #f8f8f9;          /* inset tiles (stats, filter bar)          */
+  --rp-border: #e4e4e7;
+  --rp-divider: #ececee;
   --rp-text: #27272a;
   --rp-muted: #71717a;
   --rp-accent: #2563eb;
@@ -2272,7 +2272,7 @@ export default function ReportsPage() {
                     <stat.icon className="w-full h-full" />
                   </div>
                   {isLoading ? (
-                    <Skeleton className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-zinc-200"}`} />
+                    <Skeleton className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-zinc-100"}`} />
                   ) : (
                     <div className="flex items-center justify-between relative">
                       <div>
@@ -2298,7 +2298,7 @@ export default function ReportsPage() {
               meta="Performance Matrix"
             >
               {isLoading ? (
-                <Skeleton className={`h-72 w-full ${isDark ? "bg-slate-800" : "bg-zinc-200"}`} />
+                <Skeleton className={`h-72 w-full ${isDark ? "bg-slate-800" : "bg-zinc-100"}`} />
               ) : filteredBreakdown.length === 0 ? (
                 <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                   No records match the selected filter.
@@ -2307,7 +2307,7 @@ export default function ReportsPage() {
                 <div className="h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={filteredBreakdown}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#27272a" : "#d4d4d8"} vertical={false} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#27272a" : "#e4e4e7"} vertical={false} />
                       <XAxis
                         dataKey="date"
                         tickFormatter={(d: string) => {
@@ -2359,8 +2359,8 @@ export default function ReportsPage() {
                           return (
                             <div
                               style={{
-                                backgroundColor: isDark ? "#0f172a" : "#fafafa",
-                                border: isDark ? "1px solid #334155" : "1px solid #d4d4d8",
+                                backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                                border: isDark ? "1px solid #334155" : "1px solid #e4e4e7",
                                 borderRadius: "10px",
                                 padding: "12px 14px",
                                 fontSize: "12px",
@@ -2487,7 +2487,7 @@ export default function ReportsPage() {
             meta="Fare collections only · Regular vs. Student / Senior / PWD"
           >
             {isLoading ? (
-              <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-zinc-200"}`} />
+              <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-zinc-100"}`} />
             ) : (
               <div className="rp-divided">
                 {/* Summary chips */}
@@ -2528,12 +2528,12 @@ export default function ReportsPage() {
                       <div className="h-[300px] w-full">
                         <ResponsiveContainer width="100%" height="100%">
                           <RechartsPieChart>
-                            <Pie data={cardTypeDistribution} dataKey="value" nameKey="name" cx="50%" cy="48%" innerRadius={66} outerRadius={96} paddingAngle={2} stroke={isDark ? "#0f172a" : "#ececee"} strokeWidth={2}>
+                            <Pie data={cardTypeDistribution} dataKey="value" nameKey="name" cx="50%" cy="48%" innerRadius={66} outerRadius={96} paddingAngle={2} stroke={isDark ? "#0f172a" : "#ffffff"} strokeWidth={2}>
                               {cardTypeDistribution.map((entry) => (<Cell key={entry.name} fill={CARD_TYPE_CHART_COLORS[entry.name]} />))}
                             </Pie>
                             <text x="50%" y="46%" textAnchor="middle" dominantBaseline="middle" fill={isDark ? "#e2e8f0" : "#1e293b"} fontSize="22" fontWeight="700">{cardTypeDistribution.reduce((sum, item) => sum + item.value, 0)}</text>
                             <text x="50%" y="56%" textAnchor="middle" dominantBaseline="middle" fill={isDark ? "#64748b" : "#94a3b8"} fontSize="10" fontWeight="600">REGISTERED USERS</text>
-                            <Tooltip contentStyle={{ backgroundColor: isDark ? "#0f172a" : "#fafafa", border: isDark ? "1px solid #1e293b" : "1px solid #d4d4d8", borderRadius: "8px", fontSize: "11px", fontWeight: "600" }} formatter={(value: number, name: string) => { const total = cardTypeDistribution.reduce((sum, item) => sum + item.value, 0); const pct = total > 0 ? (value / total) * 100 : 0; return [`${value} ${value === 1 ? "user" : "users"} (${pct.toFixed(1)}%)`, name]; }} />
+                            <Tooltip contentStyle={{ backgroundColor: isDark ? "#0f172a" : "#ffffff", border: isDark ? "1px solid #1e293b" : "1px solid #e4e4e7", borderRadius: "8px", fontSize: "11px", fontWeight: "600" }} formatter={(value: number, name: string) => { const total = cardTypeDistribution.reduce((sum, item) => sum + item.value, 0); const pct = total > 0 ? (value / total) * 100 : 0; return [`${value} ${value === 1 ? "user" : "users"} (${pct.toFixed(1)}%)`, name]; }} />
                             <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: "11px", fontWeight: 600 }} formatter={(value: string) => (<span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>)} />
                           </RechartsPieChart>
                         </ResponsiveContainer>
@@ -2554,10 +2554,10 @@ export default function ReportsPage() {
                       <div className="h-[300px] w-full">
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={filteredFareDiscountBreakdown} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#27272a" : "#d4d4d8"} vertical={false} />
+                            <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#27272a" : "#e4e4e7"} vertical={false} />
                             <XAxis dataKey="date" tickFormatter={(d: string) => { const date = new Date(d + "T00:00:00"); return date.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }} stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={10} fontWeight="600" axisLine={false} tickLine={false} />
                             <YAxis stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={10} fontWeight="600" tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`} axisLine={false} tickLine={false} width={58} />
-                            <Tooltip contentStyle={{ backgroundColor: isDark ? "#0f172a" : "#fafafa", border: isDark ? "1px solid #1e293b" : "1px solid #d4d4d8", borderRadius: "8px", fontSize: "11px", fontWeight: "600", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={(d: string) => { const date = new Date(d + "T00:00:00"); return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }} labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }} formatter={(value: number, name: string) => [formatPeso(Math.abs(value)), name]} />
+                            <Tooltip contentStyle={{ backgroundColor: isDark ? "#0f172a" : "#ffffff", border: isDark ? "1px solid #1e293b" : "1px solid #e4e4e7", borderRadius: "8px", fontSize: "11px", fontWeight: "600", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={(d: string) => { const date = new Date(d + "T00:00:00"); return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }} labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b" }} formatter={(value: number, name: string) => [formatPeso(Math.abs(value)), name]} />
                             <Legend wrapperStyle={{ fontSize: "10px", fontWeight: 600 }} formatter={(value: string) => (<span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>)} />
                             <Line type="monotone" dataKey="regular" name="Regular" stroke={DISCOUNT_LINE_COLORS.regular} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                             <Line type="monotone" dataKey="student" name="Student" stroke={DISCOUNT_LINE_COLORS.student} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
@@ -2580,7 +2580,7 @@ export default function ReportsPage() {
                   <div className="overflow-x-auto -mx-2 px-2">
                     <Table>
                       <TableHeader className="rp-table-head">
-                        <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-zinc-300"}`}>
+                        <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-zinc-200"}`}>
                           <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date</TableHead>
                           <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total Collected</TableHead>
                           <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Regular</TableHead>
@@ -2601,7 +2601,7 @@ export default function ReportsPage() {
                           return (
                             <TableRow
                               key={i}
-                              className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-zinc-200 hover:bg-zinc-200/60"}`}
+                              className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-zinc-100 hover:bg-zinc-100/60"}`}
                             >
                               <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                                 {date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
@@ -2661,7 +2661,7 @@ export default function ReportsPage() {
             }
           >
             {isLoading ? (
-              <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-zinc-200"}`} />
+              <Skeleton className={`h-40 w-full ${isDark ? "bg-slate-800" : "bg-zinc-100"}`} />
             ) : rankedRoutes.length === 0 ? (
               <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                 No routed Fare rides match the selected filter.
@@ -2740,7 +2740,7 @@ export default function ReportsPage() {
                   <div className="h-[340px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={routeChartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#27272a" : "#d4d4d8"} vertical={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#27272a" : "#e4e4e7"} vertical={false} />
                         <XAxis
                           dataKey="date"
                           tickFormatter={(d: string) => {
@@ -2762,8 +2762,8 @@ export default function ReportsPage() {
                         />
                         <Tooltip
                           contentStyle={{
-                            backgroundColor: isDark ? "#0f172a" : "#fafafa",
-                            border: isDark ? "1px solid #1e293b" : "1px solid #d4d4d8",
+                            backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                            border: isDark ? "1px solid #1e293b" : "1px solid #e4e4e7",
                             borderRadius: "8px",
                             fontSize: "11px",
                             fontWeight: "600",
@@ -2821,7 +2821,7 @@ export default function ReportsPage() {
                 <div className="overflow-x-auto -mx-2 px-2">
                   <Table>
                     <TableHeader className="rp-table-head">
-                      <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-zinc-300"}`}>
+                      <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-zinc-200"}`}>
                         <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>#</TableHead>
                         <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Route</TableHead>
                         <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-orange-500">Total Rides</TableHead>
@@ -2835,7 +2835,7 @@ export default function ReportsPage() {
                       {rankedRoutes.map((r, i) => (
                         <TableRow
                           key={r.routeId}
-                          className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-zinc-200 hover:bg-zinc-200/60"}`}
+                          className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-zinc-100 hover:bg-zinc-100/60"}`}
                         >
                           <TableCell className={`text-xs font-bold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{i + 1}</TableCell>
                           <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</TableCell>
@@ -2874,7 +2874,7 @@ export default function ReportsPage() {
           >
             {isLoading ? (
               <div className="space-y-4">
-                {[1, 2, 3].map((i) => <Skeleton key={i} className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-zinc-200"}`} />)}
+                {[1, 2, 3].map((i) => <Skeleton key={i} className={`h-12 w-full ${isDark ? "bg-slate-800" : "bg-zinc-100"}`} />)}
               </div>
             ) : filteredBreakdown.length === 0 ? (
               <div className={`py-12 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
@@ -2884,7 +2884,7 @@ export default function ReportsPage() {
               <div style={{ maxHeight: 560, overflowY: "auto", overflowX: "hidden" }}>
                 <Table>
                   <TableHeader className="rp-table-head">
-                    <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-zinc-300"}`}>
+                    <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-zinc-200"}`}>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Log Date</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Standard Day</TableHead>
                       <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-blue-500">Revenue Credited</TableHead>
@@ -2896,7 +2896,7 @@ export default function ReportsPage() {
                       return (
                         <TableRow
                           key={i}
-                          className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-zinc-200 hover:bg-zinc-200/60"}`}
+                          className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-zinc-100 hover:bg-zinc-100/60"}`}
                         >
                           <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                             {date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
