@@ -1815,7 +1815,7 @@ export default function UserManagementPage() {
                               top: 10,
                               left: 0,
                               right: 0,
-                              fontSize: 11,
+                              fontSize: 15,
                               letterSpacing: 0.5,
                               color: theme.accent,
                               lineHeight: 1.3,
