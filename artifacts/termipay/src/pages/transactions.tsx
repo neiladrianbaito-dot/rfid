@@ -163,15 +163,14 @@ const TX_CSS = `
   align-items: center;
   gap: 8px;
   padding: 10px 18px;
-  margin-bottom: -1px;          /* sink 1px into the body to hide its top border */
+  margin-bottom: 0;
   font: inherit;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   color: var(--tp-muted);
   background: transparent;
-  border: 1px solid transparent;
-  border-bottom: 0;
+  border: 0;                    /* no border at all — nothing left to draw a line */
   border-radius: 12px 12px 0 0;
   cursor: pointer;
   transition: color 0.15s ease;
@@ -179,9 +178,7 @@ const TX_CSS = `
 .tp-tab:hover { color: var(--tp-text); }
 .tp-tab[aria-selected="true"] {
   color: var(--tp-accent);
-  background: var(--tp-bg);     /* the only white outside the body */
-  border-color: transparent;    /* no seam where the tab meets the panel */
-  padding-bottom: 11px;
+  background: var(--tp-bg);     /* same fill as the panel below it — merges into one shape */
   z-index: 3;
 }
 .tp-tab svg { width: 14px; height: 14px; flex: none; }
@@ -211,7 +208,7 @@ const TX_CSS = `
   overflow: hidden;
   background: var(--tp-bg);
   color: var(--tp-text);
-  border: 1px solid var(--tp-border);
+  border: 0;                    /* no border anywhere on the body — tabs and panel read as one piece */
   border-radius: 0 var(--tp-radius) var(--tp-radius) var(--tp-radius);
   box-shadow: var(--tp-shadow);
 }
