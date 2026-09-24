@@ -79,8 +79,8 @@ const REPORTS_CSS = `
 /* 1. TOKENS ---------------------------------------------------------------- */
 .rp {
   --rp-bg: #ffffff;            /* main panel: pure white                   */
-  --rp-strip: #f4f4f5;         /* tab strip, faint gray so the folder reads */
-  --rp-tile: #f8f8f9;          /* inset tiles (stats, filter bar)          */
+  --rp-strip: #ffffff;         /* tab strip: white, same as the panel      */
+  --rp-tile: #ffffff;          /* inset tiles: white, outlined only        */
   --rp-border: #e4e4e7;
   --rp-divider: #ececee;
   --rp-text: #27272a;
@@ -211,7 +211,6 @@ body:has(.rp-page) {
 }
 .rp-tab:hover {
   color: var(--rp-text);
-  background: color-mix(in srgb, var(--rp-bg) 55%, transparent);
 }
 .rp-tab[aria-selected="true"] {
   color: var(--rp-accent);
@@ -335,7 +334,7 @@ body:has(.rp-page) {
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
-.rp-filter-btn:hover { color: var(--rp-text); background: var(--rp-bg); }
+.rp-filter-btn:hover { color: var(--rp-accent); }
 .rp-filter-btn[aria-pressed="true"] { color: #fff; background: var(--rp-accent); }
 .rp[data-theme="dark"] .rp-filter-btn[aria-pressed="true"] { color: #0b1220; }
 .rp-filter-reset {
@@ -350,7 +349,7 @@ body:has(.rp-page) {
   border-radius: 8px;
   cursor: pointer;
 }
-.rp-filter-reset:hover { color: var(--rp-text); background: var(--rp-bg); }
+.rp-filter-reset:hover { color: var(--rp-accent); }
 
 /* 7. MOTION + A11Y ---------------------------------------------------------- */
 @keyframes rp-swap {
