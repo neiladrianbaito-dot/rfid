@@ -1810,12 +1810,13 @@ export default function UserManagementPage() {
                             tag just floats in the top margin above them. */}
                         {theme.isLight && (
                           <div
-                            className="absolute uppercase font-bold"
+                            className="absolute uppercase font-bold text-center"
                             style={{
                               top: 10,
-                              left: 30,
-                              fontSize: 8,
-                              letterSpacing: 0.6,
+                              left: 0,
+                              right: 0,
+                              fontSize: 6.5,
+                              letterSpacing: 0.5,
                               color: theme.accent,
                               lineHeight: 1,
                             }}
