@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, KeyboardEvent } from "react";
 import { useListTransactions } from "@workspace/api-client-react";
 import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -97,6 +96,148 @@ type FinancialFields = {
 
 type TxView = "topup" | "fare" | "transfers";
 type TxType = "Fare" | "Top-up";
+
+// ══════════════════════════════════════════════════════════════════════════
+// PAGE STYLES — single-file build. The same one-folder look as the Reports
+// page: only the active tab + the content panel are visible (white); the
+// tab strip itself is transparent and starts flush at the left edge.
+// ══════════════════════════════════════════════════════════════════════════
+const TX_CSS = `
+.tp {
+  --tp-bg: #ffffff;
+  --tp-border: #e4e4e7;
+  --tp-divider: #ececee;
+  --tp-muted: #71717a;
+  --tp-text: #27272a;
+  --tp-accent: #2563eb;
+  --tp-radius: 18px;
+  --tp-shadow:
+    0 1px 2px rgba(24, 24, 27, 0.06),
+    0 10px 24px -8px rgba(24, 24, 27, 0.14),
+    0 24px 48px -20px rgba(24, 24, 27, 0.14);
+}
+.tp[data-theme="dark"] {
+  --tp-bg: #0f172a;
+  --tp-border: #1e293b;
+  --tp-divider: #1e293b;
+  --tp-muted: #94a3b8;
+  --tp-text: #e2e8f0;
+  --tp-accent: #60a5fa;
+  --tp-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 12px 28px -10px rgba(0, 0, 0, 0.55);
+}
+
+/* One master container: transparent shell, flush to the page edges, fills
+   the remaining height. */
+.tp {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+}
+
+/* Tab strip: transparent, no padding — first tab starts at the left edge. */
+.tp-tabs {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: none;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 0;
+  padding: 0;
+  background: transparent;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tp-tabs::-webkit-scrollbar { display: none; }
+
+.tp-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  margin-bottom: -1px;          /* sink 1px into the body to hide its top border */
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--tp-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.tp-tab:hover { color: var(--tp-text); }
+.tp-tab[aria-selected="true"] {
+  color: var(--tp-accent);
+  background: var(--tp-bg);     /* the only white outside the body */
+  border-color: var(--tp-border);
+  padding-bottom: 11px;
+  z-index: 3;
+}
+.tp-tab svg { width: 14px; height: 14px; flex: none; }
+.tp-count {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: var(--tp-muted);
+  border: 1px solid var(--tp-divider);
+}
+.tp-tab[aria-selected="true"] .tp-count {
+  color: var(--tp-accent);
+  border-color: var(--tp-border);
+}
+
+/* Body: the one white panel. Square top-left so the first tab sits flush. */
+.tp-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--tp-bg);
+  color: var(--tp-text);
+  border: 1px solid var(--tp-border);
+  border-radius: 0 var(--tp-radius) var(--tp-radius) var(--tp-radius);
+  box-shadow: var(--tp-shadow);
+}
+
+/* Toolbar (LIVE badge / search / status filter) — a plain row with a
+   divider, not a nested card header. */
+.tp-toolbar {
+  flex: none;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--tp-divider);
+  background: transparent;
+}
+
+/* Sticky table head takes the panel color instead of a hard-coded white. */
+.tp .tp-thead { background: var(--tp-bg); }
+
+.tp-tab:focus-visible {
+  outline: 2px solid var(--tp-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .tp-toolbar { padding: 12px 16px; }
+  .tp-tab { padding: 8px 12px; }
+}
+`;
 
 // ── 🧊 NO-FLICKER HELPER ────────────────────────────────────────────────────
 // Kapag pareho ang laman ng lumang data at bagong data, ibinabalik ang LUMANG
@@ -224,6 +365,72 @@ function getPaymentMethodLogo(method?: string | null): string | null {
   const key = method.toLowerCase().trim();
   if (key === "gcash") return "/gcash.svg";
   return null;
+}
+
+// ── 🗂️ One-folder container: transparent tab strip + single white body ─────
+type TxTabDef = { key: TxView; label: string; icon: typeof CreditCard; count: number };
+
+function TxPanel({
+  tabs,
+  active,
+  onChange,
+  isDark,
+  children,
+}: {
+  tabs: TxTabDef[];
+  active: TxView;
+  onChange: (key: TxView) => void;
+  isDark: boolean;
+  children: ReactNode;
+}) {
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  // Arrow keys / Home / End (WAI-ARIA tabs pattern)
+  const handleKeyDown = (e: KeyboardEvent, index: number) => {
+    let next = index;
+    if (e.key === "ArrowRight") next = (index + 1) % tabs.length;
+    else if (e.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    else return;
+    e.preventDefault();
+    onChange(tabs[next].key);
+    tabRefs.current[tabs[next].key]?.focus();
+  };
+
+  return (
+    <div className="tp" data-theme={isDark ? "dark" : "light"} data-testid="transactions-panel">
+      <div className="tp-tabs" role="tablist" aria-label="Transaction types">
+        {tabs.map(({ key, label, icon: Icon, count }, i) => (
+          <button
+            key={key}
+            ref={(el) => { tabRefs.current[key] = el; }}
+            role="tab"
+            id={`tp-tab-${key}`}
+            aria-selected={active === key}
+            aria-controls={`tp-panel-${key}`}
+            tabIndex={active === key ? 0 : -1}
+            className="tp-tab"
+            onClick={() => onChange(key)}
+            onKeyDown={(e) => handleKeyDown(e, i)}
+          >
+            <Icon aria-hidden="true" />
+            {label}
+            <span className="tp-count">{count}</span>
+          </button>
+        ))}
+      </div>
+
+      <div
+        className="tp-body"
+        role="tabpanel"
+        id={`tp-panel-${active}`}
+        aria-labelledby={`tp-tab-${active}`}
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
 
 // ── Reusable row para sa mga modal ──────────────────────────────────────────
@@ -969,17 +1176,36 @@ export default function TransactionsPage() {
   const isFareView = activeView === "fare";
   const isTransferView = activeView === "transfers";
 
-  const TX_TABS: { key: TxView; label: string; icon: typeof CreditCard; count: number }[] = [
+  const TX_TABS: TxTabDef[] = [
     { key: "topup", label: "Top-up", icon: CreditCard, count: topupList.length },
     { key: "fare", label: "Fare", icon: Route, count: fareList.length },
     { key: "transfers", label: "Transfer", icon: ArrowRightLeft, count: transfers.length },
   ];
 
   const headClass = "text-[11px] font-semibold uppercase tracking-wide";
+  const theadClass = `tp-thead sticky top-0 z-10 border-b ${
+    isDark ? "border-slate-800" : "border-zinc-200"
+  }`;
+
+  // LIVE pill — shared by both toolbars
+  const livePill = (
+    <div className="flex items-center gap-2 mr-2 shrink-0">
+      <span
+        className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
+          isDark
+            ? "text-emerald-400 bg-emerald-950/40 border-emerald-900"
+            : "text-emerald-600 bg-emerald-50 border-emerald-100"
+        }`}
+      >
+        <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+        LIVE
+      </span>
+    </div>
+  );
 
   return (
     <div
-      className={`space-y-4 md:space-y-6 h-full min-h-0 flex flex-col overflow-hidden pb-0 ${
+      className={`space-y-4 md:space-y-6 h-full min-h-0 flex flex-col overflow-hidden pb-4 px-1 ${
         isDark ? "text-slate-200" : "text-slate-800"
       }`}
     >
@@ -992,6 +1218,7 @@ export default function TransactionsPage() {
           animation: realtime-dot 1s ease-in-out infinite;
         }
       `}</style>
+      <style>{TX_CSS}</style>
 
       {/* Header */}
       <div
@@ -1036,532 +1263,457 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div
-        className={`flex items-center gap-6 overflow-x-auto border-b ${
-          isDark ? "border-slate-800" : "border-slate-200"
-        }`}
-      >
-        {TX_TABS.map(({ key, label, icon: Icon, count }) => {
-          const active = activeView === key;
-          return (
-            <button
-              key={key}
-              onClick={() => setActiveView(key)}
-              className={`relative flex items-center gap-1.5 pb-2.5 -mb-px whitespace-nowrap text-xs font-semibold transition-colors cursor-pointer border-b-2 ${
-                active
-                  ? isDark ? "text-blue-400 border-blue-400" : "text-blue-600 border-blue-600"
-                  : isDark
-                    ? "text-slate-500 border-transparent hover:text-slate-300"
-                    : "text-slate-400 border-transparent hover:text-slate-600"
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-              <span
-                className={`text-[10px] font-mono px-1.5 rounded ${
-                  isDark ? "bg-slate-700/60 text-slate-300" : "bg-slate-200 text-slate-600"
-                }`}
-              >
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Top-up / Fare table */}
-      {!isTransferView ? (
-        <Card
-          className={`shadow-sm flex flex-col flex-1 min-h-0 overflow-hidden relative ${
-            isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
-          }`}
-        >
-          <div
-            className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${
-              isFareView ? "from-red-500 to-rose-400" : "from-emerald-500 to-cyan-400"
-            }`}
-          />
-          <CardHeader
-            className={`flex-none pb-4 border-b ${
-              isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"
-            }`}
-          >
-            <div className="flex flex-col lg:flex-row gap-4 items-center">
-              <div className="flex items-center gap-2 mr-2 shrink-0">
-                <span
-                  className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
-                    isDark
-                      ? "text-emerald-400 bg-emerald-950/40 border-emerald-900"
-                      : "text-emerald-600 bg-emerald-50 border-emerald-100"
-                  }`}
-                >
-                  <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
-                  LIVE
-                </span>
-              </div>
-              <div className="relative flex-1 w-full">
-                <Search
-                  className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${
-                    isDark ? "text-slate-500" : "text-slate-400"
-                  }`}
-                />
-                <Input
-                  placeholder="Search card UID or name..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className={`pl-10 font-medium text-sm focus-visible:ring-blue-500 ${
-                    isDark
-                      ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
-                      : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
-                  }`}
-                />
-              </div>
-              <div className="flex gap-3 w-full lg:w-auto">
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger
-                    className={`w-full lg:w-[150px] font-medium text-xs cursor-pointer ${
+      {/* ══ ONE FOLDER: transparent tab strip + single white panel ══ */}
+      <TxPanel tabs={TX_TABS} active={activeView} onChange={setActiveView} isDark={isDark}>
+        {!isTransferView ? (
+          <>
+            {/* Top-up / Fare toolbar */}
+            <div className="tp-toolbar">
+              <div className="flex flex-col lg:flex-row gap-4 items-center">
+                {livePill}
+                <div className="relative flex-1 w-full">
+                  <Search
+                    className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${
+                      isDark ? "text-slate-500" : "text-slate-400"
+                    }`}
+                  />
+                  <Input
+                    placeholder="Search card UID or name..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className={`pl-10 font-medium text-sm focus-visible:ring-blue-500 ${
                       isDark
-                        ? "bg-slate-950 border-slate-800 text-slate-300"
-                        : "bg-white border-slate-200 text-slate-600"
+                        ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
+                        : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
+                    }`}
+                  />
+                </div>
+                <div className="flex gap-3 w-full lg:w-auto">
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger
+                      className={`w-full lg:w-[150px] font-medium text-xs cursor-pointer ${
+                        isDark
+                          ? "bg-slate-950 border-slate-800 text-slate-300"
+                          : "bg-white border-slate-200 text-slate-600"
+                      }`}
+                    >
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent
+                      className={
+                        isDark
+                          ? "bg-slate-900 border-slate-800 text-slate-300"
+                          : "bg-white border-slate-200 text-slate-600"
+                      }
+                    >
+                      <SelectItem value="all" className="cursor-pointer">All Status</SelectItem>
+                      <SelectItem value="Success" className="cursor-pointer">Success</SelectItem>
+                      <SelectItem value="Failed" className="cursor-pointer">Failed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 px-4 sm:px-6 pb-0 flex flex-col overflow-hidden">
+              {showListSkeleton ? (
+                <div className="space-y-4 pt-6">
+                  {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                    <Skeleton
+                      key={i}
+                      className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="relative mt-0 flex-1 min-h-0 overflow-auto">
+                    <Table>
+                      <TableHeader className={theadClass}>
+                        <TableRow className="border-none hover:bg-transparent">
+                          <TableHead className={headClass}>Txn ID</TableHead>
+                          <TableHead className={headClass}>Timestamp</TableHead>
+                          <TableHead className={headClass}>Card UID</TableHead>
+                          <TableHead className={headClass}>Full Name</TableHead>
+                          {isFareView ? (
+                            <>
+                              <TableHead className={headClass}>Origin</TableHead>
+                              {/* ↔ column sa pagitan ng Origin at Destination */}
+                              <TableHead className="w-10 px-0 text-center">
+                                <ArrowLeftRight
+                                  className={`mx-auto h-3.5 w-3.5 ${isDark ? "text-slate-600" : "text-slate-300"}`}
+                                  aria-hidden="true"
+                                />
+                                <span className="sr-only">Both directions</span>
+                              </TableHead>
+                              <TableHead className={headClass}>Destination</TableHead>
+                            </>
+                          ) : (
+                            <TableHead className={headClass}>Payment Method</TableHead>
+                          )}
+                          <TableHead className={headClass}>Amount</TableHead>
+                          {!isFareView && (
+                            <>
+                              <TableHead className={headClass}>Fee</TableHead>
+                              <TableHead className={headClass}>VAT</TableHead>
+                              <TableHead className={headClass}>Net Amount</TableHead>
+                            </>
+                          )}
+                          <TableHead className={headClass}>Status</TableHead>
+                          <TableHead className={`${headClass} text-right`}>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+
+                      <TableBody>
+                        {paginatedList.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={isFareView ? 10 : 11}
+                              className="text-center py-32"
+                            >
+                              <div
+                                className={`flex flex-col items-center ${
+                                  isDark ? "text-slate-700" : "text-slate-300"
+                                }`}
+                              >
+                                <History size={48} className="mb-2" />
+                                <p className="text-xs font-semibold uppercase tracking-widest">
+                                  No records found
+                                </p>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          paginatedList.map((rawTx: any) => {
+                            const tx = {
+                              ...rawTx,
+                              ...(financialById[String(rawTx?.id)] ?? {}),
+                            };
+
+                            const matchedRoute = isFareView ? findRouteFor(tx, routes) : null;
+
+                            const paymentMethodLabel = !isFareView
+                              ? formatPaymentMethod(tx.payment_method)
+                              : null;
+                            const paymentMethodLogo = !isFareView
+                              ? getPaymentMethodLogo(tx.payment_method)
+                              : null;
+
+                            return (
+                              <TableRow
+                                key={tx.id}
+                                className={`transition-colors ${
+                                  isDark
+                                    ? "border-slate-800 hover:bg-slate-800/50"
+                                    : "border-zinc-100 hover:bg-zinc-50"
+                                }`}
+                              >
+                                <TableCell className="text-xs font-mono">#{tx.id}</TableCell>
+                                <TableCell className="text-xs font-mono">
+                                  {new Date(tx.timestamp || tx.created_at).toLocaleString()}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs text-blue-500 font-semibold">
+                                  {tx.card_uid || tx.cardUid || "—"}
+                                </TableCell>
+                                <TableCell className="text-sm font-medium">
+                                  {tx.full_name || tx.fullName || "—"}
+                                </TableCell>
+
+                                {isFareView ? (
+                                  <>
+                                    <TableCell className="text-xs">
+                                      {matchedRoute ? matchedRoute.origin : "—"}
+                                    </TableCell>
+                                    <TableCell className="w-10 px-0 text-center">
+                                      <ArrowLeftRight
+                                        className={`mx-auto h-4 w-4 ${
+                                          isDark ? "text-slate-400" : "text-slate-500"
+                                        }`}
+                                        aria-label="Both directions"
+                                      />
+                                    </TableCell>
+                                    <TableCell className="text-xs">
+                                      {matchedRoute ? matchedRoute.destination : "—"}
+                                    </TableCell>
+                                  </>
+                                ) : (
+                                  <TableCell className="text-xs">
+                                    <div className="flex items-center gap-1.5">
+                                      {paymentMethodLogo && (
+                                        <img
+                                          src={paymentMethodLogo}
+                                          alt=""
+                                          className="h-6 w-auto max-w-[52px] object-contain shrink-0"
+                                        />
+                                      )}
+                                      <span>{paymentMethodLabel}</span>
+                                    </div>
+                                  </TableCell>
+                                )}
+
+                                <TableCell
+                                  className={`text-sm font-semibold ${
+                                    isFareView
+                                      ? isDark ? "text-red-400" : "text-red-600"
+                                      : isDark ? "text-slate-200" : "text-slate-800"
+                                  }`}
+                                >
+                                  {isFareView && "−"}₱{formatAmount(Number(tx.amount))}
+                                </TableCell>
+
+                                {!isFareView && (
+                                  <>
+                                    <TableCell className="text-xs font-medium tabular-nums">
+                                      {formatNullableAmount(getFeeAmount(tx))}
+                                    </TableCell>
+                                    <TableCell className="text-xs font-medium tabular-nums">
+                                      {formatNullableAmount(getVatAmount(tx))}
+                                    </TableCell>
+                                    <TableCell
+                                      className={`text-sm font-bold tabular-nums ${
+                                        isDark ? "text-emerald-400" : "text-emerald-600"
+                                      }`}
+                                    >
+                                      {formatNetAmountWithSign(getNetAmount(tx))}
+                                    </TableCell>
+                                  </>
+                                )}
+
+                                <TableCell>
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[10px] font-semibold ${statusColor(tx.status)}`}
+                                  >
+                                    {tx.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 cursor-pointer text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                    onClick={() => setViewTx(tx)}
+                                    title="View receipt"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {/* Pagination */}
+                  <div
+                    className={`flex items-center justify-between py-3 border-t mt-0 ${
+                      isDark ? "border-slate-800" : "border-zinc-200"
                     }`}
                   >
+                    <span className="text-xs font-mono">
+                      Showing {currentTypeList.length === 0 ? 0 : startIndex + 1}–
+                      {Math.min(startIndex + PAGE_SIZE, currentTypeList.length)} of{" "}
+                      {currentTypeList.length}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={safePage <= 1}
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        className="h-8 px-3 text-xs border cursor-pointer"
+                      >
+                        <ChevronLeft className="w-3 h-3 mr-1" />
+                        Prev
+                      </Button>
+                      <span className="text-xs font-semibold px-2 tabular-nums">
+                        <span className="text-blue-500">{safePage}</span>
+                        {" / "}
+                        {totalPages}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={safePage >= totalPages}
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        className="h-8 px-3 text-xs border cursor-pointer"
+                      >
+                        Next
+                        <ChevronRight className="w-3 h-3 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Transfers toolbar */}
+            <div className="tp-toolbar">
+              <div className="flex flex-col lg:flex-row gap-4 items-center">
+                {livePill}
+                <div className="relative flex-1 w-full">
+                  <Search
+                    className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${
+                      isDark ? "text-slate-500" : "text-slate-400"
+                    }`}
+                  />
+                  <Input
+                    placeholder="Search source/target card UID or name..."
+                    value={transferSearch}
+                    onChange={(e) => setTransferSearch(e.target.value)}
+                    className="pl-10 text-sm"
+                  />
+                </div>
+                <Select value={transferStatusFilter} onValueChange={setTransferStatusFilter}>
+                  <SelectTrigger className="w-full lg:w-[150px] text-xs">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
-                  <SelectContent
-                    className={
-                      isDark
-                        ? "bg-slate-900 border-slate-800 text-slate-300"
-                        : "bg-white border-slate-200 text-slate-600"
-                    }
-                  >
-                    <SelectItem value="all" className="cursor-pointer">All Status</SelectItem>
-                    <SelectItem value="Success" className="cursor-pointer">Success</SelectItem>
-                    <SelectItem value="Failed" className="cursor-pointer">Failed</SelectItem>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="failed">Failed</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
-          </CardHeader>
 
-          <CardContent className="flex-1 min-h-0 p-0 px-4 sm:px-6 pb-0 flex flex-col overflow-hidden">
-            {showListSkeleton ? (
-              <div className="space-y-4 pt-6">
-                {Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                  <Skeleton
-                    key={i}
-                    className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`}
-                  />
-                ))}
-              </div>
-            ) : (
-              <>
-                <div className="relative mt-0 flex-1 min-h-0 overflow-auto">
-                  <Table>
-                    <TableHeader
-                      className={`sticky top-0 z-10 border-b ${
-                        isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
-                      }`}
-                    >
-                      <TableRow className="border-none hover:bg-transparent">
-                        <TableHead className={headClass}>Txn ID</TableHead>
-                        <TableHead className={headClass}>Timestamp</TableHead>
-                        <TableHead className={headClass}>Card UID</TableHead>
-                        <TableHead className={headClass}>Full Name</TableHead>
-                        {isFareView ? (
-                          <>
-                            <TableHead className={headClass}>Origin</TableHead>
-                            {/* ↔ column sa pagitan ng Origin at Destination */}
-                            <TableHead className="w-10 px-0 text-center">
-                              <ArrowLeftRight
-                                className={`mx-auto h-3.5 w-3.5 ${isDark ? "text-slate-600" : "text-slate-300"}`}
-                                aria-hidden="true"
-                              />
-                              <span className="sr-only">Both directions</span>
-                            </TableHead>
-                            <TableHead className={headClass}>Destination</TableHead>
-                          </>
-                        ) : (
-                          <TableHead className={headClass}>Payment Method</TableHead>
-                        )}
-                        <TableHead className={headClass}>Amount</TableHead>
-                        {!isFareView && (
-                          <>
-                            <TableHead className={headClass}>Fee</TableHead>
-                            <TableHead className={headClass}>VAT</TableHead>
-                            <TableHead className={headClass}>Net Amount</TableHead>
-                          </>
-                        )}
-                        <TableHead className={headClass}>Status</TableHead>
-                        <TableHead className={`${headClass} text-right`}>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-
-                    <TableBody>
-                      {paginatedList.length === 0 ? (
+            <div className="flex-1 min-h-0 px-4 sm:px-6 pb-0 flex flex-col overflow-hidden">
+              {transfersLoading ? (
+                <div className="space-y-4 pt-6">
+                  {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                    <Skeleton key={i} className="h-14 w-full rounded-lg" />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="relative mt-0 flex-1 min-h-0 overflow-auto">
+                    <Table>
+                      <TableHeader className={theadClass}>
                         <TableRow>
-                          <TableCell
-                            colSpan={isFareView ? 10 : 11}
-                            className="text-center py-32"
-                          >
-                            <div
-                              className={`flex flex-col items-center ${
-                                isDark ? "text-slate-700" : "text-slate-300"
-                              }`}
-                            >
-                              <History size={48} className="mb-2" />
-                              <p className="text-xs font-semibold uppercase tracking-widest">
-                                No records found
-                              </p>
-                            </div>
-                          </TableCell>
+                          <TableHead>Transfer ID</TableHead>
+                          <TableHead>Timestamp</TableHead>
+                          <TableHead>From</TableHead>
+                          <TableHead>To</TableHead>
+                          <TableHead>Amount</TableHead>
+                          <TableHead>Reason</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
-                      ) : (
-                        paginatedList.map((rawTx: any) => {
-                          const tx = {
-                            ...rawTx,
-                            ...(financialById[String(rawTx?.id)] ?? {}),
-                          };
-
-                          const matchedRoute = isFareView ? findRouteFor(tx, routes) : null;
-
-                          const paymentMethodLabel = !isFareView
-                            ? formatPaymentMethod(tx.payment_method)
-                            : null;
-                          const paymentMethodLogo = !isFareView
-                            ? getPaymentMethodLogo(tx.payment_method)
-                            : null;
-
-                          return (
-                            <TableRow
-                              key={tx.id}
-                              className={`transition-colors ${
-                                isDark
-                                  ? "border-slate-800 hover:bg-slate-800/50"
-                                  : "border-slate-100 hover:bg-slate-50"
-                              }`}
-                            >
-                              <TableCell className="text-xs font-mono">#{tx.id}</TableCell>
-                              <TableCell className="text-xs font-mono">
-                                {new Date(tx.timestamp || tx.created_at).toLocaleString()}
-                              </TableCell>
-                              <TableCell className="font-mono text-xs text-blue-500 font-semibold">
-                                {tx.card_uid || tx.cardUid || "—"}
-                              </TableCell>
-                              <TableCell className="text-sm font-medium">
-                                {tx.full_name || tx.fullName || "—"}
-                              </TableCell>
-
-                              {isFareView ? (
-                                <>
-                                  <TableCell className="text-xs">
-                                    {matchedRoute ? matchedRoute.origin : "—"}
-                                  </TableCell>
-                                  <TableCell className="w-10 px-0 text-center">
-                                    <ArrowLeftRight
-                                      className={`mx-auto h-4 w-4 ${
-                                        isDark ? "text-slate-400" : "text-slate-500"
-                                      }`}
-                                      aria-label="Both directions"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="text-xs">
-                                    {matchedRoute ? matchedRoute.destination : "—"}
-                                  </TableCell>
-                                </>
-                              ) : (
-                                <TableCell className="text-xs">
-                                  <div className="flex items-center gap-1.5">
-                                    {paymentMethodLogo && (
-                                      <img
-                                        src={paymentMethodLogo}
-                                        alt=""
-                                        className="h-6 w-auto max-w-[52px] object-contain shrink-0"
-                                      />
-                                    )}
-                                    <span>{paymentMethodLabel}</span>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedTransferList.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={8} className="text-center py-32">
+                              <ArrowRightLeft size={48} className="mx-auto mb-2 opacity-30" />
+                              <p className="text-xs font-semibold uppercase tracking-widest">
+                                No transfers found
+                              </p>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          paginatedTransferList.map((transfer) => {
+                            const status = normalizeTransferStatus(transfer.status);
+                            return (
+                              <TableRow key={transfer.id}>
+                                <TableCell className="font-mono text-xs">#{transfer.id}</TableCell>
+                                <TableCell className="text-xs font-mono">
+                                  {new Date(transfer.created_at).toLocaleString()}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="font-mono text-xs text-blue-500 font-semibold">
+                                    {cardUidOf(transfer.source)}
+                                  </div>
+                                  <div className="text-[11px] opacity-60">
+                                    {fullNameOf(transfer.source)}
                                   </div>
                                 </TableCell>
-                              )}
-
-                              <TableCell
-                                className={`text-sm font-semibold ${
-                                  isFareView
-                                    ? isDark ? "text-red-400" : "text-red-600"
-                                    : isDark ? "text-slate-200" : "text-slate-800"
-                                }`}
-                              >
-                                {isFareView && "−"}₱{formatAmount(Number(tx.amount))}
-                              </TableCell>
-
-                              {!isFareView && (
-                                <>
-                                  <TableCell className="text-xs font-medium tabular-nums">
-                                    {formatNullableAmount(getFeeAmount(tx))}
-                                  </TableCell>
-                                  <TableCell className="text-xs font-medium tabular-nums">
-                                    {formatNullableAmount(getVatAmount(tx))}
-                                  </TableCell>
-                                  <TableCell
-                                    className={`text-sm font-bold tabular-nums ${
-                                      isDark ? "text-emerald-400" : "text-emerald-600"
-                                    }`}
+                                <TableCell>
+                                  <div className="font-mono text-xs text-blue-500 font-semibold">
+                                    {cardUidOf(transfer.target)}
+                                  </div>
+                                  <div className="text-[11px] opacity-60">
+                                    {fullNameOf(transfer.target)}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-sm font-semibold text-blue-500">
+                                  ₱{formatAmount(Number(transfer.amount))}
+                                </TableCell>
+                                <TableCell className="text-xs max-w-[180px] truncate">
+                                  {transfer.reason || "—"}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[10px] font-semibold capitalize ${transferStatusColor(status)}`}
                                   >
-                                    {formatNetAmountWithSign(getNetAmount(tx))}
-                                  </TableCell>
-                                </>
-                              )}
-
-                              <TableCell>
-                                <Badge
-                                  variant="outline"
-                                  className={`text-[10px] font-semibold ${statusColor(tx.status)}`}
-                                >
-                                  {tx.status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 cursor-pointer text-blue-500 hover:text-blue-700 hover:bg-blue-50"
-                                  onClick={() => setViewTx(tx)}
-                                  title="View receipt"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-
-                {/* Pagination */}
-                <div
-                  className={`flex items-center justify-between pt-2 border-t mt-0 pb-0 ${
-                    isDark ? "border-slate-800" : "border-slate-100"
-                  }`}
-                >
-                  <span className="text-xs font-mono">
-                    Showing {currentTypeList.length === 0 ? 0 : startIndex + 1}–
-                    {Math.min(startIndex + PAGE_SIZE, currentTypeList.length)} of{" "}
-                    {currentTypeList.length}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={safePage <= 1}
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      className="h-8 px-3 text-xs border cursor-pointer"
-                    >
-                      <ChevronLeft className="w-3 h-3 mr-1" />
-                      Prev
-                    </Button>
-                    <span className="text-xs font-semibold px-2 tabular-nums">
-                      <span className="text-blue-500">{safePage}</span>
-                      {" / "}
-                      {totalPages}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={safePage >= totalPages}
-                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                      className="h-8 px-3 text-xs border cursor-pointer"
-                    >
-                      Next
-                      <ChevronRight className="w-3 h-3 ml-1" />
-                    </Button>
+                                    {status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 cursor-pointer text-blue-500"
+                                    onClick={() => setViewTransfer(transfer)}
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
                   </div>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      ) : (
-        /* Transfers table */
-        <Card
-          className={`shadow-sm flex flex-col flex-1 min-h-0 overflow-hidden relative ${
-            isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
-          }`}
-        >
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-indigo-400" />
-          <CardHeader
-            className={`flex-none pb-4 border-b ${
-              isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"
-            }`}
-          >
-            <div className="flex flex-col lg:flex-row gap-4 items-center">
-              <div className="flex items-center gap-2 mr-2 shrink-0">
-                <span
-                  className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
-                    isDark
-                      ? "text-emerald-400 bg-emerald-950/40 border-emerald-900"
-                      : "text-emerald-600 bg-emerald-50 border-emerald-100"
-                  }`}
-                >
-                  <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
-                  LIVE
-                </span>
-              </div>
-              <div className="relative flex-1 w-full">
-                <Search
-                  className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${
-                    isDark ? "text-slate-500" : "text-slate-400"
-                  }`}
-                />
-                <Input
-                  placeholder="Search source/target card UID or name..."
-                  value={transferSearch}
-                  onChange={(e) => setTransferSearch(e.target.value)}
-                  className="pl-10 text-sm"
-                />
-              </div>
-              <Select value={transferStatusFilter} onValueChange={setTransferStatusFilter}>
-                <SelectTrigger className="w-full lg:w-[150px] text-xs">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                  <SelectItem value="failed">Failed</SelectItem>
-                </SelectContent>
-              </Select>
+
+                  <div
+                    className={`flex items-center justify-between py-3 border-t mt-0 ${
+                      isDark ? "border-slate-800" : "border-zinc-200"
+                    }`}
+                  >
+                    <span className="text-xs font-mono">
+                      Showing {filteredTransferList.length === 0 ? 0 : transferStartIndex + 1}–
+                      {Math.min(transferStartIndex + PAGE_SIZE, filteredTransferList.length)} of{" "}
+                      {filteredTransferList.length}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={safeTransferPage <= 1}
+                        onClick={() => setTransferPage((p) => Math.max(1, p - 1))}
+                        className="h-8 px-3 text-xs border cursor-pointer"
+                      >
+                        <ChevronLeft className="w-3 h-3 mr-1" />
+                        Prev
+                      </Button>
+                      <span className="text-xs font-semibold px-2">
+                        {safeTransferPage} / {transferTotalPages}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={safeTransferPage >= transferTotalPages}
+                        onClick={() => setTransferPage((p) => Math.min(transferTotalPages, p + 1))}
+                        className="h-8 px-3 text-xs border cursor-pointer"
+                      >
+                        Next
+                        <ChevronRight className="w-3 h-3 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-          </CardHeader>
-
-          <CardContent className="flex-1 min-h-0 p-0 px-4 sm:px-6 pb-0 flex flex-col overflow-hidden">
-            {transfersLoading ? (
-              <div className="space-y-4 pt-6">
-                {Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                  <Skeleton key={i} className="h-14 w-full rounded-lg" />
-                ))}
-              </div>
-            ) : (
-              <>
-                <div className="relative mt-0 flex-1 min-h-0 overflow-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Transfer ID</TableHead>
-                        <TableHead>Timestamp</TableHead>
-                        <TableHead>From</TableHead>
-                        <TableHead>To</TableHead>
-                        <TableHead>Amount</TableHead>
-                        <TableHead>Reason</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {paginatedTransferList.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={8} className="text-center py-32">
-                            <ArrowRightLeft size={48} className="mx-auto mb-2 opacity-30" />
-                            <p className="text-xs font-semibold uppercase tracking-widest">
-                              No transfers found
-                            </p>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        paginatedTransferList.map((transfer) => {
-                          const status = normalizeTransferStatus(transfer.status);
-                          return (
-                            <TableRow key={transfer.id}>
-                              <TableCell className="font-mono text-xs">#{transfer.id}</TableCell>
-                              <TableCell className="text-xs font-mono">
-                                {new Date(transfer.created_at).toLocaleString()}
-                              </TableCell>
-                              <TableCell>
-                                <div className="font-mono text-xs text-blue-500 font-semibold">
-                                  {cardUidOf(transfer.source)}
-                                </div>
-                                <div className="text-[11px] opacity-60">
-                                  {fullNameOf(transfer.source)}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div className="font-mono text-xs text-blue-500 font-semibold">
-                                  {cardUidOf(transfer.target)}
-                                </div>
-                                <div className="text-[11px] opacity-60">
-                                  {fullNameOf(transfer.target)}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm font-semibold text-blue-500">
-                                ₱{formatAmount(Number(transfer.amount))}
-                              </TableCell>
-                              <TableCell className="text-xs max-w-[180px] truncate">
-                                {transfer.reason || "—"}
-                              </TableCell>
-                              <TableCell>
-                                <Badge
-                                  variant="outline"
-                                  className={`text-[10px] font-semibold capitalize ${transferStatusColor(status)}`}
-                                >
-                                  {status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 cursor-pointer text-blue-500"
-                                  onClick={() => setViewTransfer(transfer)}
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-
-                <div className="flex items-center justify-between pt-2 border-t mt-0 pb-0">
-                  <span className="text-xs font-mono">
-                    Showing {filteredTransferList.length === 0 ? 0 : transferStartIndex + 1}–
-                    {Math.min(transferStartIndex + PAGE_SIZE, filteredTransferList.length)} of{" "}
-                    {filteredTransferList.length}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={safeTransferPage <= 1}
-                      onClick={() => setTransferPage((p) => Math.max(1, p - 1))}
-                      className="h-8 px-3 text-xs border cursor-pointer"
-                    >
-                      <ChevronLeft className="w-3 h-3 mr-1" />
-                      Prev
-                    </Button>
-                    <span className="text-xs font-semibold px-2">
-                      {safeTransferPage} / {transferTotalPages}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={safeTransferPage >= transferTotalPages}
-                      onClick={() => setTransferPage((p) => Math.min(transferTotalPages, p + 1))}
-                      className="h-8 px-3 text-xs border cursor-pointer"
-                    >
-                      Next
-                      <ChevronRight className="w-3 h-3 ml-1" />
-                    </Button>
-                  </div>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
+          </>
+        )}
+      </TxPanel>
 
       <ReceiptModal
         tx={viewTx}
