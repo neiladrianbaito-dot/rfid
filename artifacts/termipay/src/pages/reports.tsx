@@ -165,14 +165,10 @@ body:has(.rp-page) {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
-  background: var(--rp-bg);
-  color: var(--rp-text);
-  border: 1px solid var(--rp-border);
-  border-radius: var(--rp-radius);
-  box-shadow: var(--rp-shadow);
-  overflow: hidden;
+  background: transparent;   /* no outer white box: only tab + body are visible */
 }
 
 /* 4. TAB STRIP --------------------------------------------------------------
@@ -180,13 +176,15 @@ body:has(.rp-page) {
    own background and drops its bottom border, so it reads as one shape with
    the body below it. */
 .rp-tabs {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 2px;
-  padding: 10px 12px 0;
-  background: var(--rp-strip);
-  border-bottom: 1px solid var(--rp-border);
+  gap: 0;
+  padding: 0;                /* flush: first tab starts exactly at the left edge */
+  background: transparent;
+  border: 0;
   min-width: 0;
 }
 
@@ -195,8 +193,8 @@ body:has(.rp-page) {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 16px;
-  margin-bottom: -1px;               /* overlap the strip's bottom border */
+  padding: 10px 18px;
+  margin-bottom: -1px;       /* sink 1px into the body to hide its top border */
   font: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -207,7 +205,7 @@ body:has(.rp-page) {
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
   cursor: pointer;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition: color 0.15s ease;
 }
 .rp-tab:hover {
   color: var(--rp-text);
@@ -216,17 +214,23 @@ body:has(.rp-page) {
   color: var(--rp-accent);
   background: var(--rp-bg);
   border-color: var(--rp-border);
-  padding-bottom: 10px;              /* covers the strip border underneath */
-  box-shadow: 0 -4px 12px -6px rgba(24, 24, 27, 0.18);
+  padding-bottom: 11px;              /* covers the body's top border underneath */
+  z-index: 3;
 }
 .rp-tab svg { width: 14px; height: 14px; flex: none; }
 
 /* 5. CONTENT AREA ----------------------------------------------------------- */
 .rp-body {
-  flex: 1 1 auto;
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;            /* fills the rest of the page height, edge to edge */
+  width: 100%;
   min-width: 0;
   padding: 24px;
   background: var(--rp-bg);
+  border: 1px solid var(--rp-border);
+  border-radius: 0 var(--rp-radius) var(--rp-radius) var(--rp-radius); /* square top-left: tab sits flush */
+  box-shadow: var(--rp-shadow);
 }
 
 .rp-section { min-width: 0; }
@@ -367,7 +371,6 @@ body:has(.rp-page) {
 
 @media (max-width: 640px) {
   .rp-body { padding: 16px; }
-  .rp-tabs { padding: 8px 8px 0; }
   .rp-tab { padding: 8px 12px; }
 }
 
