@@ -190,15 +190,8 @@ const TX_CSS = `
     0 -1px 0 rgba(24, 24, 27, 0.04);
   z-index: 3;
 }
-/* Hairline under the whole strip so inactive tabs still read as tabs sitting
-   on a visible edge, not floating text. The active tab's own bottom border
-   is erased below so it merges flush into the panel. */
-.tp-tabs {
-  border-bottom: 1px solid var(--tp-border);
-}
 .tp-tab[aria-selected="true"] {
   margin-bottom: -1px;
-  border-bottom: 1px solid var(--tp-bg);
 }
 .tp-tab svg { width: 14px; height: 14px; flex: none; }
 .tp-count {
