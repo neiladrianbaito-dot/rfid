@@ -583,6 +583,106 @@ body:has(.rp-page) {
 .rp-body-enter { animation: rp-swap 0.16s ease-out; }
 
 .rp-tab:focus-visible,
+/* Existing filter bar — preserved. The popup is added beside it. */
+.rp-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  padding: 3px;
+  border: 1px solid var(--rp-border);
+  border-radius: 8px;
+  background: var(--rp-panel);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.rp-filter-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--rp-muted);
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.rp-filter-btn:hover {
+  background: var(--rp-soft);
+  color: var(--rp-text);
+}
+.rp-filter-btn[aria-pressed="true"] {
+  background: #2563eb;
+  color: #fff;
+}
+.rp-filter-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rp-muted);
+  cursor: pointer;
+}
+.rp-filter-reset:hover {
+  background: var(--rp-soft);
+  color: var(--rp-text);
+}
+.rp-filter-additional {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.rp-filter-popup-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--rp-border);
+  border-radius: 8px;
+  background: var(--rp-panel);
+  color: var(--rp-text);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.rp-filter-popup-trigger:hover,
+.rp-filter-popup-trigger[aria-expanded="true"] {
+  border-color: #93c5fd;
+  background: var(--rp-soft);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .08);
+}
+.rp-filter-popup-trigger.is-active {
+  color: #2563eb;
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+.rp-filter-popup-trigger .rp-filter-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #2563eb;
+}
+.rp-filter-layout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rp-filter-popup-wrap { position: relative; }
+.rp[data-theme="dark"] .rp-filter { background: #0f172a; border-color: #334155; }
+.rp[data-theme="dark"] .rp-filter-popup-trigger { background: #0f172a; border-color: #334155; color: #e2e8f0; }
+.rp[data-theme="dark"] .rp-filter-popup-trigger.is-active { background: rgba(37, 99, 235, .15); border-color: #1d4ed8; color: #60a5fa; }
+.rp[data-theme="dark"] .rp-filter-btn { color: #94a3b8; }
+.rp[data-theme="dark"] .rp-filter-btn:hover,
+.rp[data-theme="dark"] .rp-filter-reset:hover { background: #1e293b; color: #f8fafc; }
+
 .rp-filter-btn:focus-visible,
 .rp-filter-reset:focus-visible {
   outline: 2px solid var(--rp-accent);
@@ -806,6 +906,12 @@ export function DateFilterBar({
     draftYear !== "all" ? draftYear : "",
   ].filter(Boolean))).sort((a, b) => b.localeCompare(a));
 
+  const months = MONTH_OPTIONS;
+  const daysInSelectedMonth = draftYear !== "all" && draftMonth !== "all"
+    ? new Date(Number(draftYear), Number(draftMonth), 0).getDate()
+    : 31;
+  const days = Array.from({ length: daysInSelectedMonth }, (_, i) => String(i + 1).padStart(2, "0"));
+
   const activeFilterText = (() => {
     if (!isActive) return "Filter";
     if (mode === "week") return "This week";
@@ -822,7 +928,11 @@ export function DateFilterBar({
   })();
 
   const handleApply = () => {
-    onApply(draftYear, draftMonth, draftDay);
+    if (draftYear === "all") {
+      onReset();
+    } else {
+      onApply(draftYear, draftMonth, draftDay);
+    }
     setOpen(false);
   };
 
@@ -839,133 +949,147 @@ export function DateFilterBar({
     setOpen(false);
   };
 
+  const handleYearChange = (value: string) => {
+    setDraftYear(value);
+    if (value === "all") {
+      setDraftMonth("all");
+      setDraftDay("all");
+    }
+  };
+
+  const handleMonthChange = (value: string) => {
+    setDraftMonth(value);
+    if (value === "all") setDraftDay("all");
+  };
+
   return (
-    <div ref={rootRef} className="rp-date-filter" data-testid="report-date-filter">
-      <button
-        type="button"
-        className={`rp-date-filter-trigger ${isActive ? "is-active" : ""}`}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        data-testid="button-open-date-filter"
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Filter size={14} aria-hidden="true" />
-        <span>{activeFilterText}</span>
-        {isActive ? <span className="rp-date-filter-dot" aria-hidden="true" /> : null}
-      </button>
-
-      {open && (
-        <div
-          className="rp-date-filter-popover"
-          role="dialog"
-          aria-label="Report date filter"
-          data-testid="date-filter-popover"
+    <div className="rp-filter-layout">
+      {/* EXISTING FILTER BUTTONS ARE PRESERVED. This is an additional popup trigger. */}
+      <div ref={rootRef} className="rp-filter-popup-wrap" data-testid="report-date-filter-popup">
+        <button
+          type="button"
+          className={`rp-filter-popup-trigger ${isActive ? "is-active" : ""}`}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          data-testid="button-open-date-filter"
+          onClick={() => setOpen((value) => !value)}
+          title="Open date filter"
         >
-          <div className="rp-date-filter-popover-head">
-            <div>
-              <div className="rp-date-filter-popover-title">
-                <Filter size={15} aria-hidden="true" />
-                Filter by date
+          <Filter size={13} aria-hidden="true" />
+          <span>{activeFilterText}</span>
+          {isActive && <span className="rp-filter-dot" aria-hidden="true" />}
+        </button>
+
+        {open && (
+          <div className="rp-date-filter-popover" role="dialog" aria-label="Date filter">
+            <div className="rp-date-filter-popover-head">
+              <div>
+                <div className="rp-date-filter-popover-title">
+                  <Filter size={14} aria-hidden="true" />
+                  Date filter
+                </div>
+                <p>Select year, month, and day</p>
               </div>
-              <p>Choose a year, month, or specific day.</p>
+              <button
+                type="button"
+                className="rp-date-filter-close"
+                onClick={() => setOpen(false)}
+                aria-label="Close date filter"
+              >
+                ×
+              </button>
             </div>
-            <button
-              type="button"
-              className="rp-date-filter-close"
-              aria-label="Close date filter"
-              onClick={() => setOpen(false)}
-            >
-              ×
-            </button>
-          </div>
 
-          <div className="rp-date-filter-fields">
-            <label className="rp-date-filter-field">
-              <span>Year</span>
-              <select
-                value={draftYear}
-                onChange={(e) => {
-                  setDraftYear(e.target.value);
-                  if (e.target.value === "all") {
-                    setDraftMonth("all");
-                    setDraftDay("all");
-                  }
-                }}
-              >
-                <option value="all">All years</option>
-                {years.map((year) => (
-                  <option key={year} value={year}>{year}</option>
-                ))}
-              </select>
-            </label>
+            <div className="rp-date-filter-fields">
+              <label className="rp-date-filter-field">
+                <span>Year</span>
+                <select value={draftYear} onChange={(e) => handleYearChange(e.target.value)}>
+                  <option value="all">All years</option>
+                  {years.map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+              </label>
 
-            <label className="rp-date-filter-field">
-              <span>Month</span>
-              <select
-                value={draftMonth}
-                disabled={draftYear === "all"}
-                onChange={(e) => {
-                  setDraftMonth(e.target.value);
-                  setDraftDay("all");
-                }}
-              >
-                <option value="all">All months</option>
-                {MONTH_OPTIONS.map((month) => (
-                  <option key={month.value} value={month.value}>{month.label}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="rp-date-filter-field">
-              <span>Day</span>
-              <select
-                value={draftDay}
-                disabled={draftYear === "all" || draftMonth === "all"}
-                onChange={(e) => setDraftDay(e.target.value)}
-              >
-                <option value="all">All days</option>
-                {DAY_OPTIONS.map((day) => (
-                  <option key={day.value} value={day.value}>{day.label}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="rp-date-filter-quick">
-            <div className="rp-date-filter-quick-label">Quick filters</div>
-            <div className="rp-date-filter-quick-grid">
-              {FILTER_MODES.map(([quickMode, label]) => (
-                <button
-                  key={quickMode}
-                  type="button"
-                  className={`rp-date-filter-quick-btn ${mode === quickMode ? "is-selected" : ""}`}
-                  onClick={() => handleQuick(quickMode)}
+              <label className="rp-date-filter-field">
+                <span>Month</span>
+                <select
+                  value={draftMonth}
+                  onChange={(e) => handleMonthChange(e.target.value)}
+                  disabled={draftYear === "all"}
                 >
-                  {label}
-                </button>
-              ))}
+                  <option value="all">All months</option>
+                  {months.map((month) => <option key={month.value} value={month.value}>{month.label}</option>)}
+                </select>
+              </label>
+
+              <label className="rp-date-filter-field">
+                <span>Day</span>
+                <select
+                  value={draftDay}
+                  onChange={(e) => setDraftDay(e.target.value)}
+                  disabled={draftYear === "all" || draftMonth === "all"}
+                >
+                  <option value="all">All days</option>
+                  {days.map((day) => <option key={day} value={day}>{Number(day)}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <div className="rp-date-filter-quick">
+              <span className="rp-date-filter-quick-label">Quick filter</span>
+              <div className="rp-date-filter-quick-grid">
+                {FILTER_MODES.map(([quickMode, label]) => (
+                  <button
+                    key={quickMode}
+                    type="button"
+                    className={`rp-date-filter-quick-btn ${mode === quickMode ? "is-selected" : ""}`}
+                    onClick={() => handleQuick(quickMode)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rp-date-filter-footer">
+              <button type="button" className="rp-date-filter-clear" onClick={handleClear} disabled={!isActive}>
+                Clear
+              </button>
+              <button type="button" className="rp-date-filter-apply" onClick={handleApply}>
+                Apply filter
+              </button>
             </div>
           </div>
+        )}
+      </div>
 
-          <div className="rp-date-filter-footer">
-            <button
-              type="button"
-              className="rp-date-filter-clear"
-              onClick={handleClear}
-              disabled={!isActive}
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              className="rp-date-filter-apply"
-              onClick={handleApply}
-            >
-              Apply filter
-            </button>
-          </div>
-        </div>
-      )}
+      {/* ORIGINAL BAR — NOT REMOVED */}
+      <div className="rp-filter" data-testid="report-date-filter-buttons">
+        <Filter size={12} style={{ margin: "0 4px", color: "var(--rp-muted)" }} aria-hidden="true" />
+        {FILTER_MODES.map(([m, label]) => (
+          <button
+            key={m}
+            type="button"
+            className="rp-filter-btn"
+            aria-pressed={mode === m}
+            data-testid={`button-filter-${m}`}
+            onClick={() => onQuickSelect(m)}
+          >
+            {label}
+          </button>
+        ))}
+        {isActive && (
+          <button
+            type="button"
+            className="rp-filter-reset"
+            title="Clear date filter"
+            aria-label="Clear date filter"
+            data-testid="button-reset-filters"
+            onClick={onReset}
+          >
+            <RotateCcw size={11} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
