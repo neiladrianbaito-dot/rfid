@@ -55,6 +55,7 @@ import {
   Users,
   Sparkles,
   TrendingDown,
+  ArrowLeftRight,
 } from "lucide-react";
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1257,6 +1258,40 @@ export default function ReportsPage() {
   const getRouteName = React.useCallback(
     (routeId: number) => routeNameById.get(routeId) || `Route #${routeId}`,
     [routeNameById]
+  );
+
+  // ── route_id -> { origin, destination } lookup, used ONLY to render the
+  // route name with an ArrowLeftRight ICON (instead of a plain "→" text
+  // character) in the Route Performance tab's UI (highlight card, ranking
+  // badges, daily-average table). getRouteName() above — with the plain
+  // "→" string — stays the source of truth everywhere that needs a plain
+  // string instead of JSX: the chart series `name`, its Legend/Tooltip,
+  // and the Route Summary / Route Daily Excel export sheets. Falls back to
+  // that plain text if a route's origin/destination can't be found (e.g.
+  // a deleted route only known by its id). ──
+  const routePartsById = React.useMemo(() => {
+    const map = new Map<number, { origin: string; destination: string }>();
+    routeList.forEach((r: any) => {
+      const id = Number(r.id);
+      if (!Number.isFinite(id)) return;
+      map.set(id, { origin: r.origin, destination: r.destination });
+    });
+    return map;
+  }, [routeList]);
+
+  const renderRouteName = React.useCallback(
+    (routeId: number, fallbackName: string) => {
+      const parts = routePartsById.get(routeId);
+      if (!parts) return <span className="truncate">{fallbackName}</span>;
+      return (
+        <span className="inline-flex items-center gap-1.5 min-w-0">
+          <span className="truncate">{parts.origin}</span>
+          <ArrowLeftRight size={12} className="opacity-50 flex-none" aria-hidden="true" />
+          <span className="truncate">{parts.destination}</span>
+        </span>
+      );
+    },
+    [routePartsById]
   );
 
   // ── card_uid -> card type lookup, used to attribute each Fare
@@ -2686,7 +2721,7 @@ export default function ReportsPage() {
                          Most Traveled Route {isFilterActive ? `(${filterLabel})` : "(All-time)"}
                         </p>
                         <p className={`text-lg font-bold tracking-tight truncate ${isDark ? "text-white" : "text-slate-900"}`}>
-                          {topRoute.name}
+                          {renderRouteName(topRoute.routeId, topRoute.name)}
                         </p>
                       </div>
                       <div className="flex items-center gap-6 flex-none">
@@ -2722,7 +2757,9 @@ export default function ReportsPage() {
                             {idx + 2}
                           </div>
                           <div>
-                            <div className={`text-xs font-bold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</div>
+                            <div className={`text-xs font-bold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {renderRouteName(r.routeId, r.name)}
+                            </div>
                             <div className={`text-[11px] font-mono ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                               {r.totalRides.toLocaleString("en-US")} rides · {r.avgRidesPerDay.toFixed(1)}/day · {r.sharePct.toFixed(0)}% share
                             </div>
@@ -2840,7 +2877,9 @@ export default function ReportsPage() {
                           className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-zinc-100 hover:bg-zinc-100/60"}`}
                         >
                           <TableCell className={`text-xs font-bold ${isDark ? "text-slate-500" : "text-slate-400"}`}>{i + 1}</TableCell>
-                          <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{r.name}</TableCell>
+                          <TableCell className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                            {renderRouteName(r.routeId, r.name)}
+                          </TableCell>
                           <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-slate-200" : "text-slate-800"}`}>
                             {r.totalRides.toLocaleString("en-US")}
                           </TableCell>
