@@ -149,7 +149,7 @@ const TX_CSS = `
   flex: none;
   flex-wrap: nowrap;
   align-items: flex-end;
-  gap: 0;
+  gap: 6px;
   padding: 0;
   background: transparent;
   overflow-x: auto;
@@ -170,16 +170,35 @@ const TX_CSS = `
   white-space: nowrap;
   color: var(--tp-muted);
   background: transparent;
-  border: 0;                    /* no border at all — nothing left to draw a line */
+  border: 1px solid transparent;   /* reserved so hover/active don't shift layout */
+  border-bottom: 0;
   border-radius: 12px 12px 0 0;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.tp-tab:hover { color: var(--tp-text); }
+.tp-tab:hover {
+  color: var(--tp-text);
+  background: color-mix(in srgb, var(--tp-bg) 55%, transparent);
+  border-color: var(--tp-border);
+}
 .tp-tab[aria-selected="true"] {
   color: var(--tp-accent);
   background: var(--tp-bg);     /* same fill as the panel below it — merges into one shape */
+  border-color: var(--tp-border);
+  box-shadow:
+    0 -2px 6px rgba(24, 24, 27, 0.08),
+    0 -1px 0 rgba(24, 24, 27, 0.04);
   z-index: 3;
+}
+/* Hairline under the whole strip so inactive tabs still read as tabs sitting
+   on a visible edge, not floating text. The active tab's own bottom border
+   is erased below so it merges flush into the panel. */
+.tp-tabs {
+  border-bottom: 1px solid var(--tp-border);
+}
+.tp-tab[aria-selected="true"] {
+  margin-bottom: -1px;
+  border-bottom: 1px solid var(--tp-bg);
 }
 .tp-tab svg { width: 14px; height: 14px; flex: none; }
 .tp-count {
@@ -208,7 +227,8 @@ const TX_CSS = `
   overflow: hidden;
   background: var(--tp-bg);
   color: var(--tp-text);
-  border: 0;                    /* no border anywhere on the body — tabs and panel read as one piece */
+  border: 1px solid var(--tp-border);  /* subtle gray border around the panel */
+  border-top: 0;                       /* merges flush with the active tab above */
   border-radius: 0 var(--tp-radius) var(--tp-radius) var(--tp-radius);
   box-shadow: var(--tp-shadow);
 }
