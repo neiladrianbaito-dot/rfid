@@ -50,7 +50,7 @@ import {
   Percent,
   Wallet,
   Receipt,
-  ArrowLeftRight,
+  Route as RouteIcon,
   Award,
   Users,
   Sparkles,
@@ -1082,7 +1082,7 @@ const REPORT_TABS: { key: ReportTab; label: string; icon: typeof PieChart }[] = 
   { key: "chart", label: "Daily Revenue Breakdown", icon: PieChart },
   { key: "discount", label: "Discount Collection Analytics", icon: Percent },
   { key: "log", label: "Detailed Revenue Log", icon: FileText },
-  { key: "routes", label: "Route Performance", icon: ArrowLeftRight },
+  { key: "routes", label: "Route Performance", icon: RouteIcon },
 ];
 
 export default function ReportsPage() {
