@@ -190,15 +190,98 @@ function getTypeTextColor(type: string, isDark: boolean) {
   }
 }
 
+/* ---------------------------------------------------------------------
+ * PSGC (Philippine Standard Geographic Code) BARANGAY DIRECTORY
+ *
+ * This is what makes searching a barangay show its full Region /
+ * Province / City-Municipality / Barangay hierarchy. Backed by the
+ * free, no-auth PSGC Cloud API (https://psgc.cloud) — a community
+ * mirror of the PSA's official PSGC dataset.
+ *
+ * The full barangay list (~42,000 rows) is fetched ONCE per browser
+ * session, the first time the address field is focused, and cached at
+ * module scope. Every subsequent keystroke filters that in-memory list
+ * — no network round-trip per keystroke, and reopening the modal later
+ * reuses the same cached list instantly.
+ * ------------------------------------------------------------------- */
+const PSGC_BARANGAYS_URL = "https://psgc.cloud/api/v2/barangays";
+
+interface PsgcBarangay {
+  code: string;
+  name: string;
+  status?: string | null;
+  region?: { code: string; name: string } | null;
+  province?: { code: string; name: string } | null;
+  city_municipality?: { code: string; name: string } | null;
+}
+
+// Module-scope cache so every mount of the component (i.e. every time the
+// registration modal is opened) reuses the same in-memory list instead of
+// re-fetching ~42,000 rows from the API each time.
+let psgcBarangaysCache: PsgcBarangay[] | null = null;
+let psgcBarangaysPromise: Promise<PsgcBarangay[]> | null = null;
+
+function fetchPsgcBarangays(): Promise<PsgcBarangay[]> {
+  if (psgcBarangaysCache) {
+    return Promise.resolve(psgcBarangaysCache);
+  }
+
+  if (!psgcBarangaysPromise) {
+    psgcBarangaysPromise = fetch(PSGC_BARANGAYS_URL)
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`PSGC API responded with ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((data: PsgcBarangay[]) => {
+        psgcBarangaysCache = Array.isArray(data) ? data : [];
+        return psgcBarangaysCache;
+      })
+      .catch((error) => {
+        // Don't poison the cache with a failed attempt — allow a retry
+        // the next time the field is focused.
+        psgcBarangaysPromise = null;
+        throw error;
+      });
+  }
+
+  return psgcBarangaysPromise;
+}
+
+// "Barangay Name, City/Municipality, Province, Region" — the hierarchy
+// string inserted into the Full Address field when a PSGC result is
+// picked. The user can still prepend a house/unit number and street
+// before or after picking, since the field stays editable.
+function formatPsgcAddress(barangay: PsgcBarangay): string {
+  return [
+    barangay.name,
+    barangay.city_municipality?.name,
+    barangay.province?.name,
+    barangay.region?.name,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
 /*
  * ADDRESS AUTOCOMPLETE
  *
- * Replaces the old Region / Province / City / Barangay cascading
- * dropdowns with a single free-text "Full Address" field. The person can
- * type any address they want — this is NOT restricted to a fixed list —
- * but as they type, it also surfaces previously-used full addresses that
- * match, so registering another card for the same household/address is a
- * one-tap pick instead of retyping the whole thing.
+ * Single free-text "Full Address" field with two suggestion sources
+ * shown together while typing:
+ *
+ *  1. Previously used addresses — pulled from this org's own recently
+ *     registered cards, so a repeat household address is a one-tap
+ *     pick instead of retyping.
+ *
+ *  2. Barangay directory (PSGC) — searched against the official PH
+ *     barangay list. Typing a barangay name surfaces matches with
+ *     their full Region / Province / City-Municipality / Barangay
+ *     hierarchy, and picking one fills that hierarchy straight into
+ *     the field.
+ *
+ * The field is NOT restricted to either list — free typing for a
+ * brand-new address always works normally.
  */
 interface AddressAutocompleteProps {
   value: string;
@@ -219,7 +302,8 @@ function AddressAutocomplete({
 }: AddressAutocompleteProps) {
   const [open, setOpen] = useState(false);
 
-  const filtered = useMemo(() => {
+  // --- Previously used addresses (this org's own records) ---
+  const filteredPastAddresses = useMemo(() => {
     const query = value.trim().toLowerCase();
 
     const list = query
@@ -231,10 +315,64 @@ function AddressAutocomplete({
     // Don't show the exact current value back as a suggestion.
     return list
       .filter((address) => address.toLowerCase() !== query)
-      .slice(0, 8);
+      .slice(0, 5);
   }, [suggestions, value]);
 
-  const showSuggestions = open && !disabled && filtered.length > 0;
+  // --- PSGC barangay directory (Region / Province / City / Barangay) ---
+  const [psgcBarangays, setPsgcBarangays] = useState<PsgcBarangay[] | null>(
+    psgcBarangaysCache
+  );
+  const [psgcLoading, setPsgcLoading] = useState(false);
+  const [psgcError, setPsgcError] = useState(false);
+
+  // Loaded lazily on first focus of the field (not on component mount),
+  // so opening the modal never fetches 42k rows unless the user actually
+  // interacts with the address field.
+  const loadPsgcBarangays = useCallback(() => {
+    if (psgcBarangays || psgcLoading) return;
+
+    setPsgcLoading(true);
+    setPsgcError(false);
+
+    fetchPsgcBarangays()
+      .then((data) => setPsgcBarangays(data))
+      .catch(() => setPsgcError(true))
+      .finally(() => setPsgcLoading(false));
+  }, [psgcBarangays, psgcLoading]);
+
+  const filteredBarangays = useMemo(() => {
+    const query = value.trim().toLowerCase();
+
+    if (!query || !psgcBarangays) return [];
+
+    // Barangay names that START WITH the query rank above ones that
+    // merely CONTAIN it, so typing "san" surfaces "San Isidro" before
+    // "Malusan" style partial matches.
+    const starts: PsgcBarangay[] = [];
+    const contains: PsgcBarangay[] = [];
+
+    for (const barangay of psgcBarangays) {
+      const name = barangay.name.toLowerCase();
+
+      if (name.startsWith(query)) {
+        starts.push(barangay);
+      } else if (starts.length < 8 && name.includes(query)) {
+        contains.push(barangay);
+      }
+
+      if (starts.length >= 8) break;
+    }
+
+    return [...starts, ...contains].slice(0, 8);
+  }, [psgcBarangays, value]);
+
+  const hasQuery = value.trim().length > 0;
+
+  const showSuggestions =
+    open &&
+    !disabled &&
+    (filteredPastAddresses.length > 0 ||
+      (hasQuery && (filteredBarangays.length > 0 || psgcLoading || psgcError)));
 
   return (
     <Popover open={showSuggestions} onOpenChange={setOpen}>
@@ -248,7 +386,10 @@ function AddressAutocomplete({
               onChange(event.target.value);
               setOpen(true);
             }}
-            onFocus={() => setOpen(true)}
+            onFocus={() => {
+              setOpen(true);
+              loadPsgcBarangays();
+            }}
             placeholder={placeholder}
             disabled={disabled}
             rows={2}
@@ -260,41 +401,129 @@ function AddressAutocomplete({
       <PopoverContent
         align="start"
         onOpenAutoFocus={(event) => event.preventDefault()}
-        className={`w-[--radix-popover-trigger-width] min-w-[240px] p-0 ${
+        className={`w-[--radix-popover-trigger-width] min-w-[280px] p-0 ${
           isDark ? "border-slate-800 bg-slate-950" : "bg-white"
         }`}
       >
         <div
-          className={`max-h-56 overflow-y-auto py-1 ${
+          className={`max-h-72 overflow-y-auto py-1 ${
             isDark ? "divide-slate-800" : "divide-slate-100"
           }`}
         >
-          <div
-            className={`px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-              isDark ? "text-slate-500" : "text-slate-400"
-            }`}
-          >
-            Previously used addresses
-          </div>
+          {filteredPastAddresses.length > 0 && (
+            <>
+              <div
+                className={`px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                  isDark ? "text-slate-500" : "text-slate-400"
+                }`}
+              >
+                Previously used addresses
+              </div>
 
-          {filtered.map((address, index) => (
-            <button
-              type="button"
-              key={`${address}-${index}`}
-              onClick={() => {
-                onChange(address);
-                setOpen(false);
-              }}
-              className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs transition-colors ${
-                isDark
-                  ? "text-slate-200 hover:bg-slate-800"
-                  : "text-slate-800 hover:bg-slate-50"
-              }`}
-            >
-              <MapPin className="mt-0.5 h-3 w-3 shrink-0 opacity-50" />
-              <span className="line-clamp-2">{address}</span>
-            </button>
-          ))}
+              {filteredPastAddresses.map((address, index) => (
+                <button
+                  type="button"
+                  key={`past-${address}-${index}`}
+                  onClick={() => {
+                    onChange(address);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                    isDark
+                      ? "text-slate-200 hover:bg-slate-800"
+                      : "text-slate-800 hover:bg-slate-50"
+                  }`}
+                >
+                  <MapPin className="mt-0.5 h-3 w-3 shrink-0 opacity-50" />
+                  <span className="line-clamp-2">{address}</span>
+                </button>
+              ))}
+            </>
+          )}
+
+          {/* PSGC barangay directory results — shows the full Region /
+              Province / City-Municipality / Barangay chain per match. */}
+          {hasQuery && (
+            <>
+              <div
+                className={`px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide ${
+                  isDark ? "text-slate-500" : "text-slate-400"
+                }`}
+              >
+                Barangay directory (PSGC)
+              </div>
+
+              {psgcLoading && (
+                <div
+                  className={`flex items-center gap-2 px-3 py-2 text-xs ${
+                    isDark ? "text-slate-400" : "text-slate-500"
+                  }`}
+                >
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Loading barangay directory…
+                </div>
+              )}
+
+              {psgcError && (
+                <div
+                  className={`px-3 py-2 text-xs ${
+                    isDark ? "text-red-400" : "text-red-500"
+                  }`}
+                >
+                  Couldn't load the barangay directory. Check your
+                  connection and try again.
+                </div>
+              )}
+
+              {!psgcLoading &&
+                !psgcError &&
+                filteredBarangays.length === 0 && (
+                  <div
+                    className={`px-3 py-2 text-xs ${
+                      isDark ? "text-slate-500" : "text-slate-400"
+                    }`}
+                  >
+                    No matching barangay found.
+                  </div>
+                )}
+
+              {filteredBarangays.map((barangay) => (
+                <button
+                  type="button"
+                  key={barangay.code}
+                  onClick={() => {
+                    onChange(formatPsgcAddress(barangay));
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                    isDark
+                      ? "text-slate-200 hover:bg-slate-800"
+                      : "text-slate-800 hover:bg-slate-50"
+                  }`}
+                >
+                  <MapPin className="mt-0.5 h-3 w-3 shrink-0 text-cyan-500" />
+                  <span className="min-w-0">
+                    <span className="block font-medium line-clamp-1">
+                      Brgy. {barangay.name}
+                    </span>
+                    <span
+                      className={`block line-clamp-1 ${
+                        isDark ? "text-slate-400" : "text-slate-500"
+                      }`}
+                    >
+                      {[
+                        barangay.city_municipality?.name,
+                        barangay.province?.name,
+                        barangay.region?.name,
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </>
+          )}
         </div>
       </PopoverContent>
     </Popover>
@@ -1331,9 +1560,11 @@ export default function CardRegistrationPage() {
               </div>
 
               {/* ADDRESS — single searchable Full Address field.
-                  Typing filters previously-used addresses so a repeat
-                  household address can be picked in one tap; free typing
-                  for a brand-new address still works normally. */}
+                  Typing a barangay name filters the PSGC barangay
+                  directory and shows the full Region / Province / City /
+                  Barangay hierarchy per match, plus previously-used
+                  addresses from this org's own records. Free typing for
+                  a brand-new address still works normally. */}
               <div className="space-y-2">
                 <SectionTitle icon={MapPin} text="Address" />
 
@@ -1347,7 +1578,7 @@ export default function CardRegistrationPage() {
                     value={form.fullAddress}
                     onChange={(value) => updateForm("fullAddress", value)}
                     suggestions={pastAddresses}
-                    placeholder="House/unit no., street, barangay, city, province, ZIP"
+                    placeholder="Type a barangay to search Region/Province/City/Barangay, or the full address"
                     disabled={isSubmitting}
                     isDark={isDark}
                   />
