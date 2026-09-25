@@ -1469,11 +1469,17 @@ export default function ReportsPage() {
   );
 
   // ── aggregate per-day revenue directly from the FULL transaction
-  // list. report.dailyBreakdown only ever covers a short recent window,
-  // so this gives the filter a complete dataset to search across. ──
+  // list, FARE TRANSACTIONS ONLY. Top-up is a balance load, not fare
+  // revenue, so it must never be counted here — this is the exact bug
+  // that was showing incorrect (inflated) numbers once a Year / Month /
+  // Week / Day filter was applied: Top-up amounts were being summed in
+  // right alongside Fare amounts. report.dailyBreakdown only ever covers
+  // a short recent window, so this still gives the filter a complete
+  // dataset to search across, just correctly scoped to Fare only. ──
   const aggregatedBreakdown = React.useMemo(() => {
     const map = new Map<string, number>();
     txList.forEach((tx: any) => {
+      if (normalizeTxType(tx.type) !== "Fare") return; // ✅ FIX: exclude Top-up
       const dateKey = getTxDateKey(tx);
       if (!dateKey) return;
       const amount = Math.abs(Number(tx.amount) || 0);
