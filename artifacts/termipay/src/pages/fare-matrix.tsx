@@ -286,22 +286,28 @@ function haversineKm(a: { lat: number; lon: number }, b: { lat: number; lon: num
 }
 
 async function fetchNominatimCandidates(query: string, bounded: boolean) {
-  const params = new URLSearchParams({
-    format: "jsonv2",
-    limit: "5",
-    countrycodes: "ph",
-    viewbox: CALBAYOG_VIEWBOX,
-    q: query,
-  });
-  if (bounded) params.set("bounded", "1");
+  try {
+    const params = new URLSearchParams({
+      format: "jsonv2",
+      limit: "5",
+      countrycodes: "ph",
+      viewbox: CALBAYOG_VIEWBOX,
+      q: query,
+    });
+    if (bounded) params.set("bounded", "1");
 
-  const response = await fetch(
-    `https://nominatim.openstreetmap.org/search?${params.toString()}`,
-    { headers: { Accept: "application/json" } }
-  );
-  if (!response.ok) return [];
-  const data = await response.json();
-  return Array.isArray(data) ? data : [];
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+      { headers: { Accept: "application/json" } }
+    );
+    if (!response.ok) return [];
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    // Network hiccup / CORS / rate-limit — treat as "no results" so the
+    // caller moves on to the next attempt instead of the whole map dying.
+    return [];
+  }
 }
 
 // Picks the candidate that's actually closest to Calbayog City, instead of
@@ -320,31 +326,60 @@ function pickClosestCandidate(candidates: any[]) {
   return best;
 }
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+type GeocodeAttempt = {
+  query: string;
+  bounded: boolean;
+  // null = trust it outright (bounded search already constrains the result
+  // to inside Calbayog's box, so no extra distance check is needed — the
+  // city is large and elongated enough that a valid in-box match can still
+  // be more than MAX_PLAUSIBLE_DISTANCE_KM from the center point).
+  maxDistanceKm: number | null;
+};
+
 async function geocodePlace(place: string) {
   const trimmed = place.trim();
   if (!trimmed) return null;
 
   // The destination is usually just "Calbayog" (the city itself) — geocode
-  // it directly instead of appending "Calbayog City" to "Calbayog", which
-  // used to produce a confusing / low-accuracy query.
+  // it directly instead of appending "Calbayog City" to "Calbayog".
   const isCityDestination = /calbayog/i.test(trimmed);
 
-  const attempts: { query: string; bounded: boolean }[] = isCityDestination
-    ? [{ query: "Calbayog City, Samar, Philippines", bounded: true }]
+  const attempts: GeocodeAttempt[] = isCityDestination
+    ? [
+        { query: "Calbayog City, Samar, Philippines", bounded: true, maxDistanceKm: null },
+        // Fallback if the bounded search comes back empty for any reason —
+        // previously there was no fallback here, so a single failed request
+        // broke the map for EVERY route (every route shares this destination).
+        { query: "Calbayog City, Samar, Philippines", bounded: false, maxDistanceKm: MAX_PLAUSIBLE_DISTANCE_KM },
+      ]
     : [
-        { query: `Barangay ${trimmed}, Calbayog City, Samar, Philippines`, bounded: true },
-        { query: `${trimmed}, Calbayog City, Samar, Philippines`, bounded: true },
-        { query: `${trimmed}, Calbayog, Samar, Philippines`, bounded: false },
-        { query: `${trimmed}, Samar, Philippines`, bounded: false },
+        { query: `Barangay ${trimmed}, Calbayog City, Samar, Philippines`, bounded: true, maxDistanceKm: null },
+        { query: `${trimmed}, Calbayog City, Samar, Philippines`, bounded: true, maxDistanceKm: null },
+        { query: `${trimmed}, Calbayog, Samar, Philippines`, bounded: false, maxDistanceKm: MAX_PLAUSIBLE_DISTANCE_KM },
+        { query: `${trimmed}, Samar, Philippines`, bounded: false, maxDistanceKm: MAX_PLAUSIBLE_DISTANCE_KM },
+        // Last resort — accept whatever Nominatim finds so the map still
+        // renders something instead of showing "could not locate".
+        { query: `${trimmed}, Philippines`, bounded: false, maxDistanceKm: null },
       ];
 
-  for (const { query, bounded } of attempts) {
+  for (let i = 0; i < attempts.length; i++) {
+    const { query, bounded, maxDistanceKm } = attempts[i];
     const candidates = await fetchNominatimCandidates(query, bounded);
-    if (candidates.length === 0) continue;
 
-    const best = pickClosestCandidate(candidates);
-    if (best && best.distance <= MAX_PLAUSIBLE_DISTANCE_KM) {
-      return { lat: best.lat, lon: best.lon, displayName: best.displayName || trimmed };
+    if (candidates.length > 0) {
+      const best = pickClosestCandidate(candidates);
+      if (best && (maxDistanceKm === null || best.distance <= maxDistanceKm)) {
+        return { lat: best.lat, lon: best.lon, displayName: best.displayName || trimmed };
+      }
+    }
+
+    // Small gap between requests so rapid-fire calls don't trip Nominatim's
+    // usage-policy rate limiting (which would otherwise look like "the map
+    // just stopped working").
+    if (i < attempts.length - 1) {
+      await wait(200);
     }
   }
 
