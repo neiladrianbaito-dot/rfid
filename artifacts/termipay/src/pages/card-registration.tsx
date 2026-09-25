@@ -19,8 +19,6 @@ import {
   X,
   Loader2,
   CalendarDays,
-  ChevronsUpDown,
-  Check,
   Search,
 } from "lucide-react";
 
@@ -77,96 +75,21 @@ import { useToast } from "@/hooks/use-toast";
 // at `loaded` (true kapag tapos na ma-fetch ang access info).
 import { useAdminAccess } from "@/hooks/use-admin-access";
 
-const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
-
 const ID_IMAGE_BUCKET = "id-verifications";
 const MAX_ID_IMAGE_SIZE = 5 * 1024 * 1024;
 
-interface PsgcOption {
-  code: string;
-  name: string;
-}
-
-function normalizePsgc(rows: any[]): PsgcOption[] {
-  if (!Array.isArray(rows)) return [];
-
-  return rows
-    .map((row) => ({
-      code: String(row?.code ?? ""),
-      name: String(row?.name ?? ""),
-    }))
-    .filter((row) => row.code && row.name);
-}
-
-async function fetchPsgc(path: string): Promise<PsgcOption[]> {
-  const response = await fetch(`${PSGC_BASE_URL}${path}`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to load PSGC data: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  return normalizePsgc(data);
-}
-
-// 🧩 Builds the human-readable full address string from the individual
-// street / region / province / city / barangay / zip fields. Used both to
-// auto-fill the "Full Address" textarea, and as a fallback when submitting
-// in case the textarea was somehow left empty.
-function buildFullAddress(fields: {
-  streetAddress: string;
-  barangayName: string;
-  cityName: string;
-  provinceName: string;
-  regionName: string;
-  zipCode: string;
-}): string {
-  const {
-    streetAddress,
-    barangayName,
-    cityName,
-    provinceName,
-    regionName,
-    zipCode,
-  } = fields;
-
-  return [
-    streetAddress.trim(),
-    barangayName,
-    cityName,
-    provinceName,
-    regionName && zipCode
-      ? `${regionName} ${zipCode}`
-      : regionName || zipCode,
-  ]
-    .filter(Boolean)
-    .join(", ");
-}
-
+// 📝 Address is now a single free-text "Full Address" field (no more
+// Region / Province / City / Barangay cascading dropdowns). To keep
+// registration fast — especially for households registering several
+// cards — the field is searchable against addresses already used by
+// previously registered cards, so a repeat address can be picked in one
+// tap instead of retyped.
 const INITIAL_FORM = {
   cardUid: "",
   fullName: "",
   dob: "",
   contactNumber: "",
   type: "Regular",
-
-  streetAddress: "",
-  zipCode: "",
-
-  regionCode: "",
-  regionName: "",
-
-  provinceCode: "",
-  provinceName: "",
-
-  cityCode: "",
-  cityName: "",
-
-  barangayCode: "",
-  barangayName: "",
-
-  // 📝 Auto-generated (but user-editable) full address textarea value.
   fullAddress: "",
 };
 
@@ -268,192 +191,110 @@ function getTypeTextColor(type: string, isDark: boolean) {
 }
 
 /*
- * LOCATION COMBOBOX
+ * ADDRESS AUTOCOMPLETE
  *
- * Why this exists: the PSGC address lists (especially barangays — some
- * cities like Manila have ~900 of them) were being rendered as full DOM
- * trees inside Radix's <Select>, which is what caused the scroll lag.
- *
- * This component only ever renders ~15 visible rows (+ a small overscan
- * buffer) no matter how long the underlying list is, and windows the rest
- * off-screen using a spacer div. It also adds type-to-filter search, which
- * makes long lists (barangays especially) much faster to use than scrolling.
+ * Replaces the old Region / Province / City / Barangay cascading
+ * dropdowns with a single free-text "Full Address" field. The person can
+ * type any address they want — this is NOT restricted to a fixed list —
+ * but as they type, it also surfaces previously-used full addresses that
+ * match, so registering another card for the same household/address is a
+ * one-tap pick instead of retyping the whole thing.
  */
-const COMBOBOX_ITEM_HEIGHT = 32;
-const COMBOBOX_LIST_HEIGHT = 220;
-const COMBOBOX_OVERSCAN = 6;
-
-interface LocationComboboxProps {
-  options: PsgcOption[];
+interface AddressAutocompleteProps {
   value: string;
-  onChange: (code: string, name: string) => void;
-  placeholder: string;
-  loadingPlaceholder?: string;
-  loading?: boolean;
+  onChange: (value: string) => void;
+  suggestions: string[];
+  placeholder?: string;
   disabled?: boolean;
   isDark: boolean;
 }
 
-function LocationCombobox({
-  options,
+function AddressAutocomplete({
   value,
   onChange,
+  suggestions,
   placeholder,
-  loadingPlaceholder,
-  loading,
   disabled,
   isDark,
-}: LocationComboboxProps) {
+}: AddressAutocompleteProps) {
   const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [scrollTop, setScrollTop] = useState(0);
-  const listRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return options;
+    const query = value.trim().toLowerCase();
 
-    const query = search.trim().toLowerCase();
+    const list = query
+      ? suggestions.filter((address) =>
+          address.toLowerCase().includes(query)
+        )
+      : suggestions;
 
-    return options.filter((option) =>
-      option.name.toLowerCase().includes(query)
-    );
-  }, [options, search]);
+    // Don't show the exact current value back as a suggestion.
+    return list
+      .filter((address) => address.toLowerCase() !== query)
+      .slice(0, 8);
+  }, [suggestions, value]);
 
-  useEffect(() => {
-    if (open) {
-      setSearch("");
-      setScrollTop(0);
-
-      if (listRef.current) {
-        listRef.current.scrollTop = 0;
-      }
-    }
-  }, [open]);
-
-  const selected = options.find((option) => option.code === value);
-
-  const visibleCount =
-    Math.ceil(COMBOBOX_LIST_HEIGHT / COMBOBOX_ITEM_HEIGHT) +
-    COMBOBOX_OVERSCAN * 2;
-
-  const startIndex = Math.max(
-    0,
-    Math.floor(scrollTop / COMBOBOX_ITEM_HEIGHT) - COMBOBOX_OVERSCAN
-  );
-
-  const endIndex = Math.min(filtered.length, startIndex + visibleCount);
-  const visibleItems = filtered.slice(startIndex, endIndex);
-  const totalHeight = filtered.length * COMBOBOX_ITEM_HEIGHT;
-  const offsetY = startIndex * COMBOBOX_ITEM_HEIGHT;
+  const showSuggestions = open && !disabled && filtered.length > 0;
 
   return (
-    <Popover open={open} onOpenChange={(next) => !disabled && setOpen(next)}>
+    <Popover open={showSuggestions} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          disabled={disabled}
-          className={`flex h-8 w-full items-center justify-between rounded-md border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-            isDark
-              ? "border-slate-800 bg-slate-950 text-slate-200"
-              : "border-slate-200 bg-white text-slate-900"
-          }`}
-        >
-          <span className={`truncate ${!selected ? "opacity-50" : ""}`}>
-            {selected?.name ??
-              (loading ? loadingPlaceholder ?? "Loading..." : placeholder)}
-          </span>
-          <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-        </button>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 opacity-50" />
+
+          <Textarea
+            value={value}
+            onChange={(event) => {
+              onChange(event.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            placeholder={placeholder}
+            disabled={disabled}
+            rows={2}
+            className="min-h-0 resize-none py-1.5 pl-8 pr-2.5 text-xs"
+          />
+        </div>
       </PopoverTrigger>
 
       <PopoverContent
         align="start"
-        className={`w-[--radix-popover-trigger-width] min-w-[200px] p-0 ${
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        className={`w-[--radix-popover-trigger-width] min-w-[240px] p-0 ${
           isDark ? "border-slate-800 bg-slate-950" : "bg-white"
         }`}
       >
         <div
-          className={`flex items-center gap-2 border-b px-3 py-1.5 ${
-            isDark ? "border-slate-800" : "border-slate-100"
+          className={`max-h-56 overflow-y-auto py-1 ${
+            isDark ? "divide-slate-800" : "divide-slate-100"
           }`}
         >
-          <Search className="h-3.5 w-3.5 shrink-0 opacity-50" />
-          <input
-            autoFocus
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setScrollTop(0);
-
-              if (listRef.current) {
-                listRef.current.scrollTop = 0;
-              }
-            }}
-            placeholder="Search..."
-            className={`w-full bg-transparent text-xs outline-none placeholder:opacity-50 ${
-              isDark ? "text-slate-200" : "text-slate-900"
+          <div
+            className={`px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              isDark ? "text-slate-500" : "text-slate-400"
             }`}
-          />
-        </div>
+          >
+            Previously used addresses
+          </div>
 
-        <div
-          ref={listRef}
-          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-          style={{
-            height: COMBOBOX_LIST_HEIGHT,
-            overflowY: "auto",
-            overscrollBehavior: "contain",
-            contain: "strict",
-          }}
-          className="location-combobox-list"
-        >
-          {filtered.length === 0 ? (
-            <div
-              className={`px-3 py-6 text-center text-xs ${
-                isDark ? "text-slate-500" : "text-slate-400"
+          {filtered.map((address, index) => (
+            <button
+              type="button"
+              key={`${address}-${index}`}
+              onClick={() => {
+                onChange(address);
+                setOpen(false);
+              }}
+              className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                isDark
+                  ? "text-slate-200 hover:bg-slate-800"
+                  : "text-slate-800 hover:bg-slate-50"
               }`}
             >
-              No results found
-            </div>
-          ) : (
-            <div style={{ height: totalHeight, position: "relative" }}>
-              <div
-                style={{ position: "absolute", top: offsetY, left: 0, right: 0 }}
-              >
-                {visibleItems.map((option) => {
-                  const isSelected = option.code === value;
-
-                  return (
-                    <button
-                      type="button"
-                      key={option.code}
-                      onClick={() => {
-                        onChange(option.code, option.name);
-                        setOpen(false);
-                      }}
-                      style={{ height: COMBOBOX_ITEM_HEIGHT }}
-                      className={`flex w-full items-center gap-2 px-3 text-left text-xs transition-colors ${
-                        isSelected
-                          ? isDark
-                            ? "bg-cyan-950/40 text-cyan-400"
-                            : "bg-cyan-50 text-cyan-700"
-                          : isDark
-                            ? "text-slate-200 hover:bg-slate-800"
-                            : "text-slate-800 hover:bg-slate-50"
-                      }`}
-                    >
-                      <Check
-                        className={`h-3.5 w-3.5 shrink-0 ${
-                          isSelected ? "opacity-100" : "opacity-0"
-                        }`}
-                      />
-                      <span className="truncate">{option.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+              <MapPin className="mt-0.5 h-3 w-3 shrink-0 opacity-50" />
+              <span className="line-clamp-2">{address}</span>
+            </button>
+          ))}
         </div>
       </PopoverContent>
     </Popover>
@@ -481,16 +322,6 @@ export default function CardRegistrationPage() {
 
   const [idImageFile, setIdImageFile] = useState<File | null>(null);
   const [idImagePreview, setIdImagePreview] = useState<string | null>(null);
-
-  const [regions, setRegions] = useState<PsgcOption[]>([]);
-  const [provinces, setProvinces] = useState<PsgcOption[]>([]);
-  const [cities, setCities] = useState<PsgcOption[]>([]);
-  const [barangays, setBarangays] = useState<PsgcOption[]>([]);
-
-  const [loadingRegions, setLoadingRegions] = useState(false);
-  const [loadingProvinces, setLoadingProvinces] = useState(false);
-  const [loadingCities, setLoadingCities] = useState(false);
-  const [loadingBarangays, setLoadingBarangays] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -522,6 +353,35 @@ export default function CardRegistrationPage() {
     (recentUsersData as any)?.data ??
     (Array.isArray(recentUsersData) ? recentUsersData : []) ??
     [];
+
+  // 🔎 Unique, previously-used full addresses, newest first, for the
+  // Full Address autocomplete. Keeps registration fast for repeat
+  // addresses (e.g. multiple household members getting their own card).
+  const pastAddresses = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+
+    for (const user of recentUsers as any[]) {
+      const address: string = (
+        user?.fullAddress ??
+        user?.full_address ??
+        ""
+      )
+        .toString()
+        .trim();
+
+      if (!address) continue;
+
+      const key = address.toLowerCase();
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push(address);
+      }
+    }
+
+    return list;
+  }, [recentUsers]);
 
   // ✅ Detect new card registered → pulse animation on the newest row
   useEffect(() => {
@@ -602,226 +462,6 @@ export default function CardRegistrationPage() {
   const requiresIdImage = form.type !== "Regular";
 
   /*
-   * LOAD REGIONS
-   */
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRegions() {
-      try {
-        setLoadingRegions(true);
-
-        const data = await fetchPsgc("/regions/");
-
-        if (!cancelled) {
-          setRegions(data);
-        }
-      } catch (error) {
-        console.error("Failed to load regions:", error);
-
-        if (!cancelled) {
-          toast({
-            title: "Unable to Load Regions",
-            description:
-              "The Philippine address list could not be loaded.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingRegions(false);
-        }
-      }
-    }
-
-    loadRegions();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [toast]);
-
-  /*
-   * LOAD PROVINCES
-   */
-  useEffect(() => {
-    if (!form.regionCode) {
-      setProvinces([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadProvinces() {
-      try {
-        setLoadingProvinces(true);
-
-        const data = await fetchPsgc(
-          `/regions/${form.regionCode}/provinces/`
-        );
-
-        if (!cancelled) {
-          setProvinces(data);
-        }
-      } catch (error) {
-        console.error("Failed to load provinces:", error);
-
-        if (!cancelled) {
-          setProvinces([]);
-
-          toast({
-            title: "Unable to Load Provinces",
-            description:
-              "Please try selecting the region again.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingProvinces(false);
-        }
-      }
-    }
-
-    loadProvinces();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [form.regionCode, toast]);
-
-  /*
-   * LOAD CITIES / MUNICIPALITIES
-   */
-  useEffect(() => {
-    if (!form.provinceCode) {
-      setCities([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadCities() {
-      try {
-        setLoadingCities(true);
-
-        const data = await fetchPsgc(
-          `/provinces/${form.provinceCode}/cities-municipalities/`
-        );
-
-        if (!cancelled) {
-          setCities(data);
-        }
-      } catch (error) {
-        console.error("Failed to load cities:", error);
-
-        if (!cancelled) {
-          setCities([]);
-
-          toast({
-            title: "Unable to Load Cities",
-            description:
-              "Please try selecting the province again.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingCities(false);
-        }
-      }
-    }
-
-    loadCities();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [form.provinceCode, toast]);
-
-  /*
-   * LOAD BARANGAYS
-   */
-  useEffect(() => {
-    if (!form.cityCode) {
-      setBarangays([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadBarangays() {
-      try {
-        setLoadingBarangays(true);
-
-        const data = await fetchPsgc(
-          `/cities-municipalities/${form.cityCode}/barangays/`
-        );
-
-        if (!cancelled) {
-          setBarangays(data);
-        }
-      } catch (error) {
-        console.error("Failed to load barangays:", error);
-
-        if (!cancelled) {
-          setBarangays([]);
-
-          toast({
-            title: "Unable to Load Barangays",
-            description:
-              "Please try selecting the city/municipality again.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingBarangays(false);
-        }
-      }
-    }
-
-    loadBarangays();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [form.cityCode, toast]);
-
-  /*
-   * AUTO-FILL FULL ADDRESS
-   *
-   * Every time the street address or any of the location dropdowns change,
-   * rebuild the "Full Address" textarea value automatically. The textarea
-   * itself stays editable (onChange calls updateForm("fullAddress", ...)),
-   * but any dropdown change will re-sync it — this matches "auto-fill based
-   * on the selected dropdowns" behavior.
-   */
-  useEffect(() => {
-    const computed = buildFullAddress({
-      streetAddress: form.streetAddress,
-      barangayName: form.barangayName,
-      cityName: form.cityName,
-      provinceName: form.provinceName,
-      regionName: form.regionName,
-      zipCode: form.zipCode,
-    });
-
-    setForm((current) => ({
-      ...current,
-      fullAddress: computed,
-    }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    form.streetAddress,
-    form.barangayName,
-    form.cityName,
-    form.provinceName,
-    form.regionName,
-    form.zipCode,
-  ]);
-
-  /*
    * OPEN MODAL
    */
   const openModal = useCallback(() => {
@@ -834,10 +474,6 @@ export default function CardRegistrationPage() {
 
     setIdImageFile(null);
     setIdImagePreview(null);
-
-    setProvinces([]);
-    setCities([]);
-    setBarangays([]);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -861,10 +497,6 @@ export default function CardRegistrationPage() {
     setIdImageFile(null);
     setIdImagePreview(null);
 
-    setProvinces([]);
-    setCities([]);
-    setBarangays([]);
-
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -880,77 +512,6 @@ export default function CardRegistrationPage() {
     setForm((current) => ({
       ...current,
       [field]: value,
-    }));
-  }
-
-  /*
-   * REGION CHANGE
-   */
-  function handleRegionChange(code: string, name: string) {
-    setForm((current) => ({
-      ...current,
-
-      regionCode: code,
-      regionName: name,
-
-      provinceCode: "",
-      provinceName: "",
-
-      cityCode: "",
-      cityName: "",
-
-      barangayCode: "",
-      barangayName: "",
-    }));
-
-    setCities([]);
-    setBarangays([]);
-  }
-
-  /*
-   * PROVINCE CHANGE
-   */
-  function handleProvinceChange(code: string, name: string) {
-    setForm((current) => ({
-      ...current,
-
-      provinceCode: code,
-      provinceName: name,
-
-      cityCode: "",
-      cityName: "",
-
-      barangayCode: "",
-      barangayName: "",
-    }));
-
-    setBarangays([]);
-  }
-
-  /*
-   * CITY CHANGE
-   */
-  function handleCityChange(code: string, name: string) {
-    setForm((current) => ({
-      ...current,
-
-      cityCode: code,
-      cityName: name,
-
-      barangayCode: "",
-      barangayName: "",
-    }));
-  }
-
-  /*
-   * BARANGAY CHANGE
-   */
-  function handleBarangayChange(code: string, name: string) {
-    setForm((current) => ({
-      ...current,
-
-      barangayCode: code,
-      barangayName: name,
     }));
   }
 
@@ -1122,6 +683,7 @@ export default function CardRegistrationPage() {
       .toUpperCase();
     const normalizedContactNumber = form.contactNumber
       .trim();
+    const normalizedFullAddress = form.fullAddress.trim();
 
     if (!/^[A-Z0-9]{8}$/.test(normalizedCardUid)) {
       toast({
@@ -1174,33 +736,11 @@ export default function CardRegistrationPage() {
       return;
     }
 
-    if (!form.regionCode) {
+    if (!normalizedFullAddress) {
       toast({
-        title: "Region Required",
+        title: "Full Address Required",
         description:
-          "Please select the region.",
-        variant: "destructive",
-      });
-
-      return;
-    }
-
-    if (!form.cityCode) {
-      toast({
-        title: "City/Municipality Required",
-        description:
-          "Please select the city or municipality.",
-        variant: "destructive",
-      });
-
-      return;
-    }
-
-    if (!form.barangayCode) {
-      toast({
-        title: "Barangay Required",
-        description:
-          "Please select the barangay.",
+          "Please enter the card holder's full address.",
         variant: "destructive",
       });
 
@@ -1243,23 +783,6 @@ export default function CardRegistrationPage() {
         uploadedImage?.publicUrl ?? null;
 
       /*
-       * FULL ADDRESS
-       * Uses the (auto-filled, but user-editable) textarea value.
-       * Falls back to a freshly computed string in the unlikely case the
-       * textarea is empty.
-       */
-      const fullAddress =
-        form.fullAddress.trim() ||
-        buildFullAddress({
-          streetAddress: form.streetAddress,
-          barangayName: form.barangayName,
-          cityName: form.cityName,
-          provinceName: form.provinceName,
-          regionName: form.regionName,
-          zipCode: form.zipCode,
-        });
-
-      /*
        * REGISTER USER
        */
       await createMutation.mutateAsync({
@@ -1277,41 +800,7 @@ export default function CardRegistrationPage() {
           type:
             form.type,
 
-          streetAddress:
-            form.streetAddress.trim() ||
-            null,
-
-          zipCode:
-            form.zipCode.trim() ||
-            null,
-
-          regionCode:
-            form.regionCode,
-
-          regionName:
-            form.regionName,
-
-          provinceCode:
-            form.provinceCode ||
-            null,
-
-          provinceName:
-            form.provinceName ||
-            null,
-
-          cityCode:
-            form.cityCode,
-
-          cityName:
-            form.cityName,
-
-          barangayCode:
-            form.barangayCode,
-
-          barangayName:
-            form.barangayName,
-
-          fullAddress,
+          fullAddress: normalizedFullAddress,
 
           /*
            * SUPABASE PUBLIC URL
@@ -1381,20 +870,6 @@ export default function CardRegistrationPage() {
           50% { opacity: 0.2; }
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
-
-        .location-combobox-list {
-          scrollbar-width: thin;
-          will-change: scroll-position;
-          transform: translateZ(0);
-          -webkit-overflow-scrolling: touch;
-        }
-        .location-combobox-list::-webkit-scrollbar {
-          width: 6px;
-        }
-        .location-combobox-list::-webkit-scrollbar-thumb {
-          background: rgba(148, 163, 184, 0.4);
-          border-radius: 9999px;
-        }
       `}</style>
 
       {/* PAGE HEADER — same logo + text positioning/color pattern as TransactionsPage */}
@@ -1557,8 +1032,8 @@ export default function CardRegistrationPage() {
 
       {/* REGISTRATION MODAL — 🔒 hindi na-re-render kapag view_only
           Same layout/positions as the original (single column, stacked
-          sections, 2-column address grid) — just shrunk so it fits the
-          screen without a visible scrollbar. */}
+          sections) — just shrunk so it fits the screen without a visible
+          scrollbar. Address is now a single searchable field. */}
       {canManage && (
         <Dialog
           open={isModalOpen}
@@ -1855,156 +1330,27 @@ export default function CardRegistrationPage() {
                 </div>
               </div>
 
-              {/* ADDRESS */}
+              {/* ADDRESS — single searchable Full Address field.
+                  Typing filters previously-used addresses so a repeat
+                  household address can be picked in one tap; free typing
+                  for a brand-new address still works normally. */}
               <div className="space-y-2">
                 <SectionTitle icon={MapPin} text="Address" />
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {/* Row 1: Street Address + Region (equal width) */}
-                  <div className="space-y-1">
-                    <label className={MODAL_LABEL_CLASS}>
-                      Street Address{" "}
-                      <span className="font-normal text-muted-foreground">
-                        (Optional)
-                      </span>
-                    </label>
+                <div className="space-y-1">
+                  <label className={MODAL_LABEL_CLASS}>
+                    Full Address
+                    <RequiredMark />
+                  </label>
 
-                    <Input
-                      value={form.streetAddress}
-                      onChange={(event) =>
-                        updateForm("streetAddress", event.target.value)
-                      }
-                      placeholder="House number, street, sitio"
-                      disabled={isSubmitting}
-                      className={MODAL_INPUT_CLASS}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className={MODAL_LABEL_CLASS}>
-                      Region
-                      <RequiredMark />
-                    </label>
-
-                    <LocationCombobox
-                      options={regions}
-                      value={form.regionCode}
-                      onChange={handleRegionChange}
-                      placeholder="Select region"
-                      loadingPlaceholder="Loading regions..."
-                      loading={loadingRegions}
-                      disabled={isSubmitting || loadingRegions}
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  {/* Row 2: Province + City / Municipality */}
-                  <div className="space-y-1">
-                    <label className={MODAL_LABEL_CLASS}>
-                      Province
-                      <RequiredMark />
-                    </label>
-
-                    <LocationCombobox
-                      options={provinces}
-                      value={form.provinceCode}
-                      onChange={handleProvinceChange}
-                      placeholder="Select province"
-                      loadingPlaceholder="Loading provinces..."
-                      loading={loadingProvinces}
-                      disabled={
-                        isSubmitting ||
-                        !form.regionCode ||
-                        loadingProvinces
-                      }
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className={MODAL_LABEL_CLASS}>
-                      City / Municipality
-                      <RequiredMark />
-                    </label>
-
-                    <LocationCombobox
-                      options={cities}
-                      value={form.cityCode}
-                      onChange={handleCityChange}
-                      placeholder="Select city / municipality"
-                      loadingPlaceholder="Loading cities..."
-                      loading={loadingCities}
-                      disabled={
-                        isSubmitting ||
-                        !form.provinceCode ||
-                        loadingCities
-                      }
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  {/* Row 3: Barangay + ZIP Code */}
-                  <div className="space-y-1">
-                    <label className={MODAL_LABEL_CLASS}>
-                      Barangay
-                      <RequiredMark />
-                    </label>
-
-                    <LocationCombobox
-                      options={barangays}
-                      value={form.barangayCode}
-                      onChange={handleBarangayChange}
-                      placeholder="Select barangay"
-                      loadingPlaceholder="Loading barangays..."
-                      loading={loadingBarangays}
-                      disabled={
-                        isSubmitting ||
-                        !form.cityCode ||
-                        loadingBarangays
-                      }
-                      isDark={isDark}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className={MODAL_LABEL_CLASS}>
-                      ZIP Code
-                      <RequiredMark />
-                    </label>
-
-                    <Input
-                      value={form.zipCode}
-                      onChange={(event) =>
-                        updateForm(
-                          "zipCode",
-                          event.target.value.replace(/\D/g, "")
-                        )
-                      }
-                      placeholder="6710"
-                      maxLength={10}
-                      inputMode="numeric"
-                      disabled={isSubmitting}
-                      className={MODAL_INPUT_CLASS}
-                    />
-                  </div>
-
-                  {/* Row 4: Full Address — auto-filled from the fields above, editable */}
-                  <div className="space-y-1 sm:col-span-2">
-                    <label className={MODAL_LABEL_CLASS}>
-                      Full Address
-                    </label>
-
-                    <Textarea
-                      value={form.fullAddress}
-                      onChange={(event) =>
-                        updateForm("fullAddress", event.target.value)
-                      }
-                      placeholder="Auto-filled from the fields above — you can still edit it"
-                      disabled={isSubmitting}
-                      rows={2}
-                      className="min-h-0 resize-none px-2.5 py-1.5 text-xs"
-                    />
-                  </div>
+                  <AddressAutocomplete
+                    value={form.fullAddress}
+                    onChange={(value) => updateForm("fullAddress", value)}
+                    suggestions={pastAddresses}
+                    placeholder="House/unit no., street, barangay, city, province, ZIP"
+                    disabled={isSubmitting}
+                    isDark={isDark}
+                  />
                 </div>
               </div>
 
