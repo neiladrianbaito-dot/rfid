@@ -19,6 +19,8 @@ import {
   X,
   Loader2,
   CalendarDays,
+  ChevronsUpDown,
+  Check,
   Search,
 } from "lucide-react";
 
@@ -75,21 +77,102 @@ import { useToast } from "@/hooks/use-toast";
 // at `loaded` (true kapag tapos na ma-fetch ang access info).
 import { useAdminAccess } from "@/hooks/use-admin-access";
 
+const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
+
 const ID_IMAGE_BUCKET = "id-verifications";
 const MAX_ID_IMAGE_SIZE = 5 * 1024 * 1024;
 
-// 📝 Address is now a single free-text "Full Address" field (no more
-// Region / Province / City / Barangay cascading dropdowns). To keep
-// registration fast — especially for households registering several
-// cards — the field is searchable against addresses already used by
-// previously registered cards, so a repeat address can be picked in one
-// tap instead of retyped.
+// 🔎 ONE flattened, searchable address record (barangay + its full parent
+// chain: city/municipality, province, region) built once on page load.
+// This replaces the old region -> province -> city -> barangay cascading
+// dropdown flow with a single type-to-search field, same UX as the old
+// barangay picker but now covering the whole country at once.
+interface AddressSearchOption {
+  code: string; // barangayCode — used as the combobox value
+  label: string; // "Barangay, City, Province, Region" — what gets searched/shown
+
+  regionCode: string;
+  regionName: string;
+
+  provinceCode: string;
+  provinceName: string;
+
+  cityCode: string;
+  cityName: string;
+
+  barangayCode: string;
+  barangayName: string;
+}
+
+async function fetchPsgcRaw(path: string): Promise<any[]> {
+  const response = await fetch(`${PSGC_BASE_URL}${path}`);
+
+  if (!response.ok) {
+    throw new Error(`Failed to load PSGC data: ${response.status}`);
+  }
+
+  const data = await response.json();
+
+  return Array.isArray(data) ? data : [];
+}
+
+// 🧩 Builds the human-readable full address string from the individual
+// street / region / province / city / barangay / zip fields. Used both to
+// auto-fill the "Full Address" textarea, and as a fallback when submitting
+// in case the textarea was somehow left empty.
+function buildFullAddress(fields: {
+  streetAddress: string;
+  barangayName: string;
+  cityName: string;
+  provinceName: string;
+  regionName: string;
+  zipCode: string;
+}): string {
+  const {
+    streetAddress,
+    barangayName,
+    cityName,
+    provinceName,
+    regionName,
+    zipCode,
+  } = fields;
+
+  return [
+    streetAddress.trim(),
+    barangayName,
+    cityName,
+    provinceName,
+    regionName && zipCode
+      ? `${regionName} ${zipCode}`
+      : regionName || zipCode,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
 const INITIAL_FORM = {
   cardUid: "",
   fullName: "",
   dob: "",
   contactNumber: "",
   type: "Regular",
+
+  streetAddress: "",
+  zipCode: "",
+
+  regionCode: "",
+  regionName: "",
+
+  provinceCode: "",
+  provinceName: "",
+
+  cityCode: "",
+  cityName: "",
+
+  barangayCode: "",
+  barangayName: "",
+
+  // 📝 Auto-generated (but user-editable) full address textarea value.
   fullAddress: "",
 };
 
@@ -190,339 +273,220 @@ function getTypeTextColor(type: string, isDark: boolean) {
   }
 }
 
-/* ---------------------------------------------------------------------
- * PSGC (Philippine Standard Geographic Code) BARANGAY DIRECTORY
- *
- * This is what makes searching a barangay show its full Region /
- * Province / City-Municipality / Barangay hierarchy. Backed by the
- * free, no-auth PSGC Cloud API (https://psgc.cloud) — a community
- * mirror of the PSA's official PSGC dataset.
- *
- * The full barangay list (~42,000 rows) is fetched ONCE per browser
- * session, the first time the address field is focused, and cached at
- * module scope. Every subsequent keystroke filters that in-memory list
- * — no network round-trip per keystroke, and reopening the modal later
- * reuses the same cached list instantly.
- * ------------------------------------------------------------------- */
-const PSGC_BARANGAYS_URL = "https://psgc.cloud/api/v2/barangays";
-
-interface PsgcBarangay {
-  code: string;
-  name: string;
-  status?: string | null;
-  region?: { code: string; name: string } | null;
-  province?: { code: string; name: string } | null;
-  city_municipality?: { code: string; name: string } | null;
-}
-
-// Module-scope cache so every mount of the component (i.e. every time the
-// registration modal is opened) reuses the same in-memory list instead of
-// re-fetching ~42,000 rows from the API each time.
-let psgcBarangaysCache: PsgcBarangay[] | null = null;
-let psgcBarangaysPromise: Promise<PsgcBarangay[]> | null = null;
-
-function fetchPsgcBarangays(): Promise<PsgcBarangay[]> {
-  if (psgcBarangaysCache) {
-    return Promise.resolve(psgcBarangaysCache);
-  }
-
-  if (!psgcBarangaysPromise) {
-    psgcBarangaysPromise = fetch(PSGC_BARANGAYS_URL)
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`PSGC API responded with ${res.status}`);
-        }
-        return res.json();
-      })
-      .then((data: PsgcBarangay[]) => {
-        psgcBarangaysCache = Array.isArray(data) ? data : [];
-        return psgcBarangaysCache;
-      })
-      .catch((error) => {
-        // Don't poison the cache with a failed attempt — allow a retry
-        // the next time the field is focused.
-        psgcBarangaysPromise = null;
-        throw error;
-      });
-  }
-
-  return psgcBarangaysPromise;
-}
-
-// "Barangay Name, City/Municipality, Province, Region" — the hierarchy
-// string inserted into the Full Address field when a PSGC result is
-// picked. The user can still prepend a house/unit number and street
-// before or after picking, since the field stays editable.
-function formatPsgcAddress(barangay: PsgcBarangay): string {
-  return [
-    barangay.name,
-    barangay.city_municipality?.name,
-    barangay.province?.name,
-    barangay.region?.name,
-  ]
-    .filter(Boolean)
-    .join(", ");
-}
-
 /*
- * ADDRESS AUTOCOMPLETE
+ * ADDRESS COMBOBOX
  *
- * Single free-text "Full Address" field with two suggestion sources
- * shown together while typing:
+ * Replaces the old 4-level cascading Region -> Province -> City ->
+ * Barangay pickers with ONE searchable field. The options list is built
+ * once (see loadAddressData below) by flattening every barangay in the
+ * country together with its city/municipality, province, and region name,
+ * so the user can just type "tondo manila" or "poblacion cebu" and jump
+ * straight to the right barangay without walking the hierarchy manually.
  *
- *  1. Previously used addresses — pulled from this org's own recently
- *     registered cards, so a repeat household address is a one-tap
- *     pick instead of retyping.
- *
- *  2. Barangay directory (PSGC) — searched against the official PH
- *     barangay list. Typing a barangay name surfaces matches with
- *     their full Region / Province / City-Municipality / Barangay
- *     hierarchy, and picking one fills that hierarchy straight into
- *     the field.
- *
- * The field is NOT restricted to either list — free typing for a
- * brand-new address always works normally.
+ * Same virtualization approach as the old barangay list: only ~15 visible
+ * rows (+ overscan) are ever rendered, no matter how large the filtered
+ * result set is, so it stays smooth even over ~42k barangays nationwide.
+ * Results are also capped and only computed once the user has typed
+ * something, so we never try to render the full national list at once.
  */
-interface AddressAutocompleteProps {
-  value: string;
-  onChange: (value: string) => void;
-  suggestions: string[];
-  placeholder?: string;
+const COMBOBOX_ITEM_HEIGHT = 32;
+const COMBOBOX_LIST_HEIGHT = 240;
+const COMBOBOX_OVERSCAN = 6;
+const COMBOBOX_MAX_RESULTS = 300;
+const COMBOBOX_MIN_SEARCH_LENGTH = 2;
+
+interface AddressComboboxProps {
+  options: AddressSearchOption[];
+  value: string; // selected barangayCode
+  onChange: (option: AddressSearchOption) => void;
+  placeholder: string;
+  loadingPlaceholder?: string;
+  loading?: boolean;
   disabled?: boolean;
   isDark: boolean;
 }
 
-function AddressAutocomplete({
+function AddressCombobox({
+  options,
   value,
   onChange,
-  suggestions,
   placeholder,
+  loadingPlaceholder,
+  loading,
   disabled,
   isDark,
-}: AddressAutocompleteProps) {
+}: AddressComboboxProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [scrollTop, setScrollTop] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  // --- Previously used addresses (this org's own records) ---
-  const filteredPastAddresses = useMemo(() => {
-    const query = value.trim().toLowerCase();
+  const query = search.trim().toLowerCase();
 
-    const list = query
-      ? suggestions.filter((address) =>
-          address.toLowerCase().includes(query)
-        )
-      : suggestions;
+  const filtered = useMemo(() => {
+    if (query.length < COMBOBOX_MIN_SEARCH_LENGTH) return [];
 
-    // Don't show the exact current value back as a suggestion.
-    return list
-      .filter((address) => address.toLowerCase() !== query)
-      .slice(0, 5);
-  }, [suggestions, value]);
+    const tokens = query.split(/\s+/).filter(Boolean);
 
-  // --- PSGC barangay directory (Region / Province / City / Barangay) ---
-  const [psgcBarangays, setPsgcBarangays] = useState<PsgcBarangay[] | null>(
-    psgcBarangaysCache
-  );
-  const [psgcLoading, setPsgcLoading] = useState(false);
-  const [psgcError, setPsgcError] = useState(false);
+    const matches: AddressSearchOption[] = [];
 
-  // Loaded lazily on first focus of the field (not on component mount),
-  // so opening the modal never fetches 42k rows unless the user actually
-  // interacts with the address field.
-  const loadPsgcBarangays = useCallback(() => {
-    if (psgcBarangays || psgcLoading) return;
+    for (const option of options) {
+      const haystack = option.label.toLowerCase();
 
-    setPsgcLoading(true);
-    setPsgcError(false);
+      if (tokens.every((token) => haystack.includes(token))) {
+        matches.push(option);
 
-    fetchPsgcBarangays()
-      .then((data) => setPsgcBarangays(data))
-      .catch(() => setPsgcError(true))
-      .finally(() => setPsgcLoading(false));
-  }, [psgcBarangays, psgcLoading]);
-
-  const filteredBarangays = useMemo(() => {
-    const query = value.trim().toLowerCase();
-
-    if (!query || !psgcBarangays) return [];
-
-    // Barangay names that START WITH the query rank above ones that
-    // merely CONTAIN it, so typing "san" surfaces "San Isidro" before
-    // "Malusan" style partial matches.
-    const starts: PsgcBarangay[] = [];
-    const contains: PsgcBarangay[] = [];
-
-    for (const barangay of psgcBarangays) {
-      const name = barangay.name.toLowerCase();
-
-      if (name.startsWith(query)) {
-        starts.push(barangay);
-      } else if (starts.length < 8 && name.includes(query)) {
-        contains.push(barangay);
+        if (matches.length >= COMBOBOX_MAX_RESULTS) break;
       }
-
-      if (starts.length >= 8) break;
     }
 
-    return [...starts, ...contains].slice(0, 8);
-  }, [psgcBarangays, value]);
+    return matches;
+  }, [options, query]);
 
-  const hasQuery = value.trim().length > 0;
+  useEffect(() => {
+    if (open) {
+      setSearch("");
+      setScrollTop(0);
 
-  const showSuggestions =
-    open &&
-    !disabled &&
-    (filteredPastAddresses.length > 0 ||
-      (hasQuery && (filteredBarangays.length > 0 || psgcLoading || psgcError)));
+      if (listRef.current) {
+        listRef.current.scrollTop = 0;
+      }
+    }
+  }, [open]);
+
+  const selected = options.find((option) => option.code === value);
+
+  const visibleCount =
+    Math.ceil(COMBOBOX_LIST_HEIGHT / COMBOBOX_ITEM_HEIGHT) +
+    COMBOBOX_OVERSCAN * 2;
+
+  const startIndex = Math.max(
+    0,
+    Math.floor(scrollTop / COMBOBOX_ITEM_HEIGHT) - COMBOBOX_OVERSCAN
+  );
+
+  const endIndex = Math.min(filtered.length, startIndex + visibleCount);
+  const visibleItems = filtered.slice(startIndex, endIndex);
+  const totalHeight = filtered.length * COMBOBOX_ITEM_HEIGHT;
+  const offsetY = startIndex * COMBOBOX_ITEM_HEIGHT;
 
   return (
-    <Popover open={showSuggestions} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(next) => !disabled && setOpen(next)}>
       <PopoverTrigger asChild>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 opacity-50" />
-
-          <Textarea
-            value={value}
-            onChange={(event) => {
-              onChange(event.target.value);
-              setOpen(true);
-            }}
-            onFocus={() => {
-              setOpen(true);
-              loadPsgcBarangays();
-            }}
-            placeholder={placeholder}
-            disabled={disabled}
-            rows={2}
-            className="min-h-0 resize-none py-1.5 pl-8 pr-2.5 text-xs"
-          />
-        </div>
+        <button
+          type="button"
+          disabled={disabled}
+          className={`flex h-8 w-full items-center justify-between rounded-md border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            isDark
+              ? "border-slate-800 bg-slate-950 text-slate-200"
+              : "border-slate-200 bg-white text-slate-900"
+          }`}
+        >
+          <span className={`truncate ${!selected ? "opacity-50" : ""}`}>
+            {selected?.label ??
+              (loading ? loadingPlaceholder ?? "Loading..." : placeholder)}
+          </span>
+          <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+        </button>
       </PopoverTrigger>
 
       <PopoverContent
         align="start"
-        onOpenAutoFocus={(event) => event.preventDefault()}
-        className={`w-[--radix-popover-trigger-width] min-w-[280px] p-0 ${
+        className={`w-[--radix-popover-trigger-width] min-w-[260px] p-0 ${
           isDark ? "border-slate-800 bg-slate-950" : "bg-white"
         }`}
       >
         <div
-          className={`max-h-72 overflow-y-auto py-1 ${
-            isDark ? "divide-slate-800" : "divide-slate-100"
+          className={`flex items-center gap-2 border-b px-3 py-1.5 ${
+            isDark ? "border-slate-800" : "border-slate-100"
           }`}
         >
-          {filteredPastAddresses.length > 0 && (
-            <>
+          <Search className="h-3.5 w-3.5 shrink-0 opacity-50" />
+          <input
+            autoFocus
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setScrollTop(0);
+
+              if (listRef.current) {
+                listRef.current.scrollTop = 0;
+              }
+            }}
+            placeholder="Search barangay, city, or province..."
+            className={`w-full bg-transparent text-xs outline-none placeholder:opacity-50 ${
+              isDark ? "text-slate-200" : "text-slate-900"
+            }`}
+          />
+        </div>
+
+        <div
+          ref={listRef}
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+          style={{
+            height: COMBOBOX_LIST_HEIGHT,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
+            contain: "strict",
+          }}
+          className="location-combobox-list"
+        >
+          {query.length < COMBOBOX_MIN_SEARCH_LENGTH ? (
+            <div
+              className={`px-3 py-6 text-center text-xs ${
+                isDark ? "text-slate-500" : "text-slate-400"
+              }`}
+            >
+              {loading
+                ? loadingPlaceholder ?? "Loading address data..."
+                : "Start typing a barangay, city, or province name"}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div
+              className={`px-3 py-6 text-center text-xs ${
+                isDark ? "text-slate-500" : "text-slate-400"
+              }`}
+            >
+              No results found
+            </div>
+          ) : (
+            <div style={{ height: totalHeight, position: "relative" }}>
               <div
-                className={`px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                  isDark ? "text-slate-500" : "text-slate-400"
-                }`}
+                style={{ position: "absolute", top: offsetY, left: 0, right: 0 }}
               >
-                Previously used addresses
-              </div>
+                {visibleItems.map((option) => {
+                  const isSelected = option.code === value;
 
-              {filteredPastAddresses.map((address, index) => (
-                <button
-                  type="button"
-                  key={`past-${address}-${index}`}
-                  onClick={() => {
-                    onChange(address);
-                    setOpen(false);
-                  }}
-                  className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs transition-colors ${
-                    isDark
-                      ? "text-slate-200 hover:bg-slate-800"
-                      : "text-slate-800 hover:bg-slate-50"
-                  }`}
-                >
-                  <MapPin className="mt-0.5 h-3 w-3 shrink-0 opacity-50" />
-                  <span className="line-clamp-2">{address}</span>
-                </button>
-              ))}
-            </>
-          )}
-
-          {/* PSGC barangay directory results — shows the full Region /
-              Province / City-Municipality / Barangay chain per match. */}
-          {hasQuery && (
-            <>
-              <div
-                className={`px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide ${
-                  isDark ? "text-slate-500" : "text-slate-400"
-                }`}
-              >
-                Barangay directory (PSGC)
-              </div>
-
-              {psgcLoading && (
-                <div
-                  className={`flex items-center gap-2 px-3 py-2 text-xs ${
-                    isDark ? "text-slate-400" : "text-slate-500"
-                  }`}
-                >
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Loading barangay directory…
-                </div>
-              )}
-
-              {psgcError && (
-                <div
-                  className={`px-3 py-2 text-xs ${
-                    isDark ? "text-red-400" : "text-red-500"
-                  }`}
-                >
-                  Couldn't load the barangay directory. Check your
-                  connection and try again.
-                </div>
-              )}
-
-              {!psgcLoading &&
-                !psgcError &&
-                filteredBarangays.length === 0 && (
-                  <div
-                    className={`px-3 py-2 text-xs ${
-                      isDark ? "text-slate-500" : "text-slate-400"
-                    }`}
-                  >
-                    No matching barangay found.
-                  </div>
-                )}
-
-              {filteredBarangays.map((barangay) => (
-                <button
-                  type="button"
-                  key={barangay.code}
-                  onClick={() => {
-                    onChange(formatPsgcAddress(barangay));
-                    setOpen(false);
-                  }}
-                  className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs transition-colors ${
-                    isDark
-                      ? "text-slate-200 hover:bg-slate-800"
-                      : "text-slate-800 hover:bg-slate-50"
-                  }`}
-                >
-                  <MapPin className="mt-0.5 h-3 w-3 shrink-0 text-cyan-500" />
-                  <span className="min-w-0">
-                    <span className="block font-medium line-clamp-1">
-                      Brgy. {barangay.name}
-                    </span>
-                    <span
-                      className={`block line-clamp-1 ${
-                        isDark ? "text-slate-400" : "text-slate-500"
+                  return (
+                    <button
+                      type="button"
+                      key={option.code}
+                      onClick={() => {
+                        onChange(option);
+                        setOpen(false);
+                      }}
+                      style={{ height: COMBOBOX_ITEM_HEIGHT }}
+                      className={`flex w-full items-center gap-2 px-3 text-left text-xs transition-colors ${
+                        isSelected
+                          ? isDark
+                            ? "bg-cyan-950/40 text-cyan-400"
+                            : "bg-cyan-50 text-cyan-700"
+                          : isDark
+                            ? "text-slate-200 hover:bg-slate-800"
+                            : "text-slate-800 hover:bg-slate-50"
                       }`}
                     >
-                      {[
-                        barangay.city_municipality?.name,
-                        barangay.province?.name,
-                        barangay.region?.name,
-                      ]
-                        .filter(Boolean)
-                        .join(", ")}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </>
+                      <Check
+                        className={`h-3.5 w-3.5 shrink-0 ${
+                          isSelected ? "opacity-100" : "opacity-0"
+                        }`}
+                      />
+                      <span className="truncate">{option.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       </PopoverContent>
@@ -551,6 +515,14 @@ export default function CardRegistrationPage() {
 
   const [idImageFile, setIdImageFile] = useState<File | null>(null);
   const [idImagePreview, setIdImagePreview] = useState<string | null>(null);
+
+  // 🔎 Flattened, searchable nationwide address list (barangay + city +
+  // province + region combined). Loaded once on mount — no more cascading
+  // region -> province -> city -> barangay fetches per selection.
+  const [addressOptions, setAddressOptions] = useState<AddressSearchOption[]>(
+    []
+  );
+  const [loadingAddressOptions, setLoadingAddressOptions] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -582,35 +554,6 @@ export default function CardRegistrationPage() {
     (recentUsersData as any)?.data ??
     (Array.isArray(recentUsersData) ? recentUsersData : []) ??
     [];
-
-  // 🔎 Unique, previously-used full addresses, newest first, for the
-  // Full Address autocomplete. Keeps registration fast for repeat
-  // addresses (e.g. multiple household members getting their own card).
-  const pastAddresses = useMemo(() => {
-    const seen = new Set<string>();
-    const list: string[] = [];
-
-    for (const user of recentUsers as any[]) {
-      const address: string = (
-        user?.fullAddress ??
-        user?.full_address ??
-        ""
-      )
-        .toString()
-        .trim();
-
-      if (!address) continue;
-
-      const key = address.toLowerCase();
-
-      if (!seen.has(key)) {
-        seen.add(key);
-        list.push(address);
-      }
-    }
-
-    return list;
-  }, [recentUsers]);
 
   // ✅ Detect new card registered → pulse animation on the newest row
   useEffect(() => {
@@ -691,6 +634,145 @@ export default function CardRegistrationPage() {
   const requiresIdImage = form.type !== "Regular";
 
   /*
+   * LOAD ADDRESS DATA (once, on mount)
+   *
+   * Fetches regions, provinces, cities/municipalities, and barangays in
+   * parallel, then flattens every barangay together with its full parent
+   * chain into a single searchable list. This is what replaced the old
+   * cascading region -> province -> city -> barangay fetch-per-selection
+   * flow — everything is fetched once up front instead.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAddressData() {
+      try {
+        setLoadingAddressOptions(true);
+
+        const [regionsRaw, provincesRaw, citiesRaw, barangaysRaw] =
+          await Promise.all([
+            fetchPsgcRaw("/regions/"),
+            fetchPsgcRaw("/provinces/"),
+            fetchPsgcRaw("/cities-municipalities/"),
+            fetchPsgcRaw("/barangays/"),
+          ]);
+
+        const regionsMap = new Map<string, any>();
+        regionsRaw.forEach((r) => regionsMap.set(String(r?.code ?? ""), r));
+
+        const provincesMap = new Map<string, any>();
+        provincesRaw.forEach((p) =>
+          provincesMap.set(String(p?.code ?? ""), p)
+        );
+
+        const citiesMap = new Map<string, any>();
+        citiesRaw.forEach((c) => citiesMap.set(String(c?.code ?? ""), c));
+
+        const options: AddressSearchOption[] = [];
+
+        for (const b of barangaysRaw) {
+          const barangayCode = String(b?.code ?? "");
+          const barangayName = String(b?.name ?? "");
+
+          if (!barangayCode || !barangayName) continue;
+
+          const cityCode = String(b?.cityCode || b?.municipalityCode || "");
+          const city = citiesMap.get(cityCode);
+
+          const provinceCode = String(
+            city?.provinceCode || b?.provinceCode || ""
+          );
+          const province = provincesMap.get(provinceCode);
+
+          const regionCode = String(
+            city?.regionCode || province?.regionCode || b?.regionCode || ""
+          );
+          const region = regionsMap.get(regionCode);
+
+          const cityName = String(city?.name ?? "");
+          const provinceName = String(province?.name ?? "");
+          const regionName = String(region?.name ?? "");
+
+          const label = [barangayName, cityName, provinceName, regionName]
+            .filter(Boolean)
+            .join(", ");
+
+          options.push({
+            code: barangayCode,
+            label,
+            regionCode,
+            regionName,
+            provinceCode,
+            provinceName,
+            cityCode,
+            cityName,
+            barangayCode,
+            barangayName,
+          });
+        }
+
+        if (!cancelled) {
+          setAddressOptions(options);
+        }
+      } catch (error) {
+        console.error("Failed to load address data:", error);
+
+        if (!cancelled) {
+          toast({
+            title: "Unable to Load Addresses",
+            description:
+              "The Philippine address list could not be loaded.",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingAddressOptions(false);
+        }
+      }
+    }
+
+    loadAddressData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [toast]);
+
+  /*
+   * AUTO-FILL FULL ADDRESS
+   *
+   * Every time the street address, ZIP, or the selected barangay/city/
+   * province/region changes, rebuild the "Full Address" textarea value
+   * automatically. The textarea itself stays editable (onChange calls
+   * updateForm("fullAddress", ...)), but any address search selection will
+   * re-sync it.
+   */
+  useEffect(() => {
+    const computed = buildFullAddress({
+      streetAddress: form.streetAddress,
+      barangayName: form.barangayName,
+      cityName: form.cityName,
+      provinceName: form.provinceName,
+      regionName: form.regionName,
+      zipCode: form.zipCode,
+    });
+
+    setForm((current) => ({
+      ...current,
+      fullAddress: computed,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    form.streetAddress,
+    form.barangayName,
+    form.cityName,
+    form.provinceName,
+    form.regionName,
+    form.zipCode,
+  ]);
+
+  /*
    * OPEN MODAL
    */
   const openModal = useCallback(() => {
@@ -741,6 +823,28 @@ export default function CardRegistrationPage() {
     setForm((current) => ({
       ...current,
       [field]: value,
+    }));
+  }
+
+  /*
+   * ADDRESS SELECTED FROM THE SEARCHABLE COMBOBOX
+   * Fills region/province/city/barangay all at once from a single pick.
+   */
+  function handleAddressSelect(option: AddressSearchOption) {
+    setForm((current) => ({
+      ...current,
+
+      regionCode: option.regionCode,
+      regionName: option.regionName,
+
+      provinceCode: option.provinceCode,
+      provinceName: option.provinceName,
+
+      cityCode: option.cityCode,
+      cityName: option.cityName,
+
+      barangayCode: option.barangayCode,
+      barangayName: option.barangayName,
     }));
   }
 
@@ -912,7 +1016,6 @@ export default function CardRegistrationPage() {
       .toUpperCase();
     const normalizedContactNumber = form.contactNumber
       .trim();
-    const normalizedFullAddress = form.fullAddress.trim();
 
     if (!/^[A-Z0-9]{8}$/.test(normalizedCardUid)) {
       toast({
@@ -965,11 +1068,11 @@ export default function CardRegistrationPage() {
       return;
     }
 
-    if (!normalizedFullAddress) {
+    if (!form.barangayCode) {
       toast({
-        title: "Full Address Required",
+        title: "Address Required",
         description:
-          "Please enter the card holder's full address.",
+          "Please search and select the barangay, city, and province.",
         variant: "destructive",
       });
 
@@ -1012,6 +1115,23 @@ export default function CardRegistrationPage() {
         uploadedImage?.publicUrl ?? null;
 
       /*
+       * FULL ADDRESS
+       * Uses the (auto-filled, but user-editable) textarea value.
+       * Falls back to a freshly computed string in the unlikely case the
+       * textarea is empty.
+       */
+      const fullAddress =
+        form.fullAddress.trim() ||
+        buildFullAddress({
+          streetAddress: form.streetAddress,
+          barangayName: form.barangayName,
+          cityName: form.cityName,
+          provinceName: form.provinceName,
+          regionName: form.regionName,
+          zipCode: form.zipCode,
+        });
+
+      /*
        * REGISTER USER
        */
       await createMutation.mutateAsync({
@@ -1029,7 +1149,41 @@ export default function CardRegistrationPage() {
           type:
             form.type,
 
-          fullAddress: normalizedFullAddress,
+          streetAddress:
+            form.streetAddress.trim() ||
+            null,
+
+          zipCode:
+            form.zipCode.trim() ||
+            null,
+
+          regionCode:
+            form.regionCode,
+
+          regionName:
+            form.regionName,
+
+          provinceCode:
+            form.provinceCode ||
+            null,
+
+          provinceName:
+            form.provinceName ||
+            null,
+
+          cityCode:
+            form.cityCode,
+
+          cityName:
+            form.cityName,
+
+          barangayCode:
+            form.barangayCode,
+
+          barangayName:
+            form.barangayName,
+
+          fullAddress,
 
           /*
            * SUPABASE PUBLIC URL
@@ -1099,6 +1253,20 @@ export default function CardRegistrationPage() {
           50% { opacity: 0.2; }
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
+
+        .location-combobox-list {
+          scrollbar-width: thin;
+          will-change: scroll-position;
+          transform: translateZ(0);
+          -webkit-overflow-scrolling: touch;
+        }
+        .location-combobox-list::-webkit-scrollbar {
+          width: 6px;
+        }
+        .location-combobox-list::-webkit-scrollbar-thumb {
+          background: rgba(148, 163, 184, 0.4);
+          border-radius: 9999px;
+        }
       `}</style>
 
       {/* PAGE HEADER — same logo + text positioning/color pattern as TransactionsPage */}
@@ -1260,9 +1428,9 @@ export default function CardRegistrationPage() {
       </motion.div>
 
       {/* REGISTRATION MODAL — 🔒 hindi na-re-render kapag view_only
-          Same layout/positions as the original (single column, stacked
-          sections) — just shrunk so it fits the screen without a visible
-          scrollbar. Address is now a single searchable field. */}
+          Same layout/positions as before — single column, stacked
+          sections — just with the 4-level address picker collapsed into
+          one searchable field. */}
       {canManage && (
         <Dialog
           open={isModalOpen}
@@ -1559,29 +1727,92 @@ export default function CardRegistrationPage() {
                 </div>
               </div>
 
-              {/* ADDRESS — single searchable Full Address field.
-                  Typing a barangay name filters the PSGC barangay
-                  directory and shows the full Region / Province / City /
-                  Barangay hierarchy per match, plus previously-used
-                  addresses from this org's own records. Free typing for
-                  a brand-new address still works normally. */}
+              {/* ADDRESS — now a single searchable field instead of 4
+                  cascading dropdowns */}
               <div className="space-y-2">
                 <SectionTitle icon={MapPin} text="Address" />
 
-                <div className="space-y-1">
-                  <label className={MODAL_LABEL_CLASS}>
-                    Full Address
-                    <RequiredMark />
-                  </label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {/* Row 1: Street Address + ZIP Code */}
+                  <div className="space-y-1">
+                    <label className={MODAL_LABEL_CLASS}>
+                      Street Address{" "}
+                      <span className="font-normal text-muted-foreground">
+                        (Optional)
+                      </span>
+                    </label>
 
-                  <AddressAutocomplete
-                    value={form.fullAddress}
-                    onChange={(value) => updateForm("fullAddress", value)}
-                    suggestions={pastAddresses}
-                    placeholder="Type a barangay to search Region/Province/City/Barangay, or the full address"
-                    disabled={isSubmitting}
-                    isDark={isDark}
-                  />
+                    <Input
+                      value={form.streetAddress}
+                      onChange={(event) =>
+                        updateForm("streetAddress", event.target.value)
+                      }
+                      placeholder="House number, street, sitio"
+                      disabled={isSubmitting}
+                      className={MODAL_INPUT_CLASS}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={MODAL_LABEL_CLASS}>
+                      ZIP Code{" "}
+                      <span className="font-normal text-muted-foreground">
+                        (Optional)
+                      </span>
+                    </label>
+
+                    <Input
+                      value={form.zipCode}
+                      onChange={(event) =>
+                        updateForm(
+                          "zipCode",
+                          event.target.value.replace(/\D/g, "")
+                        )
+                      }
+                      placeholder="6710"
+                      maxLength={10}
+                      inputMode="numeric"
+                      disabled={isSubmitting}
+                      className={MODAL_INPUT_CLASS}
+                    />
+                  </div>
+
+                  {/* Row 2: ONE searchable field for barangay/city/province/region */}
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className={MODAL_LABEL_CLASS}>
+                      Barangay / City / Province
+                      <RequiredMark />
+                    </label>
+
+                    <AddressCombobox
+                      options={addressOptions}
+                      value={form.barangayCode}
+                      onChange={handleAddressSelect}
+                      placeholder="Search barangay, city, or province..."
+                      loadingPlaceholder="Loading address data..."
+                      loading={loadingAddressOptions}
+                      disabled={isSubmitting}
+                      isDark={isDark}
+                    />
+                  </div>
+
+                  {/* Row 3: Full Address — auto-filled from the search above, editable */}
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className={MODAL_LABEL_CLASS}>
+                      Full Address
+                    </label>
+
+                    <Textarea
+                      value={form.fullAddress}
+                      onChange={(event) =>
+                        updateForm("fullAddress", event.target.value)
+                      }
+                      placeholder="Auto-filled from the search above — you can still edit it"
+                      disabled={isSubmitting}
+                      rows={2}
+                      className="min-h-0 resize-none px-2.5 py-1.5 text-xs"
+                    />
+                  </div>
                 </div>
               </div>
 
