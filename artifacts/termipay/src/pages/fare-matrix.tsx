@@ -45,6 +45,7 @@ import {
   Pencil,
   Trash2,
   MapPin,
+  Map,
   Power,
   PowerOff,
   ArrowLeftRight,
@@ -122,6 +123,370 @@ type Device = {
   // updated_at removed — column does not exist on this table
 };
 
+
+type RouteMapPreviewProps = {
+  route: any;
+  isDark: boolean;
+};
+
+function RouteMapPreview({ route, isDark }: RouteMapPreviewProps) {
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const leafletRef = useRef<any>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const layerRef = useRef<any>(null);
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [durationMin, setDurationMin] = useState<number | null>(null);
+
+  const loadLeaflet = async () => {
+    if ((window as any).L) return (window as any).L;
+
+    const existingScript = document.querySelector(
+      'script[data-termipay-leaflet="true"]'
+    ) as HTMLScriptElement | null;
+
+    const existingCss = document.querySelector(
+      'link[data-termipay-leaflet="true"]'
+    ) as HTMLLinkElement | null;
+
+    if (!existingCss) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      link.dataset.termipayLeaflet = "true";
+      document.head.appendChild(link);
+    }
+
+    if (existingScript) {
+      await new Promise<void>((resolve, reject) => {
+        if ((window as any).L) {
+          resolve();
+          return;
+        }
+        existingScript.addEventListener("load", () => resolve(), { once: true });
+        existingScript.addEventListener("error", () => reject(new Error("Leaflet failed to load")), { once: true });
+      });
+      return (window as any).L;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      script.async = true;
+      script.dataset.termipayLeaflet = "true";
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Leaflet failed to load"));
+      document.body.appendChild(script);
+    });
+
+    return (window as any).L;
+  };
+
+  const geocode = async (place: string) => {
+    const queries = [
+      `${place}, Calbayog City, Samar, Philippines`,
+      `${place}, Samar, Philippines`,
+      `${place}, Philippines`,
+    ];
+
+    for (const query of queries) {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`,
+        {
+          headers: {
+            Accept: "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return {
+          lat: Number(data[0].lat),
+          lon: Number(data[0].lon),
+          displayName: String(data[0].display_name ?? place),
+        };
+      }
+    }
+
+    return null;
+  };
+
+  const haversine = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+    const R = 6371;
+    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+    const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+    const lat1 = (a.lat * Math.PI) / 180;
+    const lat2 = (b.lat * Math.PI) / 180;
+
+    const x =
+      Math.sin(dLat / 2) ** 2 +
+      Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+
+    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      if (!route || !mapRef.current) return;
+
+      setStatus("loading");
+      setErrorMessage("");
+      setDistanceKm(null);
+      setDurationMin(null);
+
+      try {
+        const L = await loadLeaflet();
+        if (cancelled || !mapRef.current) return;
+
+        leafletRef.current = L;
+
+        if (!mapInstanceRef.current) {
+          mapInstanceRef.current = L.map(mapRef.current, {
+            zoomControl: true,
+            attributionControl: true,
+          }).setView([12.0667, 124.6], 10);
+
+          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: "&copy; OpenStreetMap contributors",
+          }).addTo(mapInstanceRef.current);
+        }
+
+        const map = mapInstanceRef.current;
+
+        if (layerRef.current) {
+          layerRef.current.clearLayers();
+        } else {
+          layerRef.current = L.layerGroup().addTo(map);
+        }
+
+        const origin = await geocode(String(route.origin ?? ""));
+        const destination = await geocode(String(route.destination ?? ""));
+
+        if (cancelled) return;
+
+        if (!origin || !destination) {
+          throw new Error(
+            `Could not locate "${!origin ? route.origin : route.destination}". Try using a more specific route name.`
+          );
+        }
+
+        const bounds = L.latLngBounds(
+          [origin.lat, origin.lon],
+          [destination.lat, destination.lon]
+        );
+
+        const startIcon = L.divIcon({
+          className: "termipay-map-marker",
+          html: `<div style="width:30px;height:30px;border-radius:9999px;background:#2563eb;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:12px;">A</div>`,
+          iconSize: [30, 30],
+          iconAnchor: [15, 15],
+        });
+
+        const endIcon = L.divIcon({
+          className: "termipay-map-marker",
+          html: `<div style="width:30px;height:30px;border-radius:9999px;background:#10b981;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:12px;">B</div>`,
+          iconSize: [30, 30],
+          iconAnchor: [15, 15],
+        });
+
+        L.marker([origin.lat, origin.lon], { icon: startIcon })
+          .bindPopup(`<b>${String(route.origin)}</b><br/>Origin`)
+          .addTo(layerRef.current);
+
+        L.marker([destination.lat, destination.lon], { icon: endIcon })
+          .bindPopup(`<b>${String(route.destination)}</b><br/>Destination`)
+          .addTo(layerRef.current);
+
+        try {
+          const osrmUrl =
+            `https://router.project-osrm.org/route/v1/driving/` +
+            `${origin.lon},${origin.lat};${destination.lon},${destination.lat}` +
+            `?overview=full&geometries=geojson`;
+
+          const response = await fetch(osrmUrl);
+
+          if (!response.ok) {
+            throw new Error("Routing service unavailable");
+          }
+
+          const data = await response.json();
+          const routeData = data?.routes?.[0];
+
+          if (!routeData) {
+            throw new Error("No road route found");
+          }
+
+          const coordinates = routeData.geometry.coordinates.map(
+            ([lon, lat]: [number, number]) => [lat, lon]
+          );
+
+          L.polyline(coordinates, {
+            color: "#2563eb",
+            weight: 5,
+            opacity: 0.9,
+            lineCap: "round",
+            lineJoin: "round",
+          }).addTo(layerRef.current);
+
+          setDistanceKm(Number(routeData.distance) / 1000);
+          setDurationMin(Number(routeData.duration) / 60);
+          map.fitBounds(L.latLngBounds(coordinates), { padding: [40, 40] });
+        } catch {
+          const straightDistance = haversine(origin, destination);
+
+          L.polyline(
+            [
+              [origin.lat, origin.lon],
+              [destination.lat, destination.lon],
+            ],
+            {
+              color: "#64748b",
+              weight: 4,
+              opacity: 0.8,
+              dashArray: "8 8",
+            }
+          ).addTo(layerRef.current);
+
+          setDistanceKm(straightDistance);
+          setDurationMin(null);
+          map.fitBounds(bounds, { padding: [40, 40] });
+          setErrorMessage("Road routing is unavailable. Showing straight-line distance instead.");
+        }
+
+        if (!cancelled) {
+          setStatus("ready");
+        }
+      } catch (error: any) {
+        if (cancelled) return;
+
+        setStatus("error");
+        setErrorMessage(
+          error?.message || "Unable to load the route map. Please check your internet connection."
+        );
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [route?.id, route?.origin, route?.destination]);
+
+  useEffect(() => {
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      mapInstanceRef.current?.invalidateSize?.();
+    }, 150);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  if (!route) {
+    return (
+      <div
+        className={`h-[520px] rounded-xl border flex items-center justify-center ${
+          isDark
+            ? "bg-slate-950 border-slate-800 text-slate-500"
+            : "bg-slate-50 border-slate-200 text-slate-400"
+        }`}
+      >
+        No route selected.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className={`rounded-xl border p-4 ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
+          <p className={`text-[10px] uppercase tracking-wider font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+            Route
+          </p>
+          <p className={`mt-1 font-bold truncate ${isDark ? "text-white" : "text-slate-900"}`}>
+            {route.origin} → {route.destination}
+          </p>
+        </div>
+
+        <div className={`rounded-xl border p-4 ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
+          <p className={`text-[10px] uppercase tracking-wider font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+            Distance
+          </p>
+          <p className={`mt-1 text-xl font-bold ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+            {distanceKm !== null ? `${distanceKm.toFixed(1)} km` : "—"}
+          </p>
+        </div>
+
+        <div className={`rounded-xl border p-4 ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
+          <p className={`text-[10px] uppercase tracking-wider font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+            Est. Drive Time
+          </p>
+          <p className={`mt-1 text-xl font-bold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+            {durationMin !== null
+              ? durationMin < 60
+                ? `${Math.round(durationMin)} min`
+                : `${Math.floor(durationMin / 60)}h ${Math.round(durationMin % 60)}m`
+              : "—"}
+          </p>
+        </div>
+      </div>
+
+      {errorMessage && (
+        <div className={`rounded-lg border px-4 py-3 text-xs ${
+          isDark
+            ? "bg-amber-950/30 border-amber-900 text-amber-300"
+            : "bg-amber-50 border-amber-200 text-amber-700"
+        }`}>
+          {errorMessage}
+        </div>
+      )}
+
+      <div className="relative overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+        <div ref={mapRef} className="h-[520px] w-full" />
+
+        {status === "loading" && (
+          <div className="absolute inset-0 z-[500] flex items-center justify-center bg-white/75 backdrop-blur-sm">
+            <div className="rounded-xl border bg-white px-5 py-4 shadow-lg text-center">
+              <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+              <p className="text-sm font-semibold text-slate-700">Loading route map...</p>
+              <p className="mt-1 text-xs text-slate-400">Finding the origin and destination</p>
+            </div>
+          </div>
+        )}
+
+        {status === "error" && (
+          <div className="absolute inset-0 z-[500] flex items-center justify-center bg-white/90">
+            <div className="max-w-sm px-6 text-center">
+              <Map className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+              <p className="text-sm font-semibold text-slate-700">Map preview unavailable</p>
+              <p className="mt-1 text-xs text-slate-500">{errorMessage}</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <p className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+        Map data © OpenStreetMap contributors · Road routing by OSRM · Fare: ₱{Number(route.fareAmount ?? 0).toFixed(2)}
+      </p>
+    </div>
+  );
+}
+
 export default function FareMatrixPage() {
   const { isDark } = useTheme();
   const { user } = useAuth(); // ⬅️ NEW: current logged-in admin
@@ -153,6 +518,8 @@ export default function FareMatrixPage() {
   const [originalEditForm, setOriginalEditForm] = useState(editForm);
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [fareMatrixTab, setFareMatrixTab] = useState<"routes" | "map">("routes");
+  const [mapRouteId, setMapRouteId] = useState<string | number | null>(null);
 
   // ✅ Activate-with-device modal state
   const [activateRoute, setActivateRoute] = useState<any>(null);
@@ -330,6 +697,17 @@ export default function FareMatrixPage() {
     sortOrderRef.current = sorted.map((r) => r.id);
     return sorted;
   }, [routes, searchTerm]);
+
+  const selectedMapRoute = Array.isArray(routes)
+    ? routes.find((r) => String(r.id) === String(mapRouteId)) ?? routes[0] ?? null
+    : null;
+
+  useEffect(() => {
+    if (fareMatrixTab === "map" && Array.isArray(routes) && routes.length > 0) {
+      const exists = routes.some((r) => String(r.id) === String(mapRouteId));
+      if (!exists) setMapRouteId(routes[0].id);
+    }
+  }, [fareMatrixTab, routes, mapRouteId]);
 
   const createMutation = useCreateRoute({
     mutation: {
@@ -813,16 +1191,40 @@ export default function FareMatrixPage() {
                 LIVE
               </span>
               <div>
-                <CardTitle className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                  <MapPin className="w-4 h-4 text-blue-500" />
-                  Configured Routes
-                </CardTitle>
-                <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  One active route per reader device. A route stays active until you deactivate it or reassign that reader.
+                <div className={`inline-flex items-center gap-1 rounded-lg border p-1 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+                  <button
+                    type="button"
+                    onClick={() => setFareMatrixTab("routes")}
+                    className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs font-semibold transition-all cursor-pointer ${
+                      fareMatrixTab === "routes"
+                        ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-blue-600 text-white shadow-sm"
+                        : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    <MapPin className="w-3.5 h-3.5" />
+                    Configured Routes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFareMatrixTab("map")}
+                    className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs font-semibold transition-all cursor-pointer ${
+                      fareMatrixTab === "map"
+                        ? isDark ? "bg-slate-800 text-white shadow-sm" : "bg-blue-600 text-white shadow-sm"
+                        : isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    <Map className="w-3.5 h-3.5" />
+                    Map Preview
+                  </button>
+                </div>
+                <p className={`text-xs mt-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  {fareMatrixTab === "routes"
+                    ? "Manage transit routes, fares, reader activation, and route status."
+                    : "Preview the selected route on a live OpenStreetMap road map."}
                 </p>
               </div>
             </div>
-            <div className="relative w-full md:w-72">
+            {fareMatrixTab === "routes" && <div className="relative w-full md:w-72">
               <Search className={`absolute left-2.5 top-2.5 h-4 w-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
               <Input
                 placeholder="Search origin or destination..."
@@ -834,11 +1236,41 @@ export default function FareMatrixPage() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
-            </div>
+            </div>}
           </div>
         </CardHeader>
         <CardContent className="overflow-y-auto p-0 px-6 pb-6">
-          {isLoading ? (
+          {fareMatrixTab === "map" ? (
+            <div className="pt-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className={`text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>Route Map Preview</p>
+                  <p className={`text-xs mt-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    Select a configured route to view its road path and distance.
+                  </p>
+                </div>
+                <div className="w-full sm:w-80">
+                  <Select
+                    value={selectedMapRoute ? String(selectedMapRoute.id) : ""}
+                    onValueChange={(value) => setMapRouteId(value)}
+                  >
+                    <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}>
+                      <SelectValue placeholder="Select route" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.isArray(routes) && routes.map((route) => (
+                        <SelectItem key={route.id} value={String(route.id)}>
+                          {route.origin} → {route.destination} · ₱{Number(route.fareAmount ?? 0).toFixed(2)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <RouteMapPreview route={selectedMapRoute} isDark={isDark} />
+            </div>
+          ) : isLoading ? (
             <div className="space-y-4 pt-6">
               {[1, 2, 3, 4, 5, 6].map((i) => (
                 <Skeleton key={i} className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
