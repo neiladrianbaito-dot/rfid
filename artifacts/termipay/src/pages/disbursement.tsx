@@ -403,11 +403,6 @@ export default function DisbursementPage() {
     [txAvailableToDisburse]
   );
 
-  // ── the backend only fires a disbursement once ₱50,000 worth of
-  // unlinked fare transactions has piled up, and only pays out up to
-  // ₱50,000 per call — this is purely informational for the UI copy. ──
-  const meetsMinimum = disburseAmount >= MIN_DISBURSEMENT_AMOUNT;
-
   // 🔒 Tooltip para sa Disburse button, depende kung bakit disabled
   const disburseButtonTitle = isViewOnly
     ? "View only — you don't have permission to disburse."
@@ -699,28 +694,14 @@ export default function DisbursementPage() {
         </Card>
       </div>
 
-      {/* ══ AVAILABLE TO DISBURSE — no more date filter, any-time disbursement ══ */}
-      <div className={`flex flex-wrap items-center gap-2 py-3 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-        <span className={`text-sm font-semibold whitespace-nowrap ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-          Available to Disburse:
-        </span>
-
-        <span className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-          {formatPeso(disburseAmount)}
-        </span>
-
-        {!meetsMinimum && (
-          <span className={`text-[11px] ${isDark ? "text-amber-400" : "text-amber-600"}`}>
-            (below the ₱{MIN_DISBURSEMENT_AMOUNT.toLocaleString("en-US")} minimum needed to disburse)
-          </span>
-        )}
-
+      {/* ══ DISBURSE ACTION — no more date filter, any-time disbursement ══ */}
+      <div className={`flex flex-wrap items-center justify-end gap-2 py-3 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
         {/* 🔒 Disburse button — NAKA-GREY OUT (disabled) kapag view_only,
             hindi tinatanggal sa screen. */}
         <Button
           onClick={openDisburseModal}
           disabled={!canDisburse}
-          className={`ml-auto text-xs font-semibold h-8 px-4 text-white disabled:cursor-not-allowed disabled:opacity-100 ${
+          className={`text-xs font-semibold h-8 px-4 text-white disabled:cursor-not-allowed disabled:opacity-100 ${
             canDisburse
               ? "bg-indigo-600 hover:bg-indigo-700"
               : isDark
