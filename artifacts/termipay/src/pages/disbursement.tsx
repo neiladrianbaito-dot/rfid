@@ -254,7 +254,11 @@ function checkDisbursementIdFieldPresence(txList: any[]) {
   }
 }
 
-
+// ⭐ FIX: this function signature was missing entirely, which is why the
+// build failed — every hook/handler/JSX below was floating with no
+// enclosing function, so the file's final closing `}` had nothing left
+// to match.
+export default function DisbursementPage() {
   const { user } = useAuth();
   const { isDark } = useTheme();
   const adminName = user?.name || "System Administrator";
@@ -318,7 +322,7 @@ function checkDisbursementIdFieldPresence(txList: any[]) {
 
   // ── status filter for the Disbursement History table: "All" shows every
   // row, otherwise only rows whose status matches exactly. ──
-  const [disbursementStatusFilter, setDisbursementStatusFilter] = useState<
+  const [disbursementStatusFilter, setDisbursementStatusFilter] = useState
     (typeof DISBURSEMENT_STATUS_FILTERS)[number]
   >("All");
 
