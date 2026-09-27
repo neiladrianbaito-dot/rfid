@@ -129,26 +129,6 @@ const DISBURSEMENT_CHANNELS = [
   { value: "PH_BDO", label: "BDO" },
 ];
 
-// ── Identifies whether a transaction is an actual FARE (tap) transaction,
-// as opposed to a top-up / cash-in / load transaction. Only fare
-// transactions count as "revenue" that can be disbursed — top-ups are
-// money the passenger added to their own balance, not money collected
-// by the operator.
-//
-// IMPORTANT: adjust `NON_FARE_MARKERS` (and/or the field lookup below) to
-// match whatever field/value your backend actually uses to distinguish
-// transaction types. If no type-like field is present at all, this
-// treats the transaction as fare by default (backward-compatible with
-// data that has no type field yet). ──
-function isFareTransaction(tx: any): boolean {
-  const raw = (tx.type ?? tx.transaction_type ?? tx.category ?? "")
-    .toString()
-    .toLowerCase()
-    .trim();
-  if (!raw) return true; // no type field present — assume fare
-  return !NON_FARE_MARKERS.some((marker) => raw.includes(marker));
-}
-
 // ── The inverse of isFareTransaction: true only when the transaction IS
 // a top-up/cash-in/load (i.e. money a passenger added to their own
 // balance, not fare revenue). ──
@@ -247,7 +227,34 @@ function isBdoChannel(row: any): boolean {
   return code === "PH_BDO";
 }
 
-export default function DisbursementPage() {
+// ── one-time diagnostic: if NONE of the fetched transactions ever carry a
+// disbursement_id field at all (i.e. it's `undefined` on every single row,
+// not just `null` on the genuinely-unlinked ones), that's a strong signal
+// the field is being stripped before it reaches the frontend — e.g. missing
+// from the transactions API's Zod response schema (@workspace/api-zod).
+// When that happens, `tx.disbursement_id == null` is true for EVERY
+// transaction, so already-disbursed fare transactions get miscounted as
+// still available — which is exactly the kind of large frontend-vs-backend
+// mismatch this warning is meant to catch. ──
+let warnedMissingDisbursementIdField = false;
+
+function checkDisbursementIdFieldPresence(txList: any[]) {
+  if (warnedMissingDisbursementIdField || txList.length === 0) return;
+  const anyRowHasField = txList.some((tx) => Object.prototype.hasOwnProperty.call(tx, "disbursement_id"));
+  if (!anyRowHasField) {
+    warnedMissingDisbursementIdField = true;
+    console.error(
+      "[Disbursement] None of the fetched transactions have a `disbursement_id` field at all. " +
+        "This usually means the field is being stripped before it reaches the frontend (e.g. missing " +
+        "from the transactions API's Zod response schema in @workspace/api-zod), which makes already-" +
+        "disbursed fare transactions look like they're still available to disburse. Add `disbursement_id` " +
+        "to that schema and this warning should stop firing.",
+      txList[0]
+    );
+  }
+}
+
+
   const { user } = useAuth();
   const { isDark } = useTheme();
   const adminName = user?.name || "System Administrator";
@@ -287,6 +294,24 @@ export default function DisbursementPage() {
   // actually sitting in your Xendit account right now. ──
   const [xenditBalance, setXenditBalance] = useState<number | null>(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+
+  // ── AUTHORITATIVE disbursement preview — fetched straight from the DB
+  // via preview-disbursement (which calls preview_disbursement_batch(),
+  // a read-only twin of create_transactions_disbursement()). This is the
+  // single source of truth for "Available to Disburse": totalAvailable is
+  // every unlinked fare transaction (uncapped), batchAmount is what the
+  // NEXT disbursement call will actually pay out (oldest-first, capped at
+  // ₱50,000), and batchIds are exactly which transactions that covers.
+  // We deliberately do NOT derive this from useListTransactions() anymore
+  // — that list's `disbursement_id` wasn't reliably reaching the frontend,
+  // which made already-linked fare transactions look "available". ──
+  const [disbursementPreview, setDisbursementPreview] = useState<{
+    totalAvailable: number;
+    batchAmount: number;
+    batchIds: any[];
+  }>({ totalAvailable: 0, batchAmount: 0, batchIds: [] });
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
 
   // ── current page (1-indexed) for the Disbursement History table ──
   const [disbursementPage, setDisbursementPage] = useState(1);
@@ -373,6 +398,40 @@ export default function DisbursementPage() {
     fetchXenditBalance();
   }, [fetchXenditBalance]);
 
+  // ── fetches the AUTHORITATIVE "available to disburse" numbers from
+  // preview-disbursement (read-only DB function). Called on mount, after
+  // every successful disbursement, whenever transactions change via
+  // realtime, and right when the disburse modal is opened, so it's as
+  // fresh as possible before the admin submits. ──
+  const fetchDisbursementPreview = React.useCallback(async () => {
+    setIsLoadingPreview(true);
+    try {
+      const functionsUrl = getSupabaseFunctionsUrl();
+      const token = window.localStorage.getItem("termipay_auth_token");
+      const res = await fetch(`${functionsUrl}/preview-disbursement`, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (!res.ok) {
+        console.warn("Failed to fetch disbursement preview:", await res.text());
+        return;
+      }
+      const data = await res.json();
+      setDisbursementPreview({
+        totalAvailable: typeof data?.total_available === "number" ? data.total_available : 0,
+        batchAmount: typeof data?.batch_amount === "number" ? data.batch_amount : 0,
+        batchIds: Array.isArray(data?.batch_ids) ? data.batch_ids : [],
+      });
+    } catch (err) {
+      console.warn("Failed to fetch disbursement preview:", err);
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDisbursementPreview();
+  }, [fetchDisbursementPreview]);
+
   const { data: transactions, refetch: refetchTransactions } = useListTransactions();
 
   useRealtimeRefetch(["transactions"], () => {
@@ -380,9 +439,17 @@ export default function DisbursementPage() {
     // a new top-up or a new disbursement can change the real Xendit
     // balance, so keep it fresh too
     fetchXenditBalance();
+    // fare transactions changing (new taps, a disbursement linking some)
+    // directly changes the authoritative "available to disburse" preview
+    fetchDisbursementPreview();
   });
 
   const txList = useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
+
+  useEffect(() => {
+    checkDisbursementIdFieldPresence(txList);
+  }, [txList]);
+
 
   // ── total NET amount, ACROSS ALL TIME, that users have topped up
   // specifically via GCash — i.e. after Xendit's fee/VAT is deducted,
@@ -408,27 +475,20 @@ export default function DisbursementPage() {
     [disbursementHistory]
   );
 
-  // ── ANY-TIME disbursement: no date filter anymore. This is every fare
-  // transaction that hasn't been linked to a disbursement yet, regardless
-  // of when it happened. The backend independently re-derives this same
-  // set (fare-only, unlinked) — this is a preview, not the source of truth. ──
-  const txAvailableToDisburse = useMemo(
-    () =>
-      txList.filter((tx: any) => isFareTransaction(tx) && tx.disbursement_id == null),
-    [txList]
-  );
-
   // ── explicit fare-only transaction IDs, sent to the backend as an
-  // allowlist. Falsy/missing ids are filtered out defensively. ──
-  const fareTransactionIds = useMemo(
-    () => txAvailableToDisburse.map((tx: any) => tx.id).filter((id: any) => id != null),
-    [txAvailableToDisburse]
-  );
+  // allowlist. These come straight from preview_disbursement_batch() —
+  // the same batch the backend will actually reserve — instead of being
+  // re-derived client-side from the general transactions list. ──
+  const fareTransactionIds = disbursementPreview.batchIds;
 
-  const disburseAmount = useMemo(
-    () => txAvailableToDisburse.reduce((sum: number, tx: any) => sum + Math.abs(Number(tx.amount) || 0), 0),
-    [txAvailableToDisburse]
-  );
+  // ── "Available to Disburse": the amount that will ACTUALLY go out on
+  // the NEXT disbursement run, straight from the DB (oldest-first, capped
+  // at ₱50,000). ──
+  const disburseAmount = disbursementPreview.batchAmount;
+
+  // ── whatever's left in the fare queue AFTER this batch goes out — stays
+  // unlinked and rolls into the following disbursement call. ──
+  const remainingFareBalance = Math.max(0, disbursementPreview.totalAvailable - disbursementPreview.batchAmount);
 
   // 🔒 Tooltip para sa Disburse button, depende kung bakit disabled
   const disburseButtonTitle = isViewOnly
@@ -447,6 +507,9 @@ export default function DisbursementPage() {
     setDisburseError(null);
     setDisburseSuccess(null);
     setDisburseModalOpen(true);
+    // pull the freshest "available to disburse" numbers right as the
+    // modal opens, so the admin isn't looking at a stale preview
+    fetchDisbursementPreview();
   };
 
   const closeDisburseModal = () => {
@@ -572,6 +635,8 @@ export default function DisbursementPage() {
       fetchDisbursementHistory();
       // the balance in Xendit just changed too (money went out)
       fetchXenditBalance();
+      // the fare queue just changed too (some transactions just got linked)
+      fetchDisbursementPreview();
 
       // ── auto-close the modal once the disbursement request succeeds.
       // A short delay lets the admin actually read the success message
@@ -979,8 +1044,21 @@ export default function DisbursementPage() {
             <div className="px-5 py-4 space-y-4">
               <div className={`flex items-center justify-between px-3 py-2.5 rounded-md border text-sm ${isDark ? "bg-indigo-950/40 border-indigo-900" : "bg-indigo-50 border-indigo-100"}`}>
                 <span className={isDark ? "text-indigo-300" : "text-indigo-700"}>Available to Disburse</span>
-                <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>{formatPeso(disburseAmount)}</span>
+                <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>
+                  {isLoadingPreview ? <Loader2 size={14} className="animate-spin inline-block" /> : formatPeso(disburseAmount)}
+                </span>
               </div>
+              {/* ── shows what's left over in the fare queue AFTER this
+                  batch — i.e. what rolls into the NEXT disbursement, once
+                  it (plus whatever new fares come in) reaches ₱50,000
+                  again. Only rendered when there actually is a remainder,
+                  so the modal doesn't add noise on a normal small queue. ── */}
+              {remainingFareBalance > 0 && (
+                <div className={`flex items-center justify-between px-3 py-2 rounded-md border text-xs ${isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50 border-slate-200"}`}>
+                  <span className={isDark ? "text-slate-400" : "text-slate-500"}>Remaining fare balance (next disbursement)</span>
+                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{formatPeso(remainingFareBalance)}</span>
+                </div>
+              )}
               <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                 Only fare transactions are included here — top-ups, cash-ins, and loads are automatically excluded, and
                 anything already disbursed is not counted again. Disbursements aren't tied to any date — any unlinked fare
