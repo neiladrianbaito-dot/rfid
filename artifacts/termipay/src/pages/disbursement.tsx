@@ -130,23 +130,33 @@ const DISBURSEMENT_CHANNELS = [
 ];
 
 // ── Identifies whether a transaction is an actual FARE (tap) transaction,
-// as opposed to a top-up / cash-in / load transaction. Only fare
-// transactions count as "revenue" that can be disbursed — top-ups are
-// money the passenger added to their own balance, not money collected
-// by the operator.
+// as opposed to a top-up / cash-in / load transaction (or a refund, void,
+// adjustment, or anything else that isn't a fare). Only fare transactions
+// count as "revenue" that can be disbursed.
 //
-// IMPORTANT: adjust `NON_FARE_MARKERS` (and/or the field lookup below) to
-// match whatever field/value your backend actually uses to distinguish
-// transaction types. If no type-like field is present at all, this
-// treats the transaction as fare by default (backward-compatible with
-// data that has no type field yet). ──
+// IMPORTANT: this MUST stay an exact match on `type === "fare"` — mirroring
+// the DB function's `lower(t.type) = 'fare'` filter EXACTLY. Treating it as
+// "anything that isn't a topup marker" (the old logic) silently counts
+// refunds/voids/adjustments/etc. as fare on the frontend even though the
+// backend will never touch them — which is a direct source of the
+// frontend-vs-backend total mismatch. If the `type` column ever stores a
+// different literal value for fares, update BOTH this function and the
+// `lower(t.type) = 'fare'` check in create_transactions_disbursement so
+// they never drift apart again. ──
 function isFareTransaction(tx: any): boolean {
-  const raw = (tx.type ?? tx.transaction_type ?? tx.category ?? "")
-    .toString()
-    .toLowerCase()
-    .trim();
-  if (!raw) return true; // no type field present — assume fare
-  return !NON_FARE_MARKERS.some((marker) => raw.includes(marker));
+  const raw = (tx.type ?? "").toString().toLowerCase().trim();
+  return raw === "fare";
+}
+
+// ── Mirrors the DB function's `lower(t.status) = 'success'` filter —
+// only successful transactions are ever eligible for disbursement.
+// Without this check, Pending/Failed/Reversed fare transactions get
+// counted on the frontend as "available to disburse" even though the
+// backend will never touch them, which was a major source of the
+// frontend/backend total mismatch. ──
+function isSuccessfulTransaction(tx: any): boolean {
+  const raw = (tx.status ?? "").toString().toLowerCase().trim();
+  return raw === "success";
 }
 
 // ── The inverse of isFareTransaction: true only when the transaction IS
@@ -442,11 +452,14 @@ function checkDisbursementIdFieldPresence(txList: any[]) {
 
   // ── ANY-TIME disbursement: no date filter anymore. This is every fare
   // transaction that hasn't been linked to a disbursement yet, regardless
-  // of when it happened. The backend independently re-derives this same
-  // set (fare-only, unlinked) — this is a preview, not the source of truth. ──
+  // of when it happened. Mirrors create_transactions_disbursement exactly:
+  // type = 'fare' AND status = 'success' AND disbursement_id is null.
+  // This is a preview, not the source of truth — the DB function is. ──
   const txAvailableToDisburse = useMemo(
     () =>
-      txList.filter((tx: any) => isFareTransaction(tx) && tx.disbursement_id == null),
+      txList.filter(
+        (tx: any) => isFareTransaction(tx) && isSuccessfulTransaction(tx) && tx.disbursement_id == null
+      ),
     [txList]
   );
 
@@ -475,8 +488,13 @@ function checkDisbursementIdFieldPresence(txList: any[]) {
   // unlinked total. ──
   const nextDisbursementBatch = useMemo(() => {
     const sorted = [...txAvailableToDisburse].sort((a: any, b: any) => {
-      const at = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const bt = b.created_at ? new Date(b.created_at).getTime() : 0;
+      // NOTE: the transactions table's date column is `timestamp`, not
+      // `created_at` (that's only on the disbursements table) — this must
+      // match the DB function's `order by t.timestamp, t.id` exactly, or
+      // the preview can include/exclude different transactions than what
+      // actually gets batched server-side.
+      const at = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const bt = b.timestamp ? new Date(b.timestamp).getTime() : 0;
       if (at !== bt) return at - bt;
       // stable tie-break (by id) so the preview doesn't jitter on re-render
       return (Number(a.id) || 0) - (Number(b.id) || 0);
