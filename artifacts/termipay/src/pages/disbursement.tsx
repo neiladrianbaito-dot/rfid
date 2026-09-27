@@ -247,7 +247,34 @@ function isBdoChannel(row: any): boolean {
   return code === "PH_BDO";
 }
 
-export default function DisbursementPage() {
+// ── one-time diagnostic: if NONE of the fetched transactions ever carry a
+// disbursement_id field at all (i.e. it's `undefined` on every single row,
+// not just `null` on the genuinely-unlinked ones), that's a strong signal
+// the field is being stripped before it reaches the frontend — e.g. missing
+// from the transactions API's Zod response schema (@workspace/api-zod).
+// When that happens, `tx.disbursement_id == null` is true for EVERY
+// transaction, so already-disbursed fare transactions get miscounted as
+// still available — which is exactly the kind of large frontend-vs-backend
+// mismatch this warning is meant to catch. ──
+let warnedMissingDisbursementIdField = false;
+
+function checkDisbursementIdFieldPresence(txList: any[]) {
+  if (warnedMissingDisbursementIdField || txList.length === 0) return;
+  const anyRowHasField = txList.some((tx) => Object.prototype.hasOwnProperty.call(tx, "disbursement_id"));
+  if (!anyRowHasField) {
+    warnedMissingDisbursementIdField = true;
+    console.error(
+      "[Disbursement] None of the fetched transactions have a `disbursement_id` field at all. " +
+        "This usually means the field is being stripped before it reaches the frontend (e.g. missing " +
+        "from the transactions API's Zod response schema in @workspace/api-zod), which makes already-" +
+        "disbursed fare transactions look like they're still available to disburse. Add `disbursement_id` " +
+        "to that schema and this warning should stop firing.",
+      txList[0]
+    );
+  }
+}
+
+
   const { user } = useAuth();
   const { isDark } = useTheme();
   const adminName = user?.name || "System Administrator";
@@ -383,6 +410,11 @@ export default function DisbursementPage() {
   });
 
   const txList = useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
+
+  useEffect(() => {
+    checkDisbursementIdFieldPresence(txList);
+  }, [txList]);
+
 
   // ── total NET amount, ACROSS ALL TIME, that users have topped up
   // specifically via GCash — i.e. after Xendit's fee/VAT is deducted,
