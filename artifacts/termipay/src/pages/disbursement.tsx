@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
@@ -48,6 +49,26 @@ const MIN_DISBURSEMENT_AMOUNT = 50000;
 // matter when it's triggered — serializes against the advisory lock in
 // the DB function. There's no "period" anymore to key off of. ──
 const DISBURSE_IDEMPOTENCY_KEY = "manual-disbursement";
+
+// ── Status filter options for the Disbursement History table — same
+// "All + dot-colored Select" pattern used for Type/Status filters in
+// User Management. ──
+const DISBURSEMENT_STATUS_FILTERS = ["All", "Pending", "Completed", "Failed"] as const;
+
+// 🎨 Status filter -> dot color mapping (Pending/Completed/Failed), same
+// palette used elsewhere in the app (amber/emerald/red).
+function getDisbursementStatusDotColor(status: string) {
+  switch (status) {
+    case "Completed":
+      return "bg-emerald-500";
+    case "Failed":
+      return "bg-red-500";
+    case "Pending":
+      return "bg-amber-500";
+    default:
+      return "bg-slate-400";
+  }
+}
 
 // ── SHARED classification config — keep this in sync with whatever the
 // backend (create-disbursement function) uses to classify transactions.
@@ -270,11 +291,11 @@ export default function DisbursementPage() {
   // ── current page (1-indexed) for the Disbursement History table ──
   const [disbursementPage, setDisbursementPage] = useState(1);
 
-  // ── status filter for the Disbursement History table: ALL shows every
+  // ── status filter for the Disbursement History table: "All" shows every
   // row, otherwise only rows whose status matches exactly. ──
   const [disbursementStatusFilter, setDisbursementStatusFilter] = useState<
-    "ALL" | "PENDING" | "COMPLETED" | "FAILED"
-  >("ALL");
+    (typeof DISBURSEMENT_STATUS_FILTERS)[number]
+  >("All");
 
   // ── synchronous guard against double-submit (double-click, double-tap,
   // Enter-key + click race, etc). The real, authoritative protection
@@ -573,15 +594,15 @@ export default function DisbursementPage() {
   };
 
   // ── counts per status, computed off the FULL history (not the filtered
-  // view) so the filter tab counts stay stable regardless of which tab is
-  // currently selected. ──
+  // view) so the dropdown's counts stay stable regardless of which option
+  // is currently selected. ──
   const disbursementStatusCounts = useMemo(() => {
-    const counts = { ALL: disbursementHistory.length, PENDING: 0, COMPLETED: 0, FAILED: 0 };
+    const counts = { All: disbursementHistory.length, Pending: 0, Completed: 0, Failed: 0 };
     for (const row of disbursementHistory) {
       const s = (row.status || "").toString().toUpperCase();
-      if (s === "PENDING") counts.PENDING += 1;
-      else if (s === "COMPLETED") counts.COMPLETED += 1;
-      else if (s === "FAILED") counts.FAILED += 1;
+      if (s === "PENDING") counts.Pending += 1;
+      else if (s === "COMPLETED") counts.Completed += 1;
+      else if (s === "FAILED") counts.Failed += 1;
     }
     return counts;
   }, [disbursementHistory]);
@@ -589,9 +610,9 @@ export default function DisbursementPage() {
   // ── the history rows after applying the status filter — this is what
   // pagination and the table body actually work off of. ──
   const filteredDisbursementHistory = useMemo(() => {
-    if (disbursementStatusFilter === "ALL") return disbursementHistory;
+    if (disbursementStatusFilter === "All") return disbursementHistory;
     return disbursementHistory.filter(
-      (row: any) => (row.status || "").toString().toUpperCase() === disbursementStatusFilter
+      (row: any) => (row.status || "").toString().toUpperCase() === disbursementStatusFilter.toUpperCase()
     );
   }, [disbursementHistory, disbursementStatusFilter]);
 
@@ -770,45 +791,41 @@ export default function DisbursementPage() {
               </span>
             </CardTitle>
             <div className="flex items-center gap-2 flex-wrap">
-              {/* ── status filter tabs: All / Pending / Completed / Failed ── */}
-              <div
-                className={`flex items-center gap-0.5 p-0.5 rounded-md border ${
-                  isDark ? "bg-slate-950 border-slate-800" : "bg-slate-100 border-slate-200"
-                }`}
+              {/* ── status filter — same dot-colored Select pattern used for
+                  Type/Status filters in User Management ── */}
+              <Select
+                value={disbursementStatusFilter}
+                onValueChange={(v) => setDisbursementStatusFilter(v as (typeof DISBURSEMENT_STATUS_FILTERS)[number])}
               >
-                {(
-                  [
-                    { key: "ALL", label: "All" },
-                    { key: "PENDING", label: "Pending" },
-                    { key: "COMPLETED", label: "Completed" },
-                    { key: "FAILED", label: "Failed" },
-                  ] as const
-                ).map((tab) => {
-                  const isActive = disbursementStatusFilter === tab.key;
-                  return (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      onClick={() => setDisbursementStatusFilter(tab.key)}
-                      data-testid={`button-disbursement-filter-${tab.key.toLowerCase()}`}
-                      className={`h-7 px-2.5 rounded text-[11px] font-semibold transition-colors ${
-                        isActive
-                          ? isDark
-                            ? "bg-slate-800 text-white"
-                            : "bg-white text-slate-900 shadow-sm"
-                          : isDark
-                            ? "text-slate-400 hover:text-white"
-                            : "text-slate-500 hover:text-slate-900"
-                      }`}
-                    >
-                      {tab.label}
-                      <span className={`ml-1 ${isActive ? "opacity-80" : "opacity-60"}`}>
-                        ({disbursementStatusCounts[tab.key]})
+                <SelectTrigger
+                  data-testid="select-disbursement-status-filter"
+                  className={`h-8 w-[150px] text-[11px] font-semibold cursor-pointer ${
+                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    {disbursementStatusFilter !== "All" && (
+                      <span className={`w-2 h-2 rounded-full inline-block ${getDisbursementStatusDotColor(disbursementStatusFilter)}`} />
+                    )}
+                    <SelectValue />
+                  </span>
+                </SelectTrigger>
+                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+                  {DISBURSEMENT_STATUS_FILTERS.map((s) => (
+                    <SelectItem key={s} value={s} className="cursor-pointer">
+                      <span className="flex items-center gap-2">
+                        {s !== "All" && (
+                          <span className={`w-2 h-2 rounded-full inline-block ${getDisbursementStatusDotColor(s)}`} />
+                        )}
+                        {s}
+                        <span className={isDark ? "text-slate-500" : "text-slate-400"}>
+                          ({disbursementStatusCounts[s]})
+                        </span>
                       </span>
-                    </button>
-                  );
-                })}
-              </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
               <button
                 type="button"
@@ -836,7 +853,7 @@ export default function DisbursementPage() {
             </div>
           ) : filteredDisbursementHistory.length === 0 ? (
             <div className={`py-10 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              Walang disbursement na may status na "{disbursementStatusFilter.toLowerCase()}".
+              Walang disbursement na may status na "{disbursementStatusFilter}".
             </div>
           ) : (
             <Table>
