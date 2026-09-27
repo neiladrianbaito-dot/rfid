@@ -55,6 +55,14 @@ const DISBURSE_IDEMPOTENCY_KEY = "manual-disbursement";
 // User Management. ──
 const DISBURSEMENT_STATUS_FILTERS = ["All", "Pending", "Completed", "Failed"] as const;
 
+// ⭐ FIX: pulled the inline `(typeof DISBURSEMENT_STATUS_FILTERS)[number]`
+// type expression out into its own named alias. That inline form was
+// getting mis-stripped by the build (its runtime output referenced a
+// bare `number` identifier that doesn't exist, causing
+// "ReferenceError: number is not defined" in the browser). A plain
+// named type reference like this cannot be misparsed the same way.
+type DisbursementStatusFilterType = (typeof DISBURSEMENT_STATUS_FILTERS)[number];
+
 // 🎨 Status filter -> dot color mapping (Pending/Completed/Failed), same
 // palette used elsewhere in the app (amber/emerald/red).
 function getDisbursementStatusDotColor(status: string) {
@@ -318,9 +326,7 @@ function DisbursementPage() {
 
   // ── status filter for the Disbursement History table: "All" shows every
   // row, otherwise only rows whose status matches exactly. ──
-  const [disbursementStatusFilter, setDisbursementStatusFilter] = useState
-    (typeof DISBURSEMENT_STATUS_FILTERS)[number]
-  >("All");
+  const [disbursementStatusFilter, setDisbursementStatusFilter] = useState<DisbursementStatusFilterType>("All");
 
   // ── synchronous guard against double-submit (double-click, double-tap,
   // Enter-key + click race, etc). The real, authoritative protection
@@ -860,7 +866,7 @@ function DisbursementPage() {
                   Type/Status filters in User Management ── */}
               <Select
                 value={disbursementStatusFilter}
-                onValueChange={(v) => setDisbursementStatusFilter(v as (typeof DISBURSEMENT_STATUS_FILTERS)[number])}
+                onValueChange={(v) => setDisbursementStatusFilter(v as DisbursementStatusFilterType)}
               >
                 <SelectTrigger
                   data-testid="select-disbursement-status-filter"
