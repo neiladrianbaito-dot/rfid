@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Landmark,
   Smartphone,
+  PiggyBank,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -36,6 +37,18 @@ const ACCOUNT_NUMBER_MAX_LEN = 12;
 // Disbursement History table is paginated client-side at this many rows per page
 const DISBURSEMENTS_PER_PAGE = 10;
 
+// ── Backend now disburses ANY TIME — there's no date_start/date_end
+// window anymore. A disbursement only fires once ₱50,000 worth of
+// unlinked fare transactions has piled up, and each disbursement only
+// ever takes up to ₱50,000 (oldest first); any excess rolls into the
+// next call. Keep this in sync with the DB function's floor/cap. ──
+const MIN_DISBURSEMENT_AMOUNT = 50000;
+
+// ── one fixed idempotency key so every disbursement attempt — no
+// matter when it's triggered — serializes against the advisory lock in
+// the DB function. There's no "period" anymore to key off of. ──
+const DISBURSE_IDEMPOTENCY_KEY = "manual-disbursement";
+
 // ── SHARED classification config — keep this in sync with whatever the
 // backend (create-disbursement function) uses to classify transactions.
 // Ideally this list lives in one shared module imported by both sides;
@@ -47,10 +60,6 @@ const NON_FARE_MARKERS = ["topup", "top_up", "top-up", "cash_in", "cashin", "cas
 // to other e-wallets/bank channels you might add later). Adjust/extend
 // if your backend spells the channel differently. ──
 const GCASH_MARKERS = ["gcash", "g-cash", "g_cash"];
-
-function getLocalDateString(): string {
-  return new Date().toLocaleDateString("en-CA");
-}
 
 // strips everything except digits and caps the length, used for the
 // account/mobile number field
@@ -93,37 +102,11 @@ async function logAudit(params: { entity: string; format: string; details: strin
   }
 }
 
-const MONTH_OPTIONS = [
-  { value: "01", label: "January" },
-  { value: "02", label: "February" },
-  { value: "03", label: "March" },
-  { value: "04", label: "April" },
-  { value: "05", label: "May" },
-  { value: "06", label: "June" },
-  { value: "07", label: "July" },
-  { value: "08", label: "August" },
-  { value: "09", label: "September" },
-  { value: "10", label: "October" },
-  { value: "11", label: "November" },
-  { value: "12", label: "December" },
-];
-
 // bank/e-wallet channels Xendit commonly supports for disbursement in PH —
 // trim/extend this list to match what's actually enabled on your Xendit account
 const DISBURSEMENT_CHANNELS = [
   { value: "PH_BDO", label: "BDO" },
 ];
-
-// ── Returns how many days are in a given year/month. Falls back to 31
-// (safe upper bound) when year and/or month aren't picked yet, so the
-// Day dropdown still shows a full list before a Year/Month is chosen. ──
-function getDaysInMonth(year: string, month: string): number {
-  if (year === "all" || month === "all") return 31;
-  const y = parseInt(year, 10);
-  const m = parseInt(month, 10);
-  if (isNaN(y) || isNaN(m)) return 31;
-  return new Date(y, m, 0).getDate();
-}
 
 // ── Identifies whether a transaction is an actual FARE (tap) transaction,
 // as opposed to a top-up / cash-in / load transaction. Only fare
@@ -224,23 +207,6 @@ function getTopupNetAmount(tx: any): number {
   return gross;
 }
 
-// Returns the transaction's local "YYYY-MM-DD" date key
-function getTxDateKey(tx: any): string | null {
-  const ts = tx.timestamp || tx.created_at;
-  if (!ts) return null;
-  const dt = new Date(ts);
-  if (isNaN(dt.getTime())) return null;
-  return dt.toLocaleDateString("en-CA"); // YYYY-MM-DD, local time
-}
-
-// Extracts { year, month, day } from a transaction's timestamp field
-function getTxDateParts(tx: any): { year: string; month: string; day: string } | null {
-  const key = getTxDateKey(tx);
-  if (!key) return null;
-  const [y, m, d] = key.split("-");
-  return { year: y, month: m, day: d };
-}
-
 // ── Resolves a disbursement history row's bank/e-wallet channel code
 // (whatever field the backend happens to store it in) to a display
 // label from DISBURSEMENT_CHANNELS, falling back to the raw code (or an
@@ -274,37 +240,6 @@ export default function DisbursementPage() {
   const { canManage, loaded } = useAdminAccess();
   const canDisburse = loaded && canManage;
   const isViewOnly = loaded && !canManage;
-
-  // ── filter state (drives which period gets disbursed) ──
-  const [filterYear, setFilterYear] = useState<string>("all");
-  const [filterMonth, setFilterMonth] = useState<string>("all");
-  const [filterDay, setFilterDay] = useState<string>("all");
-
-  // ── Day options are derived from the currently selected Year/Month so
-  // it's impossible to pick an invalid date like Feb 31. Whenever the
-  // available days shrink (e.g. switching from a 31-day month to Feb)
-  // and the currently selected Day no longer exists, it's reset to "all"
-  // automatically. ──
-  const daysInSelectedMonth = useMemo(
-    () => getDaysInMonth(filterYear, filterMonth),
-    [filterYear, filterMonth]
-  );
-
-  const dayOptions = useMemo(
-    () =>
-      Array.from({ length: daysInSelectedMonth }, (_, i) => {
-        const val = String(i + 1).padStart(2, "0");
-        return { value: val, label: String(i + 1) };
-      }),
-    [daysInSelectedMonth]
-  );
-
-  useEffect(() => {
-    if (filterDay === "all") return;
-    if (parseInt(filterDay, 10) > daysInSelectedMonth) {
-      setFilterDay("all");
-    }
-  }, [daysInSelectedMonth, filterDay]);
 
   // ── disbursement modal state ──
   const [disburseModalOpen, setDisburseModalOpen] = useState(false);
@@ -424,9 +359,8 @@ export default function DisbursementPage() {
 
   // ── total NET amount, ACROSS ALL TIME, that users have topped up
   // specifically via GCash — i.e. after Xendit's fee/VAT is deducted,
-  // NOT the gross amount the passenger paid. Not scoped to the
-  // Year/Month/Day filter above — this is a running lifetime total,
-  // separate from the disbursable fare revenue. ──
+  // NOT the gross amount the passenger paid. This is a running lifetime
+  // total, separate from disbursable fare revenue. ──
   const totalGcashTopups = useMemo(
     () =>
       txList
@@ -435,102 +369,49 @@ export default function DisbursementPage() {
     [txList]
   );
 
-  // ── derive available years straight from transactions so the Year
-  // dropdown reflects everything that actually has records ──
-  const availableYears = useMemo(() => {
-    const years = new Set<string>();
-    txList.forEach((tx: any) => {
-      const parts = getTxDateParts(tx);
-      if (parts) years.add(parts.year);
-    });
-    return Array.from(years).sort((a, b) => b.localeCompare(a));
-  }, [txList]);
+  // ── total actually paid out, ALL TIME, across every disbursement that
+  // wasn't FAILED (PENDING + COMPLETED). A FAILED row means the reserved
+  // transactions were released and never actually left Xendit, so it's
+  // excluded here. ──
+  const totalDisbursed = useMemo(
+    () =>
+      disbursementHistory
+        .filter((row: any) => (row.status || "").toString().toUpperCase() !== "FAILED")
+        .reduce((sum: number, row: any) => sum + (Number(row.amount) || 0), 0),
+    [disbursementHistory]
+  );
 
-  const isFilterActive = filterYear !== "all" || filterMonth !== "all" || filterDay !== "all";
+  // ── ANY-TIME disbursement: no date filter anymore. This is every fare
+  // transaction that hasn't been linked to a disbursement yet, regardless
+  // of when it happened. The backend independently re-derives this same
+  // set (fare-only, unlinked) — this is a preview, not the source of truth. ──
+  const txAvailableToDisburse = useMemo(
+    () =>
+      txList.filter((tx: any) => isFareTransaction(tx) && tx.disbursement_id == null),
+    [txList]
+  );
 
-  const resetFilters = () => {
-    setFilterYear("all");
-    setFilterMonth("all");
-    setFilterDay("all");
-  };
-
-  // Human-readable label for the currently active filter, e.g. "September 2026"
-  const filterLabel = useMemo(() => {
-    if (!isFilterActive) return "";
-    const parts: string[] = [];
-    if (filterDay !== "all") parts.push(filterDay);
-    if (filterMonth !== "all") {
-      const m = MONTH_OPTIONS.find((mo) => mo.value === filterMonth);
-      parts.push(m ? m.label : filterMonth);
-    }
-    if (filterYear !== "all") parts.push(filterYear);
-    return parts.join(" ");
-  }, [isFilterActive, filterYear, filterMonth, filterDay]);
-
-  // ── the actual [date_start, date_end] range the backend will scan for
-  // un-disbursed transactions. Requires a Year to be selected (or no
-  // filter at all, which means "today"). Month-only/Day-only filters
-  // (no Year) don't resolve to a concrete range — disburseDateRange is
-  // null in that case and the button gets disabled. ──
-  const disburseDateRange = useMemo((): { start: string; end: string } | null => {
-    if (!isFilterActive) {
-      const today = getLocalDateString();
-      return { start: today, end: today };
-    }
-    if (filterYear === "all") return null; // no concrete range to anchor to
-
-    if (filterMonth === "all") {
-      return { start: `${filterYear}-01-01`, end: `${filterYear}-12-31` };
-    }
-    if (filterDay === "all") {
-      const daysInMonth = getDaysInMonth(filterYear, filterMonth);
-      return { start: `${filterYear}-${filterMonth}-01`, end: `${filterYear}-${filterMonth}-${String(daysInMonth).padStart(2, "0")}` };
-    }
-    return { start: `${filterYear}-${filterMonth}-${filterDay}`, end: `${filterYear}-${filterMonth}-${filterDay}` };
-  }, [isFilterActive, filterYear, filterMonth, filterDay]);
-
-  // ── transactions that fall inside the active disburse date range AND
-  // pass the fare-only filter. This list is now used for TWO things:
-  // 1) the estimated preview amount shown in the UI, and
-  // 2) the explicit allowlist of transaction IDs sent to the backend,
-  // so the server has a concrete, fare-only set to intersect against
-  // instead of re-deriving "fare" from the date range alone. ──
-  const txInRange = useMemo(() => {
-    if (!disburseDateRange) return [];
-    return txList.filter((tx: any) => {
-      if (!isFareTransaction(tx)) return false;
-      const key = getTxDateKey(tx);
-      if (!key) return false;
-      return key >= disburseDateRange.start && key <= disburseDateRange.end;
-    });
-  }, [txList, disburseDateRange]);
-
-  // ── explicit fare-only transaction IDs in the active range, sent to the
-  // backend as an allowlist. Falsy/missing ids are filtered out defensively. ──
+  // ── explicit fare-only transaction IDs, sent to the backend as an
+  // allowlist. Falsy/missing ids are filtered out defensively. ──
   const fareTransactionIds = useMemo(
-    () => txInRange.map((tx: any) => tx.id).filter((id: any) => id != null),
-    [txInRange]
+    () => txAvailableToDisburse.map((tx: any) => tx.id).filter((id: any) => id != null),
+    [txAvailableToDisburse]
   );
 
   const disburseAmount = useMemo(
-    () => txInRange.reduce((sum: number, tx: any) => sum + Math.abs(Number(tx.amount) || 0), 0),
-    [txInRange]
+    () => txAvailableToDisburse.reduce((sum: number, tx: any) => sum + Math.abs(Number(tx.amount) || 0), 0),
+    [txAvailableToDisburse]
   );
 
-  const disburseAmountLabel = isFilterActive ? `${filterLabel} Revenue` : "Today's Revenue";
-
-  // ── identifies WHICH PERIOD is being disbursed, so the backend can
-  // serialize concurrent requests for the same period (advisory lock). ──
-  const disburseIdempotencyKey = isFilterActive
-    ? `filtered-${filterYear}-${filterMonth}-${filterDay}`
-    : `today-${getLocalDateString()}`;
+  // ── the backend only fires a disbursement once ₱50,000 worth of
+  // unlinked fare transactions has piled up, and only pays out up to
+  // ₱50,000 per call — this is purely informational for the UI copy. ──
+  const meetsMinimum = disburseAmount >= MIN_DISBURSEMENT_AMOUNT;
 
   // 🔒 Tooltip para sa Disburse button, depende kung bakit disabled
   const disburseButtonTitle = isViewOnly
     ? "View only — you don't have permission to disburse."
-    : !disburseDateRange
-      ? "Pumili ng Year sa filter para makapag-disburse"
-      : undefined;
+    : undefined;
 
   const openDisburseModal = () => {
     // 🔒 Guard: bawal buksan ang disburse modal kapag view_only
@@ -569,7 +450,7 @@ export default function DisbursementPage() {
 
   const handleSubmitDisbursement = async () => {
     // 🔒 Guard: bawal mag-disburse kapag view_only. Proteksyon ito kahit
-    // ma-bypass ang UI (hal. Enter key, devtools, atbp).
+    // ma-bypass ang UI (hal. Enter key, devtools, atbp.).
     if (!canDisburse) {
       setDisburseError("View only access — wala kang permission na mag-disburse.");
       return;
@@ -583,11 +464,6 @@ export default function DisbursementPage() {
 
     setDisburseError(null);
 
-    if (!disburseDateRange) {
-      setDisburseError("Pumili muna ng Year sa filter para makapag-disburse (kailangan ng malinaw na date range).");
-      isSubmittingRef.current = false;
-      return;
-    }
     if (!disburseForm.bank_code) {
       setDisburseError("Pumili ng bank o e-wallet.");
       isSubmittingRef.current = false;
@@ -606,10 +482,10 @@ export default function DisbursementPage() {
       isSubmittingRef.current = false;
       return;
     }
-    // ── nothing fare-eligible to disburse for this period — stop before
-    // even hitting the backend, and tell the admin clearly why. ──
+    // ── nothing fare-eligible to disburse — stop before even hitting the
+    // backend, and tell the admin clearly why. ──
     if (fareTransactionIds.length === 0) {
-      setDisburseError("Walang fare transaction (hindi top-up) na available na i-disburse para sa period na ito.");
+      setDisburseError("Walang fare transaction (hindi top-up) na available na i-disburse sa ngayon.");
       isSubmittingRef.current = false;
       return;
     }
@@ -626,12 +502,11 @@ export default function DisbursementPage() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          date_start: disburseDateRange.start,
-          date_end: disburseDateRange.end,
-          // ── NEW: explicit fare-only enforcement sent to the backend.
-          // The backend MUST use these to restrict what actually gets
-          // disbursed — it should not just trust the date range, since
-          // that range can also contain topup/cash-in/load transactions. ──
+          // ── no more date_start/date_end — the backend now scans ALL
+          // unlinked fare transactions regardless of when they happened. ──
+          // ── explicit fare-only enforcement sent to the backend. The
+          // backend MUST use these to restrict what actually gets
+          // disbursed — it should not just trust the client. ──
           transaction_type: "fare",
           exclude_transaction_types: NON_FARE_MARKERS,
           fare_transaction_ids: fareTransactionIds,
@@ -639,21 +514,20 @@ export default function DisbursementPage() {
           bank_code: disburseForm.bank_code,
           account_holder_name: disburseForm.account_holder_name.trim(),
           account_number: disburseForm.account_number.trim(),
-          description: disburseForm.description.trim() || `${disburseAmountLabel} disbursement`,
+          description: disburseForm.description.trim() || "Fare revenue disbursement",
           requested_by: adminName,
-          idempotency_key: disburseIdempotencyKey,
+          idempotency_key: DISBURSE_IDEMPOTENCY_KEY,
         }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        // 409 = the backend found no un-disbursed FARE transactions left for
-        // this period — show a clear message instead of the generic one
+        // 409 = the backend either found no un-disbursed FARE transactions,
+        // or the available total hasn't reached the ₱50,000 minimum yet —
+        // show its message directly since it already explains which.
         if (res.status === 409) {
-          throw new Error(
-            data?.error || "Wala nang bagong fare transaction na pwedeng i-disburse para sa period na ito."
-          );
+          throw new Error(data?.error || "Hindi pa maisasagawa ang disbursement sa ngayon.");
         }
         throw new Error(data?.error || "Nabigo ang disbursement request.");
       }
@@ -667,7 +541,7 @@ export default function DisbursementPage() {
       logAudit({
         entity: "Disbursement",
         format: "Xendit",
-        details: `${adminName} triggered a disbursement of ${formatPeso(sentAmount)} (${disburseAmountLabel}, fare-only) to ${disburseForm.account_holder_name.trim()}`,
+        details: `${adminName} triggered a disbursement of ${formatPeso(sentAmount)} (fare-only) to ${disburseForm.account_holder_name.trim()}`,
       });
 
       // refresh the REAL history list right away so the new row (with its
@@ -745,8 +619,8 @@ export default function DisbursementPage() {
         </div>
       </div>
 
-      {/* ══ XENDIT BALANCE + GCASH TOP-UPS SUMMARY ══ */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* ══ XENDIT BALANCE + TOTAL DISBURSED + GCASH TOP-UPS SUMMARY ══ */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-600 via-blue-500 to-transparent" />
           <CardContent className="p-5 flex items-center justify-between gap-3">
@@ -783,6 +657,29 @@ export default function DisbursementPage() {
           </CardContent>
         </Card>
 
+        {/* NEW: Total Disbursed — sum of every non-FAILED disbursement, all time */}
+        <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-transparent" />
+          <CardContent className="p-5 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                <PiggyBank size={12} className="text-emerald-500" />
+                Total Disbursed
+              </p>
+              <p className={`text-xl font-bold font-mono mt-1 ${isDark ? "text-white" : "text-slate-900"}`}>
+                {isLoadingHistory && disbursementHistory.length === 0 ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-emerald-500" />
+                ) : (
+                  formatPeso(totalDisbursed)
+                )}
+              </p>
+              <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                All-time, across {disbursementHistory.length} disbursement{disbursementHistory.length === 1 ? "" : "s"}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-blue-400 to-transparent" />
           <CardContent className="p-5 flex items-center justify-between gap-3">
@@ -802,71 +699,29 @@ export default function DisbursementPage() {
         </Card>
       </div>
 
-      {/* ══ SELECT PERIOD TO DISBURSE — simplified, single row, no card/gradient styling ══ */}
+      {/* ══ AVAILABLE TO DISBURSE — no more date filter, any-time disbursement ══ */}
       <div className={`flex flex-wrap items-center gap-2 py-3 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
         <span className={`text-sm font-semibold whitespace-nowrap ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-          Select Period to Disburse:
+          Available to Disburse:
         </span>
 
-        <select
-          value={filterYear}
-          onChange={(e) => setFilterYear(e.target.value)}
-          data-testid="select-filter-year"
-          className={`h-8 rounded border px-2 text-xs ${isDark ? "bg-slate-950 border-slate-700 text-slate-200" : "bg-white border-slate-300 text-slate-700"}`}
-        >
-          <option value="all">Year</option>
-          {availableYears.map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
+        <span className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+          {formatPeso(disburseAmount)}
+        </span>
 
-        <select
-          value={filterMonth}
-          onChange={(e) => setFilterMonth(e.target.value)}
-          data-testid="select-filter-month"
-          className={`h-8 rounded border px-2 text-xs ${isDark ? "bg-slate-950 border-slate-700 text-slate-200" : "bg-white border-slate-300 text-slate-700"}`}
-        >
-          <option value="all">Month</option>
-          {MONTH_OPTIONS.map((m) => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
-
-        <select
-          value={filterDay}
-          onChange={(e) => setFilterDay(e.target.value)}
-          data-testid="select-filter-day"
-          className={`h-8 rounded border px-2 text-xs ${isDark ? "bg-slate-950 border-slate-700 text-slate-200" : "bg-white border-slate-300 text-slate-700"}`}
-        >
-          <option value="all">Day</option>
-          {dayOptions.map((d) => (
-            <option key={d.value} value={d.value}>{d.label}</option>
-          ))}
-        </select>
-
-        {isFilterActive && (
-          <button
-            type="button"
-            onClick={resetFilters}
-            data-testid="button-reset-filters"
-            className={`h-8 px-2 text-xs underline ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}
-          >
-            Reset
-          </button>
+        {!meetsMinimum && (
+          <span className={`text-[11px] ${isDark ? "text-amber-400" : "text-amber-600"}`}>
+            (below the ₱{MIN_DISBURSEMENT_AMOUNT.toLocaleString("en-US")} minimum needed to disburse)
+          </span>
         )}
 
-        <span className={`text-sm font-semibold ml-2 ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-          {disburseAmountLabel}: {formatPeso(disburseAmount)}
-        </span>
-
         {/* 🔒 Disburse button — NAKA-GREY OUT (disabled) kapag view_only,
-            hindi tinatanggal sa screen. Naka-grey din kapag wala pang
-            concrete date range. */}
+            hindi tinatanggal sa screen. */}
         <Button
           onClick={openDisburseModal}
-          disabled={!disburseDateRange || !canDisburse}
+          disabled={!canDisburse}
           className={`ml-auto text-xs font-semibold h-8 px-4 text-white disabled:cursor-not-allowed disabled:opacity-100 ${
-            canDisburse && disburseDateRange
+            canDisburse
               ? "bg-indigo-600 hover:bg-indigo-700"
               : isDark
                 ? "bg-slate-700 text-slate-400 hover:bg-slate-700"
@@ -879,7 +734,7 @@ export default function DisbursementPage() {
         </Button>
       </div>
 
-      {/* 🔒 View-only notice sa ilalim ng filter row (maliit lang, hindi nagbabago ng layout) */}
+      {/* 🔒 View-only notice sa ilalim ng row (maliit lang, hindi nagbabago ng layout) */}
       {isViewOnly && (
         <p className={`-mt-6 text-[11px] ${isDark ? "text-amber-400" : "text-amber-600"}`}>
           View only — disbursing is disabled for your account.
@@ -1044,11 +899,18 @@ export default function DisbursementPage() {
 
             <div className="px-5 py-4 space-y-4">
               <div className={`flex items-center justify-between px-3 py-2.5 rounded-md border text-sm ${isDark ? "bg-indigo-950/40 border-indigo-900" : "bg-indigo-50 border-indigo-100"}`}>
-                <span className={isDark ? "text-indigo-300" : "text-indigo-700"}>{disburseAmountLabel}</span>
+                <span className={isDark ? "text-indigo-300" : "text-indigo-700"}>Available to Disburse</span>
                 <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>{formatPeso(disburseAmount)}</span>
               </div>
               <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Only fare transactions will be included here—top-ups, cash-ins, and loads are automatically excluded. If a portion of these transactions was previously disbursed, only new fare transactions that have not yet been sent to Xendit will be counted.
+                Only fare transactions are included here — top-ups, cash-ins, and loads are automatically excluded, and
+                anything already disbursed is not counted again. Disbursements aren't tied to any date — any unlinked fare
+                transaction is eligible, whenever it happened.
+              </p>
+              <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                A disbursement only goes through once at least ₱{MIN_DISBURSEMENT_AMOUNT.toLocaleString("en-US")} is
+                available, and each one pays out up to ₱{MIN_DISBURSEMENT_AMOUNT.toLocaleString("en-US")} at a time
+                (oldest transactions first) — any excess rolls into the next disbursement.
               </p>
 
               <div>
@@ -1177,7 +1039,7 @@ export default function DisbursementPage() {
                   value={disburseForm.description}
                   onChange={(e) => handleDisburseFieldChange("description", e.target.value)}
                   data-testid="input-disburse-description"
-                  placeholder={`${disburseAmountLabel} disbursement`}
+                  placeholder="Fare revenue disbursement"
                   className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
                     isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
                   }`}
