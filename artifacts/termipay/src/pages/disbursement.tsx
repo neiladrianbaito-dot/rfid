@@ -130,33 +130,23 @@ const DISBURSEMENT_CHANNELS = [
 ];
 
 // ── Identifies whether a transaction is an actual FARE (tap) transaction,
-// as opposed to a top-up / cash-in / load transaction (or a refund, void,
-// adjustment, or anything else that isn't a fare). Only fare transactions
-// count as "revenue" that can be disbursed.
+// as opposed to a top-up / cash-in / load transaction. Only fare
+// transactions count as "revenue" that can be disbursed — top-ups are
+// money the passenger added to their own balance, not money collected
+// by the operator.
 //
-// IMPORTANT: this MUST stay an exact match on `type === "fare"` — mirroring
-// the DB function's `lower(t.type) = 'fare'` filter EXACTLY. Treating it as
-// "anything that isn't a topup marker" (the old logic) silently counts
-// refunds/voids/adjustments/etc. as fare on the frontend even though the
-// backend will never touch them — which is a direct source of the
-// frontend-vs-backend total mismatch. If the `type` column ever stores a
-// different literal value for fares, update BOTH this function and the
-// `lower(t.type) = 'fare'` check in create_transactions_disbursement so
-// they never drift apart again. ──
+// IMPORTANT: adjust `NON_FARE_MARKERS` (and/or the field lookup below) to
+// match whatever field/value your backend actually uses to distinguish
+// transaction types. If no type-like field is present at all, this
+// treats the transaction as fare by default (backward-compatible with
+// data that has no type field yet). ──
 function isFareTransaction(tx: any): boolean {
-  const raw = (tx.type ?? "").toString().toLowerCase().trim();
-  return raw === "fare";
-}
-
-// ── Mirrors the DB function's `lower(t.status) = 'success'` filter —
-// only successful transactions are ever eligible for disbursement.
-// Without this check, Pending/Failed/Reversed fare transactions get
-// counted on the frontend as "available to disburse" even though the
-// backend will never touch them, which was a major source of the
-// frontend/backend total mismatch. ──
-function isSuccessfulTransaction(tx: any): boolean {
-  const raw = (tx.status ?? "").toString().toLowerCase().trim();
-  return raw === "success";
+  const raw = (tx.type ?? tx.transaction_type ?? tx.category ?? "")
+    .toString()
+    .toLowerCase()
+    .trim();
+  if (!raw) return true; // no type field present — assume fare
+  return !NON_FARE_MARKERS.some((marker) => raw.includes(marker));
 }
 
 // ── The inverse of isFareTransaction: true only when the transaction IS
@@ -257,34 +247,7 @@ function isBdoChannel(row: any): boolean {
   return code === "PH_BDO";
 }
 
-// ── one-time diagnostic: if NONE of the fetched transactions ever carry a
-// disbursement_id field at all (i.e. it's `undefined` on every single row,
-// not just `null` on the genuinely-unlinked ones), that's a strong signal
-// the field is being stripped before it reaches the frontend — e.g. missing
-// from the transactions API's Zod response schema (@workspace/api-zod).
-// When that happens, `tx.disbursement_id == null` is true for EVERY
-// transaction, so already-disbursed fare transactions get miscounted as
-// still available — which is exactly the kind of large frontend-vs-backend
-// mismatch this warning is meant to catch. ──
-let warnedMissingDisbursementIdField = false;
-
-function checkDisbursementIdFieldPresence(txList: any[]) {
-  if (warnedMissingDisbursementIdField || txList.length === 0) return;
-  const anyRowHasField = txList.some((tx) => Object.prototype.hasOwnProperty.call(tx, "disbursement_id"));
-  if (!anyRowHasField) {
-    warnedMissingDisbursementIdField = true;
-    console.error(
-      "[Disbursement] None of the fetched transactions have a `disbursement_id` field at all. " +
-        "This usually means the field is being stripped before it reaches the frontend (e.g. missing " +
-        "from the transactions API's Zod response schema in @workspace/api-zod), which makes already-" +
-        "disbursed fare transactions look like they're still available to disburse. Add `disbursement_id` " +
-        "to that schema and this warning should stop firing.",
-      txList[0]
-    );
-  }
-}
-
-
+export default function DisbursementPage() {
   const { user } = useAuth();
   const { isDark } = useTheme();
   const adminName = user?.name || "System Administrator";
@@ -421,11 +384,6 @@ function checkDisbursementIdFieldPresence(txList: any[]) {
 
   const txList = useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
 
-  useEffect(() => {
-    checkDisbursementIdFieldPresence(txList);
-  }, [txList]);
-
-
   // ── total NET amount, ACROSS ALL TIME, that users have topped up
   // specifically via GCash — i.e. after Xendit's fee/VAT is deducted,
   // NOT the gross amount the passenger paid. This is a running lifetime
@@ -452,14 +410,11 @@ function checkDisbursementIdFieldPresence(txList: any[]) {
 
   // ── ANY-TIME disbursement: no date filter anymore. This is every fare
   // transaction that hasn't been linked to a disbursement yet, regardless
-  // of when it happened. Mirrors create_transactions_disbursement exactly:
-  // type = 'fare' AND status = 'success' AND disbursement_id is null.
-  // This is a preview, not the source of truth — the DB function is. ──
+  // of when it happened. The backend independently re-derives this same
+  // set (fare-only, unlinked) — this is a preview, not the source of truth. ──
   const txAvailableToDisburse = useMemo(
     () =>
-      txList.filter(
-        (tx: any) => isFareTransaction(tx) && isSuccessfulTransaction(tx) && tx.disbursement_id == null
-      ),
+      txList.filter((tx: any) => isFareTransaction(tx) && tx.disbursement_id == null),
     [txList]
   );
 
@@ -470,55 +425,10 @@ function checkDisbursementIdFieldPresence(txList: any[]) {
     [txAvailableToDisburse]
   );
 
-  // ── TOTAL unlinked fare revenue sitting in the queue, regardless of
-  // when it happened. This is NOT what gets sent on the next disbursement
-  // — it's everything that is eventually eligible, including whatever
-  // will roll over past the ₱50,000-per-call cap. ──
-  const totalUnlinkedFareAmount = useMemo(
+  const disburseAmount = useMemo(
     () => txAvailableToDisburse.reduce((sum: number, tx: any) => sum + Math.abs(Number(tx.amount) || 0), 0),
     [txAvailableToDisburse]
   );
-
-  // ── Mirrors exactly what create_transactions_disbursement (the DB
-  // function) will actually batch into the NEXT disbursement call:
-  // oldest unlinked fare transactions first, stopping BEFORE the running
-  // total would exceed MIN_DISBURSEMENT_AMOUNT (₱50,000). Anything past
-  // that point is left unlinked and rolls into the following call —
-  // that's the "remaining balance" the admin should see, not the full
-  // unlinked total. ──
-  const nextDisbursementBatch = useMemo(() => {
-    const sorted = [...txAvailableToDisburse].sort((a: any, b: any) => {
-      // NOTE: the transactions table's date column is `timestamp`, not
-      // `created_at` (that's only on the disbursements table) — this must
-      // match the DB function's `order by t.timestamp, t.id` exactly, or
-      // the preview can include/exclude different transactions than what
-      // actually gets batched server-side.
-      const at = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-      const bt = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-      if (at !== bt) return at - bt;
-      // stable tie-break (by id) so the preview doesn't jitter on re-render
-      return (Number(a.id) || 0) - (Number(b.id) || 0);
-    });
-
-    let batchTotal = 0;
-    const batchIds: any[] = [];
-    for (const tx of sorted) {
-      const amt = Math.abs(Number(tx.amount) || 0);
-      if (batchTotal + amt > MIN_DISBURSEMENT_AMOUNT) break; // would exceed the ₱50k cap — leave for the next call
-      batchTotal += amt;
-      batchIds.push(tx.id);
-    }
-    return { amount: batchTotal, ids: batchIds };
-  }, [txAvailableToDisburse]);
-
-  // ── This is what "Available to Disburse" should actually show: the
-  // amount that will really go out on the NEXT disbursement run, not the
-  // full unlinked total (which can be bigger than the ₱50,000 per-call cap). ──
-  const disburseAmount = nextDisbursementBatch.amount;
-
-  // ── whatever's left in the fare queue AFTER this batch goes out — stays
-  // unlinked and rolls into the following disbursement call. ──
-  const remainingFareBalance = Math.max(0, totalUnlinkedFareAmount - disburseAmount);
 
   // 🔒 Tooltip para sa Disburse button, depende kung bakit disabled
   const disburseButtonTitle = isViewOnly
@@ -1071,17 +981,6 @@ function checkDisbursementIdFieldPresence(txList: any[]) {
                 <span className={isDark ? "text-indigo-300" : "text-indigo-700"}>Available to Disburse</span>
                 <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>{formatPeso(disburseAmount)}</span>
               </div>
-              {/* ── shows what's left over in the fare queue AFTER this
-                  batch — i.e. what rolls into the NEXT disbursement, once
-                  it (plus whatever new fares come in) reaches ₱50,000
-                  again. Only rendered when there actually is a remainder,
-                  so the modal doesn't add noise on a normal small queue. ── */}
-              {remainingFareBalance > 0 && (
-                <div className={`flex items-center justify-between px-3 py-2 rounded-md border text-xs ${isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50 border-slate-200"}`}>
-                  <span className={isDark ? "text-slate-400" : "text-slate-500"}>Remaining fare balance (next disbursement)</span>
-                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{formatPeso(remainingFareBalance)}</span>
-                </div>
-              )}
               <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                 Only fare transactions are included here — top-ups, cash-ins, and loads are automatically excluded, and
                 anything already disbursed is not counted again. Disbursements aren't tied to any date — any unlinked fare
