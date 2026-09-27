@@ -9,6 +9,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase"; // 👈 adjust to your actual supabase client path
 import { useAuth } from "@/hooks/use-auth"; // ⬅️ NEW: for the current admin's username
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,7 +45,6 @@ import {
   Pencil,
   Trash2,
   MapPin,
-  Map,
   Power,
   PowerOff,
   ArrowLeftRight,
@@ -99,118 +99,6 @@ const CALBAYOG_BARANGAYS = [
 
 const DEFAULT_DESTINATION = "Calbayog";
 
-// ══════════════════════════════════════════════════════════════════════
-// 🆕 FARE MATRIX PANEL STYLES — same "folder tab" panel language used on
-// the Reports page (.rp-tabs / .rp-body), scoped under fm- so it can live
-// alongside the Reports page styles without colliding.
-// ══════════════════════════════════════════════════════════════════════
-const FARE_MATRIX_CSS = `
-.fm-panel {
-  --fm-bg: #ffffff;
-  --fm-tile: #ffffff;
-  --fm-border: #e4e4e7;
-  --fm-divider: #ececee;
-  --fm-text: #27272a;
-  --fm-muted: #71717a;
-  --fm-accent: #2563eb;
-  --fm-radius: 18px;
-  --fm-shadow:
-    0 1px 2px rgba(24, 24, 27, 0.06),
-    0 10px 24px -6px rgba(24, 24, 27, 0.14),
-    0 28px 56px -16px rgba(24, 24, 27, 0.16);
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  min-width: 0;
-}
-.fm-panel[data-theme="dark"] {
-  --fm-bg: #0f172a;
-  --fm-tile: #111827;
-  --fm-border: #1e293b;
-  --fm-divider: #1e293b;
-  --fm-text: #e2e8f0;
-  --fm-muted: #94a3b8;
-  --fm-accent: #60a5fa;
-  --fm-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    0 12px 28px -8px rgba(0, 0, 0, 0.55),
-    0 32px 64px -20px rgba(0, 0, 0, 0.6);
-}
-
-/* Tab strip — the top edge of the "folder" */
-.fm-tabs {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0;
-  padding: 0;
-  min-width: 0;
-}
-.fm-tab {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  margin-bottom: -1px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  color: var(--fm-muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: 12px 12px 0 0;
-  cursor: pointer;
-  transition: color 0.15s ease;
-}
-.fm-tab:hover { color: var(--fm-text); }
-.fm-tab[aria-selected="true"] {
-  color: var(--fm-accent);
-  background: var(--fm-bg);
-  border-color: var(--fm-border);
-  padding-bottom: 11px; /* covers the body's top border underneath */
-  z-index: 3;
-}
-.fm-tab svg { width: 14px; height: 14px; flex: none; }
-
-/* Body — one panel, content swaps inside it (never remounts as a card) */
-.fm-body {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  min-width: 0;
-  background: var(--fm-bg);
-  border: 1px solid var(--fm-border);
-  border-radius: 0 var(--fm-radius) var(--fm-radius) var(--fm-radius);
-  box-shadow: var(--fm-shadow);
-  overflow: hidden;
-}
-
-.fm-body-head {
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--fm-divider);
-  background: transparent;
-}
-
-@keyframes fm-swap { from { opacity: 0; } to { opacity: 1; } }
-.fm-body-enter { animation: fm-swap 0.16s ease-out; }
-
-.fm-tab:focus-visible {
-  outline: 2px solid var(--fm-accent);
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .fm-body-enter { animation: none; }
-  .fm-tab { transition: none; }
-}
-`;
-
 // ✅ Small helper so the toast title shows a green check icon next to the text
 function SuccessTitle({ text }: { text: string }) {
   return (
@@ -233,470 +121,6 @@ type Device = {
   created_at: string;
   // updated_at removed — column does not exist on this table
 };
-
-type RouteMapPreviewProps = {
-  route: any;
-  isDark: boolean;
-};
-
-// ══════════════════════════════════════════════════════════════════════
-// 🆕 GEOCODING — Calbayog City accuracy fix
-//
-// The old geocode() sent bare "{place}, Calbayog City, Samar, Philippines"
-// (and then progressively looser fallbacks) straight to Nominatim with NO
-// location bias, and always trusted result #0. Several barangay names in
-// this list also exist as place names elsewhere (e.g. "Malaga" → Málaga,
-// Spain), so a weak or failed match on the specific query could silently
-// fall through to a same-named place on the other side of the world.
-//
-// Fix:
-//   1. Every query is restricted to the Philippines (countrycodes=ph) and
-//      biased toward a bounding box around Calbayog City (viewbox=...),
-//      with bounded=1 on the specific attempts so results MUST fall
-//      inside that box.
-//   2. Looser fallback attempts relax `bounded` (in case OSM doesn't have
-//      the barangay indexed precisely) but keep the same viewbox bias.
-//   3. Among whatever candidates come back, we pick the one physically
-//      CLOSEST to Calbayog's city center — not just Nominatim's #1 rank.
-//   4. Any candidate still farther than ~40km from the city (a generous
-//      radius that comfortably covers the whole city + its barangays) is
-//      rejected as implausible, and the next, more specific query is used
-//      instead of accepting a wrong match.
-// ══════════════════════════════════════════════════════════════════════
-const CALBAYOG_CENTER = { lat: 12.0667, lon: 124.6 };
-// left,top,right,bottom (lon,lat,lon,lat) — a generous box around Calbayog
-// City's full land area (it's one of the largest cities by area in the
-// Philippines), so outlying barangays still fall comfortably inside it.
-const CALBAYOG_VIEWBOX = "124.30,12.35,124.90,11.75";
-// Reject any geocoded match farther than this from the city center.
-const MAX_PLAUSIBLE_DISTANCE_KM = 40;
-
-function haversineKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
-  const lat1 = (a.lat * Math.PI) / 180;
-  const lat2 = (b.lat * Math.PI) / 180;
-
-  const x =
-    Math.sin(dLat / 2) ** 2 +
-    Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
-
-  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-}
-
-async function fetchNominatimCandidates(query: string, bounded: boolean) {
-  try {
-    const params = new URLSearchParams({
-      format: "jsonv2",
-      limit: "5",
-      countrycodes: "ph",
-      viewbox: CALBAYOG_VIEWBOX,
-      q: query,
-    });
-    if (bounded) params.set("bounded", "1");
-
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?${params.toString()}`,
-      { headers: { Accept: "application/json" } }
-    );
-    if (!response.ok) return [];
-    const data = await response.json();
-    return Array.isArray(data) ? data : [];
-  } catch {
-    // Network hiccup / CORS / rate-limit — treat as "no results" so the
-    // caller moves on to the next attempt instead of the whole map dying.
-    return [];
-  }
-}
-
-// Picks the candidate that's actually closest to Calbayog City, instead of
-// blindly trusting Nominatim's #1 ranked result.
-function pickClosestCandidate(candidates: any[]) {
-  let best: { lat: number; lon: number; displayName: string; distance: number } | null = null;
-  for (const item of candidates) {
-    const lat = Number(item.lat);
-    const lon = Number(item.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    const distance = haversineKm(CALBAYOG_CENTER, { lat, lon });
-    if (!best || distance < best.distance) {
-      best = { lat, lon, displayName: String(item.display_name ?? ""), distance };
-    }
-  }
-  return best;
-}
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-type GeocodeAttempt = {
-  query: string;
-  bounded: boolean;
-  // null = trust it outright (bounded search already constrains the result
-  // to inside Calbayog's box, so no extra distance check is needed — the
-  // city is large and elongated enough that a valid in-box match can still
-  // be more than MAX_PLAUSIBLE_DISTANCE_KM from the center point).
-  maxDistanceKm: number | null;
-};
-
-async function geocodePlace(place: string) {
-  const trimmed = place.trim();
-  if (!trimmed) return null;
-
-  // The destination is usually just "Calbayog" (the city itself) — geocode
-  // it directly instead of appending "Calbayog City" to "Calbayog".
-  const isCityDestination = /calbayog/i.test(trimmed);
-
-  const attempts: GeocodeAttempt[] = isCityDestination
-    ? [
-        { query: "Calbayog City, Samar, Philippines", bounded: true, maxDistanceKm: null },
-        // Fallback if the bounded search comes back empty for any reason —
-        // previously there was no fallback here, so a single failed request
-        // broke the map for EVERY route (every route shares this destination).
-        { query: "Calbayog City, Samar, Philippines", bounded: false, maxDistanceKm: MAX_PLAUSIBLE_DISTANCE_KM },
-      ]
-    : [
-        { query: `Barangay ${trimmed}, Calbayog City, Samar, Philippines`, bounded: true, maxDistanceKm: null },
-        { query: `${trimmed}, Calbayog City, Samar, Philippines`, bounded: true, maxDistanceKm: null },
-        { query: `${trimmed}, Calbayog, Samar, Philippines`, bounded: false, maxDistanceKm: MAX_PLAUSIBLE_DISTANCE_KM },
-        { query: `${trimmed}, Samar, Philippines`, bounded: false, maxDistanceKm: MAX_PLAUSIBLE_DISTANCE_KM },
-        // Last resort — accept whatever Nominatim finds so the map still
-        // renders something instead of showing "could not locate".
-        { query: `${trimmed}, Philippines`, bounded: false, maxDistanceKm: null },
-      ];
-
-  for (let i = 0; i < attempts.length; i++) {
-    const { query, bounded, maxDistanceKm } = attempts[i];
-    const candidates = await fetchNominatimCandidates(query, bounded);
-
-    if (candidates.length > 0) {
-      const best = pickClosestCandidate(candidates);
-      if (best && (maxDistanceKm === null || best.distance <= maxDistanceKm)) {
-        return { lat: best.lat, lon: best.lon, displayName: best.displayName || trimmed };
-      }
-    }
-
-    // Small gap between requests so rapid-fire calls don't trip Nominatim's
-    // usage-policy rate limiting (which would otherwise look like "the map
-    // just stopped working").
-    if (i < attempts.length - 1) {
-      await wait(200);
-    }
-  }
-
-  return null;
-}
-
-function RouteMapPreview({ route, isDark }: RouteMapPreviewProps) {
-  const mapRef = useRef<HTMLDivElement | null>(null);
-  const leafletRef = useRef<any>(null);
-  const mapInstanceRef = useRef<any>(null);
-  const layerRef = useRef<any>(null);
-  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [distanceKm, setDistanceKm] = useState<number | null>(null);
-  const [durationMin, setDurationMin] = useState<number | null>(null);
-
-  const loadLeaflet = async () => {
-    if ((window as any).L) return (window as any).L;
-
-    const existingScript = document.querySelector(
-      'script[data-termipay-leaflet="true"]'
-    ) as HTMLScriptElement | null;
-
-    const existingCss = document.querySelector(
-      'link[data-termipay-leaflet="true"]'
-    ) as HTMLLinkElement | null;
-
-    if (!existingCss) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-      link.dataset.termipayLeaflet = "true";
-      document.head.appendChild(link);
-    }
-
-    if (existingScript) {
-      await new Promise<void>((resolve, reject) => {
-        if ((window as any).L) {
-          resolve();
-          return;
-        }
-        existingScript.addEventListener("load", () => resolve(), { once: true });
-        existingScript.addEventListener("error", () => reject(new Error("Leaflet failed to load")), { once: true });
-      });
-      return (window as any).L;
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-      script.async = true;
-      script.dataset.termipayLeaflet = "true";
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error("Leaflet failed to load"));
-      document.body.appendChild(script);
-    });
-
-    return (window as any).L;
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const run = async () => {
-      if (!route || !mapRef.current) return;
-
-      setStatus("loading");
-      setErrorMessage("");
-      setDistanceKm(null);
-      setDurationMin(null);
-
-      try {
-        const L = await loadLeaflet();
-        if (cancelled || !mapRef.current) return;
-
-        leafletRef.current = L;
-
-        if (!mapInstanceRef.current) {
-          mapInstanceRef.current = L.map(mapRef.current, {
-            zoomControl: true,
-            attributionControl: true,
-          }).setView([CALBAYOG_CENTER.lat, CALBAYOG_CENTER.lon], 10);
-
-          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 19,
-            attribution: "&copy; OpenStreetMap contributors",
-          }).addTo(mapInstanceRef.current);
-        }
-
-        const map = mapInstanceRef.current;
-
-        if (layerRef.current) {
-          layerRef.current.clearLayers();
-        } else {
-          layerRef.current = L.layerGroup().addTo(map);
-        }
-
-        const origin = await geocodePlace(String(route.origin ?? ""));
-        const destination = await geocodePlace(String(route.destination ?? ""));
-
-        if (cancelled) return;
-
-        if (!origin || !destination) {
-          throw new Error(
-            `Could not accurately locate "${!origin ? route.origin : route.destination}" within Calbayog City. Try using a more specific route name.`
-          );
-        }
-
-        const bounds = L.latLngBounds(
-          [origin.lat, origin.lon],
-          [destination.lat, destination.lon]
-        );
-
-        const startIcon = L.divIcon({
-          className: "termipay-map-marker",
-          html: `<div style="width:30px;height:30px;border-radius:9999px;background:#2563eb;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:12px;">A</div>`,
-          iconSize: [30, 30],
-          iconAnchor: [15, 15],
-        });
-
-        const endIcon = L.divIcon({
-          className: "termipay-map-marker",
-          html: `<div style="width:30px;height:30px;border-radius:9999px;background:#10b981;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:12px;">B</div>`,
-          iconSize: [30, 30],
-          iconAnchor: [15, 15],
-        });
-
-        L.marker([origin.lat, origin.lon], { icon: startIcon })
-          .bindPopup(`<b>${String(route.origin)}</b><br/>Origin`)
-          .addTo(layerRef.current);
-
-        L.marker([destination.lat, destination.lon], { icon: endIcon })
-          .bindPopup(`<b>${String(route.destination)}</b><br/>Destination`)
-          .addTo(layerRef.current);
-
-        try {
-          const osrmUrl =
-            `https://router.project-osrm.org/route/v1/driving/` +
-            `${origin.lon},${origin.lat};${destination.lon},${destination.lat}` +
-            `?overview=full&geometries=geojson`;
-
-          const response = await fetch(osrmUrl);
-
-          if (!response.ok) {
-            throw new Error("Routing service unavailable");
-          }
-
-          const data = await response.json();
-          const routeData = data?.routes?.[0];
-
-          if (!routeData) {
-            throw new Error("No road route found");
-          }
-
-          const coordinates = routeData.geometry.coordinates.map(
-            ([lon, lat]: [number, number]) => [lat, lon]
-          );
-
-          L.polyline(coordinates, {
-            color: "#2563eb",
-            weight: 5,
-            opacity: 0.9,
-            lineCap: "round",
-            lineJoin: "round",
-          }).addTo(layerRef.current);
-
-          setDistanceKm(Number(routeData.distance) / 1000);
-          setDurationMin(Number(routeData.duration) / 60);
-          map.fitBounds(L.latLngBounds(coordinates), { padding: [40, 40] });
-        } catch {
-          const straightDistance = haversineKm(origin, destination);
-
-          L.polyline(
-            [
-              [origin.lat, origin.lon],
-              [destination.lat, destination.lon],
-            ],
-            {
-              color: "#64748b",
-              weight: 4,
-              opacity: 0.8,
-              dashArray: "8 8",
-            }
-          ).addTo(layerRef.current);
-
-          setDistanceKm(straightDistance);
-          setDurationMin(null);
-          map.fitBounds(bounds, { padding: [40, 40] });
-          setErrorMessage("Road routing is unavailable. Showing straight-line distance instead.");
-        }
-
-        if (!cancelled) {
-          setStatus("ready");
-        }
-      } catch (error: any) {
-        if (cancelled) return;
-
-        setStatus("error");
-        setErrorMessage(
-          error?.message || "Unable to load the route map. Please check your internet connection."
-        );
-      }
-    };
-
-    run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [route?.id, route?.origin, route?.destination]);
-
-  useEffect(() => {
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      mapInstanceRef.current?.invalidateSize?.();
-    }, 150);
-
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  if (!route) {
-    return (
-      <div
-        className={`h-[520px] rounded-xl border flex items-center justify-center ${
-          isDark
-            ? "bg-slate-950 border-slate-800 text-slate-500"
-            : "bg-slate-50 border-slate-200 text-slate-400"
-        }`}
-      >
-        No route selected.
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className={`rounded-xl border p-4 ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
-          <p className={`text-[10px] uppercase tracking-wider font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-            Route
-          </p>
-          <p className={`mt-1 font-bold truncate ${isDark ? "text-white" : "text-slate-900"}`}>
-            {route.origin} → {route.destination}
-          </p>
-        </div>
-
-        <div className={`rounded-xl border p-4 ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
-          <p className={`text-[10px] uppercase tracking-wider font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-            Distance
-          </p>
-          <p className={`mt-1 text-xl font-bold ${isDark ? "text-blue-400" : "text-blue-600"}`}>
-            {distanceKm !== null ? `${distanceKm.toFixed(1)} km` : "—"}
-          </p>
-        </div>
-
-        <div className={`rounded-xl border p-4 ${isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"}`}>
-          <p className={`text-[10px] uppercase tracking-wider font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-            Est. Drive Time
-          </p>
-          <p className={`mt-1 text-xl font-bold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-            {durationMin !== null
-              ? durationMin < 60
-                ? `${Math.round(durationMin)} min`
-                : `${Math.floor(durationMin / 60)}h ${Math.round(durationMin % 60)}m`
-              : "—"}
-          </p>
-        </div>
-      </div>
-
-      {errorMessage && (
-        <div className={`rounded-lg border px-4 py-3 text-xs ${
-          isDark
-            ? "bg-amber-950/30 border-amber-900 text-amber-300"
-            : "bg-amber-50 border-amber-200 text-amber-700"
-        }`}>
-          {errorMessage}
-        </div>
-      )}
-
-      <div className="relative overflow-hidden rounded-xl border border-slate-200 shadow-sm">
-        <div ref={mapRef} className="h-[520px] w-full" />
-
-        {status === "loading" && (
-          <div className="absolute inset-0 z-[500] flex items-center justify-center bg-white/75 backdrop-blur-sm">
-            <div className="rounded-xl border bg-white px-5 py-4 shadow-lg text-center">
-              <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
-              <p className="text-sm font-semibold text-slate-700">Loading route map...</p>
-              <p className="mt-1 text-xs text-slate-400">Finding the origin and destination</p>
-            </div>
-          </div>
-        )}
-
-        {status === "error" && (
-          <div className="absolute inset-0 z-[500] flex items-center justify-center bg-white/90">
-            <div className="max-w-sm px-6 text-center">
-              <Map className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-              <p className="text-sm font-semibold text-slate-700">Map preview unavailable</p>
-              <p className="mt-1 text-xs text-slate-500">{errorMessage}</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <p className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-        Map data © OpenStreetMap contributors · Road routing by OSRM · Fare: ₱{Number(route.fareAmount ?? 0).toFixed(2)}
-      </p>
-    </div>
-  );
-}
 
 export default function FareMatrixPage() {
   const { isDark } = useTheme();
@@ -729,8 +153,6 @@ export default function FareMatrixPage() {
   const [originalEditForm, setOriginalEditForm] = useState(editForm);
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [fareMatrixTab, setFareMatrixTab] = useState<"routes" | "map">("routes");
-  const [mapRouteId, setMapRouteId] = useState<string | number | null>(null);
 
   // ✅ Activate-with-device modal state
   const [activateRoute, setActivateRoute] = useState<any>(null);
@@ -908,17 +330,6 @@ export default function FareMatrixPage() {
     sortOrderRef.current = sorted.map((r) => r.id);
     return sorted;
   }, [routes, searchTerm]);
-
-  const selectedMapRoute = Array.isArray(routes)
-    ? routes.find((r) => String(r.id) === String(mapRouteId)) ?? routes[0] ?? null
-    : null;
-
-  useEffect(() => {
-    if (fareMatrixTab === "map" && Array.isArray(routes) && routes.length > 0) {
-      const exists = routes.some((r) => String(r.id) === String(mapRouteId));
-      if (!exists) setMapRouteId(routes[0].id);
-    }
-  }, [fareMatrixTab, routes, mapRouteId]);
 
   const createMutation = useCreateRoute({
     mutation: {
@@ -1241,7 +652,6 @@ export default function FareMatrixPage() {
           50% { opacity: 0.2; }
         }
         .realtime-dot { animation: realtime-dot 1s ease-in-out infinite; }
-        ${FARE_MATRIX_CSS}
       `}</style>
 
       <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-6 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
@@ -1391,254 +801,197 @@ export default function FareMatrixPage() {
         )}
       </div>
 
-      {/* ══ FARE MATRIX PANEL — folder-tab design, matching the Reports page ══ */}
-      <div className="fm-panel" data-theme={isDark ? "dark" : "light"} data-testid="fare-matrix-panel">
-        <div className="fm-tabs" role="tablist" aria-label="Fare matrix sections">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={fareMatrixTab === "routes"}
-            className="fm-tab"
-            data-testid="button-tab-routes"
-            onClick={() => setFareMatrixTab("routes")}
-          >
-            <MapPin aria-hidden="true" />
-            Configured Routes
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={fareMatrixTab === "map"}
-            className="fm-tab"
-            data-testid="button-tab-map"
-            onClick={() => setFareMatrixTab("map")}
-          >
-            <Map aria-hidden="true" />
-            Map Preview
-          </button>
-        </div>
-
-        <div key={fareMatrixTab} className="fm-body fm-body-enter" role="tabpanel">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
-
-          <div className="fm-body-head flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+      <Card className={`h-full shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
+        <CardHeader className={`pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1 flex items-center gap-3">
               <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 shrink-0 ${
                 isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
               }`}>
                 <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
                 LIVE
               </span>
-              <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                {fareMatrixTab === "routes"
-                  ? "Manage transit routes, fares, reader activation, and route status."
-                  : "Preview the selected route on a live OpenStreetMap road map."}
-              </p>
+              <div>
+                <CardTitle className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                  <MapPin className="w-4 h-4 text-blue-500" />
+                  Configured Routes
+                </CardTitle>
+                <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  One active route per reader device. A route stays active until you deactivate it or reassign that reader.
+                </p>
+              </div>
             </div>
-
-            {fareMatrixTab === "routes" && (
-              <div className="relative w-full md:w-72">
-                <Search className={`absolute left-2.5 top-2.5 h-4 w-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                <Input
-                  placeholder="Search origin or destination..."
-                  className={`pl-9 focus-visible:ring-blue-500 ${
-                    isDark
-                      ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
-                      : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
-                  }`}
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-            )}
+            <div className="relative w-full md:w-72">
+              <Search className={`absolute left-2.5 top-2.5 h-4 w-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+              <Input
+                placeholder="Search origin or destination..."
+                className={`pl-9 focus-visible:ring-blue-500 ${
+                  isDark
+                    ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
+                    : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
+                }`}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
           </div>
-
-          <div className="p-6">
-            {fareMatrixTab === "map" ? (
-              <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <p className={`text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>Route Map Preview</p>
-                    <p className={`text-xs mt-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      Select a configured route to view its road path and distance.
-                    </p>
-                  </div>
-                  <div className="w-full sm:w-80">
-                    <Select
-                      value={selectedMapRoute ? String(selectedMapRoute.id) : ""}
-                      onValueChange={(value) => setMapRouteId(value)}
-                    >
-                      <SelectTrigger className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}>
-                        <SelectValue placeholder="Select route" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Array.isArray(routes) && routes.map((route) => (
-                          <SelectItem key={route.id} value={String(route.id)}>
-                            {route.origin} → {route.destination} · ₱{Number(route.fareAmount ?? 0).toFixed(2)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <RouteMapPreview route={selectedMapRoute} isDark={isDark} />
-              </div>
-            ) : isLoading ? (
-              <div className="space-y-4">
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <Skeleton key={i} className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
-                ))}
-              </div>
-            ) : (
-              <div className={`relative overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-                <Table>
-                  <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-                    <TableRow className="border-none hover:bg-transparent">
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Origin</TableHead>
-                      <TableHead />
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Destination</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fare Amount</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
-                      <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Activate</TableHead>
-                      <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
+        </CardHeader>
+        <CardContent className="overflow-y-auto p-0 px-6 pb-6">
+          {isLoading ? (
+            <div className="space-y-4 pt-6">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <Skeleton key={i} className={`h-14 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+              ))}
+            </div>
+          ) : (
+            <div className={`relative mt-6 overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+              <Table>
+                <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+                  <TableRow className="border-none hover:bg-transparent">
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Origin</TableHead>
+                    <TableHead />
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Destination</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fare Amount</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</TableHead>
+                    <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Activate</TableHead>
+                    <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredRoutes.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-20">
+                        <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
+                          <MapPin size={48} className="mb-2" />
+                          <p className="text-xs font-semibold uppercase tracking-widest">
+                            {searchTerm ? "No routes matched" : "No routes configured"}
+                          </p>
+                        </div>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredRoutes.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center py-20">
-                          <div className={`flex flex-col items-center ${isDark ? "text-slate-700" : "text-slate-300"}`}>
-                            <MapPin size={48} className="mb-2" />
-                            <p className="text-xs font-semibold uppercase tracking-widest">
-                              {searchTerm ? "No routes matched" : "No routes configured"}
-                            </p>
+                  ) : (
+                    filteredRoutes.map((route) => (
+                      <TableRow
+                        key={route.id}
+                        data-testid={`row-route-${route.id}`}
+                        className={`transition-all duration-300 ease-in-out ${
+                          route.isActive
+                            ? isDark
+                              ? "bg-emerald-950/20 shadow-[inset_2px_0_0_0_rgb(16,185,129)] border-slate-800"
+                              : "bg-emerald-50/50 shadow-[inset_2px_0_0_0_rgb(16,185,129)] border-slate-100"
+                            : isDark
+                              ? "hover:bg-slate-800/50 border-slate-800"
+                              : "hover:bg-slate-50 border-slate-100"
+                        }`}
+                      >
+                        <TableCell className={`font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-3.5 h-3.5 text-blue-500" />
+                            {route.origin}
                           </div>
                         </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredRoutes.map((route) => (
-                        <TableRow
-                          key={route.id}
-                          data-testid={`row-route-${route.id}`}
-                          className={`transition-all duration-300 ease-in-out ${
-                            route.isActive
-                              ? isDark
-                                ? "bg-emerald-950/20 shadow-[inset_2px_0_0_0_rgb(16,185,129)] border-slate-800"
-                                : "bg-emerald-50/50 shadow-[inset_2px_0_0_0_rgb(16,185,129)] border-slate-100"
-                              : isDark
-                                ? "hover:bg-slate-800/50 border-slate-800"
-                                : "hover:bg-slate-50 border-slate-100"
-                          }`}
-                        >
-                          <TableCell className={`font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                            <div className="flex items-center gap-2">
-                              <MapPin className="w-3.5 h-3.5 text-blue-500" />
-                              {route.origin}
-                            </div>
-                          </TableCell>
-                          <TableCell className={`text-xs px-1 ${isDark ? "text-slate-600" : "text-slate-300"}`}>→</TableCell>
-                          <TableCell className={`font-medium ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                            <div className="flex items-center gap-2">
-                              <MapPin className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                              {route.destination}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <span className={`font-bold ${isDark ? "text-white" : "text-slate-900"} ${route.isActive ? "text-base" : "text-sm"}`}>
-                              ₱{route.fareAmount.toFixed(2)}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={route.isActive ? "default" : "secondary"}
+                        <TableCell className={`text-xs px-1 ${isDark ? "text-slate-600" : "text-slate-300"}`}>→</TableCell>
+                        <TableCell className={`font-medium ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                          <div className="flex items-center gap-2">
+                            <MapPin className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+                            {route.destination}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className={`font-bold ${isDark ? "text-white" : "text-slate-900"} ${route.isActive ? "text-base" : "text-sm"}`}>
+                            ₱{route.fareAmount.toFixed(2)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={route.isActive ? "default" : "secondary"}
+                            className={
+                              route.isActive
+                                ? isDark
+                                  ? "bg-emerald-950/40 text-emerald-400 border border-emerald-900"
+                                  : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : isDark
+                                  ? "bg-slate-800 text-slate-400 border border-slate-700"
+                                  : "bg-slate-100 text-slate-500 border border-slate-200"
+                            }
+                          >
+                            {route.isActive ? "Active" : "Inactive"}
+                          </Badge>
+                        </TableCell>
+
+                        {/* 🔒 Activate / Deactivate — makikita lang kapag may permission (hindi view_only).
+                            Ang view_only ay "—" lang ang makikita. */}
+                        <TableCell>
+                          {canManage ? (
+                            <Button
+                              size="sm"
+                              variant={route.isActive ? "destructive" : "default"}
                               className={
-                                route.isActive
-                                  ? isDark
-                                    ? "bg-emerald-950/40 text-emerald-400 border border-emerald-900"
-                                    : "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : isDark
-                                    ? "bg-slate-800 text-slate-400 border border-slate-700"
-                                    : "bg-slate-100 text-slate-500 border border-slate-200"
+                                (route.isActive
+                                  ? "bg-red-500 hover:bg-red-600 text-white"
+                                  : "bg-emerald-600 hover:bg-emerald-700 text-white") +
+                                " cursor-pointer disabled:cursor-not-allowed"
                               }
-                            >
-                              {route.isActive ? "Active" : "Inactive"}
-                            </Badge>
-                          </TableCell>
-
-                          {/* 🔒 Activate / Deactivate — makikita lang kapag may permission (hindi view_only).
-                              Ang view_only ay "—" lang ang makikita. */}
-                          <TableCell>
-                            {canManage ? (
-                              <Button
-                                size="sm"
-                                variant={route.isActive ? "destructive" : "default"}
-                                className={
-                                  (route.isActive
-                                    ? "bg-red-500 hover:bg-red-600 text-white"
-                                    : "bg-emerald-600 hover:bg-emerald-700 text-white") +
-                                  " cursor-pointer disabled:cursor-not-allowed"
+                              onClick={() => {
+                                if (route.isActive) {
+                                  // Deactivating doesn't need a device selection
+                                  handleDeactivate(route.id);
+                                } else {
+                                  // Activating opens the device-selection modal
+                                  openActivateModal(route);
                                 }
-                                onClick={() => {
-                                  if (route.isActive) {
-                                    // Deactivating doesn't need a device selection
-                                    handleDeactivate(route.id);
-                                  } else {
-                                    // Activating opens the device-selection modal
-                                    openActivateModal(route);
-                                  }
-                                }}
-                                disabled={isTogglePending && pendingRouteId === route.id}
-                                data-testid={`toggle-route-${route.id}`}
-                              >
-                                {route.isActive ? (
-                                  <><PowerOff className="w-3.5 h-3.5 mr-1" /> Deactivate</>
-                                ) : (
-                                  <><Power className="w-3.5 h-3.5 mr-1" /> Activate</>
-                                )}
-                              </Button>
-                            ) : (
-                              <span className={`text-xs ${isDark ? "text-slate-600" : "text-slate-300"}`}>—</span>
-                            )}
-                          </TableCell>
+                              }}
+                              disabled={isTogglePending && pendingRouteId === route.id}
+                              data-testid={`toggle-route-${route.id}`}
+                            >
+                              {route.isActive ? (
+                                <><PowerOff className="w-3.5 h-3.5 mr-1" /> Deactivate</>
+                              ) : (
+                                <><Power className="w-3.5 h-3.5 mr-1" /> Activate</>
+                              )}
+                            </Button>
+                          ) : (
+                            <span className={`text-xs ${isDark ? "text-slate-600" : "text-slate-300"}`}>—</span>
+                          )}
+                        </TableCell>
 
-                          {/* 🔒 Edit / Delete — makikita lang kapag may permission (hindi view_only) */}
-                          <TableCell className="text-right">
-                            {canManage && (
-                              <div className="flex justify-end gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
-                                  onClick={() => openEdit(route)}
-                                  data-testid={`button-edit-route-${route.id}`}
-                                  title="Edit route"
-                                >
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
-                                  onClick={() => setDeleteRoute(route)}
-                                  data-testid={`button-delete-route-${route.id}`}
-                                  title="Delete route"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </Button>
-                              </div>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+                        {/* 🔒 Edit / Delete — makikita lang kapag may permission (hindi view_only) */}
+                        <TableCell className="text-right">
+                          {canManage && (
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
+                                onClick={() => openEdit(route)}
+                                data-testid={`button-edit-route-${route.id}`}
+                                title="Edit route"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
+                                onClick={() => setDeleteRoute(route)}
+                                data-testid={`button-delete-route-${route.id}`}
+                                title="Delete route"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Add Route Dialog
           🔒 `open` naka-gate sa canManage — hindi kailanman magbubukas kapag view_only */}
