@@ -425,10 +425,50 @@ export default function DisbursementPage() {
     [txAvailableToDisburse]
   );
 
-  const disburseAmount = useMemo(
+  // ── TOTAL unlinked fare revenue sitting in the queue, regardless of
+  // when it happened. This is NOT what gets sent on the next disbursement
+  // — it's everything that is eventually eligible, including whatever
+  // will roll over past the ₱50,000-per-call cap. ──
+  const totalUnlinkedFareAmount = useMemo(
     () => txAvailableToDisburse.reduce((sum: number, tx: any) => sum + Math.abs(Number(tx.amount) || 0), 0),
     [txAvailableToDisburse]
   );
+
+  // ── Mirrors exactly what create_transactions_disbursement (the DB
+  // function) will actually batch into the NEXT disbursement call:
+  // oldest unlinked fare transactions first, stopping BEFORE the running
+  // total would exceed MIN_DISBURSEMENT_AMOUNT (₱50,000). Anything past
+  // that point is left unlinked and rolls into the following call —
+  // that's the "remaining balance" the admin should see, not the full
+  // unlinked total. ──
+  const nextDisbursementBatch = useMemo(() => {
+    const sorted = [...txAvailableToDisburse].sort((a: any, b: any) => {
+      const at = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bt = b.created_at ? new Date(b.created_at).getTime() : 0;
+      if (at !== bt) return at - bt;
+      // stable tie-break (by id) so the preview doesn't jitter on re-render
+      return (Number(a.id) || 0) - (Number(b.id) || 0);
+    });
+
+    let batchTotal = 0;
+    const batchIds: any[] = [];
+    for (const tx of sorted) {
+      const amt = Math.abs(Number(tx.amount) || 0);
+      if (batchTotal + amt > MIN_DISBURSEMENT_AMOUNT) break; // would exceed the ₱50k cap — leave for the next call
+      batchTotal += amt;
+      batchIds.push(tx.id);
+    }
+    return { amount: batchTotal, ids: batchIds };
+  }, [txAvailableToDisburse]);
+
+  // ── This is what "Available to Disburse" should actually show: the
+  // amount that will really go out on the NEXT disbursement run, not the
+  // full unlinked total (which can be bigger than the ₱50,000 per-call cap). ──
+  const disburseAmount = nextDisbursementBatch.amount;
+
+  // ── whatever's left in the fare queue AFTER this batch goes out — stays
+  // unlinked and rolls into the following disbursement call. ──
+  const remainingFareBalance = Math.max(0, totalUnlinkedFareAmount - disburseAmount);
 
   // 🔒 Tooltip para sa Disburse button, depende kung bakit disabled
   const disburseButtonTitle = isViewOnly
@@ -981,6 +1021,17 @@ export default function DisbursementPage() {
                 <span className={isDark ? "text-indigo-300" : "text-indigo-700"}>Available to Disburse</span>
                 <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>{formatPeso(disburseAmount)}</span>
               </div>
+              {/* ── shows what's left over in the fare queue AFTER this
+                  batch — i.e. what rolls into the NEXT disbursement, once
+                  it (plus whatever new fares come in) reaches ₱50,000
+                  again. Only rendered when there actually is a remainder,
+                  so the modal doesn't add noise on a normal small queue. ── */}
+              {remainingFareBalance > 0 && (
+                <div className={`flex items-center justify-between px-3 py-2 rounded-md border text-xs ${isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50 border-slate-200"}`}>
+                  <span className={isDark ? "text-slate-400" : "text-slate-500"}>Remaining fare balance (next disbursement)</span>
+                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{formatPeso(remainingFareBalance)}</span>
+                </div>
+              )}
               <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                 Only fare transactions are included here — top-ups, cash-ins, and loads are automatically excluded, and
                 anything already disbursed is not counted again. Disbursements aren't tied to any date — any unlinked fare
