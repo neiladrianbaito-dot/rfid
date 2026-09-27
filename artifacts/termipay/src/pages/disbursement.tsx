@@ -254,11 +254,7 @@ function checkDisbursementIdFieldPresence(txList: any[]) {
   }
 }
 
-// ⭐ FIX: this function signature was missing entirely, which is why the
-// build failed — every hook/handler/JSX below was floating with no
-// enclosing function, so the file's final closing `}` had nothing left
-// to match.
-export default function DisbursementPage() {
+function DisbursementPage() {
   const { user } = useAuth();
   const { isDark } = useTheme();
   const adminName = user?.name || "System Administrator";
@@ -1264,3 +1260,7 @@ export default function DisbursementPage() {
     </div>
   );
 }
+
+export default DisbursementPage;
+export { DisbursementPage };
+export { DisbursementPage as Disbursement };
