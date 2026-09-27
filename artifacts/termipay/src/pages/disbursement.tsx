@@ -270,6 +270,12 @@ export default function DisbursementPage() {
   // ── current page (1-indexed) for the Disbursement History table ──
   const [disbursementPage, setDisbursementPage] = useState(1);
 
+  // ── status filter for the Disbursement History table: ALL shows every
+  // row, otherwise only rows whose status matches exactly. ──
+  const [disbursementStatusFilter, setDisbursementStatusFilter] = useState<
+    "ALL" | "PENDING" | "COMPLETED" | "FAILED"
+  >("ALL");
+
   // ── synchronous guard against double-submit (double-click, double-tap,
   // Enter-key + click race, etc). The real, authoritative protection
   // against duplicates still lives in the backend/DB; this ref just
@@ -566,17 +572,46 @@ export default function DisbursementPage() {
     }
   };
 
+  // ── counts per status, computed off the FULL history (not the filtered
+  // view) so the filter tab counts stay stable regardless of which tab is
+  // currently selected. ──
+  const disbursementStatusCounts = useMemo(() => {
+    const counts = { ALL: disbursementHistory.length, PENDING: 0, COMPLETED: 0, FAILED: 0 };
+    for (const row of disbursementHistory) {
+      const s = (row.status || "").toString().toUpperCase();
+      if (s === "PENDING") counts.PENDING += 1;
+      else if (s === "COMPLETED") counts.COMPLETED += 1;
+      else if (s === "FAILED") counts.FAILED += 1;
+    }
+    return counts;
+  }, [disbursementHistory]);
+
+  // ── the history rows after applying the status filter — this is what
+  // pagination and the table body actually work off of. ──
+  const filteredDisbursementHistory = useMemo(() => {
+    if (disbursementStatusFilter === "ALL") return disbursementHistory;
+    return disbursementHistory.filter(
+      (row: any) => (row.status || "").toString().toUpperCase() === disbursementStatusFilter
+    );
+  }, [disbursementHistory, disbursementStatusFilter]);
+
+  // ── reset back to page 1 whenever the filter changes, so we don't get
+  // stuck on a page number that no longer has any rows. ──
+  useEffect(() => {
+    setDisbursementPage(1);
+  }, [disbursementStatusFilter]);
+
   // ── pagination derived values for the Disbursement History table ──
-  const disbursementTotalPages = Math.max(1, Math.ceil(disbursementHistory.length / DISBURSEMENTS_PER_PAGE));
+  const disbursementTotalPages = Math.max(1, Math.ceil(filteredDisbursementHistory.length / DISBURSEMENTS_PER_PAGE));
 
   // Clamp the current page in case the underlying list shrank (e.g. after
-  // a refetch returned fewer rows than before).
+  // a refetch returned fewer rows than before, or a filter narrowed it).
   const disbursementPageClamped = Math.min(disbursementPage, disbursementTotalPages);
 
   const paginatedDisbursements = useMemo(() => {
     const start = (disbursementPageClamped - 1) * DISBURSEMENTS_PER_PAGE;
-    return disbursementHistory.slice(start, start + DISBURSEMENTS_PER_PAGE);
-  }, [disbursementHistory, disbursementPageClamped]);
+    return filteredDisbursementHistory.slice(start, start + DISBURSEMENTS_PER_PAGE);
+  }, [filteredDisbursementHistory, disbursementPageClamped]);
 
   const goToPrevDisbursementPage = () => {
     setDisbursementPage((p) => Math.max(1, p - 1));
@@ -734,18 +769,60 @@ export default function DisbursementPage() {
                 — actual Xendit payouts
               </span>
             </CardTitle>
-            <button
-              type="button"
-              onClick={fetchDisbursementHistory}
-              disabled={isLoadingHistory}
-              data-testid="button-refresh-disbursement-history"
-              className={`h-8 flex items-center gap-1.5 px-2.5 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-50 ${
-                isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-              }`}
-            >
-              <RefreshCw size={12} className={isLoadingHistory ? "animate-spin" : ""} />
-              Refresh
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* ── status filter tabs: All / Pending / Completed / Failed ── */}
+              <div
+                className={`flex items-center gap-0.5 p-0.5 rounded-md border ${
+                  isDark ? "bg-slate-950 border-slate-800" : "bg-slate-100 border-slate-200"
+                }`}
+              >
+                {(
+                  [
+                    { key: "ALL", label: "All" },
+                    { key: "PENDING", label: "Pending" },
+                    { key: "COMPLETED", label: "Completed" },
+                    { key: "FAILED", label: "Failed" },
+                  ] as const
+                ).map((tab) => {
+                  const isActive = disbursementStatusFilter === tab.key;
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setDisbursementStatusFilter(tab.key)}
+                      data-testid={`button-disbursement-filter-${tab.key.toLowerCase()}`}
+                      className={`h-7 px-2.5 rounded text-[11px] font-semibold transition-colors ${
+                        isActive
+                          ? isDark
+                            ? "bg-slate-800 text-white"
+                            : "bg-white text-slate-900 shadow-sm"
+                          : isDark
+                            ? "text-slate-400 hover:text-white"
+                            : "text-slate-500 hover:text-slate-900"
+                      }`}
+                    >
+                      {tab.label}
+                      <span className={`ml-1 ${isActive ? "opacity-80" : "opacity-60"}`}>
+                        ({disbursementStatusCounts[tab.key]})
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={fetchDisbursementHistory}
+                disabled={isLoadingHistory}
+                data-testid="button-refresh-disbursement-history"
+                className={`h-8 flex items-center gap-1.5 px-2.5 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-50 ${
+                  isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <RefreshCw size={12} className={isLoadingHistory ? "animate-spin" : ""} />
+                Refresh
+              </button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0 px-6 pb-6 pt-6">
@@ -756,6 +833,10 @@ export default function DisbursementPage() {
           ) : disbursementHistory.length === 0 ? (
             <div className={`py-10 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
               Wala pang disbursement na naitala.
+            </div>
+          ) : filteredDisbursementHistory.length === 0 ? (
+            <div className={`py-10 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              Walang disbursement na may status na "{disbursementStatusFilter.toLowerCase()}".
             </div>
           ) : (
             <Table>
@@ -824,10 +905,10 @@ export default function DisbursementPage() {
 
           {/* ── Previous / Next pagination controls — only shown once there's
               more than one page's worth of disbursement rows. ── */}
-          {disbursementHistory.length > DISBURSEMENTS_PER_PAGE && (
+          {filteredDisbursementHistory.length > DISBURSEMENTS_PER_PAGE && (
             <div className={`flex items-center justify-between pt-4 mt-2 border-t ${isDark ? "border-slate-800" : "border-slate-100"}`}>
               <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Page {disbursementPageClamped} of {disbursementTotalPages} · {disbursementHistory.length} total
+                Page {disbursementPageClamped} of {disbursementTotalPages} · {filteredDisbursementHistory.length} total
               </span>
               <div className="flex items-center gap-2">
                 <button
