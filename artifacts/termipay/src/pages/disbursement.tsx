@@ -1,22 +1,53 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
-import { Wallet, History, RefreshCw } from "lucide-react";
+// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
+// at `loaded` (true kapag tapos na ma-fetch ang access info).
+import { useAdminAccess } from "@/hooks/use-admin-access";
+import {
+  Wallet,
+  X,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  ChevronDown,
+  History,
+  RefreshCw,
+} from "lucide-react";
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// how long (ms) to show the success message inside the modal before it auto-closes
+const DISBURSE_SUCCESS_AUTOCLOSE_MS = 1800;
+
+// account number is restricted to digits only, max 12 characters
+const ACCOUNT_NUMBER_MAX_LEN = 12;
+
 // Disbursement History table is paginated client-side at this many rows per page
 const DISBURSEMENTS_PER_PAGE = 10;
+
+// Backend disburses ANY TIME once ₱50,000 worth of unlinked fare
+// transactions has piled up; each disbursement pays up to ₱50,000
+// (oldest first), the excess rolls into the next one. Keep in sync with
+// the DB function's floor/cap.
+const MIN_DISBURSEMENT_AMOUNT = 50000;
+
+// one fixed idempotency key so every disbursement attempt serializes
+// against the advisory lock in the DB function.
+const DISBURSE_IDEMPOTENCY_KEY = "manual-disbursement";
 
 // ── Status filter options for the Disbursement History table ──
 const DISBURSEMENT_STATUS_FILTERS = ["All", "Pending", "Completed", "Failed"] as const;
 
-// Named alias (avoids the build mis-stripping the inline typeof expression)
+// Named alias (avoids the build mis-stripping the inline typeof expression,
+// which caused "ReferenceError: number is not defined" before).
 type DisbursementStatusFilterType = (typeof DISBURSEMENT_STATUS_FILTERS)[number];
 
 // 🎨 Status filter -> dot color mapping
@@ -33,6 +64,22 @@ function getDisbursementStatusDotColor(status: string) {
   }
 }
 
+// SHARED classification config — keep in sync with the backend
+// (create-disbursement function).
+const NON_FARE_MARKERS = ["topup", "top_up", "top-up", "cash_in", "cashin", "cash-in", "load", "reload"];
+
+// strips everything except digits and caps the length
+function sanitizeAccountNumber(raw: string): string {
+  return raw.replace(/\D/g, "").slice(0, ACCOUNT_NUMBER_MAX_LEN);
+}
+
+// shared helper to normalize the API base URL for direct fetch() calls
+function normalizeApiBaseUrl(rawUrl?: string | null): string {
+  const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
+}
+
 // normalizes the Supabase Functions base URL
 function getSupabaseFunctionsUrl(): string {
   const explicit = (import.meta.env.VITE_SUPABASE_FUNCTIONS_URL || "").trim().replace(/\/+$/, "");
@@ -42,7 +89,26 @@ function getSupabaseFunctionsUrl(): string {
   return supabaseUrl.replace(".supabase.co", ".functions.supabase.co");
 }
 
-// bank/e-wallet channels — keep in sync with the Reports page's Disbursement tab
+// fire-and-forget audit log call for disbursement actions
+async function logAudit(params: { entity: string; format: string; details: string }) {
+  try {
+    const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
+    const token = window.localStorage.getItem("termipay_auth_token");
+    await fetch(`${apiBaseUrl}/api/audit/log-export`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(params),
+    });
+  } catch (err) {
+    console.warn("Failed to write audit log (ignoring):", err);
+  }
+}
+
+// bank/e-wallet channels Xendit supports for disbursement in PH —
+// trim/extend to match what's enabled on your Xendit account
 const DISBURSEMENT_CHANNELS = [{ value: "PH_BDO", label: "BDO" }];
 
 function getChannelLabel(row: any): string {
@@ -58,16 +124,59 @@ function isBdoChannel(row: any): boolean {
 }
 
 function DisbursementPage() {
+  const { user } = useAuth();
   const { isDark } = useTheme();
+  const adminName = user?.name || "System Administrator";
 
-  // ── REAL disbursement history — fetched straight from the DB via the
-  // list-disbursements function. ──
+  // 🔒 ADMIN ACCESS:
+  //  - canDisburse: true lang kapag tapos nang mag-load ang access info
+  //    AT may permission (hindi view_only).
+  //  - isViewOnly: true kapag loaded na at walang permission.
+  const { canManage, loaded } = useAdminAccess();
+  const canDisburse = loaded && canManage;
+  const isViewOnly = loaded && !canManage;
+
+  // ── disbursement modal state ──
+  const [disburseModalOpen, setDisburseModalOpen] = useState(false);
+  const [disburseChannelOpen, setDisburseChannelOpen] = useState(false);
+  const [disburseForm, setDisburseForm] = useState({
+    bank_code: "",
+    account_holder_name: "",
+    account_number: "",
+    description: "",
+  });
+  const [isDisbursing, setIsDisbursing] = useState(false);
+  const [disburseError, setDisburseError] = useState<string | null>(null);
+  const [disburseSuccess, setDisburseSuccess] = useState<string | null>(null);
+
+  // ── REAL disbursement history (list-disbursements) ──
   const [disbursementHistory, setDisbursementHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // ── AUTHORITATIVE disbursement preview (preview-disbursement): what the
+  // NEXT disbursement will actually pay out (oldest-first, capped at
+  // ₱50,000) and exactly which fare transactions it covers. ──
+  const [disbursementPreview, setDisbursementPreview] = useState<{
+    totalAvailable: number;
+    batchAmount: number;
+    batchIds: any[];
+  }>({ totalAvailable: 0, batchAmount: 0, batchIds: [] });
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
   const [disbursementPage, setDisbursementPage] = useState(1);
   const [disbursementStatusFilter, setDisbursementStatusFilter] =
     useState<DisbursementStatusFilterType>("All");
+
+  // synchronous guard against double-submit
+  const isSubmittingRef = useRef(false);
+  // holds the setTimeout id for the post-success auto-close
+  const autoCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (autoCloseTimeoutRef.current) clearTimeout(autoCloseTimeoutRef.current);
+    };
+  }, []);
 
   const fetchDisbursementHistory = React.useCallback(async () => {
     setIsLoadingHistory(true);
@@ -91,14 +200,193 @@ function DisbursementPage() {
     }
   }, []);
 
+  const fetchDisbursementPreview = React.useCallback(async () => {
+    setIsLoadingPreview(true);
+    try {
+      const functionsUrl = getSupabaseFunctionsUrl();
+      const token = window.localStorage.getItem("termipay_auth_token");
+      const res = await fetch(`${functionsUrl}/preview-disbursement`, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (!res.ok) {
+        console.warn("Failed to fetch disbursement preview:", await res.text());
+        return;
+      }
+      const data = await res.json();
+      setDisbursementPreview({
+        totalAvailable: typeof data?.total_available === "number" ? data.total_available : 0,
+        batchAmount: typeof data?.batch_amount === "number" ? data.batch_amount : 0,
+        batchIds: Array.isArray(data?.batch_ids) ? data.batch_ids : [],
+      });
+    } catch (err) {
+      console.warn("Failed to fetch disbursement preview:", err);
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDisbursementHistory();
-  }, [fetchDisbursementHistory]);
+    fetchDisbursementPreview();
+  }, [fetchDisbursementHistory, fetchDisbursementPreview]);
 
-  // keep the history fresh when transactions / disbursements change
+  // keep history + preview fresh when transactions / disbursements change
   useRealtimeRefetch(["transactions", "disbursements"], () => {
     fetchDisbursementHistory();
+    fetchDisbursementPreview();
   });
+
+  // explicit fare-only transaction IDs, sent to the backend as an allowlist
+  const fareTransactionIds = disbursementPreview.batchIds;
+  // amount that will ACTUALLY go out on the NEXT disbursement run
+  const disburseAmount = disbursementPreview.batchAmount;
+  // what's left in the fare queue AFTER this batch
+  const remainingFareBalance = Math.max(0, disbursementPreview.totalAvailable - disbursementPreview.batchAmount);
+
+  const disburseButtonTitle = isViewOnly
+    ? "View only — you don't have permission to disburse."
+    : undefined;
+
+  const openDisburseModal = () => {
+    // 🔒 Guard: bawal buksan ang disburse modal kapag view_only
+    if (!canDisburse) return;
+
+    if (autoCloseTimeoutRef.current) {
+      clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = null;
+    }
+    setDisburseChannelOpen(false);
+    setDisburseError(null);
+    setDisburseSuccess(null);
+    setDisburseModalOpen(true);
+    // pull the freshest "available to disburse" numbers as the modal opens
+    fetchDisbursementPreview();
+  };
+
+  const closeDisburseModal = () => {
+    if (isDisbursing) return; // don't let them close mid-request
+    if (autoCloseTimeoutRef.current) {
+      clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = null;
+    }
+    setDisburseChannelOpen(false);
+    setDisburseModalOpen(false);
+  };
+
+  const handleDisburseFieldChange = (field: keyof typeof disburseForm, value: string) => {
+    setDisburseForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleAccountNumberChange = (rawValue: string) => {
+    setDisburseForm((prev) => ({ ...prev, account_number: sanitizeAccountNumber(rawValue) }));
+  };
+
+  const handleSubmitDisbursement = async () => {
+    // 🔒 Guard: bawal mag-disburse kapag view_only (kahit ma-bypass ang UI).
+    if (!canDisburse) {
+      setDisburseError("View only access — wala kang permission na mag-disburse.");
+      return;
+    }
+
+    // synchronous double-submit guard — checked and set BEFORE any await
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
+    setDisburseError(null);
+
+    if (!disburseForm.bank_code) {
+      setDisburseError("Pumili ng bank o e-wallet.");
+      isSubmittingRef.current = false;
+      return;
+    }
+    if (!disburseForm.account_holder_name.trim() || !disburseForm.account_number.trim()) {
+      setDisburseError("Kailangan ang account holder name at account number.");
+      isSubmittingRef.current = false;
+      return;
+    }
+    if (!/^\d{1,12}$/.test(disburseForm.account_number.trim())) {
+      setDisburseError("Ang account/mobile number ay dapat mga numero lang, hanggang 12 digits.");
+      isSubmittingRef.current = false;
+      return;
+    }
+    if (fareTransactionIds.length === 0) {
+      setDisburseError("Walang fare transaction (hindi top-up) na available na i-disburse sa ngayon.");
+      isSubmittingRef.current = false;
+      return;
+    }
+
+    setIsDisbursing(true);
+    try {
+      const functionsUrl = getSupabaseFunctionsUrl();
+      const token = window.localStorage.getItem("termipay_auth_token");
+
+      const res = await fetch(`${functionsUrl}/create-disbursement`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          // no date_start/date_end — the backend scans ALL unlinked fare
+          // transactions regardless of when they happened.
+          // explicit fare-only enforcement; the backend MUST use these.
+          transaction_type: "fare",
+          exclude_transaction_types: NON_FARE_MARKERS,
+          fare_transaction_ids: fareTransactionIds,
+          channel_code: disburseForm.bank_code,
+          bank_code: disburseForm.bank_code,
+          account_holder_name: disburseForm.account_holder_name.trim(),
+          account_number: disburseForm.account_number.trim(),
+          description: disburseForm.description.trim() || "Fare revenue disbursement",
+          requested_by: adminName,
+          idempotency_key: DISBURSE_IDEMPOTENCY_KEY,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        // 409 = no un-disbursed FARE transactions, or the available total
+        // hasn't reached the ₱50,000 minimum yet — the message explains which.
+        if (res.status === 409) {
+          throw new Error(data?.error || "Hindi pa maisasagawa ang disbursement sa ngayon.");
+        }
+        throw new Error(data?.error || "Nabigo ang disbursement request.");
+      }
+
+      const sentAmount = data?.disbursement?.amount ?? disburseAmount;
+      const recipientName = disburseForm.account_holder_name.trim();
+      setDisburseSuccess(
+        `Naipadala na ang ${formatPeso(sentAmount)} (mula sa bagong/hindi pa na-disburse na FARE transactions lamang) — pending pa ang confirmation mula sa Xendit.`
+      );
+      setDisburseForm({ bank_code: "", account_holder_name: "", account_number: "", description: "" });
+
+      logAudit({
+        entity: "Disbursement",
+        format: "Xendit",
+        details: `${adminName} triggered a disbursement of ${formatPeso(sentAmount)} (fare-only) to ${recipientName}`,
+      });
+
+      // refresh everything that just changed
+      fetchDisbursementHistory();
+      fetchDisbursementPreview();
+
+      // auto-close the modal after a short delay so the admin can read the
+      // success message (isDisbursing is already false by then).
+      if (autoCloseTimeoutRef.current) clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = setTimeout(() => {
+        setDisburseChannelOpen(false);
+        setDisburseModalOpen(false);
+        setDisburseSuccess(null);
+        autoCloseTimeoutRef.current = null;
+      }, DISBURSE_SUCCESS_AUTOCLOSE_MS);
+    } catch (err: any) {
+      setDisburseError(err?.message || "May error na nangyari, subukan ulit.");
+    } finally {
+      setIsDisbursing(false);
+      isSubmittingRef.current = false;
+    }
+  };
 
   // ── counts per status, off the FULL history ──
   const disbursementStatusCounts = useMemo(() => {
@@ -147,7 +435,7 @@ function DisbursementPage() {
       style={{ overflowX: "hidden", maxWidth: "100%", boxSizing: "border-box" }}
       data-testid="disbursement-page"
     >
-      {/* ══ HEADER ══ */}
+      {/* ══ HEADER + DISBURSE BUTTON ══ */}
       <div className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
         <div>
           <h2 className={`text-2xl font-bold tracking-tight flex items-center gap-3 ${isDark ? "text-white" : "text-slate-900"}`}>
@@ -155,10 +443,37 @@ function DisbursementPage() {
             Disbursement
           </h2>
           <p className={`text-sm mt-1 flex items-center flex-wrap gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            <span>Past payouts sent via</span>
+            <span>Send collected revenue to a bank or e-wallet via</span>
             <img src="/xendit.png" alt="Xendit" className="h-4 w-auto max-w-[70px] object-contain inline-block align-middle" />
-            <span>. To disburse, go to Reports → Disbursement tab.</span>
+            <span>, and review past payouts.</span>
           </p>
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* 🔒 View-only notice */}
+          {isViewOnly && (
+            <span className={`text-[11px] font-semibold ${isDark ? "text-amber-400" : "text-amber-600"}`}>
+              View only — disbursing is disabled for your account.
+            </span>
+          )}
+
+          {/* 🔒 Disburse button — NAKA-GREY OUT (disabled) kapag view_only,
+              hindi tinatanggal sa screen. */}
+          <Button
+            onClick={openDisburseModal}
+            disabled={!canDisburse}
+            className={`text-xs font-semibold h-9 px-6 text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-100 ${
+              canDisburse
+                ? "bg-indigo-600 hover:bg-indigo-700"
+                : isDark
+                  ? "bg-slate-700 text-slate-400 hover:bg-slate-700"
+                  : "bg-slate-300 text-slate-500 hover:bg-slate-300"
+            }`}
+            data-testid="button-disburse-revenue"
+            title={disburseButtonTitle}
+          >
+            Disburse
+          </Button>
         </div>
       </div>
 
@@ -335,6 +650,240 @@ function DisbursementPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ══ DISBURSE REVENUE MODAL ══ */}
+      {disburseModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={closeDisburseModal}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`w-full max-w-md rounded-lg border shadow-xl ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}
+          >
+            <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+              <h3 className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+                <Wallet size={16} className="text-indigo-500" />
+                Disburse Revenue
+              </h3>
+              <button onClick={closeDisburseModal} className={isDark ? "text-slate-500 hover:text-white" : "text-slate-400 hover:text-slate-900"}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="px-5 py-4 space-y-4">
+              <div className={`flex items-center justify-between px-3 py-2.5 rounded-md border text-sm ${isDark ? "bg-indigo-950/40 border-indigo-900" : "bg-indigo-50 border-indigo-100"}`}>
+                <span className={isDark ? "text-indigo-300" : "text-indigo-700"}>Available to Disburse</span>
+                <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>
+                  {isLoadingPreview ? <Loader2 size={14} className="animate-spin inline-block" /> : formatPeso(disburseAmount)}
+                </span>
+              </div>
+              {/* what's left in the fare queue AFTER this batch — only shown
+                  when there actually is a remainder */}
+              {remainingFareBalance > 0 && (
+                <div className={`flex items-center justify-between px-3 py-2 rounded-md border text-xs ${isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50 border-slate-200"}`}>
+                  <span className={isDark ? "text-slate-400" : "text-slate-500"}>Remaining fare balance (next disbursement)</span>
+                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{formatPeso(remainingFareBalance)}</span>
+                </div>
+              )}
+              <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                Only fare transactions are included here — top-ups, cash-ins, and loads are automatically excluded, and
+                anything already disbursed is not counted again. Disbursements aren't tied to any date — any unlinked fare
+                transaction is eligible, whenever it happened.
+              </p>
+              <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                A disbursement only goes through once at least ₱{MIN_DISBURSEMENT_AMOUNT.toLocaleString("en-US")} is
+                available, and each one pays out up to ₱{MIN_DISBURSEMENT_AMOUNT.toLocaleString("en-US")} at a time
+                (oldest transactions first) — any excess rolls into the next disbursement.
+              </p>
+
+              <div>
+                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Bank / E-Wallet</label>
+                <div className="relative">
+                  <button
+                    type="button"
+                    data-testid="select-disburse-bank"
+                    onClick={() => setDisburseChannelOpen((prev) => !prev)}
+                    className={`w-full h-9 rounded-md border px-2.5 text-sm flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                      isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      {disburseForm.bank_code === "PH_BDO" ? (
+                        <>
+                          <span>BDO</span>
+                          <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none" />
+                        </>
+                      ) : (
+                        <span>
+                          {DISBURSEMENT_CHANNELS.find((c) => c.value === disburseForm.bank_code)?.label || "Select channel"}
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown size={15} className={`flex-none transition-transform ${disburseChannelOpen ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {disburseChannelOpen && (
+                    <div
+                      className={`absolute z-50 mt-1 w-full rounded-md border shadow-lg overflow-hidden ${
+                        isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDisburseFieldChange("bank_code", "");
+                          setDisburseChannelOpen(false);
+                        }}
+                        className={`w-full h-9 px-2.5 text-left text-sm ${
+                          isDark ? "text-slate-400 hover:bg-slate-900" : "text-slate-500 hover:bg-slate-50"
+                        }`}
+                      >
+                        Select channel
+                      </button>
+
+                      {DISBURSEMENT_CHANNELS.map((c) => (
+                        <button
+                          key={c.value}
+                          type="button"
+                          onClick={() => {
+                            handleDisburseFieldChange("bank_code", c.value);
+                            setDisburseChannelOpen(false);
+                          }}
+                          className={`w-full h-10 px-2.5 text-left text-sm flex items-center gap-2 ${
+                            isDark ? "text-slate-200 hover:bg-slate-900" : "text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {c.value === "PH_BDO" ? (
+                            <>
+                              <span>{c.label}</span>
+                              <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none ml-auto" />
+                            </>
+                          ) : (
+                            <span>{c.label}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Account Holder Name</label>
+                <input
+                  type="text"
+                  value={disburseForm.account_holder_name}
+                  onChange={(e) => handleDisburseFieldChange("account_holder_name", e.target.value)}
+                  data-testid="input-disburse-holder-name"
+                  placeholder="Juan Dela Cruz"
+                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Account / Mobile Number
+                  <span className={`ml-1 font-normal normal-case ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+                    (numbers only, max 12 digits)
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={ACCOUNT_NUMBER_MAX_LEN}
+                  value={disburseForm.account_number}
+                  onChange={(e) => handleAccountNumberChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Block obviously non-numeric keystrokes outright (nice-to-have;
+                    // the real enforcement is the onChange sanitizer above, which also
+                    // covers paste/autofill/IME input).
+                    const allowedKeys = [
+                      "Backspace", "Delete", "Tab", "Escape", "Enter",
+                      "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End",
+                    ];
+                    if (allowedKeys.includes(e.key) || e.ctrlKey || e.metaKey) return;
+                    if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                  }}
+                  data-testid="input-disburse-account-number"
+                  placeholder="09171234567"
+                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Note (optional)</label>
+                <input
+                  type="text"
+                  value={disburseForm.description}
+                  onChange={(e) => handleDisburseFieldChange("description", e.target.value)}
+                  data-testid="input-disburse-description"
+                  placeholder="Fare revenue disbursement"
+                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
+                  }`}
+                />
+              </div>
+
+              {disburseError && (
+                <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-red-50 border border-red-100 text-red-700 text-xs">
+                  <AlertCircle size={14} className="mt-0.5 flex-none" />
+                  {disburseError}
+                </div>
+              )}
+              {disburseSuccess && (
+                <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs">
+                  <CheckCircle2 size={14} className="mt-0.5 flex-none" />
+                  {disburseSuccess}
+                </div>
+              )}
+            </div>
+
+            <div className={`flex justify-end gap-2 px-5 py-4 border-t ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+              <button
+                type="button"
+                onClick={closeDisburseModal}
+                disabled={isDisbursing}
+                className={`text-xs font-semibold px-4 h-9 bg-transparent border-0 shadow-none disabled:opacity-60 disabled:cursor-not-allowed ${
+                  isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"
+                }`}
+              >
+                Cancel
+              </button>
+
+              {/* 🔒 Confirm button — naka-grey out din kapag view_only (extra
+                  proteksyon, kahit paano pa nabuksan ang modal) */}
+              <Button
+                onClick={handleSubmitDisbursement}
+                disabled={isDisbursing || !canDisburse}
+                data-testid="button-confirm-disburse"
+                title={isViewOnly ? "View only — you don't have permission to disburse." : undefined}
+                className={`text-white text-xs font-semibold px-4 h-9 disabled:cursor-not-allowed ${
+                  canDisburse
+                    ? "bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+                    : isDark
+                      ? "bg-slate-700 text-slate-400 hover:bg-slate-700 disabled:opacity-100"
+                      : "bg-slate-300 text-slate-500 hover:bg-slate-300 disabled:opacity-100"
+                }`}
+              >
+                {isDisbursing ? (
+                  <>
+                    <Loader2 size={14} className="mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  "Confirm Disbursement"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
