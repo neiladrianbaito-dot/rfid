@@ -2601,7 +2601,7 @@ export default function ReportsPage() {
     logExportAudit({
       entity: "Transaction Logs",
       format: "Excel",
-      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — 10 separate tabs: Fare, Top-up, Transfers, Discount Analytics, Route Summary, Route Daily, Peak Hours, Peak Days, Disbursement Summary, Disbursement Log${
+      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — 8 separate tabs: Fare, Top-up, Transfers, Discount Analytics, Route Summary, Route Daily, Peak Hours, Peak Days${
         isFilterActive ? ` [Filtered: ${filterLabel}]` : ""
       }`,
     });
@@ -2814,46 +2814,6 @@ export default function ReportsPage() {
       { header: "Total Revenue (PHP)", width: 20, get: (d: any) => peso2(d.revenue),
         total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.revenue, 0)) },
       { header: "Rank (by rides)", width: 16, get: (d: any) => (d.rank > 0 ? String(d.rank) : "—") },
-    ];
-
-    // ── 🆕 Disbursement — Summary. One row per date (oldest → newest),
-    // straight from `disbursementChartData` so the sheet matches the
-    // on-screen bar graph exactly: number of disbursements, amount sent,
-    // and net GCash top-ups for that date. ──
-    const disbursementSummaryColumns: SheetColumn[] = [
-      { header: "Date", width: 16, get: (d: any) =>
-        new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-      },
-      { header: "Day", width: 14, get: (d: any) =>
-        new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" })
-      },
-      { header: "Disbursements", width: 16, get: (d: any) => String(d.count),
-        total: (rows) => String(rows.reduce((s: number, d: any) => s + d.count, 0)) },
-      { header: "Amount Sent (PHP)", width: 20, get: (d: any) => peso2(d.sent),
-        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.sent, 0)) },
-      { header: "GCash Top-ups Net (PHP)", width: 24, get: (d: any) => peso2(d.gcash),
-        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.gcash, 0)) },
-    ];
-
-    // ── 🆕 Disbursement — Log. One row per individual disbursement in the
-    // active date filter (FAILED ones included so the admin can see them,
-    // colored red by the status column; the totals only sum non-FAILED). ──
-    const disbursementLogColumns: SheetColumn[] = [
-      { header: "Timestamp", width: 26, get: (r: any) => {
-        const ts = r.created_at || r.timestamp || r.createdAt;
-        return ts ? new Date(ts).toLocaleString("en-PH") : "";
-      }},
-      { header: "Bank / Channel", width: 18, get: (r: any) => r.channel_code || r.bank_code || r.channelCode || "" },
-      { header: "Account Holder", width: 26, get: (r: any) => r.account_holder_name || r.accountHolderName || "" },
-      { header: "Amount (PHP)", width: 18, get: (r: any) => peso2(Number(r.amount) || 0),
-        total: (rows) => peso2(
-          rows
-            .filter((r: any) => (r.status || "").toString().toUpperCase() !== "FAILED")
-            .reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0)
-        ) },
-      { header: "Note", width: 30, get: (r: any) => r.description || "" },
-      { header: "Status", width: 14, get: (r: any) => (r.status || "").toString(),
-        total: (rows) => `${rows.length} record${rows.length === 1 ? "" : "s"}` },
     ];
 
     const filterSuffix = isFilterActive ? ` — Filtered: ${filterLabel}` : "";
