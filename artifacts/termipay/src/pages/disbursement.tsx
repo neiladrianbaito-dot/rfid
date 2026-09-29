@@ -1,9 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
@@ -19,6 +27,9 @@ import {
   ChevronDown,
   History,
   RefreshCw,
+  Eye,
+  XCircle,
+  Clock,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -123,6 +134,265 @@ function isBdoChannel(row: any): boolean {
   return code === "PH_BDO";
 }
 
+// ── Receipt helpers ─────────────────────────────────────────────────────────
+type DisbursementStatus = "completed" | "failed" | "pending";
+
+function normalizeDisbursementStatus(status?: string | null): DisbursementStatus {
+  const key = (status ?? "").toString().toLowerCase().trim();
+  if (key === "completed" || key === "complete" || key === "success") return "completed";
+  if (key === "failed" || key === "failure" || key === "error") return "failed";
+  return "pending";
+}
+
+function formatAmountPlain(amount: number): string {
+  return Math.abs(amount).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatNullablePeso(value: unknown): string {
+  if (value == null || value === "") return "—";
+  const n = Number(value);
+  return Number.isFinite(n) ? `₱${formatAmountPlain(n)}` : "—";
+}
+
+// ── Reusable row para sa receipt modal (same design as Transaction Logs) ────
+function DetailRow({
+  label,
+  isDark,
+  icon,
+  children,
+}: {
+  label: string;
+  isDark: boolean;
+  icon?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+        isDark ? "bg-slate-950/60" : "bg-slate-50"
+      }`}
+    >
+      <span
+        className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest ${
+          isDark ? "text-slate-500" : "text-slate-400"
+        }`}
+      >
+        {icon}
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+// ── Disbursement Receipt Modal ──────────────────────────────────────────────
+function DisbursementReceiptModal({
+  row,
+  onClose,
+  isDark,
+}: {
+  row: any | null;
+  onClose: () => void;
+  isDark: boolean;
+}) {
+  if (!row) return null;
+
+  const status = normalizeDisbursementStatus(row.status);
+  const amount = formatAmountPlain(Number(row.amount) || 0);
+
+  const StatusIcon = status === "failed" ? XCircle : status === "pending" ? Clock : CheckCircle2;
+
+  const statusRingClass =
+    status === "completed"
+      ? isDark
+        ? "ring-emerald-900 bg-emerald-950/40 text-emerald-400"
+        : "ring-emerald-100 bg-emerald-50 text-emerald-600"
+      : status === "failed"
+        ? isDark
+          ? "ring-red-900 bg-red-950/40 text-red-400"
+          : "ring-red-100 bg-red-50 text-red-600"
+        : isDark
+          ? "ring-amber-900 bg-amber-950/40 text-amber-400"
+          : "ring-amber-100 bg-amber-50 text-amber-600";
+
+  const statusTextColor =
+    status === "completed"
+      ? isDark ? "text-emerald-400" : "text-emerald-600"
+      : status === "failed"
+        ? isDark ? "text-red-400" : "text-red-600"
+        : isDark ? "text-amber-400" : "text-amber-600";
+
+  const accentColor =
+    status === "completed"
+      ? "from-emerald-500 to-cyan-400"
+      : status === "failed"
+        ? "from-red-500 to-rose-400"
+        : "from-amber-500 to-orange-400";
+
+  const closeBg =
+    status === "completed"
+      ? "bg-emerald-600 hover:bg-emerald-700"
+      : status === "failed"
+        ? "bg-red-600 hover:bg-red-700"
+        : "bg-indigo-600 hover:bg-indigo-700";
+
+  const valueText = isDark ? "text-slate-300" : "text-slate-700";
+  const amountColor = isDark ? "text-indigo-400" : "text-indigo-600";
+
+  const netValue = row.xendit_net_amount;
+
+  return (
+    <Dialog open={!!row} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent
+        className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
+          isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+        }`}
+      >
+        <VisuallyHidden>
+          <DialogTitle>Disbursement Receipt</DialogTitle>
+          <DialogDescription>Disbursement #{row.id}</DialogDescription>
+        </VisuallyHidden>
+
+        <div className={`h-1 w-full bg-gradient-to-r ${accentColor}`} />
+
+        <div className="px-5 pt-5 pb-6 space-y-5">
+          {/* Hero */}
+          <div className="flex flex-col items-center gap-2 pt-1">
+            <div className={`flex items-center justify-center w-12 h-12 rounded-full ring-2 ${statusRingClass}`}>
+              <StatusIcon className="w-5 h-5" />
+            </div>
+            <p className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              Revenue Disbursement
+            </p>
+            <p className={`text-4xl font-bold tabular-nums tracking-tight ${amountColor}`}>
+              ₱{amount}
+            </p>
+          </div>
+
+          <div className={`border-t border-dashed ${isDark ? "border-slate-800" : "border-slate-200"}`} />
+
+          {/* Details */}
+          <div
+            className={`rounded-xl overflow-hidden border divide-y ${
+              isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-100"
+            }`}
+          >
+            <DetailRow label="Disbursement ID" isDark={isDark}>
+              <span className={`text-xs font-mono font-medium ${valueText}`}>#{row.id}</span>
+            </DetailRow>
+
+            <DetailRow label="Timestamp" isDark={isDark}>
+              <span className={`text-xs text-right font-medium ${valueText}`}>
+                {row.created_at
+                  ? new Date(row.created_at).toLocaleString("en-PH", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })
+                  : "—"}
+              </span>
+            </DetailRow>
+
+            <DetailRow label="Status" isDark={isDark}>
+              <span className={`text-xs font-bold capitalize ${statusTextColor}`}>{status}</span>
+            </DetailRow>
+
+            <DetailRow label="Account Name" isDark={isDark}>
+              <span className={`text-xs font-bold text-right truncate max-w-[60%] ${valueText}`}>
+                {row.account_holder_name || "—"}
+              </span>
+            </DetailRow>
+
+            <DetailRow label="Account No." isDark={isDark}>
+              <span className={`text-xs font-mono font-semibold ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+                {row.account_number || "—"}
+              </span>
+            </DetailRow>
+
+            <DetailRow label="Channel" isDark={isDark}>
+              <span className={`flex items-center justify-end gap-1.5 text-xs font-medium text-right max-w-[60%] ${valueText}`}>
+                {isBdoChannel(row) && (
+                  <img
+                    src="/bdo.png"
+                    alt="BDO"
+                    className="h-4 w-auto max-w-[28px] object-contain shrink-0"
+                  />
+                )}
+                <span className="truncate">{getChannelLabel(row)}</span>
+              </span>
+            </DetailRow>
+
+            <DetailRow label="Xendit ID" isDark={isDark}>
+              <span className={`text-[11px] font-mono font-medium text-right truncate max-w-[60%] ${valueText}`}>
+                {row.xendit_disbursement_id || "—"}
+              </span>
+            </DetailRow>
+
+            <DetailRow label="Note" isDark={isDark}>
+              <span className={`text-xs text-right max-w-[60%] truncate ${valueText}`}>
+                {row.description || "—"}
+              </span>
+            </DetailRow>
+
+            {status === "failed" && row.failure_reason && (
+              <DetailRow label="Failure Reason" isDark={isDark}>
+                <span className={`text-xs text-right max-w-[60%] ${isDark ? "text-red-400" : "text-red-600"}`}>
+                  {row.failure_reason}
+                </span>
+              </DetailRow>
+            )}
+
+            <DetailRow label="Amount" isDark={isDark}>
+              <span className={`text-xs font-mono font-bold ${isDark ? "text-slate-200" : "text-slate-900"}`}>
+                ₱{amount}
+              </span>
+            </DetailRow>
+
+            <DetailRow label="Fee" isDark={isDark}>
+              <span className={`text-xs font-mono font-medium ${valueText}`}>
+                {formatNullablePeso(row.xendit_fee_amount)}
+              </span>
+            </DetailRow>
+
+            <DetailRow label="VAT" isDark={isDark}>
+              <span className={`text-xs font-mono font-medium ${valueText}`}>
+                {formatNullablePeso(row.xendit_vat_amount)}
+              </span>
+            </DetailRow>
+
+            <DetailRow label="Net Amount" isDark={isDark}>
+              <span className={`text-xs font-mono font-bold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                {formatNullablePeso(netValue)}
+              </span>
+            </DetailRow>
+          </div>
+
+          {/* Footer total */}
+          <div
+            className={`border-t border-dashed pt-3 flex items-center justify-between ${
+              isDark ? "border-slate-800" : "border-slate-200"
+            }`}
+          >
+            <span className={`text-[11px] font-medium ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Amount disbursed
+            </span>
+            <span className={`text-sm font-bold ${amountColor}`}>₱{amount}</span>
+          </div>
+
+          <Button
+            onClick={onClose}
+            className={`w-full text-white font-semibold uppercase text-[11px] tracking-widest ${closeBg} transition-colors cursor-pointer`}
+          >
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function DisbursementPage() {
   const { user } = useAuth();
   const { isDark } = useTheme();
@@ -148,6 +418,9 @@ function DisbursementPage() {
   const [isDisbursing, setIsDisbursing] = useState(false);
   const [disburseError, setDisburseError] = useState<string | null>(null);
   const [disburseSuccess, setDisburseSuccess] = useState<string | null>(null);
+
+  // ── receipt modal state (eye icon sa Actions column) ──
+  const [viewDisbursement, setViewDisbursement] = useState<any | null>(null);
 
   // ── REAL disbursement history (list-disbursements) ──
   const [disbursementHistory, setDisbursementHistory] = useState<any[]>([]);
@@ -564,6 +837,7 @@ function DisbursementPage() {
                   <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>VAT</TableHead>
                   <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Net Amount</TableHead>
                   <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-indigo-500">Amount</TableHead>
+                  <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -610,6 +884,19 @@ function DisbursementPage() {
                     <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
                       {formatPeso(Number(row.amount) || 0)}
                     </TableCell>
+                    {/* 👁 Actions — buksan ang receipt */}
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 cursor-pointer text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                        onClick={() => setViewDisbursement(row)}
+                        title="View receipt"
+                        data-testid={`button-view-disbursement-${row.id}`}
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -650,6 +937,13 @@ function DisbursementPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ══ DISBURSEMENT RECEIPT MODAL (same design as Transaction Logs receipt) ══ */}
+      <DisbursementReceiptModal
+        row={viewDisbursement}
+        onClose={() => setViewDisbursement(null)}
+        isDark={isDark}
+      />
 
       {/* ══ DISBURSE REVENUE MODAL ══ */}
       {disburseModalOpen && (
