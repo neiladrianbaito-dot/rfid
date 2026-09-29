@@ -1,70 +1,25 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useListTransactions } from "@workspace/api-client-react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
-// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
-// at `loaded` (true kapag tapos na ma-fetch ang access info).
-import { useAdminAccess } from "@/hooks/use-admin-access";
-import {
-  Wallet,
-  X,
-  Loader2,
-  CheckCircle2,
-  AlertCircle,
-  ChevronDown,
-  History,
-  RefreshCw,
-  Landmark,
-  Smartphone,
-  PiggyBank,
-} from "lucide-react";
+import { Wallet, History, RefreshCw } from "lucide-react";
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-// how long (ms) to show the success message inside the modal before it auto-closes
-const DISBURSE_SUCCESS_AUTOCLOSE_MS = 1800;
-
-// account number is restricted to digits only, max 12 characters (covers PH
-// mobile numbers like "09171234567" as well as bank account numbers)
-const ACCOUNT_NUMBER_MAX_LEN = 12;
-
 // Disbursement History table is paginated client-side at this many rows per page
 const DISBURSEMENTS_PER_PAGE = 10;
 
-// ── Backend now disburses ANY TIME — there's no date_start/date_end
-// window anymore. A disbursement only fires once ₱50,000 worth of
-// unlinked fare transactions has piled up, and each disbursement only
-// ever takes up to ₱50,000 (oldest first); any excess rolls into the
-// next call. Keep this in sync with the DB function's floor/cap. ──
-const MIN_DISBURSEMENT_AMOUNT = 50000;
-
-// ── one fixed idempotency key so every disbursement attempt — no
-// matter when it's triggered — serializes against the advisory lock in
-// the DB function. There's no "period" anymore to key off of. ──
-const DISBURSE_IDEMPOTENCY_KEY = "manual-disbursement";
-
-// ── Status filter options for the Disbursement History table — same
-// "All + dot-colored Select" pattern used for Type/Status filters in
-// User Management. ──
+// ── Status filter options for the Disbursement History table ──
 const DISBURSEMENT_STATUS_FILTERS = ["All", "Pending", "Completed", "Failed"] as const;
 
-// ⭐ FIX: pulled the inline `(typeof DISBURSEMENT_STATUS_FILTERS)[number]`
-// type expression out into its own named alias. That inline form was
-// getting mis-stripped by the build (its runtime output referenced a
-// bare `number` identifier that doesn't exist, causing
-// "ReferenceError: number is not defined" in the browser). A plain
-// named type reference like this cannot be misparsed the same way.
+// Named alias (avoids the build mis-stripping the inline typeof expression)
 type DisbursementStatusFilterType = (typeof DISBURSEMENT_STATUS_FILTERS)[number];
 
-// 🎨 Status filter -> dot color mapping (Pending/Completed/Failed), same
-// palette used elsewhere in the app (amber/emerald/red).
+// 🎨 Status filter -> dot color mapping
 function getDisbursementStatusDotColor(status: string) {
   switch (status) {
     case "Completed":
@@ -78,33 +33,7 @@ function getDisbursementStatusDotColor(status: string) {
   }
 }
 
-// ── SHARED classification config — keep this in sync with whatever the
-// backend (create-disbursement function) uses to classify transactions.
-// Ideally this list lives in one shared module imported by both sides;
-// duplicating it here is a stopgap until that's wired up. ──
-const NON_FARE_MARKERS = ["topup", "top_up", "top-up", "cash_in", "cashin", "cash-in", "load", "reload"];
-
-// ── GCash detection markers — used ONLY to narrow top-up transactions
-// down to the ones that specifically came in through GCash (as opposed
-// to other e-wallets/bank channels you might add later). Adjust/extend
-// if your backend spells the channel differently. ──
-const GCASH_MARKERS = ["gcash", "g-cash", "g_cash"];
-
-// strips everything except digits and caps the length, used for the
-// account/mobile number field
-function sanitizeAccountNumber(raw: string): string {
-  return raw.replace(/\D/g, "").slice(0, ACCOUNT_NUMBER_MAX_LEN);
-}
-
-// shared helper to normalize the API base URL for direct fetch() calls
-function normalizeApiBaseUrl(rawUrl?: string | null): string {
-  const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
-  if (!trimmed) return "";
-  return trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
-}
-
-// normalizes the Supabase Functions base URL, e.g.
-// "https://xxxx.supabase.co" -> "https://xxxx.functions.supabase.co"
+// normalizes the Supabase Functions base URL
 function getSupabaseFunctionsUrl(): string {
   const explicit = (import.meta.env.VITE_SUPABASE_FUNCTIONS_URL || "").trim().replace(/\/+$/, "");
   if (explicit) return explicit;
@@ -113,113 +42,9 @@ function getSupabaseFunctionsUrl(): string {
   return supabaseUrl.replace(".supabase.co", ".functions.supabase.co");
 }
 
-// fire-and-forget audit log call for disbursement actions
-async function logAudit(params: { entity: string; format: string; details: string }) {
-  try {
-    const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || null);
-    const token = window.localStorage.getItem("termipay_auth_token");
-    await fetch(`${apiBaseUrl}/api/audit/log-export`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(params),
-    });
-  } catch (err) {
-    console.warn("Failed to write audit log (ignoring):", err);
-  }
-}
+// bank/e-wallet channels — keep in sync with the Reports page's Disbursement tab
+const DISBURSEMENT_CHANNELS = [{ value: "PH_BDO", label: "BDO" }];
 
-// bank/e-wallet channels Xendit commonly supports for disbursement in PH —
-// trim/extend this list to match what's actually enabled on your Xendit account
-const DISBURSEMENT_CHANNELS = [
-  { value: "PH_BDO", label: "BDO" },
-];
-
-// ── The inverse of isFareTransaction: true only when the transaction IS
-// a top-up/cash-in/load (i.e. money a passenger added to their own
-// balance, not fare revenue). ──
-function isTopupTransaction(tx: any): boolean {
-  const raw = (tx.type ?? tx.transaction_type ?? tx.category ?? "")
-    .toString()
-    .toLowerCase()
-    .trim();
-  if (!raw) return false; // no type field present — can't confirm it's a top-up
-  return NON_FARE_MARKERS.some((marker) => raw.includes(marker));
-}
-
-// ── Identifies whether a (top-up) transaction specifically came in
-// through GCash, as opposed to another e-wallet/bank channel.
-//
-// IMPORTANT: adjust the field lookup below to match whatever field your
-// backend actually stores the payment channel in (e.g. `channel`,
-// `payment_channel`, `payment_method`, `channel_code`). If no
-// channel-like field is present at all, this currently assumes GCash —
-// flip that default to `false` once you have a real channel field, so
-// top-ups from other channels don't get miscounted. ──
-function isGcashChannel(tx: any): boolean {
-  const raw = (tx.channel ?? tx.payment_channel ?? tx.payment_method ?? tx.channel_code ?? "")
-    .toString()
-    .toLowerCase()
-    .trim();
-  if (!raw) return true; // no channel field present — TODO: flip to false once a real field exists
-  return GCASH_MARKERS.some((marker) => raw.includes(marker));
-}
-
-// ── Returns the NET amount of a top-up transaction, i.e. what's left
-// AFTER Xendit's fee/VAT is deducted — NOT the gross `amount` the
-// passenger paid.
-//
-// Lookup order:
-//   1) a dedicated net-amount field (snake_case or camelCase variants)
-//   2) gross amount minus fee minus VAT, if fee/VAT fields exist
-//   3) last resort: the gross amount (and a one-time console warning, so
-//      you can tell the net field isn't reaching the frontend)
-//
-// IMPORTANT: if your transactions API uses a different field name for the
-// net amount, add it to the `netRaw` lookup below. Also make sure that
-// field is declared in the transactions response schema in
-// @workspace/api-zod, otherwise Zod strips it before it ever gets here. ──
-let warnedMissingNetAmount = false;
-
-function getTopupNetAmount(tx: any): number {
-  const netRaw =
-    tx.net_amount ??
-    tx.netAmount ??
-    tx.xendit_net_amount ??
-    tx.xenditNetAmount ??
-    tx.amount_net ??
-    null;
-
-  if (netRaw !== null && netRaw !== "" && !isNaN(Number(netRaw))) {
-    return Math.abs(Number(netRaw));
-  }
-
-  const gross = Math.abs(Number(tx.amount) || 0);
-  const feeRaw = tx.fee ?? tx.fee_amount ?? tx.xendit_fee_amount ?? tx.xenditFeeAmount ?? null;
-  const vatRaw = tx.vat ?? tx.vat_amount ?? tx.xendit_vat_amount ?? tx.xenditVatAmount ?? null;
-
-  if (feeRaw !== null || vatRaw !== null) {
-    const fee = Math.abs(Number(feeRaw) || 0);
-    const vat = Math.abs(Number(vatRaw) || 0);
-    return Math.max(0, gross - fee - vat);
-  }
-
-  if (!warnedMissingNetAmount) {
-    warnedMissingNetAmount = true;
-    console.warn(
-      "[Disbursement] Top-up transaction has no net amount / fee fields — falling back to gross amount. Check the transactions API response + Zod schema.",
-      tx
-    );
-  }
-  return gross;
-}
-
-// ── Resolves a disbursement history row's bank/e-wallet channel code
-// (whatever field the backend happens to store it in) to a display
-// label from DISBURSEMENT_CHANNELS, falling back to the raw code (or an
-// em dash) if it's missing/unrecognized. ──
 function getChannelLabel(row: any): string {
   const code = (row.bank_code ?? row.channel_code ?? row.channel ?? "").toString().trim();
   if (!code) return "—";
@@ -227,127 +52,23 @@ function getChannelLabel(row: any): string {
   return match ? match.label : code;
 }
 
-// ── True when a disbursement history row's channel resolves to BDO, so
-// the table can show the BDO logo next to the label — same treatment as
-// the channel picker in the modal. ──
 function isBdoChannel(row: any): boolean {
   const code = (row.bank_code ?? row.channel_code ?? row.channel ?? "").toString().trim();
   return code === "PH_BDO";
 }
 
-// ── one-time diagnostic: if NONE of the fetched transactions ever carry a
-// disbursement_id field at all (i.e. it's `undefined` on every single row,
-// not just `null` on the genuinely-unlinked ones), that's a strong signal
-// the field is being stripped before it reaches the frontend — e.g. missing
-// from the transactions API's Zod response schema (@workspace/api-zod).
-// When that happens, `tx.disbursement_id == null` is true for EVERY
-// transaction, so already-disbursed fare transactions get miscounted as
-// still available — which is exactly the kind of large frontend-vs-backend
-// mismatch this warning is meant to catch. ──
-let warnedMissingDisbursementIdField = false;
-
-function checkDisbursementIdFieldPresence(txList: any[]) {
-  if (warnedMissingDisbursementIdField || txList.length === 0) return;
-  const anyRowHasField = txList.some((tx) => Object.prototype.hasOwnProperty.call(tx, "disbursement_id"));
-  if (!anyRowHasField) {
-    warnedMissingDisbursementIdField = true;
-    console.error(
-      "[Disbursement] None of the fetched transactions have a `disbursement_id` field at all. " +
-        "This usually means the field is being stripped before it reaches the frontend (e.g. missing " +
-        "from the transactions API's Zod response schema in @workspace/api-zod), which makes already-" +
-        "disbursed fare transactions look like they're still available to disburse. Add `disbursement_id` " +
-        "to that schema and this warning should stop firing.",
-      txList[0]
-    );
-  }
-}
-
 function DisbursementPage() {
-  const { user } = useAuth();
   const { isDark } = useTheme();
-  const adminName = user?.name || "System Administrator";
-
-  // 🔒 ADMIN ACCESS:
-  //  - canDisburse: true lang kapag tapos nang mag-load ang access info
-  //    AT may permission (hindi view_only). Ginagamit sa Disburse button,
-  //    sa modal Confirm button, at sa mga handler bilang proteksyon.
-  //  - isViewOnly: true kapag loaded na at walang permission — para sa
-  //    tooltip/message.
-  const { canManage, loaded } = useAdminAccess();
-  const canDisburse = loaded && canManage;
-  const isViewOnly = loaded && !canManage;
-
-  // ── disbursement modal state ──
-  const [disburseModalOpen, setDisburseModalOpen] = useState(false);
-  const [disburseChannelOpen, setDisburseChannelOpen] = useState(false);
-  const [disburseForm, setDisburseForm] = useState({
-    bank_code: "",
-    account_holder_name: "",
-    account_number: "",
-    description: "",
-  });
-  const [isDisbursing, setIsDisbursing] = useState(false);
-  const [disburseError, setDisburseError] = useState<string | null>(null);
-  const [disburseSuccess, setDisburseSuccess] = useState<string | null>(null);
 
   // ── REAL disbursement history — fetched straight from the DB via the
-  // list-disbursements function, not computed/estimated on the frontend.
-  // This reflects exactly what was (or wasn't) actually transferred to
-  // Xendit, including its current status. ──
+  // list-disbursements function. ──
   const [disbursementHistory, setDisbursementHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-  // ── REAL Xendit account balance — fetched straight from Xendit's
-  // Balance API (via the get-xendit-balance function), i.e. how much is
-  // actually sitting in your Xendit account right now. ──
-  const [xenditBalance, setXenditBalance] = useState<number | null>(null);
-  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
-
-  // ── AUTHORITATIVE disbursement preview — fetched straight from the DB
-  // via preview-disbursement (which calls preview_disbursement_batch(),
-  // a read-only twin of create_transactions_disbursement()). This is the
-  // single source of truth for "Available to Disburse": totalAvailable is
-  // every unlinked fare transaction (uncapped), batchAmount is what the
-  // NEXT disbursement call will actually pay out (oldest-first, capped at
-  // ₱50,000), and batchIds are exactly which transactions that covers.
-  // We deliberately do NOT derive this from useListTransactions() anymore
-  // — that list's `disbursement_id` wasn't reliably reaching the frontend,
-  // which made already-linked fare transactions look "available". ──
-  const [disbursementPreview, setDisbursementPreview] = useState<{
-    totalAvailable: number;
-    batchAmount: number;
-    batchIds: any[];
-  }>({ totalAvailable: 0, batchAmount: 0, batchIds: [] });
-  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
-
-
-  // ── current page (1-indexed) for the Disbursement History table ──
   const [disbursementPage, setDisbursementPage] = useState(1);
+  const [disbursementStatusFilter, setDisbursementStatusFilter] =
+    useState<DisbursementStatusFilterType>("All");
 
-  // ── status filter for the Disbursement History table: "All" shows every
-  // row, otherwise only rows whose status matches exactly. ──
-  const [disbursementStatusFilter, setDisbursementStatusFilter] = useState<DisbursementStatusFilterType>("All");
-
-  // ── synchronous guard against double-submit (double-click, double-tap,
-  // Enter-key + click race, etc). The real, authoritative protection
-  // against duplicates still lives in the backend/DB; this ref just
-  // avoids firing an obviously-redundant second request from the same
-  // click session. ──
-  const isSubmittingRef = useRef(false);
-
-  // ── holds the setTimeout id for the post-success auto-close ──
-  const autoCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (autoCloseTimeoutRef.current) clearTimeout(autoCloseTimeoutRef.current);
-    };
-  }, []);
-
-  // ── fetches the REAL disbursement rows from the DB (via the
-  // list-disbursements function) — what actually went to Xendit, with
-  // its current status. Called on mount and after every disbursement
-  // attempt so the list always reflects reality. ──
   const fetchDisbursementHistory = React.useCallback(async () => {
     setIsLoadingHistory(true);
     try {
@@ -374,299 +95,12 @@ function DisbursementPage() {
     fetchDisbursementHistory();
   }, [fetchDisbursementHistory]);
 
-  // ── fetches the REAL Xendit balance (via the get-xendit-balance
-  // function). Called on mount and manually via the Refresh button next
-  // to the balance card. ──
-  const fetchXenditBalance = React.useCallback(async () => {
-    setIsLoadingBalance(true);
-    try {
-      const functionsUrl = getSupabaseFunctionsUrl();
-      const token = window.localStorage.getItem("termipay_auth_token");
-      const res = await fetch(`${functionsUrl}/get-xendit-balance`, {
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
-      if (!res.ok) {
-        console.warn("Failed to fetch Xendit balance:", await res.text());
-        setXenditBalance(null);
-        return;
-      }
-      const data = await res.json();
-      setXenditBalance(typeof data?.balance === "number" ? data.balance : null);
-    } catch (err) {
-      console.warn("Failed to fetch Xendit balance:", err);
-      setXenditBalance(null);
-    } finally {
-      setIsLoadingBalance(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchXenditBalance();
-  }, [fetchXenditBalance]);
-
-  // ── fetches the AUTHORITATIVE "available to disburse" numbers from
-  // preview-disbursement (read-only DB function). Called on mount, after
-  // every successful disbursement, whenever transactions change via
-  // realtime, and right when the disburse modal is opened, so it's as
-  // fresh as possible before the admin submits. ──
-  const fetchDisbursementPreview = React.useCallback(async () => {
-    setIsLoadingPreview(true);
-    try {
-      const functionsUrl = getSupabaseFunctionsUrl();
-      const token = window.localStorage.getItem("termipay_auth_token");
-      const res = await fetch(`${functionsUrl}/preview-disbursement`, {
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
-      if (!res.ok) {
-        console.warn("Failed to fetch disbursement preview:", await res.text());
-        return;
-      }
-      const data = await res.json();
-      setDisbursementPreview({
-        totalAvailable: typeof data?.total_available === "number" ? data.total_available : 0,
-        batchAmount: typeof data?.batch_amount === "number" ? data.batch_amount : 0,
-        batchIds: Array.isArray(data?.batch_ids) ? data.batch_ids : [],
-      });
-    } catch (err) {
-      console.warn("Failed to fetch disbursement preview:", err);
-    } finally {
-      setIsLoadingPreview(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchDisbursementPreview();
-  }, [fetchDisbursementPreview]);
-
-  const { data: transactions, refetch: refetchTransactions } = useListTransactions();
-
-  useRealtimeRefetch(["transactions"], () => {
-    refetchTransactions();
-    // a new top-up or a new disbursement can change the real Xendit
-    // balance, so keep it fresh too
-    fetchXenditBalance();
-    // fare transactions changing (new taps, a disbursement linking some)
-    // directly changes the authoritative "available to disburse" preview
-    fetchDisbursementPreview();
+  // keep the history fresh when transactions / disbursements change
+  useRealtimeRefetch(["transactions", "disbursements"], () => {
+    fetchDisbursementHistory();
   });
 
-  const txList = useMemo(() => (Array.isArray(transactions) ? transactions : []), [transactions]);
-
-  useEffect(() => {
-    checkDisbursementIdFieldPresence(txList);
-  }, [txList]);
-
-
-  // ── total NET amount, ACROSS ALL TIME, that users have topped up
-  // specifically via GCash — i.e. after Xendit's fee/VAT is deducted,
-  // NOT the gross amount the passenger paid. This is a running lifetime
-  // total, separate from disbursable fare revenue. ──
-  const totalGcashTopups = useMemo(
-    () =>
-      txList
-        .filter((tx: any) => isTopupTransaction(tx) && isGcashChannel(tx))
-        .reduce((sum: number, tx: any) => sum + getTopupNetAmount(tx), 0),
-    [txList]
-  );
-
-  // ── total actually paid out, ALL TIME, across every disbursement that
-  // wasn't FAILED (PENDING + COMPLETED). A FAILED row means the reserved
-  // transactions were released and never actually left Xendit, so it's
-  // excluded here. ──
-  const totalDisbursed = useMemo(
-    () =>
-      disbursementHistory
-        .filter((row: any) => (row.status || "").toString().toUpperCase() !== "FAILED")
-        .reduce((sum: number, row: any) => sum + (Number(row.amount) || 0), 0),
-    [disbursementHistory]
-  );
-
-  // ── explicit fare-only transaction IDs, sent to the backend as an
-  // allowlist. These come straight from preview_disbursement_batch() —
-  // the same batch the backend will actually reserve — instead of being
-  // re-derived client-side from the general transactions list. ──
-  const fareTransactionIds = disbursementPreview.batchIds;
-
-  // ── "Available to Disburse": the amount that will ACTUALLY go out on
-  // the NEXT disbursement run, straight from the DB (oldest-first, capped
-  // at ₱50,000). ──
-  const disburseAmount = disbursementPreview.batchAmount;
-
-  // ── whatever's left in the fare queue AFTER this batch goes out — stays
-  // unlinked and rolls into the following disbursement call. ──
-  const remainingFareBalance = Math.max(0, disbursementPreview.totalAvailable - disbursementPreview.batchAmount);
-
-  // 🔒 Tooltip para sa Disburse button, depende kung bakit disabled
-  const disburseButtonTitle = isViewOnly
-    ? "View only — you don't have permission to disburse."
-    : undefined;
-
-  const openDisburseModal = () => {
-    // 🔒 Guard: bawal buksan ang disburse modal kapag view_only
-    if (!canDisburse) return;
-
-    if (autoCloseTimeoutRef.current) {
-      clearTimeout(autoCloseTimeoutRef.current);
-      autoCloseTimeoutRef.current = null;
-    }
-    setDisburseChannelOpen(false);
-    setDisburseError(null);
-    setDisburseSuccess(null);
-    setDisburseModalOpen(true);
-    // pull the freshest "available to disburse" numbers right as the
-    // modal opens, so the admin isn't looking at a stale preview
-    fetchDisbursementPreview();
-  };
-
-  const closeDisburseModal = () => {
-    if (isDisbursing) return; // don't let them close mid-request
-    if (autoCloseTimeoutRef.current) {
-      clearTimeout(autoCloseTimeoutRef.current);
-      autoCloseTimeoutRef.current = null;
-    }
-    setDisburseChannelOpen(false);
-    setDisburseModalOpen(false);
-  };
-
-  const handleDisburseFieldChange = (field: keyof typeof disburseForm, value: string) => {
-    setDisburseForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  // ── dedicated handler for the account/mobile number field: strips any
-  // non-digit characters as the admin types/pastes, and hard-caps the
-  // length at ACCOUNT_NUMBER_MAX_LEN (12). ──
-  const handleAccountNumberChange = (rawValue: string) => {
-    setDisburseForm((prev) => ({ ...prev, account_number: sanitizeAccountNumber(rawValue) }));
-  };
-
-  const handleSubmitDisbursement = async () => {
-    // 🔒 Guard: bawal mag-disburse kapag view_only. Proteksyon ito kahit
-    // ma-bypass ang UI (hal. Enter key, devtools, atbp.).
-    if (!canDisburse) {
-      setDisburseError("View only access — wala kang permission na mag-disburse.");
-      return;
-    }
-
-    // ── synchronous double-submit guard — checked and set BEFORE any
-    // await, so a second click that fires before the first re-render
-    // still gets blocked here. ──
-    if (isSubmittingRef.current) return;
-    isSubmittingRef.current = true;
-
-    setDisburseError(null);
-
-    if (!disburseForm.bank_code) {
-      setDisburseError("Pumili ng bank o e-wallet.");
-      isSubmittingRef.current = false;
-      return;
-    }
-    if (!disburseForm.account_holder_name.trim() || !disburseForm.account_number.trim()) {
-      setDisburseError("Kailangan ang account holder name at account number.");
-      isSubmittingRef.current = false;
-      return;
-    }
-    // ── belt-and-suspenders: account number should already be digits-only
-    // (max 12) thanks to handleAccountNumberChange, but re-validate here in
-    // case the value ever gets set another way. ──
-    if (!/^\d{1,12}$/.test(disburseForm.account_number.trim())) {
-      setDisburseError("Ang account/mobile number ay dapat mga numero lang, hanggang 12 digits.");
-      isSubmittingRef.current = false;
-      return;
-    }
-    // ── nothing fare-eligible to disburse — stop before even hitting the
-    // backend, and tell the admin clearly why. ──
-    if (fareTransactionIds.length === 0) {
-      setDisburseError("Walang fare transaction (hindi top-up) na available na i-disburse sa ngayon.");
-      isSubmittingRef.current = false;
-      return;
-    }
-
-    setIsDisbursing(true);
-    try {
-      const functionsUrl = getSupabaseFunctionsUrl();
-      const token = window.localStorage.getItem("termipay_auth_token");
-
-      const res = await fetch(`${functionsUrl}/create-disbursement`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          // ── no more date_start/date_end — the backend now scans ALL
-          // unlinked fare transactions regardless of when they happened. ──
-          // ── explicit fare-only enforcement sent to the backend. The
-          // backend MUST use these to restrict what actually gets
-          // disbursed — it should not just trust the client. ──
-          transaction_type: "fare",
-          exclude_transaction_types: NON_FARE_MARKERS,
-          fare_transaction_ids: fareTransactionIds,
-          channel_code: disburseForm.bank_code,
-          bank_code: disburseForm.bank_code,
-          account_holder_name: disburseForm.account_holder_name.trim(),
-          account_number: disburseForm.account_number.trim(),
-          description: disburseForm.description.trim() || "Fare revenue disbursement",
-          requested_by: adminName,
-          idempotency_key: DISBURSE_IDEMPOTENCY_KEY,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        // 409 = the backend either found no un-disbursed FARE transactions,
-        // or the available total hasn't reached the ₱50,000 minimum yet —
-        // show its message directly since it already explains which.
-        if (res.status === 409) {
-          throw new Error(data?.error || "Hindi pa maisasagawa ang disbursement sa ngayon.");
-        }
-        throw new Error(data?.error || "Nabigo ang disbursement request.");
-      }
-
-      const sentAmount = data?.disbursement?.amount ?? disburseAmount;
-      setDisburseSuccess(
-        `Naipadala na ang ${formatPeso(sentAmount)} (mula sa bagong/hindi pa na-disburse na FARE transactions lamang) — pending pa ang confirmation mula sa Xendit.`
-      );
-      setDisburseForm({ bank_code: "", account_holder_name: "", account_number: "", description: "" });
-
-      logAudit({
-        entity: "Disbursement",
-        format: "Xendit",
-        details: `${adminName} triggered a disbursement of ${formatPeso(sentAmount)} (fare-only) to ${disburseForm.account_holder_name.trim()}`,
-      });
-
-      // refresh the REAL history list right away so the new row (with its
-      // actual DB-generated amount/status) shows up without waiting for
-      // the modal auto-close
-      fetchDisbursementHistory();
-      // the balance in Xendit just changed too (money went out)
-      fetchXenditBalance();
-      // the fare queue just changed too (some transactions just got linked)
-      fetchDisbursementPreview();
-
-      // ── auto-close the modal once the disbursement request succeeds.
-      // A short delay lets the admin actually read the success message
-      // before the modal disappears; isDisbursing is already false by
-      // then (set in `finally` below) so closeDisburseModal won't be
-      // blocked by the "don't close mid-request" guard. ──
-      if (autoCloseTimeoutRef.current) clearTimeout(autoCloseTimeoutRef.current);
-      autoCloseTimeoutRef.current = setTimeout(() => {
-        setDisburseChannelOpen(false);
-        setDisburseModalOpen(false);
-        setDisburseSuccess(null);
-        autoCloseTimeoutRef.current = null;
-      }, DISBURSE_SUCCESS_AUTOCLOSE_MS);
-    } catch (err: any) {
-      setDisburseError(err?.message || "May error na nangyari, subukan ulit.");
-    } finally {
-      setIsDisbursing(false);
-      isSubmittingRef.current = false;
-    }
-  };
-
-  // ── counts per status, computed off the FULL history (not the filtered
-  // view) so the dropdown's counts stay stable regardless of which option
-  // is currently selected. ──
+  // ── counts per status, off the FULL history ──
   const disbursementStatusCounts = useMemo(() => {
     const counts = { All: disbursementHistory.length, Pending: 0, Completed: 0, Failed: 0 };
     for (const row of disbursementHistory) {
@@ -678,8 +112,6 @@ function DisbursementPage() {
     return counts;
   }, [disbursementHistory]);
 
-  // ── the history rows after applying the status filter — this is what
-  // pagination and the table body actually work off of. ──
   const filteredDisbursementHistory = useMemo(() => {
     if (disbursementStatusFilter === "All") return disbursementHistory;
     return disbursementHistory.filter(
@@ -687,17 +119,11 @@ function DisbursementPage() {
     );
   }, [disbursementHistory, disbursementStatusFilter]);
 
-  // ── reset back to page 1 whenever the filter changes, so we don't get
-  // stuck on a page number that no longer has any rows. ──
   useEffect(() => {
     setDisbursementPage(1);
   }, [disbursementStatusFilter]);
 
-  // ── pagination derived values for the Disbursement History table ──
   const disbursementTotalPages = Math.max(1, Math.ceil(filteredDisbursementHistory.length / DISBURSEMENTS_PER_PAGE));
-
-  // Clamp the current page in case the underlying list shrank (e.g. after
-  // a refetch returned fewer rows than before, or a filter narrowed it).
   const disbursementPageClamped = Math.min(disbursementPage, disbursementTotalPages);
 
   const paginatedDisbursements = useMemo(() => {
@@ -705,13 +131,8 @@ function DisbursementPage() {
     return filteredDisbursementHistory.slice(start, start + DISBURSEMENTS_PER_PAGE);
   }, [filteredDisbursementHistory, disbursementPageClamped]);
 
-  const goToPrevDisbursementPage = () => {
-    setDisbursementPage((p) => Math.max(1, p - 1));
-  };
-
-  const goToNextDisbursementPage = () => {
-    setDisbursementPage((p) => Math.min(disbursementTotalPages, p + 1));
-  };
+  const goToPrevDisbursementPage = () => setDisbursementPage((p) => Math.max(1, p - 1));
+  const goToNextDisbursementPage = () => setDisbursementPage((p) => Math.min(disbursementTotalPages, p + 1));
 
   const statusBadgeClasses = (status: string, isDarkMode: boolean) => {
     const s = (status || "").toUpperCase();
@@ -734,123 +155,14 @@ function DisbursementPage() {
             Disbursement
           </h2>
           <p className={`text-sm mt-1 flex items-center flex-wrap gap-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            <span>Send collected revenue to a bank or e-wallet via</span>
+            <span>Past payouts sent via</span>
             <img src="/xendit.png" alt="Xendit" className="h-4 w-auto max-w-[70px] object-contain inline-block align-middle" />
-            <span>, and review past payouts.</span>
+            <span>. To disburse, go to Reports → Disbursement tab.</span>
           </p>
         </div>
       </div>
 
-      {/* ══ XENDIT BALANCE + TOTAL DISBURSED + GCASH TOP-UPS SUMMARY ══ */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-600 via-blue-500 to-transparent" />
-          <CardContent className="p-5 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                <Landmark size={12} className="text-indigo-500" />
-                Xendit Balance
-              </p>
-              <p className={`text-xl font-bold font-mono mt-1 ${isDark ? "text-white" : "text-slate-900"}`}>
-                {isLoadingBalance ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-indigo-500" />
-                ) : xenditBalance !== null ? (
-                  formatPeso(xenditBalance)
-                ) : (
-                  "—"
-                )}
-              </p>
-              <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Available to disburse right now
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={fetchXenditBalance}
-              disabled={isLoadingBalance}
-              data-testid="button-refresh-xendit-balance"
-              title="Refresh"
-              className={`h-8 w-8 flex-none flex items-center justify-center rounded-md transition-colors disabled:opacity-50 ${
-                isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-              }`}
-            >
-              <RefreshCw size={14} className={isLoadingBalance ? "animate-spin" : ""} />
-            </button>
-          </CardContent>
-        </Card>
-
-        {/* NEW: Total Disbursed — sum of every non-FAILED disbursement, all time */}
-        <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-transparent" />
-          <CardContent className="p-5 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                <PiggyBank size={12} className="text-emerald-500" />
-                Total Disbursed
-              </p>
-              <p className={`text-xl font-bold font-mono mt-1 ${isDark ? "text-white" : "text-slate-900"}`}>
-                {isLoadingHistory && disbursementHistory.length === 0 ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-emerald-500" />
-                ) : (
-                  formatPeso(totalDisbursed)
-                )}
-              </p>
-              <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                All-time, across {disbursementHistory.length} disbursement{disbursementHistory.length === 1 ? "" : "s"}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className={`shadow-sm overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-blue-400 to-transparent" />
-          <CardContent className="p-5 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                <Smartphone size={12} className="text-sky-500" />
-                Total GCash Top-ups (Net)
-              </p>
-              <p className={`text-xl font-bold font-mono mt-1 ${isDark ? "text-white" : "text-slate-900"}`}>
-                {formatPeso(totalGcashTopups)}
-              </p>
-              <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Net amount after fees, all-time — not fare revenue
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ══ DISBURSE ACTION — no more date filter, any-time disbursement ══ */}
-      <div className={`flex flex-wrap items-center justify-end gap-2 py-3 border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
-        {/* 🔒 Disburse button — NAKA-GREY OUT (disabled) kapag view_only,
-            hindi tinatanggal sa screen. */}
-        <Button
-          onClick={openDisburseModal}
-          disabled={!canDisburse}
-          className={`text-xs font-semibold h-8 px-4 text-white disabled:cursor-not-allowed disabled:opacity-100 ${
-            canDisburse
-              ? "bg-indigo-600 hover:bg-indigo-700"
-              : isDark
-                ? "bg-slate-700 text-slate-400 hover:bg-slate-700"
-                : "bg-slate-300 text-slate-500 hover:bg-slate-300"
-          }`}
-          data-testid="button-disburse-revenue"
-          title={disburseButtonTitle}
-        >
-          Disburse
-        </Button>
-      </div>
-
-      {/* 🔒 View-only notice sa ilalim ng row (maliit lang, hindi nagbabago ng layout) */}
-      {isViewOnly && (
-        <p className={`-mt-6 text-[11px] ${isDark ? "text-amber-400" : "text-amber-600"}`}>
-          View only — disbursing is disabled for your account.
-        </p>
-      )}
-
-      {/* ══ DISBURSEMENT HISTORY — REAL data straight from the disbursements
-          table (via list-disbursements), i.e. what actually went to Xendit ══ */}
+      {/* ══ DISBURSEMENT HISTORY — REAL data straight from the disbursements table ══ */}
       <Card className={`shadow-sm overflow-hidden ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -862,8 +174,6 @@ function DisbursementPage() {
               </span>
             </CardTitle>
             <div className="flex items-center gap-2 flex-wrap">
-              {/* ── status filter — same dot-colored Select pattern used for
-                  Type/Status filters in User Management ── */}
               <Select
                 value={disbursementStatusFilter}
                 onValueChange={(v) => setDisbursementStatusFilter(v as DisbursementStatusFilterType)}
@@ -991,8 +301,7 @@ function DisbursementPage() {
             </Table>
           )}
 
-          {/* ── Previous / Next pagination controls — only shown once there's
-              more than one page's worth of disbursement rows. ── */}
+          {/* ── Previous / Next pagination controls ── */}
           {filteredDisbursementHistory.length > DISBURSEMENTS_PER_PAGE && (
             <div className={`flex items-center justify-between pt-4 mt-2 border-t ${isDark ? "border-slate-800" : "border-slate-100"}`}>
               <span className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
@@ -1026,243 +335,6 @@ function DisbursementPage() {
           )}
         </CardContent>
       </Card>
-
-      {/* ══ DISBURSE REVENUE MODAL ══ */}
-      {disburseModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={closeDisburseModal}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-md rounded-lg border shadow-xl ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}
-          >
-            <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-              <h3 className={`text-sm font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
-                <Wallet size={16} className="text-indigo-500" />
-                Disburse Revenue
-              </h3>
-              <button onClick={closeDisburseModal} className={isDark ? "text-slate-500 hover:text-white" : "text-slate-400 hover:text-slate-900"}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="px-5 py-4 space-y-4">
-              <div className={`flex items-center justify-between px-3 py-2.5 rounded-md border text-sm ${isDark ? "bg-indigo-950/40 border-indigo-900" : "bg-indigo-50 border-indigo-100"}`}>
-                <span className={isDark ? "text-indigo-300" : "text-indigo-700"}>Available to Disburse</span>
-                <span className={`font-bold ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>
-                  {isLoadingPreview ? <Loader2 size={14} className="animate-spin inline-block" /> : formatPeso(disburseAmount)}
-                </span>
-              </div>
-              {/* ── shows what's left over in the fare queue AFTER this
-                  batch — i.e. what rolls into the NEXT disbursement, once
-                  it (plus whatever new fares come in) reaches ₱50,000
-                  again. Only rendered when there actually is a remainder,
-                  so the modal doesn't add noise on a normal small queue. ── */}
-              {remainingFareBalance > 0 && (
-                <div className={`flex items-center justify-between px-3 py-2 rounded-md border text-xs ${isDark ? "bg-slate-800/60 border-slate-700" : "bg-slate-50 border-slate-200"}`}>
-                  <span className={isDark ? "text-slate-400" : "text-slate-500"}>Remaining fare balance (next disbursement)</span>
-                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{formatPeso(remainingFareBalance)}</span>
-                </div>
-              )}
-              <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                Only fare transactions are included here — top-ups, cash-ins, and loads are automatically excluded, and
-                anything already disbursed is not counted again. Disbursements aren't tied to any date — any unlinked fare
-                transaction is eligible, whenever it happened.
-              </p>
-              <p className={`text-[11px] -mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                A disbursement only goes through once at least ₱{MIN_DISBURSEMENT_AMOUNT.toLocaleString("en-US")} is
-                available, and each one pays out up to ₱{MIN_DISBURSEMENT_AMOUNT.toLocaleString("en-US")} at a time
-                (oldest transactions first) — any excess rolls into the next disbursement.
-              </p>
-
-              <div>
-                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Bank / E-Wallet</label>
-                <div className="relative">
-                  <button
-                    type="button"
-                    data-testid="select-disburse-bank"
-                    onClick={() => setDisburseChannelOpen((prev) => !prev)}
-                    className={`w-full h-9 rounded-md border px-2.5 text-sm flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                      isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-                    }`}
-                  >
-                    <span className="flex items-center gap-2 min-w-0">
-                      {disburseForm.bank_code === "PH_BDO" ? (
-                        <>
-                          <span>BDO</span>
-                          <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none" />
-                        </>
-                      ) : (
-                        <span>
-                          {DISBURSEMENT_CHANNELS.find((c) => c.value === disburseForm.bank_code)?.label || "Select channel"}
-                        </span>
-                      )}
-                    </span>
-                    <ChevronDown size={15} className={`flex-none transition-transform ${disburseChannelOpen ? "rotate-180" : ""}`} />
-                  </button>
-
-                  {disburseChannelOpen && (
-                    <div
-                      className={`absolute z-50 mt-1 w-full rounded-md border shadow-lg overflow-hidden ${
-                        isDark ? "bg-slate-950 border-slate-800" : "bg-white border-slate-200"
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleDisburseFieldChange("bank_code", "");
-                          setDisburseChannelOpen(false);
-                        }}
-                        className={`w-full h-9 px-2.5 text-left text-sm ${
-                          isDark ? "text-slate-400 hover:bg-slate-900" : "text-slate-500 hover:bg-slate-50"
-                        }`}
-                      >
-                        Select channel
-                      </button>
-
-                      {DISBURSEMENT_CHANNELS.map((c) => (
-                        <button
-                          key={c.value}
-                          type="button"
-                          onClick={() => {
-                            handleDisburseFieldChange("bank_code", c.value);
-                            setDisburseChannelOpen(false);
-                          }}
-                          className={`w-full h-10 px-2.5 text-left text-sm flex items-center gap-2 ${
-                            isDark ? "text-slate-200 hover:bg-slate-900" : "text-slate-700 hover:bg-slate-50"
-                          }`}
-                        >
-                          {c.value === "PH_BDO" ? (
-                            <>
-                              <span>{c.label}</span>
-                              <img src="/bdo.png" alt="BDO" className="h-3.5 w-auto max-w-[24px] object-contain flex-none ml-auto" />
-                            </>
-                          ) : (
-                            <span>{c.label}</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Account Holder Name</label>
-                <input
-                  type="text"
-                  value={disburseForm.account_holder_name}
-                  onChange={(e) => handleDisburseFieldChange("account_holder_name", e.target.value)}
-                  data-testid="input-disburse-holder-name"
-                  placeholder="Juan Dela Cruz"
-                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Account / Mobile Number
-                  <span className={`ml-1 font-normal normal-case ${isDark ? "text-slate-600" : "text-slate-400"}`}>
-                    (numbers only, max 12 digits)
-                  </span>
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={ACCOUNT_NUMBER_MAX_LEN}
-                  value={disburseForm.account_number}
-                  onChange={(e) => handleAccountNumberChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    // Block obviously non-numeric keystrokes outright (nice-to-have;
-                    // the real enforcement is the onChange sanitizer above, which also
-                    // covers paste/autofill/IME input).
-                    const allowedKeys = [
-                      "Backspace", "Delete", "Tab", "Escape", "Enter",
-                      "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End",
-                    ];
-                    if (allowedKeys.includes(e.key) || e.ctrlKey || e.metaKey) return;
-                    if (!/^[0-9]$/.test(e.key)) e.preventDefault();
-                  }}
-                  data-testid="input-disburse-account-number"
-                  placeholder="09171234567"
-                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className={`text-xs font-semibold mb-1 block ${isDark ? "text-slate-400" : "text-slate-500"}`}>Note (optional)</label>
-                <input
-                  type="text"
-                  value={disburseForm.description}
-                  onChange={(e) => handleDisburseFieldChange("description", e.target.value)}
-                  data-testid="input-disburse-description"
-                  placeholder="Fare revenue disbursement"
-                  className={`w-full h-9 rounded-md border px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-700"
-                  }`}
-                />
-              </div>
-
-              {disburseError && (
-                <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-red-50 border border-red-100 text-red-700 text-xs">
-                  <AlertCircle size={14} className="mt-0.5 flex-none" />
-                  {disburseError}
-                </div>
-              )}
-              {disburseSuccess && (
-                <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs">
-                  <CheckCircle2 size={14} className="mt-0.5 flex-none" />
-                  {disburseSuccess}
-                </div>
-              )}
-            </div>
-
-            <div className={`flex justify-end gap-2 px-5 py-4 border-t ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-              <button
-                type="button"
-                onClick={closeDisburseModal}
-                disabled={isDisbursing}
-                className={`text-xs font-semibold px-4 h-9 bg-transparent border-0 shadow-none disabled:opacity-60 disabled:cursor-not-allowed ${
-                  isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"
-                }`}
-              >
-                Cancel
-              </button>
-
-              {/* 🔒 Confirm button — naka-grey out din kapag view_only (extra
-                  proteksyon, kahit paano pa nabuksan ang modal) */}
-              <Button
-                onClick={handleSubmitDisbursement}
-                disabled={isDisbursing || !canDisburse}
-                data-testid="button-confirm-disburse"
-                title={isViewOnly ? "View only — you don't have permission to disburse." : undefined}
-                className={`text-white text-xs font-semibold px-4 h-9 disabled:cursor-not-allowed ${
-                  canDisburse
-                    ? "bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
-                    : isDark
-                      ? "bg-slate-700 text-slate-400 hover:bg-slate-700 disabled:opacity-100"
-                      : "bg-slate-300 text-slate-500 hover:bg-slate-300 disabled:opacity-100"
-                }`}
-              >
-                {isDisbursing ? (
-                  <>
-                    <Loader2 size={14} className="mr-2 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  "Confirm Disbursement"
-                )}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
