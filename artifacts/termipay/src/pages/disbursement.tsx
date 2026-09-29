@@ -171,7 +171,7 @@ function DetailRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+      className={`flex items-center justify-between gap-3 px-3 py-1.5 ${
         isDark ? "bg-slate-950/60" : "bg-slate-50"
       }`}
     >
@@ -258,16 +258,16 @@ function DisbursementReceiptModal({
 
         <div className={`h-1 w-full bg-gradient-to-r ${accentColor}`} />
 
-        <div className="px-5 pt-5 pb-6 space-y-5">
+        <div className="px-4 pt-3 pb-4 space-y-3">
           {/* Hero */}
-          <div className="flex flex-col items-center gap-2 pt-1">
-            <div className={`flex items-center justify-center w-12 h-12 rounded-full ring-2 ${statusRingClass}`}>
-              <StatusIcon className="w-5 h-5" />
+          <div className="flex flex-col items-center gap-1 pt-0">
+            <div className={`flex items-center justify-center w-9 h-9 rounded-full ring-2 ${statusRingClass}`}>
+              <StatusIcon className="w-4 h-4" />
             </div>
             <p className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>
               Revenue Disbursement
             </p>
-            <p className={`text-4xl font-bold tabular-nums tracking-tight ${amountColor}`}>
+            <p className={`text-2xl font-bold tabular-nums tracking-tight ${amountColor}`}>
               ₱{amount}
             </p>
           </div>
@@ -371,7 +371,7 @@ function DisbursementReceiptModal({
 
           {/* Footer total */}
           <div
-            className={`border-t border-dashed pt-3 flex items-center justify-between ${
+            className={`border-t border-dashed pt-2 flex items-center justify-between ${
               isDark ? "border-slate-800" : "border-slate-200"
             }`}
           >
@@ -383,7 +383,7 @@ function DisbursementReceiptModal({
 
           <Button
             onClick={onClose}
-            className={`w-full text-white font-semibold uppercase text-[11px] tracking-widest ${closeBg} transition-colors cursor-pointer`}
+            className={`w-full h-8 text-white font-semibold uppercase text-[11px] tracking-widest ${closeBg} transition-colors cursor-pointer`}
           >
             Close
           </Button>
