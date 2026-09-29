@@ -1264,8 +1264,8 @@ function safeSheetName(name: string): string {
 // 🆕 Report-tab definitions for the tab strip at the top of the master
 // container (rendered by <ReportsPanel>).
 // 🆕 "peak" = Peak Ridership (busiest hour of the day + busiest day of the week).
-// 🆕 "disbursement" = Xendit balance / totals cards, Disburse button, and the
-//    per-date disbursement table (the history table itself stays on the
+// 🆕 "disbursement" = Xendit balance / totals cards, Disburse button, and a
+//    per-date summary bar graph (the history table itself stays on the
 //    Disbursement page).
 type ReportTab = "chart" | "discount" | "log" | "routes" | "peak" | "disbursement";
 const REPORT_TABS: { key: ReportTab; label: string; icon: typeof PieChart }[] = [
@@ -1381,7 +1381,7 @@ export default function ReportsPage() {
   const [disburseSuccess, setDisburseSuccess] = useState<string | null>(null);
 
   // ── REAL disbursement history (list-disbursements). Used here for the
-  // "Total Disbursed" card and the per-date table; the full history table
+  // "Total Disbursed" card and the per-date graph; the full history table
   // lives on the Disbursement page. ──
   const [disbursementHistory, setDisbursementHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -1986,8 +1986,8 @@ export default function ReportsPage() {
     [gcashTopupTxs]
   );
 
-  // Per-date rows for the "Disbursement by Date" table: only dates that
-  // actually have a payout or a GCash top-up, newest first.
+  // Per-date rows: only dates that actually have a payout or a GCash
+  // top-up, newest first. Feeds the chart data below.
   const disbursementDailyRows = React.useMemo(() => {
     const map = new Map<string, { date: string; count: number; sent: number; gcashNet: number }>();
     const ensure = (date: string) => {
@@ -2015,6 +2015,20 @@ export default function ReportsPage() {
 
     return Array.from(map.values()).sort((a, b) => b.date.localeCompare(a.date));
   }, [filteredDisbursementRows, gcashTopupTxs]);
+
+  // 🆕 Chronological (oldest → newest) data for the Disbursement bar graph
+  const disbursementChartData = React.useMemo(
+    () =>
+      [...disbursementDailyRows]
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map((r) => ({
+          date: r.date,
+          sent: r.sent,
+          gcash: r.gcashNet,
+          count: r.count,
+        })),
+    [disbursementDailyRows]
+  );
 
   // explicit fare-only transaction IDs, sent to the backend as an allowlist
   // (straight from preview_disbursement_batch()).
@@ -3915,12 +3929,12 @@ export default function ReportsPage() {
         )}
 
         {/* ══ 🆕 DISBURSEMENT ══
-            Xendit balance · Total Disbursed · GCash top-ups (net) cards,
-            the Disburse button, and a per-date table. Total Disbursed,
-            GCash top-ups and the table follow the same Year/Month/Week/Day
-            filter as the other tabs; the Xendit balance is always live.
-            The full disbursement history table stays on the Disbursement
-            page. */}
+            Summary only: 4 stat tiles (same look as Daily Revenue tiles)
+            + one bar graph (Amount Sent vs GCash Top-ups Net, per date).
+            Total Disbursed, GCash top-ups and the graph follow the same
+            Year/Month/Week/Day filter as the other tabs; the Xendit
+            balance and "Ready to Disburse" are always live. The full
+            disbursement history table stays on the Disbursement page. */}
         {activeTab === "disbursement" && (
           <ReportSection
             title="Disbursement"
@@ -3955,131 +3969,154 @@ export default function ReportsPage() {
             }
           >
             <div className="rp-divided">
-              {/* ── Summary cards ── */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* Xendit Balance (always live, not date-filtered) */}
-                <div className="rp-stat">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-600 via-blue-500 to-transparent" />
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                        <Landmark size={12} className="text-indigo-500" />
-                        Xendit Balance
-                      </p>
-                      <p className={`text-xl font-bold font-mono mt-1 ${isDark ? "text-white" : "text-slate-900"}`}>
-                        {isLoadingBalance ? (
-                          <Loader2 className="h-5 w-5 animate-spin text-indigo-500" />
-                        ) : xenditBalance !== null ? (
-                          formatPeso(xenditBalance)
-                        ) : (
-                          "—"
-                        )}
-                      </p>
-                      <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                        Available to disburse right now
-                      </p>
+              {/* ── Summary cards (same look as the Daily Revenue tiles) ── */}
+              <div className="rp-stats" style={{ marginBottom: 0 }}>
+                {[
+                  {
+                    label: "Xendit Balance",
+                    value: isLoadingBalance ? null : xenditBalance !== null ? formatPeso(xenditBalance) : "—",
+                    sub: "Live · available right now",
+                    icon: Landmark,
+                    color: isDark ? "text-indigo-400" : "text-indigo-600",
+                    bg: isDark ? "bg-indigo-950/40" : "bg-indigo-50",
+                    border: isDark ? "border-indigo-900" : "border-indigo-100",
+                    testId: "text-xendit-balance",
+                    refresh: true,
+                  },
+                  {
+                    label: "Total Disbursed",
+                    value: isLoadingHistory && disbursementHistory.length === 0 ? null : formatPeso(totalDisbursed),
+                    sub: `${isFilterActive ? filterLabel : "All-time"} · ${disbursementCount} disbursement${disbursementCount === 1 ? "" : "s"}`,
+                    icon: PiggyBank,
+                    color: isDark ? "text-emerald-400" : "text-emerald-600",
+                    bg: isDark ? "bg-emerald-950/40" : "bg-emerald-50",
+                    border: isDark ? "border-emerald-900" : "border-emerald-100",
+                    testId: "text-total-disbursed",
+                    refresh: false,
+                  },
+                  {
+                    label: "GCash Top-ups (Net)",
+                    value: formatPeso(totalGcashTopups),
+                    sub: `${isFilterActive ? filterLabel : "All-time"} · after fees`,
+                    icon: Smartphone,
+                    color: isDark ? "text-sky-400" : "text-sky-600",
+                    bg: isDark ? "bg-sky-950/40" : "bg-sky-50",
+                    border: isDark ? "border-sky-900" : "border-sky-100",
+                    testId: "text-gcash-topups",
+                    refresh: false,
+                  },
+                  {
+                    label: "Ready to Disburse",
+                    value: isLoadingPreview ? null : formatPeso(disburseAmount),
+                    sub:
+                      remainingFareBalance > 0
+                        ? `+ ${formatPeso(remainingFareBalance)} rolls to next batch`
+                        : `Min. ₱${MIN_DISBURSEMENT_AMOUNT.toLocaleString("en-US")} per batch`,
+                    icon: Wallet,
+                    color: isDark ? "text-amber-400" : "text-amber-600",
+                    bg: isDark ? "bg-amber-950/40" : "bg-amber-50",
+                    border: isDark ? "border-amber-900" : "border-amber-100",
+                    testId: "text-ready-to-disburse",
+                    refresh: false,
+                  },
+                ].map((stat, idx) => (
+                  <div key={idx} className="rp-stat">
+                    <div className={`absolute top-0 right-0 w-16 h-16 pointer-events-none ${isDark ? "opacity-10" : "opacity-5"}`}>
+                      <stat.icon className="w-full h-full" />
                     </div>
-                    <button
-                      type="button"
-                      onClick={fetchXenditBalance}
-                      disabled={isLoadingBalance}
-                      data-testid="button-refresh-xendit-balance"
-                      title="Refresh"
-                      className={`h-8 w-8 flex-none flex items-center justify-center rounded-md transition-colors disabled:opacity-50 ${
-                        isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-                      }`}
-                    >
-                      <RefreshCw size={14} className={isLoadingBalance ? "animate-spin" : ""} />
-                    </button>
+                    <div className="flex items-center justify-between relative gap-3">
+                      <div className="min-w-0">
+                        <p className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                          {stat.label}
+                        </p>
+                        <p className={`text-2xl font-bold mt-1 tracking-tight ${stat.color}`} data-testid={stat.testId}>
+                          {stat.value === null ? <Loader2 className="h-6 w-6 animate-spin" /> : stat.value}
+                        </p>
+                        <p className={`text-[10px] mt-1 truncate ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.sub}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-2 flex-none">
+                        <div className={`w-10 h-10 rounded border ${stat.bg} ${stat.border} flex items-center justify-center ${stat.color}`}>
+                          <stat.icon size={20} />
+                        </div>
+                        {stat.refresh && (
+                          <button
+                            type="button"
+                            onClick={fetchXenditBalance}
+                            disabled={isLoadingBalance}
+                            title="Refresh balance"
+                            data-testid="button-refresh-xendit-balance"
+                            className={`h-6 w-6 flex items-center justify-center rounded transition-colors disabled:opacity-50 ${
+                              isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                            }`}
+                          >
+                            <RefreshCw size={12} className={isLoadingBalance ? "animate-spin" : ""} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-
-                {/* Total Disbursed (non-FAILED, within the active filter) */}
-                <div className="rp-stat">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-transparent" />
-                  <div className="min-w-0">
-                    <p className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      <PiggyBank size={12} className="text-emerald-500" />
-                      Total Disbursed
-                    </p>
-                    <p className={`text-xl font-bold font-mono mt-1 ${isDark ? "text-white" : "text-slate-900"}`}>
-                      {isLoadingHistory && disbursementHistory.length === 0 ? (
-                        <Loader2 className="h-5 w-5 animate-spin text-emerald-500" />
-                      ) : (
-                        formatPeso(totalDisbursed)
-                      )}
-                    </p>
-                    <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      {isFilterActive ? filterLabel : "All-time"}, across {disbursementCount} disbursement{disbursementCount === 1 ? "" : "s"}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Total GCash Top-ups (Net) */}
-                <div className="rp-stat">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-blue-400 to-transparent" />
-                  <div className="min-w-0">
-                    <p className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      <Smartphone size={12} className="text-sky-500" />
-                      Total GCash Top-ups (Net)
-                    </p>
-                    <p className={`text-xl font-bold font-mono mt-1 ${isDark ? "text-white" : "text-slate-900"}`}>
-                      {formatPeso(totalGcashTopups)}
-                    </p>
-                    <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      Net amount after fees, {isFilterActive ? filterLabel : "all-time"} — not fare revenue
-                    </p>
-                  </div>
-                </div>
+                ))}
               </div>
 
-              {/* ── Per-date table ── */}
-              {disbursementDailyRows.length === 0 ? (
-                <div className={`py-10 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  No disbursements or GCash top-ups match the selected filter.
+              {/* ── Summary graph: Amount Sent vs GCash Top-ups (Net), per date ── */}
+              <div className="rp-well">
+                <div className="mb-3">
+                  <h3 className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                    Disbursed vs. GCash Top-ups
+                  </h3>
+                  <p className={`text-[11px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    Amount sent out compared to net GCash top-ups, per date
+                  </p>
                 </div>
-              ) : (
-                <div style={{ maxHeight: 460, overflowY: "auto", overflowX: "auto" }}>
-                  <Table>
-                    <TableHeader className="rp-table-head">
-                      <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-zinc-200"}`}>
-                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date</TableHead>
-                        <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Day</TableHead>
-                        <TableHead className={`text-right text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Disbursements</TableHead>
-                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-emerald-600">Amount Sent</TableHead>
-                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wide text-sky-500">GCash Top-ups (Net)</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {disbursementDailyRows.map((row) => {
-                        const date = new Date(`${row.date}T00:00:00`);
-                        return (
-                          <TableRow
-                            key={row.date}
-                            className={`transition-colors cursor-default ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-zinc-100 hover:bg-zinc-100/60"}`}
-                          >
-                            <TableCell className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                              {date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                            </TableCell>
-                            <TableCell className={`text-[11px] font-semibold uppercase ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                              {date.toLocaleDateString("en-US", { weekday: "long" })}
-                            </TableCell>
-                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                              {row.count}
-                            </TableCell>
-                            <TableCell className={`text-right font-semibold font-mono text-sm ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                              {row.sent > 0 ? formatPeso(row.sent) : "—"}
-                            </TableCell>
-                            <TableCell className={`text-right font-mono text-xs ${isDark ? "text-sky-400" : "text-sky-600"}`}>
-                              {row.gcashNet > 0 ? formatPeso(row.gcashNet) : "—"}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
+
+                {disbursementChartData.length === 0 ? (
+                  <div className={`h-[300px] flex items-center justify-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    No disbursements or GCash top-ups match the selected filter.
+                  </div>
+                ) : (
+                  <div className="h-[320px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={disbursementChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }} barGap={4}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#27272a" : "#e4e4e7"} vertical={false} />
+                        <XAxis
+                          dataKey="date"
+                          tickFormatter={(d: string) =>
+                            new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                          }
+                          stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={11} fontWeight="600" axisLine={false} tickLine={false}
+                        />
+                        <YAxis
+                          stroke={isDark ? "#64748b" : "#94a3b8"} fontSize={10} fontWeight="600" axisLine={false} tickLine={false}
+                          width={62}
+                          tickFormatter={(v: number) => `₱${v.toLocaleString("en-US")}`}
+                        />
+                        <Tooltip
+                          cursor={{ fill: isDark ? "rgba(96,165,250,0.08)" : "rgba(37,99,235,0.05)" }}
+                          contentStyle={{
+                            backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                            border: isDark ? "1px solid #1e293b" : "1px solid #e4e4e7",
+                            borderRadius: "8px",
+                            fontSize: "11px",
+                            fontWeight: "600",
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                          }}
+                          labelStyle={{ color: isDark ? "#e2e8f0" : "#1e293b", fontWeight: 800 }}
+                          labelFormatter={(d: string) =>
+                            new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                          }
+                          formatter={(value: number, name: string) => [formatPeso(Number(value) || 0), name]}
+                        />
+                        <Legend
+                          wrapperStyle={{ fontSize: "11px", fontWeight: 600 }}
+                          formatter={(value: string) => <span style={{ color: isDark ? "#cbd5e1" : "#334155" }}>{value}</span>}
+                        />
+                        <Bar dataKey="sent" name="Amount Sent" fill="#10b981" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="gcash" name="GCash Top-ups (Net)" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
             </div>
           </ReportSection>
         )}
