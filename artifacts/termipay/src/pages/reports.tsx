@@ -1264,9 +1264,9 @@ function safeSheetName(name: string): string {
 // 🆕 Report-tab definitions for the tab strip at the top of the master
 // container (rendered by <ReportsPanel>).
 // 🆕 "peak" = Peak Ridership (busiest hour of the day + busiest day of the week).
-// 🆕 "disbursement" = Xendit balance / totals cards, Disburse button, and a
-//    per-date summary bar graph (the history table itself stays on the
-//    Disbursement page).
+// 🆕 "disbursement" = Xendit balance / totals cards and a per-date summary
+//    bar graph (summary only — the Disburse button and the history table
+//    stay on the Disbursement page).
 type ReportTab = "chart" | "discount" | "log" | "routes" | "peak" | "disbursement";
 const REPORT_TABS: { key: ReportTab; label: string; icon: typeof PieChart }[] = [
   { key: "chart", label: "Daily Revenue Breakdown", icon: PieChart },
@@ -1292,7 +1292,7 @@ export default function ReportsPage() {
   const { canManage, loaded } = useAdminAccess();
   const canExport = loaded && canManage;
   const isViewOnly = loaded && !canManage;
-  // 🔒 Same permission gates the Disburse button + modal Confirm button.
+  // 🔒 Same permission gates the modal Confirm button.
   const canDisburse = canExport;
 
   const prevRevenueRef = useRef<number | null>(null);
@@ -1381,8 +1381,9 @@ export default function ReportsPage() {
   const [disburseSuccess, setDisburseSuccess] = useState<string | null>(null);
 
   // ── REAL disbursement history (list-disbursements). Used here for the
-  // "Total Disbursed" card and the per-date graph; the full history table
-  // lives on the Disbursement page. ──
+  // "Total Disbursed" card, the per-date graph, and the Excel
+  // "Disbursement" sheet; the full history table lives on the
+  // Disbursement page. ──
   const [disbursementHistory, setDisbursementHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
@@ -2016,7 +2017,9 @@ export default function ReportsPage() {
     return Array.from(map.values()).sort((a, b) => b.date.localeCompare(a.date));
   }, [filteredDisbursementRows, gcashTopupTxs]);
 
-  // 🆕 Chronological (oldest → newest) data for the Disbursement bar graph
+  // 🆕 Chronological (oldest → newest) data for the Disbursement bar graph.
+  // Also reused by the Excel "Disbursement" sheet so the export always
+  // matches the on-screen graph.
   const disbursementChartData = React.useMemo(
     () =>
       [...disbursementDailyRows]
@@ -2037,10 +2040,6 @@ export default function ReportsPage() {
   const disburseAmount = disbursementPreview.batchAmount;
   // what's left in the fare queue AFTER this batch
   const remainingFareBalance = Math.max(0, disbursementPreview.totalAvailable - disbursementPreview.batchAmount);
-
-  const disburseButtonTitle = isViewOnly
-    ? "View only — you don't have permission to disburse."
-    : undefined;
 
   const openDisburseModal = () => {
     // 🔒 Guard: bawal buksan ang disburse modal kapag view_only
@@ -2568,12 +2567,12 @@ export default function ReportsPage() {
     ? "View only — you don't have permission to export logs."
     : undefined;
 
-  // ── EXPORT: one workbook, EIGHT separate tabs/sheets — "Fare",
+  // ── EXPORT: one workbook, NINE separate tabs/sheets — "Fare",
   // "Top-up", "Transfers", "Discount Analytics", "Route Summary",
-  // "Route Daily", "Peak Hours", "Peak Days" — mirroring the
-  // Fare / Top-up / Transfer tabs on the Transactions page plus the
-  // Discount Collection Analytics, Route Performance and Peak Ridership
-  // tabs on this page. Discount Analytics and Route Daily now
+  // "Route Daily", "Peak Hours", "Peak Days", "Disbursement" — mirroring
+  // the Fare / Top-up / Transfer tabs on the Transactions page plus the
+  // Discount Collection Analytics, Route Performance, Peak Ridership and
+  // Disbursement tabs on this page. Discount Analytics and Route Daily now
   // both pull from the FULL zero-filled calendar range (same data the
   // on-screen charts use) instead of only the days that happen to have a
   // transaction, so no date gets silently dropped from the export.
@@ -2581,7 +2580,10 @@ export default function ReportsPage() {
   // filteredTopupList (which now carries fee_amount/vat_amount/net_amount
   // thanks to enrichedTxList above), matching the Transactions page.
   // 🆕 Peak Hours (all 24 hours) and Peak Days (Mon–Sun) come straight
-  // from peakStats, so the export always matches the on-screen charts. ──
+  // from peakStats, so the export always matches the on-screen charts.
+  // 🆕 Disbursement comes straight from disbursementChartData (the same
+  // per-date rows as the on-screen bar graph) so the sheet always
+  // matches the Disbursement tab, and follows the same date filter. ──
   const handleExportExcelLogs = async () => {
     // 🔒 Guard: bawal mag-export kapag view_only. Proteksyon ito kahit
     // ma-bypass ang UI (devtools, atbp). Hindi rin magsusulat ng audit log.
@@ -2601,7 +2603,7 @@ export default function ReportsPage() {
     logExportAudit({
       entity: "Transaction Logs",
       format: "Excel",
-      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — 8 separate tabs: Fare, Top-up, Transfers, Discount Analytics, Route Summary, Route Daily, Peak Hours, Peak Days${
+      details: `${adminName} exported transaction logs as Excel (transaction-logs${filenameSuffix}-${stamp}.xlsx) — 9 separate tabs: Fare, Top-up, Transfers, Discount Analytics, Route Summary, Route Daily, Peak Hours, Peak Days, Disbursement${
         isFilterActive ? ` [Filtered: ${filterLabel}]` : ""
       }`,
     });
@@ -2816,9 +2818,28 @@ export default function ReportsPage() {
       { header: "Rank (by rides)", width: 16, get: (d: any) => (d.rank > 0 ? String(d.rank) : "—") },
     ];
 
+    // ── 🆕 Disbursement. One row per date that has a payout and/or a
+    // GCash top-up (same rows as the on-screen "Disbursed vs. GCash
+    // Top-ups" graph, oldest → newest), following the active date filter.
+    // FAILED disbursements are excluded, same as the on-screen totals.
+    // "Difference" = Amount Sent − GCash Top-ups (Net) for that date. ──
+    const disbursementColumns: SheetColumn[] = [
+      { header: "Date", width: 16, get: (d: any) =>
+        new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      },
+      { header: "No. of Disbursements", width: 22, get: (d: any) => String(d.count),
+        total: (rows) => String(rows.reduce((s: number, d: any) => s + d.count, 0)) },
+      { header: "Amount Sent (PHP)", width: 20, get: (d: any) => peso2(d.sent),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.sent, 0)) },
+      { header: "GCash Top-ups Net (PHP)", width: 24, get: (d: any) => peso2(d.gcash),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + d.gcash, 0)) },
+      { header: "Difference (PHP)", width: 20, get: (d: any) => peso2(d.sent - d.gcash),
+        total: (rows) => peso2(rows.reduce((s: number, d: any) => s + (d.sent - d.gcash), 0)) },
+    ];
+
     const filterSuffix = isFilterActive ? ` — Filtered: ${filterLabel}` : "";
 
-    // ── build the 8 tabs, one worksheet each ──
+    // ── build the 9 tabs, one worksheet each ──
     const fareSheet = buildSingleSheet(utils, {
       generatedAt,
       adminName,
@@ -2926,6 +2947,18 @@ export default function ReportsPage() {
       },
     });
 
+    const disbursementSheet = buildSingleSheet(utils, {
+      generatedAt,
+      adminName,
+      subtitle: `Disbursement — Sent vs. GCash Top-ups${filterSuffix}`,
+      block: {
+        title: `DISBURSEMENT — PER DATE (${disbursementChartData.length})`,
+        bandColor: "4F46E5",
+        columns: disbursementColumns,
+        rows: disbursementChartData,
+      },
+    });
+
     const workbook = utils.book_new();
     utils.book_append_sheet(workbook, fareSheet, safeSheetName("Fare"));
     utils.book_append_sheet(workbook, topupSheet, safeSheetName("Top-up"));
@@ -2935,6 +2968,7 @@ export default function ReportsPage() {
     utils.book_append_sheet(workbook, routeDailySheet, safeSheetName("Route Daily"));
     utils.book_append_sheet(workbook, peakHoursSheet, safeSheetName("Peak Hours"));
     utils.book_append_sheet(workbook, peakDaysSheet, safeSheetName("Peak Days"));
+    utils.book_append_sheet(workbook, disbursementSheet, safeSheetName("Disbursement"));
 
     workbook.Props = {
       Title: "Transaction Logs",
@@ -3933,8 +3967,11 @@ export default function ReportsPage() {
             + one bar graph (Amount Sent vs GCash Top-ups Net, per date).
             Total Disbursed, GCash top-ups and the graph follow the same
             Year/Month/Week/Day filter as the other tabs; the Xendit
-            balance and "Ready to Disburse" are always live. The full
-            disbursement history table stays on the Disbursement page. */}
+            balance and "Ready to Disburse" are always live. The Disburse
+            button is intentionally NOT on this tab (removed) and the full
+            disbursement history table stays on the Disbursement page.
+            The same per-date data is included in the Excel export as the
+            "Disbursement" sheet. */}
         {activeTab === "disbursement" && (
           <ReportSection
             title="Disbursement"
@@ -3943,29 +3980,10 @@ export default function ReportsPage() {
             filterLabel={isFilterActive ? filterLabel : undefined}
             filterBar={renderFilterBar()}
             meta={
-              <div className="flex items-center gap-3 flex-wrap justify-end">
-                {isViewOnly && (
-                  <span className={`text-[11px] font-semibold ${isDark ? "text-amber-400" : "text-amber-600"}`}>
-                    View only — disbursing is disabled.
-                  </span>
-                )}
-                {/* 🔒 Disburse button — NAKA-GREY OUT (disabled) kapag view_only */}
-                <Button
-                  onClick={openDisburseModal}
-                  disabled={!canDisburse}
-                  className={`text-xs font-semibold h-8 px-4 text-white disabled:cursor-not-allowed disabled:opacity-100 ${
-                    canDisburse
-                      ? "bg-indigo-600 hover:bg-indigo-700"
-                      : isDark
-                        ? "bg-slate-700 text-slate-400 hover:bg-slate-700"
-                        : "bg-slate-300 text-slate-500 hover:bg-slate-300"
-                  }`}
-                  data-testid="button-disburse-revenue"
-                  title={disburseButtonTitle}
-                >
-                  Disburse
-                </Button>
-              </div>
+              <>
+                <Sparkles size={11} className="text-amber-500" />
+                Summary only · Sent vs. GCash top-ups
+              </>
             }
           >
             <div className="rp-divided">
@@ -4175,10 +4193,12 @@ export default function ReportsPage() {
         )}
       </ReportsPanel>
 
-      {/* ══ 🆕 DISBURSE REVENUE MODAL ══
-          Rendered at the page root (not inside the tab panel) so it always
-          overlays the whole screen. Opened from the Disbursement tab's
-          Disburse button. */}
+      {/* ══ DISBURSE REVENUE MODAL ══
+          NOTE: the Disburse button was removed from the Disbursement tab,
+          so nothing on this page opens this modal anymore. It is kept
+          here (unchanged) in case you want to re-attach a trigger later;
+          it's safe to delete this block + the disburse* state/handlers
+          above if you never need it on this page. */}
       {disburseModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
