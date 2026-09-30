@@ -14,6 +14,8 @@ import {
   FileText,
   Printer,
   Loader2,
+  User,
+  BadgeCheck,
 } from "lucide-react";
 import { toPng } from "html-to-image"; // 🆕 npm i html-to-image jspdf
 import { jsPDF } from "jspdf"; // 🆕
@@ -29,6 +31,9 @@ export type Transaction = {
   amount: number | string;
   status: string;
   route_id?: number | null;
+  // 🆕 Passenger info — map these to your actual column names if different
+  passenger_name?: string | null;
+  card_type?: string | null; // senior | pwd | student | regular
   payment_method?: string | null;
   fee_amount?: number | string | null;
   vat_amount?: number | string | null;
@@ -105,6 +110,20 @@ function formatPaymentMethod(method?: string | null): string | null {
   };
   const key = method.toLowerCase().trim();
   return map[key] ?? method.charAt(0).toUpperCase() + method.slice(1);
+}
+
+// 🆕 Card type → display label
+function formatCardType(type?: string | null): string {
+  if (!type) return "—";
+  const key = type.toLowerCase().trim();
+  const map: Record<string, string> = {
+    senior: "Senior Citizen",
+    senior_citizen: "Senior Citizen",
+    pwd: "PWD",
+    student: "Student",
+    regular: "Regular",
+  };
+  return map[key] ?? type.charAt(0).toUpperCase() + type.slice(1);
 }
 
 function getPaymentMethodLogo(method?: string | null): string | null {
@@ -302,6 +321,19 @@ export function TransactionDetailModal({
       value: tx.type,
       mono: false,
     },
+    // 🆕 Passenger name + card type
+    {
+      icon: <User className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />,
+      label: "Passenger",
+      value: tx.passenger_name?.trim() || "—",
+      mono: false,
+    },
+    {
+      icon: <BadgeCheck className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />,
+      label: "Card type",
+      value: formatCardType(tx.card_type),
+      mono: false,
+    },
   ];
 
   const actionBtnClass = `h-8 gap-1.5 text-[10px] sm:text-xs font-semibold cursor-pointer ${
@@ -328,6 +360,32 @@ export function TransactionDetailModal({
         >
           {/* Top accent stripe */}
           <div className={`h-1 w-full ${isFare ? "bg-red-500" : "bg-emerald-500"}`} />
+
+          {/* 🆕 Company header */}
+          <div className={`px-4 sm:px-5 pt-3 pb-2.5 text-center border-b border-dashed ${
+            isDark ? "border-slate-700" : "border-slate-300"
+          }`}>
+            <p className={`text-xs sm:text-sm font-black tracking-wide ${
+              isDark ? "text-white" : "text-slate-900"
+            }`}>
+              D&apos; TURBANADA TRANSPORT, INC.
+            </p>
+            <p className={`text-[9px] sm:text-[10px] leading-snug mt-1 ${
+              isDark ? "text-slate-400" : "text-slate-500"
+            }`}>
+              JD Avelino St., Brgy. West Awang, Calbayog City, Samar, Philippines
+            </p>
+            <p className={`text-[9px] sm:text-[10px] leading-snug ${
+              isDark ? "text-slate-400" : "text-slate-500"
+            }`}>
+              Non Vat Reg. TIN 496-013-435-00005
+            </p>
+            <p className={`text-[9px] sm:text-[10px] leading-snug ${
+              isDark ? "text-slate-400" : "text-slate-500"
+            }`}>
+              CP #09171281530
+            </p>
+          </div>
 
           {/* Header */}
           <div className={`flex items-center justify-between px-4 sm:px-5 py-2 sm:py-2.5 border-b ${
