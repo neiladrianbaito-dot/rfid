@@ -16,9 +16,10 @@ import {
   Loader2,
   User,
   BadgeCheck,
+  Percent,
 } from "lucide-react";
-import { toPng } from "html-to-image"; // 🆕 npm i html-to-image jspdf
-import { jsPDF } from "jspdf"; // 🆕
+import { toPng } from "html-to-image"; // npm i html-to-image jspdf
+import { jsPDF } from "jspdf";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/use-theme";
 
@@ -31,7 +32,7 @@ export type Transaction = {
   amount: number | string;
   status: string;
   route_id?: number | null;
-  // 🆕 Passenger info — map these to your actual column names if different
+  // Passenger info — map these to your actual column names if different
   passenger_name?: string | null;
   card_type?: string | null; // senior | pwd | student | regular
   payment_method?: string | null;
@@ -47,6 +48,11 @@ export type FareRoute = {
   fareAmount: number;
   isActive: boolean;
 };
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+// 🆕 Discount applied to Fare transactions for every card type except "regular"
+const FARE_DISCOUNT_RATE = 0.2; // 20%
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -112,7 +118,7 @@ function formatPaymentMethod(method?: string | null): string | null {
   return map[key] ?? method.charAt(0).toUpperCase() + method.slice(1);
 }
 
-// 🆕 Card type → display label
+// Card type → display label
 function formatCardType(type?: string | null): string {
   if (!type) return "—";
   const key = type.toLowerCase().trim();
@@ -126,6 +132,18 @@ function formatCardType(type?: string | null): string {
   return map[key] ?? type.charAt(0).toUpperCase() + type.slice(1);
 }
 
+// 🆕 Every card type gets the discount EXCEPT regular (or empty)
+function isDiscountedCard(type?: string | null): boolean {
+  if (!type) return false;
+  const key = type.toLowerCase().trim();
+  return key !== "" && key !== "regular";
+}
+
+// 🆕 Round to 2 decimals (avoids floating point noise like 7.199999)
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
 function getPaymentMethodLogo(method?: string | null): string | null {
   if (!method) return null;
   const key = method.toLowerCase().trim();
@@ -133,7 +151,7 @@ function getPaymentMethodLogo(method?: string | null): string | null {
   return null;
 }
 
-// 🆕 Load a data URL into an <img> so we can read its natural size (for PDF sizing)
+// Load a data URL into an <img> so we can read its natural size (for PDF sizing)
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -158,7 +176,7 @@ export function TransactionDetailModal({
 }: TransactionDetailModalProps) {
   const { isDark } = useTheme();
 
-  // 🆕 Ref to the receipt card + busy state (hooks must stay above the early return)
+  // Ref to the receipt card + busy state (hooks must stay above the early return)
   const receiptRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState<null | "image" | "pdf" | "print">(null);
 
@@ -180,13 +198,27 @@ export function TransactionDetailModal({
   const netAmount = getNetAmount(tx);
   const feeAmount = getFeeAmount(tx);
   const vatAmount = getVatAmount(tx);
-  const heroAmount = !isFare && netAmount != null ? netAmount : originalAmount;
+
+  // 🆕 Fare discount (20% for senior / pwd / student — none for regular)
+  const hasFareDiscount = isFare && isDiscountedCard(tx.card_type);
+  const fareDiscount = hasFareDiscount
+    ? round2(originalAmount * FARE_DISCOUNT_RATE)
+    : 0;
+  const fareTotal = round2(originalAmount - fareDiscount);
+  const discountPercentLabel = `${Math.round(FARE_DISCOUNT_RATE * 100)}%`;
+
+  // 🆕 Hero amount: for Fare use the discounted total
+  const heroAmount = isFare
+    ? fareTotal
+    : netAmount != null
+    ? netAmount
+    : originalAmount;
 
   const amountColor = isFare
     ? isDark ? "text-red-400" : "text-red-600"
     : isDark ? "text-emerald-400" : "text-emerald-600";
 
-  // 🆕 ── Export helpers ───────────────────────────────────────────────────────
+  // ── Export helpers ──────────────────────────────────────────────────────────
   const fileBase = `receipt-TXN-${tx.id}`;
 
   /** Renders the receipt card to a PNG data URL (buttons are excluded). */
@@ -321,7 +353,7 @@ export function TransactionDetailModal({
       value: tx.type,
       mono: false,
     },
-    // 🆕 Passenger name + card type
+    // Passenger name + card type
     {
       icon: <User className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />,
       label: "Passenger",
@@ -353,7 +385,7 @@ export function TransactionDetailModal({
         }`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 🆕 Everything inside this wrapper is what gets exported */}
+        {/* Everything inside this wrapper is what gets exported */}
         <div
           ref={receiptRef}
           className={isDark ? "bg-slate-900" : "bg-white"}
@@ -361,7 +393,7 @@ export function TransactionDetailModal({
           {/* Top accent stripe */}
           <div className={`h-1 w-full ${isFare ? "bg-red-500" : "bg-emerald-500"}`} />
 
-          {/* 🆕 Company header */}
+          {/* Company header */}
           <div className={`px-4 sm:px-5 pt-3 pb-2.5 text-center border-b border-dashed ${
             isDark ? "border-slate-700" : "border-slate-300"
           }`}>
@@ -438,9 +470,17 @@ export function TransactionDetailModal({
           }`}>
             <p className={`text-2xl sm:text-3xl font-black tracking-tighter ${amountColor}`}>
               {isFare
-                ? formatAmount(tx.amount)
+                ? formatAmount(fareTotal)
                 : formatNullableAmount(heroAmount)}
             </p>
+            {/* 🆕 Discount badge */}
+            {hasFareDiscount && (
+              <p className={`text-[9px] sm:text-[10px] font-semibold mt-0.5 ${
+                isDark ? "text-amber-400" : "text-amber-600"
+              }`}>
+                {discountPercentLabel} {formatCardType(tx.card_type)} discount applied
+              </p>
+            )}
             <p className={`text-[9px] sm:text-[10px] mt-0.5 ${
               isDark ? "text-slate-500" : "text-slate-400"
             }`}>
@@ -485,6 +525,41 @@ export function TransactionDetailModal({
                   </span>
                 </div>
               ))}
+
+              {/* 🆕 Fare + Discount rows — Fare type with a discounted card only */}
+              {hasFareDiscount && (
+                <>
+                  <div className={`flex items-center justify-between gap-3 px-3 py-1.5 sm:py-2 ${
+                    isDark ? "bg-slate-950/40" : "bg-slate-50"
+                  }`}>
+                    <span className={`text-[9px] sm:text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
+                      isDark ? "text-slate-500" : "text-slate-400"
+                    }`}>
+                      Fare
+                    </span>
+                    <span className={`text-[10px] sm:text-xs font-mono font-medium ${
+                      isDark ? "text-slate-200" : "text-slate-700"
+                    }`}>
+                      {formatAmount(originalAmount)}
+                    </span>
+                  </div>
+                  <div className={`flex items-center justify-between gap-3 px-3 py-1.5 sm:py-2 ${
+                    isDark ? "bg-slate-950/40" : "bg-slate-50"
+                  }`}>
+                    <span className={`flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] shrink-0 ${
+                      isDark ? "text-slate-500" : "text-slate-400"
+                    }`}>
+                      <Percent className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
+                      Discount ({discountPercentLabel})
+                    </span>
+                    <span className={`text-[10px] sm:text-xs font-mono font-bold ${
+                      isDark ? "text-amber-400" : "text-amber-600"
+                    }`}>
+                      -{formatAmount(fareDiscount)}
+                    </span>
+                  </div>
+                </>
+              )}
 
               {/* Payment method — only for Top-up (non-Fare) transactions */}
               {!isFare && (
@@ -637,16 +712,16 @@ export function TransactionDetailModal({
             </span>
             <span className={`text-xs sm:text-sm font-black ${amountColor}`}>
               {isFare
-                ? formatAmount(tx.amount)
+                ? formatAmount(fareTotal)
                 : formatNullableAmount(netAmount)}
             </span>
           </div>
         </div>
-        {/* 🆕 ── end of exported area ─────────────────────────────────────── */}
+        {/* ── end of exported area ───────────────────────────────────────── */}
 
         {/* Footer (not exported) */}
         <div className="px-4 sm:px-5 pb-3 sm:pb-4 space-y-2">
-          {/* 🆕 Download image / PDF / Print — Fare type only */}
+          {/* Download image / PDF / Print — Fare type only */}
           {isFare && (
             <div className="grid grid-cols-3 gap-2">
               <Button
