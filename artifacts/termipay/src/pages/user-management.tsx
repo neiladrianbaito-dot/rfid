@@ -1994,102 +1994,123 @@ export default function UserManagementPage() {
         </CardContent>
       </Card>
 
-      {/* Card Preview Dialog — flippable front/back, styled to match the printed card */}
+      {/* Card Preview Dialog — responsive, balanced layout.
+          Order: header → card → quick facts → [Image | PDF] centered → Renew → Close (bottom) */}
       <Dialog open={!!previewUser} onOpenChange={(open) => !open && setPreviewUser(null)}>
-        <DialogContent className={`sm:max-w-lg [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+        <DialogContent
+          className={`w-[calc(100vw-1.5rem)] max-w-lg max-h-[92dvh] overflow-y-auto p-4 sm:p-6 gap-4 [&>button]:cursor-pointer ${
+            isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+          }`}
+        >
           <DialogHeader>
-            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center justify-between gap-2 text-blue-500 pr-6">
-              <span className="flex items-center gap-2">
+            <DialogTitle className="flex items-center justify-between gap-2 pr-6 text-blue-500">
+              <span className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide">
                 <CreditCard size={18} /> Card Preview
               </span>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setPreviewFlipped((f) => !f)}
-                className={`h-7 px-2.5 text-[11px] font-semibold normal-case cursor-pointer ${isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"}`}
+                className={`h-7 px-2.5 text-[11px] font-semibold normal-case cursor-pointer shrink-0 ${
+                  isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                }`}
               >
                 <RotateCw className="w-3 h-3 mr-1" />
-                Flip to {previewFlipped ? "front" : "back"}
+                {previewFlipped ? "Front" : "Back"}
               </Button>
             </DialogTitle>
           </DialogHeader>
 
           {previewUser && (
-            <div className="py-2">
-              {/* 🔒 Locked-scale card mockup — fixed-pixel design, scales as
-                  one unit, never reflows internally. Click to flip. */}
+            <div className="space-y-3">
               <LockedFlipCard
                 flipped={previewFlipped}
                 onFlip={() => setPreviewFlipped((f) => !f)}
                 front={<CardFront user={previewUser} />}
                 back={<CardBack />}
               />
-              <p className={`text-center text-[10px] mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              <p className={`text-center text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                 Tap the card to flip
               </p>
 
-              {/* Quick facts below the card */}
-              <div className="grid grid-cols-2 gap-3 mt-5">
-                <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Balance</span>
-                  <div className={`text-sm font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                    {formatPeso(previewUser.balance || 0)}
+              {/* Quick facts — 1 column on very small screens, 2 columns otherwise */}
+              <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2.5">
+                {[
+                  {
+                    label: "Balance",
+                    value: formatPeso(previewUser.balance || 0),
+                    cls: isDark ? "text-emerald-400" : "text-emerald-600",
+                  },
+                  {
+                    label: "Status",
+                    value: previewUser.status,
+                    cls:
+                      previewUser.status === "Active"
+                        ? isDark ? "text-emerald-400" : "text-emerald-600"
+                        : isDark ? "text-red-400" : "text-red-600",
+                  },
+                  {
+                    label: "Valid Until",
+                    value: formatDate(previewUser.expirationDate),
+                    cls: `font-mono ${
+                      isCardExpired(previewUser.expirationDate)
+                        ? isDark ? "text-red-400" : "text-red-600"
+                        : isDark ? "text-slate-200" : "text-slate-800"
+                    }`,
+                  },
+                  {
+                    label: "Linked Account",
+                    value: normalizeEmail(previewUser.email) ?? "No account linked",
+                    cls: `font-mono ${
+                      normalizeEmail(previewUser.email)
+                        ? isDark ? "text-blue-400" : "text-blue-600"
+                        : isDark ? "text-slate-500 italic" : "text-slate-400 italic"
+                    }`,
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className={`min-w-0 rounded-lg border px-3 py-2 ${
+                      isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"
+                    }`}
+                  >
+                    <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                      {item.label}
+                    </span>
+                    <div className={`text-sm font-semibold truncate ${item.cls}`} title={String(item.value)}>
+                      {item.value}
+                    </div>
                   </div>
-                </div>
-                <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</span>
-                  <div className={`text-sm font-semibold ${previewUser.status === "Active" ? (isDark ? "text-emerald-400" : "text-emerald-600") : (isDark ? "text-red-400" : "text-red-600")}`}>
-                    {previewUser.status}
-                  </div>
-                </div>
-                <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card Valid Until</span>
-                  <div className={`text-sm font-semibold font-mono ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                    {formatDate(previewUser.expirationDate)}
-                  </div>
-                </div>
-                <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-                  <span className={`text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                    <LinkIcon size={10} /> Linked Account
-                  </span>
-                  <div className={`text-sm font-mono ${normalizeEmail(previewUser.email) ? (isDark ? "text-blue-400" : "text-blue-600") : (isDark ? "text-slate-500 italic" : "text-slate-400 italic")}`}>
-                    {normalizeEmail(previewUser.email) ?? "No account linked"}
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
           )}
 
-          <DialogFooter className="gap-2 flex-wrap">
-            {/* ⬇️ NEW: Download buttons — available sa lahat ng admin (kasama view_only).
-                Kung gusto mong i-restrict, i-wrap sa {canManage && (...)} */}
-            <Button
-              variant="outline"
-              onClick={downloadCardImage}
-              disabled={!!isExporting}
-              className="text-xs font-semibold cursor-pointer gap-1.5 disabled:cursor-not-allowed"
-            >
-              {isExporting === "png" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-              Download Image
-            </Button>
-            <Button
-              variant="outline"
-              onClick={downloadCardPdf}
-              disabled={!!isExporting}
-              className="text-xs font-semibold cursor-pointer gap-1.5 disabled:cursor-not-allowed"
-            >
-              {isExporting === "pdf" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-              Download PDF
-            </Button>
+          {/* Footer — stacked & centered. Overrides DialogFooter's default sm:flex-row. */}
+          <DialogFooter className="flex flex-col gap-2.5 sm:flex-col sm:justify-center sm:space-x-0">
+            {/* Download buttons: equal width, centered, balanced */}
+            <div className="grid grid-cols-2 gap-2.5 w-full max-w-sm mx-auto">
+              <Button
+                variant="outline"
+                onClick={downloadCardImage}
+                disabled={!!isExporting}
+                className="h-10 w-full justify-center text-xs font-semibold cursor-pointer gap-1.5 disabled:cursor-not-allowed"
+              >
+                {isExporting === "png" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                Image
+              </Button>
+              <Button
+                variant="outline"
+                onClick={downloadCardPdf}
+                disabled={!!isExporting}
+                className="h-10 w-full justify-center text-xs font-semibold cursor-pointer gap-1.5 disabled:cursor-not-allowed"
+              >
+                {isExporting === "pdf" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                PDF
+              </Button>
+            </div>
 
-            <Button
-              variant="ghost"
-              onClick={() => setPreviewUser(null)}
-              className={`text-xs font-medium cursor-pointer ${isDark ? "text-slate-400 hover:text-white hover:bg-slate-800" : "text-slate-500"}`}
-            >
-              Close
-            </Button>
-            {/* 🔒 Renew Card button — makikita lang kapag may permission (hindi view_only) */}
+            {/* Renew (only with permission) */}
             {canManage && previewUser && (
               <Button
                 onClick={() => {
@@ -2098,13 +2119,30 @@ export default function UserManagementPage() {
                   openRenew(user);
                 }}
                 disabled={!isCardExpired(previewUser.expirationDate)}
-                title={!isCardExpired(previewUser.expirationDate) ? `Not yet expired — valid until ${formatDate(previewUser.expirationDate)}` : undefined}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-emerald-600"
+                title={
+                  !isCardExpired(previewUser.expirationDate)
+                    ? `Not yet expired — valid until ${formatDate(previewUser.expirationDate)}`
+                    : undefined
+                }
+                className="h-10 w-full max-w-sm mx-auto justify-center bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-emerald-600"
               >
                 <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
                 Renew Card
               </Button>
             )}
+
+            {/* Close — always at the very bottom */}
+            <Button
+              variant="ghost"
+              onClick={() => setPreviewUser(null)}
+              className={`h-10 w-full max-w-sm mx-auto justify-center text-xs font-medium cursor-pointer border ${
+                isDark
+                  ? "text-slate-300 hover:text-white hover:bg-slate-800 border-slate-800"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
+              }`}
+            >
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
