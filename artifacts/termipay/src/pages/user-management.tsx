@@ -485,29 +485,26 @@ function ChevronStaircase({ color }: { color: string }) {
 // ═══════════════════════════════════════════════════════════════════════
 // 🔒 LOCKED-SCALE CARD SYSTEM — same idea as the LTO LTMS Digital ID card.
 //
-// The problem before: the card front/back used Tailwind responsive classes
-// (p-5 sm:p-7, text-2xl sm:text-3xl, etc). At certain widths the browser
-// jumps between breakpoints, so text, padding, and the logo each resize at
-// DIFFERENT moments — the design visibly "reflows" instead of scaling as
-// one unit, and things can drift out of position.
-//
-// The fix: author the card ONCE at a fixed pixel canvas
+// The card is authored ONCE at a fixed pixel canvas
 // (CARD_DESIGN_WIDTH x CARD_DESIGN_HEIGHT). Every element inside uses
-// fixed px values only — no breakpoints, no "sm:"/"md:" classes. That
-// canvas is then dropped into a responsive-width container and scaled
-// down/up with a single CSS `transform: scale(ratio)`, where ratio is
-// measured live (via ResizeObserver) from how much space is actually
-// available. Because it's one transform on one wrapper, every child
-// (logo, UID, name, "Valid Until" label) shrinks or grows by the exact
-// same amount, in the exact same relative position — nothing reflows,
-// nothing repositions independently, no matter how far you stretch or
-// shrink the container. It behaves exactly like scaling a locked image.
+// fixed px values only — no breakpoints. That canvas is dropped into a
+// responsive-width container and scaled with a single CSS
+// `transform: scale(ratio)`, measured live via ResizeObserver.
+//
+// 📏 TRUE RFID / ID-1 (CR80) SIZE:
+// 85.60 mm x 53.98 mm  (aspect ratio ≈ 1.586).
+// The design canvas keeps this exact ratio, and the PDF export uses the
+// same millimeters, so printing at 100% / "Actual size" gives a card that
+// is exactly the size of a real RFID card.
 // ═══════════════════════════════════════════════════════════════════════
 
+// 📏 Real-world CR80 card size in millimeters (used for the PDF page size)
+const CARD_MM_WIDTH = 85.6;
+const CARD_MM_HEIGHT = 53.98;
+
 const CARD_DESIGN_WIDTH = 700;
-// Keeps the real 1376:774 physical-card aspect ratio, just authored at a
-// smaller, easier-to-design canvas size.
-const CARD_DESIGN_HEIGHT = Math.round((CARD_DESIGN_WIDTH * 774) / 1376); // 394
+// Height derived from the real CR80 ratio → 700 x 441
+const CARD_DESIGN_HEIGHT = Math.round((CARD_DESIGN_WIDTH * CARD_MM_HEIGHT) / CARD_MM_WIDTH); // 441
 
 function useScaleToFit(designWidth: number) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -586,17 +583,30 @@ function LockedFlipCard({
 // ═══════════════════════════════════════════════════════════════════════
 // 🪪 CARD FACES — extracted into their own components so the flippable
 // preview AND the hidden export layer (PNG / PDF download) render the
-// EXACT same design. `withShadow={false}` is used for exports so the
-// drop shadow doesn't get clipped at the edges of the captured image.
+// EXACT same design.
+//
+// `withShadow={false}` → no drop shadow (so it isn't clipped in exports).
+// `square={true}`      → square corners + no border. Used for exports so
+//                        the PDF/PNG is a clean, full-bleed, print-ready
+//                        rectangle (no white/black corners). The physical
+//                        card cutter/printer handles the rounded corners.
 // ═══════════════════════════════════════════════════════════════════════
-function CardFront({ user, withShadow = true }: { user: any; withShadow?: boolean }) {
+function CardFront({
+  user,
+  withShadow = true,
+  square = false,
+}: {
+  user: any;
+  withShadow?: boolean;
+  square?: boolean;
+}) {
   const theme = getCardTheme(user.type);
   return (
     <div
-      className="rounded-2xl overflow-hidden border h-full w-full relative"
+      className={`${square ? "" : "rounded-2xl border"} overflow-hidden h-full w-full relative`}
       style={{
         backgroundColor: theme.cardBg,
-        borderColor: theme.isLight ? "#cbd5e1" : "transparent",
+        borderColor: square ? "transparent" : theme.isLight ? "#cbd5e1" : "transparent",
         boxShadow: !withShadow
           ? "none"
           : theme.isLight
@@ -606,7 +616,7 @@ function CardFront({ user, withShadow = true }: { user: any; withShadow?: boolea
     >
       <ChevronStaircase color={theme.pattern} />
 
-      <div className="relative h-full w-full flex flex-col justify-between" style={{ padding: 30 }}>
+      <div className="relative h-full w-full flex flex-col justify-between" style={{ padding: 32 }}>
         {/* ➕ small "Non-transferable" tag for discounted card types
             (Student/Senior/PWD). Absolutely positioned so the header row
             below keeps its exact position/size. */}
@@ -632,8 +642,8 @@ function CardFront({ user, withShadow = true }: { user: any; withShadow?: boolea
           <div
             className="rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden"
             style={{
-              width: 62,
-              height: 62,
+              width: 66,
+              height: 66,
               backgroundColor: theme.isLight ? "#f1f5f9" : "rgba(255,255,255,0.10)",
               borderColor: theme.isLight ? "#cbd5e1" : "rgba(255,255,255,0.30)",
             }}
@@ -642,23 +652,23 @@ function CardFront({ user, withShadow = true }: { user: any; withShadow?: boolea
           </div>
           <span
             className="font-bold tracking-wide uppercase"
-            style={{ color: theme.textColor, fontSize: 22, lineHeight: 1.15 }}
+            style={{ color: theme.textColor, fontSize: 23, lineHeight: 1.15 }}
           >
             Fare Collection System
           </span>
         </div>
 
         {/* Body */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div
             className="font-mono font-extrabold tracking-wide"
-            style={{ color: theme.uidColor, fontSize: 44, lineHeight: 1.1 }}
+            style={{ color: theme.uidColor, fontSize: 46, lineHeight: 1.1 }}
           >
             {user.cardUid}
           </div>
           <div
             className="font-semibold"
-            style={{ color: theme.textColor, fontSize: 25, lineHeight: 1.2 }}
+            style={{ color: theme.textColor, fontSize: 26, lineHeight: 1.2 }}
           >
             {user.fullName}
           </div>
@@ -668,20 +678,20 @@ function CardFront({ user, withShadow = true }: { user: any; withShadow?: boolea
         <div className="flex items-end justify-between">
           <div
             className="font-extrabold tracking-wide"
-            style={{ color: theme.accent, fontSize: 24, lineHeight: 1.1 }}
+            style={{ color: theme.accent, fontSize: 25, lineHeight: 1.1 }}
           >
             {theme.label}
           </div>
           <div className="text-right">
             <div
               className="uppercase tracking-wide font-semibold"
-              style={{ color: theme.subTextColor, fontSize: 11, lineHeight: 1.3 }}
+              style={{ color: theme.subTextColor, fontSize: 12, lineHeight: 1.3 }}
             >
               Valid Until
             </div>
             <div
               className="font-mono font-bold"
-              style={{ color: theme.textColor, fontSize: 15, lineHeight: 1.3 }}
+              style={{ color: theme.textColor, fontSize: 16, lineHeight: 1.3 }}
             >
               {formatDate(user.expirationDate)}
             </div>
@@ -692,10 +702,16 @@ function CardFront({ user, withShadow = true }: { user: any; withShadow?: boolea
   );
 }
 
-function CardBack({ withShadow = true }: { withShadow?: boolean }) {
+function CardBack({
+  withShadow = true,
+  square = false,
+}: {
+  withShadow?: boolean;
+  square?: boolean;
+}) {
   return (
     <div
-      className="rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300 h-full w-full"
+      className={`${square ? "" : "rounded-2xl border border-slate-300"} overflow-hidden bg-[#eceae4] flex flex-col h-full w-full`}
       style={{
         boxShadow: withShadow
           ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
@@ -703,18 +719,18 @@ function CardBack({ withShadow = true }: { withShadow?: boolean }) {
       }}
     >
       <div style={{ height: "18%" }} className="bg-[#221f20] flex-shrink-0" />
-      <div className="flex-1 min-h-0 flex flex-col" style={{ padding: "12px 28px" }}>
+      <div className="flex-1 min-h-0 flex flex-col" style={{ padding: "14px 30px" }}>
         <div
           className="bg-white border-y border-slate-300"
           style={{ padding: "8px 14px", marginBottom: 14 }}
         >
-          <span className="font-extrabold text-slate-900" style={{ fontSize: 19 }}>
+          <span className="font-extrabold text-slate-900" style={{ fontSize: 20 }}>
             Terms and Condition
           </span>
         </div>
         <ul
           className="text-slate-800 flex-1 min-h-0 overflow-hidden"
-          style={{ fontSize: 13, lineHeight: 1.45, display: "flex", flexDirection: "column", gap: 3 }}
+          style={{ fontSize: 14, lineHeight: 1.45, display: "flex", flexDirection: "column", gap: 4 }}
         >
           <li>• Property of the Fare Collection System Operator.</li>
           <li>• Non-transferable and subject to transit system rules.</li>
@@ -730,13 +746,13 @@ function CardBack({ withShadow = true }: { withShadow?: boolean }) {
         >
           <div
             className="rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden"
-            style={{ width: 38, height: 38 }}
+            style={{ width: 40, height: 40 }}
           >
             <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
           </div>
           <span
             className="font-extrabold tracking-wide text-slate-900 uppercase"
-            style={{ fontSize: 15 }}
+            style={{ fontSize: 16 }}
           >
             Fare Collection System
           </span>
@@ -1443,16 +1459,19 @@ export default function UserManagementPage() {
   };
 
   // ═══════════════════════════════════════════════════════════════════
-  // ⬇️ NEW: CARD EXPORT (PNG + PDF)
+  // ⬇️ CARD EXPORT (PNG + PDF)
   //
   // Hindi tayo nagca-capture mula sa mismong preview, kasi may scale()
   // transform at 3D flip (backface-visibility) doon — madalas blangko o
   // salamin ang lalabas. Sa halip, may hidden, unscaled, non-flipped
-  // export layer (sa dulo ng page) na 700x394 ang bawat side, at iyon
-  // ang kina-capture.
+  // export layer (sa dulo ng page) na 700x441 ang bawat side (CR80 ratio),
+  // at iyon ang kina-capture.
+  //
+  // 📏 PDF: page size = eksaktong 85.6 x 53.98 mm (totoong RFID/ID-1 card).
+  // I-print sa 100% / "Actual size" (huwag "Fit to page") para sakto.
   // ═══════════════════════════════════════════════════════════════════
   const capture = (el: HTMLElement, width: number, height: number) =>
-    toPng(el, { pixelRatio: 3, cacheBust: true, width, height });
+    toPng(el, { pixelRatio: 4, cacheBust: true, width, height });
 
   const triggerDownload = (href: string, filename: string) => {
     const a = document.createElement("a");
@@ -1483,7 +1502,7 @@ export default function UserManagementPage() {
     }
   };
 
-  // 📄 PDF — page 1 = front, page 2 = back, each page exactly card-sized
+  // 📄 PDF — page 1 = front, page 2 = back, each page EXACTLY 85.6 x 53.98 mm
   const downloadCardPdf = async () => {
     if (!previewUser || !exportFrontRef.current || !exportBackRef.current) return;
     setIsExporting("pdf");
@@ -1494,10 +1513,15 @@ export default function UserManagementPage() {
       const front = await capture(exportFrontRef.current, W, H);
       const back = await capture(exportBackRef.current, W, H);
 
-      const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [W, H], compress: true });
-      pdf.addImage(front, "PNG", 0, 0, W, H);
-      pdf.addPage([W, H], "landscape");
-      pdf.addImage(back, "PNG", 0, 0, W, H);
+      const pdf = new jsPDF({
+        orientation: "landscape",
+        unit: "mm",
+        format: [CARD_MM_WIDTH, CARD_MM_HEIGHT],
+        compress: true,
+      });
+      pdf.addImage(front, "PNG", 0, 0, CARD_MM_WIDTH, CARD_MM_HEIGHT);
+      pdf.addPage([CARD_MM_WIDTH, CARD_MM_HEIGHT], "landscape");
+      pdf.addImage(back, "PNG", 0, 0, CARD_MM_WIDTH, CARD_MM_HEIGHT);
       pdf.save(`${exportFileBase()}.pdf`);
     } catch (error) {
       console.error("Card PDF export error:", error);
@@ -2683,10 +2707,12 @@ export default function UserManagementPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ⬇️ NEW: Hidden EXPORT LAYER — unscaled, non-flipped, off-screen (NOT
+      {/* ⬇️ Hidden EXPORT LAYER — unscaled, non-flipped, off-screen (NOT
           display:none, so it can still be rendered and captured). Front and
-          back are each exactly 700x394. Sits outside the Dialog so the
-          dialog's transform can't affect its fixed positioning. */}
+          back are each exactly 700x441 (CR80 ratio). Uses `square` faces so
+          the exported PNG/PDF is a clean full-bleed, print-ready rectangle.
+          Sits outside the Dialog so the dialog's transform can't affect its
+          fixed positioning. */}
       {previewUser && (
         <div
           aria-hidden
@@ -2703,10 +2729,10 @@ export default function UserManagementPage() {
             }}
           >
             <div ref={exportFrontRef} style={{ width: CARD_DESIGN_WIDTH, height: CARD_DESIGN_HEIGHT }}>
-              <CardFront user={previewUser} withShadow={false} />
+              <CardFront user={previewUser} withShadow={false} square />
             </div>
             <div ref={exportBackRef} style={{ width: CARD_DESIGN_WIDTH, height: CARD_DESIGN_HEIGHT }}>
-              <CardBack withShadow={false} />
+              <CardBack withShadow={false} square />
             </div>
           </div>
         </div>
