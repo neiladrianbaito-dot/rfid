@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard, Download, FileText } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   AlertDialog,
@@ -31,6 +31,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() / balance transfer RPC calls
+
+// ⬇️ NEW: card image / PDF export
+import { toPng } from "html-to-image";
+import { jsPDF } from "jspdf";
 
 // 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
 // at `loaded` (true kapag tapos na ma-fetch ang access info).
@@ -579,6 +583,169 @@ function LockedFlipCard({
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// 🪪 CARD FACES — extracted into their own components so the flippable
+// preview AND the hidden export layer (PNG / PDF download) render the
+// EXACT same design. `withShadow={false}` is used for exports so the
+// drop shadow doesn't get clipped at the edges of the captured image.
+// ═══════════════════════════════════════════════════════════════════════
+function CardFront({ user, withShadow = true }: { user: any; withShadow?: boolean }) {
+  const theme = getCardTheme(user.type);
+  return (
+    <div
+      className="rounded-2xl overflow-hidden border h-full w-full relative"
+      style={{
+        backgroundColor: theme.cardBg,
+        borderColor: theme.isLight ? "#cbd5e1" : "transparent",
+        boxShadow: !withShadow
+          ? "none"
+          : theme.isLight
+          ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
+          : "0 10px 25px -5px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.2)",
+      }}
+    >
+      <ChevronStaircase color={theme.pattern} />
+
+      <div className="relative h-full w-full flex flex-col justify-between" style={{ padding: 30 }}>
+        {/* ➕ small "Non-transferable" tag for discounted card types
+            (Student/Senior/PWD). Absolutely positioned so the header row
+            below keeps its exact position/size. */}
+        {theme.isLight && (
+          <div
+            className="absolute uppercase font-bold text-center"
+            style={{
+              top: 10,
+              left: 0,
+              right: 0,
+              fontSize: 15,
+              letterSpacing: 0.5,
+              color: theme.accent,
+              lineHeight: 1.3,
+            }}
+          >
+            Non-Transferable
+          </div>
+        )}
+
+        {/* Header / logo badge */}
+        <div className="flex items-center" style={{ gap: 16 }}>
+          <div
+            className="rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden"
+            style={{
+              width: 62,
+              height: 62,
+              backgroundColor: theme.isLight ? "#f1f5f9" : "rgba(255,255,255,0.10)",
+              borderColor: theme.isLight ? "#cbd5e1" : "rgba(255,255,255,0.30)",
+            }}
+          >
+            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+          </div>
+          <span
+            className="font-bold tracking-wide uppercase"
+            style={{ color: theme.textColor, fontSize: 22, lineHeight: 1.15 }}
+          >
+            Fare Collection System
+          </span>
+        </div>
+
+        {/* Body */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div
+            className="font-mono font-extrabold tracking-wide"
+            style={{ color: theme.uidColor, fontSize: 44, lineHeight: 1.1 }}
+          >
+            {user.cardUid}
+          </div>
+          <div
+            className="font-semibold"
+            style={{ color: theme.textColor, fontSize: 25, lineHeight: 1.2 }}
+          >
+            {user.fullName}
+          </div>
+        </div>
+
+        {/* Footer row: type label (left) + valid until (right) */}
+        <div className="flex items-end justify-between">
+          <div
+            className="font-extrabold tracking-wide"
+            style={{ color: theme.accent, fontSize: 24, lineHeight: 1.1 }}
+          >
+            {theme.label}
+          </div>
+          <div className="text-right">
+            <div
+              className="uppercase tracking-wide font-semibold"
+              style={{ color: theme.subTextColor, fontSize: 11, lineHeight: 1.3 }}
+            >
+              Valid Until
+            </div>
+            <div
+              className="font-mono font-bold"
+              style={{ color: theme.textColor, fontSize: 15, lineHeight: 1.3 }}
+            >
+              {formatDate(user.expirationDate)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CardBack({ withShadow = true }: { withShadow?: boolean }) {
+  return (
+    <div
+      className="rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300 h-full w-full"
+      style={{
+        boxShadow: withShadow
+          ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
+          : "none",
+      }}
+    >
+      <div style={{ height: "18%" }} className="bg-[#221f20] flex-shrink-0" />
+      <div className="flex-1 min-h-0 flex flex-col" style={{ padding: "12px 28px" }}>
+        <div
+          className="bg-white border-y border-slate-300"
+          style={{ padding: "8px 14px", marginBottom: 14 }}
+        >
+          <span className="font-extrabold text-slate-900" style={{ fontSize: 19 }}>
+            Terms and Condition
+          </span>
+        </div>
+        <ul
+          className="text-slate-800 flex-1 min-h-0 overflow-hidden"
+          style={{ fontSize: 13, lineHeight: 1.45, display: "flex", flexDirection: "column", gap: 3 }}
+        >
+          <li>• Property of the Fare Collection System Operator.</li>
+          <li>• Non-transferable and subject to transit system rules.</li>
+          <li>• Positive balance required to pass through.</li>
+          <li>• Non-refundable card issuance fee applies.</li>
+          <li>• Operator is not responsible for lost or stolen cards.</li>
+          <li>• Unused balances on unregistered cards are non-refundable.</li>
+          <li>• Tampering or unauthorized duplication is strictly prohibited.</li>
+        </ul>
+        <div
+          className="flex items-center border-t border-slate-300"
+          style={{ gap: 10, paddingTop: 10, marginTop: 6 }}
+        >
+          <div
+            className="rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden"
+            style={{ width: 38, height: 38 }}
+          >
+            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+          </div>
+          <span
+            className="font-extrabold tracking-wide text-slate-900 uppercase"
+            style={{ fontSize: 15 }}
+          >
+            Fare Collection System
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function UserManagementPage() {
   const { isDark } = useTheme();
 
@@ -594,6 +761,12 @@ export default function UserManagementPage() {
   const [deleteUser, setDeleteUser] = useState<any>(null);
   const [previewUser, setPreviewUser] = useState<any>(null);
   const [previewFlipped, setPreviewFlipped] = useState(false);
+
+  // ⬇️ NEW: card export (PNG / PDF) state + refs
+  const [isExporting, setIsExporting] = useState<"png" | "pdf" | null>(null);
+  const exportSheetRef = useRef<HTMLDivElement>(null); // front + back stacked (for PNG)
+  const exportFrontRef = useRef<HTMLDivElement>(null); // front only (for PDF page 1)
+  const exportBackRef = useRef<HTMLDivElement>(null); // back only (for PDF page 2)
 
   // ✅ Renew confirmation modal state — holds the user pending renewal
   const [renewUser, setRenewUser] = useState<any>(null);
@@ -1269,6 +1442,71 @@ export default function UserManagementPage() {
     });
   };
 
+  // ═══════════════════════════════════════════════════════════════════
+  // ⬇️ NEW: CARD EXPORT (PNG + PDF)
+  //
+  // Hindi tayo nagca-capture mula sa mismong preview, kasi may scale()
+  // transform at 3D flip (backface-visibility) doon — madalas blangko o
+  // salamin ang lalabas. Sa halip, may hidden, unscaled, non-flipped
+  // export layer (sa dulo ng page) na 700x394 ang bawat side, at iyon
+  // ang kina-capture.
+  // ═══════════════════════════════════════════════════════════════════
+  const capture = (el: HTMLElement, width: number, height: number) =>
+    toPng(el, { pixelRatio: 3, cacheBust: true, width, height });
+
+  const triggerDownload = (href: string, filename: string) => {
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const exportFileBase = () =>
+    `card-${String(previewUser?.cardUid ?? "design").replace(/[^a-zA-Z0-9_-]/g, "")}`;
+
+  // 🖼 PNG — front + back stacked in one image
+  const downloadCardImage = async () => {
+    if (!previewUser || !exportSheetRef.current) return;
+    setIsExporting("png");
+    try {
+      const el = exportSheetRef.current;
+      await capture(el, el.offsetWidth, el.offsetHeight); // warm-up: makes sure images/fonts are loaded
+      const dataUrl = await capture(el, el.offsetWidth, el.offsetHeight);
+      triggerDownload(dataUrl, `${exportFileBase()}.png`);
+    } catch (error) {
+      console.error("Card image export error:", error);
+      toast({ title: "Failed to export image", variant: "destructive" });
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  // 📄 PDF — page 1 = front, page 2 = back, each page exactly card-sized
+  const downloadCardPdf = async () => {
+    if (!previewUser || !exportFrontRef.current || !exportBackRef.current) return;
+    setIsExporting("pdf");
+    try {
+      const W = CARD_DESIGN_WIDTH;
+      const H = CARD_DESIGN_HEIGHT;
+      await capture(exportFrontRef.current, W, H); // warm-up
+      const front = await capture(exportFrontRef.current, W, H);
+      const back = await capture(exportBackRef.current, W, H);
+
+      const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [W, H], compress: true });
+      pdf.addImage(front, "PNG", 0, 0, W, H);
+      pdf.addPage([W, H], "landscape");
+      pdf.addImage(back, "PNG", 0, 0, W, H);
+      pdf.save(`${exportFileBase()}.pdf`);
+    } catch (error) {
+      console.error("Card PDF export error:", error);
+      toast({ title: "Failed to export PDF", variant: "destructive" });
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
   return (
     <div className={`space-y-8 h-full min-h-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`} data-testid="users-page">
       <style>{`
@@ -1776,210 +2014,74 @@ export default function UserManagementPage() {
             </DialogTitle>
           </DialogHeader>
 
-          {previewUser && (() => {
-            const theme = getCardTheme(previewUser.type);
-            return (
-              <div className="py-2">
-                {/* 🔒 Locked-scale card mockup — fixed-pixel design, scales as
-                    one unit, never reflows internally. Click to flip. */}
-                <LockedFlipCard
-                  flipped={previewFlipped}
-                  onFlip={() => setPreviewFlipped((f) => !f)}
-                  front={
-                    <div
-                      className="rounded-2xl overflow-hidden border h-full w-full relative"
-                      style={{
-                        backgroundColor: theme.cardBg,
-                        borderColor: theme.isLight ? "#cbd5e1" : "transparent",
-                        boxShadow: theme.isLight
-                          ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
-                          : "0 10px 25px -5px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.2)",
-                      }}
-                    >
-                      <ChevronStaircase color={theme.pattern} />
+          {previewUser && (
+            <div className="py-2">
+              {/* 🔒 Locked-scale card mockup — fixed-pixel design, scales as
+                  one unit, never reflows internally. Click to flip. */}
+              <LockedFlipCard
+                flipped={previewFlipped}
+                onFlip={() => setPreviewFlipped((f) => !f)}
+                front={<CardFront user={previewUser} />}
+                back={<CardBack />}
+              />
+              <p className={`text-center text-[10px] mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                Tap the card to flip
+              </p>
 
-                      <div
-                        className="relative h-full w-full flex flex-col justify-between"
-                        style={{ padding: 30 }}
-                      >
-                        {/* ➕ NEW: small "Non-transferable" tag for discounted
-                            card types (Student/Senior/PWD). Absolutely
-                            positioned above the header row's own box so the
-                            logo circle + "Fare Collection System" text below
-                            it keep their exact original position/size — this
-                            tag just floats in the top margin above them. */}
-                        {theme.isLight && (
-                          <div
-                            className="absolute uppercase font-bold text-center"
-                            style={{
-                              top: 10,
-                              left: 0,
-                              right: 0,
-                              fontSize: 15,
-                              letterSpacing: 0.5,
-                              color: theme.accent,
-                              lineHeight: 1.3,
-                            }}
-                          >
-                            Non-Transferable
-                          </div>
-                        )}
-
-                        {/* Header / logo badge — ENLARGED: 44px -> 62px, gap bumped for balance */}
-                        <div className="flex items-center" style={{ gap: 16 }}>
-                          <div
-                            className="rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden"
-                            style={{
-                              width: 62,
-                              height: 62,
-                              backgroundColor: theme.isLight ? "#f1f5f9" : "rgba(255,255,255,0.10)",
-                              borderColor: theme.isLight ? "#cbd5e1" : "rgba(255,255,255,0.30)",
-                            }}
-                          >
-                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
-                          </div>
-                          {/* ENLARGED: 17px -> 22px */}
-                          <span
-                            className="font-bold tracking-wide uppercase"
-                            style={{ color: theme.textColor, fontSize: 22, lineHeight: 1.15 }}
-                          >
-                            Fare Collection System
-                          </span>
-                        </div>
-
-                        {/* Body — ENLARGED: UID 38px -> 44px, name 20px -> 25px */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          <div
-                            className="font-mono font-extrabold tracking-wide"
-                            style={{ color: theme.uidColor, fontSize: 44, lineHeight: 1.1 }}
-                          >
-                            {previewUser.cardUid}
-                          </div>
-                          <div
-                            className="font-semibold"
-                            style={{ color: theme.textColor, fontSize: 25, lineHeight: 1.2 }}
-                          >
-                            {previewUser.fullName}
-                          </div>
-                        </div>
-
-                        {/* Footer row: type label (left) + valid until (right) — fixed px, position locked */}
-                        <div className="flex items-end justify-between">
-                          <div
-                            className="font-extrabold tracking-wide"
-                            style={{ color: theme.accent, fontSize: 24, lineHeight: 1.1 }}
-                          >
-                            {theme.label}
-                          </div>
-                          {/* ✅ FIX: "Valid Until" label + date now follow theme.textColor
-                              instead of being hardcoded to white. That means:
-                              - Regular card (navy bg)      -> white text (theme.textColor = "#ffffff")
-                              - Student/Senior/PWD (white bg) -> dark navy text (theme.textColor = "#0f172a")
-                              so it's always legible regardless of card background. */}
-                          <div className="text-right">
-                            <div
-                              className="uppercase tracking-wide font-semibold"
-                              style={{ color: theme.subTextColor, fontSize: 11, lineHeight: 1.3 }}
-                            >
-                              Valid Until
-                            </div>
-                            <div
-                              className="font-mono font-bold"
-                              style={{ color: theme.textColor, fontSize: 15, lineHeight: 1.3 }}
-                            >
-                              {formatDate(previewUser.expirationDate)}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  }
-                  back={
-                    <div
-                      className="rounded-2xl overflow-hidden bg-[#eceae4] flex flex-col border border-slate-300 h-full w-full"
-                      style={{ boxShadow: "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)" }}
-                    >
-                      <div style={{ height: "18%" }} className="bg-[#221f20] flex-shrink-0" />
-                      <div className="flex-1 min-h-0 flex flex-col" style={{ padding: "12px 28px" }}>
-                        <div
-                          className="bg-white border-y border-slate-300"
-                          style={{ padding: "8px 14px", marginBottom: 14 }}
-                        >
-                          <span className="font-extrabold text-slate-900" style={{ fontSize: 19 }}>
-                            Terms and Condition
-                          </span>
-                        </div>
-                        <ul
-                          className="text-slate-800 flex-1 min-h-0 overflow-hidden"
-                          style={{ fontSize: 13, lineHeight: 1.45, display: "flex", flexDirection: "column", gap: 3 }}
-                        >
-                          <li>• Property of the Fare Collection System Operator.</li>
-                          <li>• Non-transferable and subject to transit system rules.</li>
-                          <li>• Positive balance required to pass through.</li>
-                          <li>• Non-refundable card issuance fee applies.</li>
-                          <li>• Operator is not responsible for lost or stolen cards.</li>
-                          <li>• Unused balances on unregistered cards are non-refundable.</li>
-                          <li>• Tampering or unauthorized duplication is strictly prohibited.</li>
-                        </ul>
-                        <div
-                          className="flex items-center border-t border-slate-300"
-                          style={{ gap: 10, paddingTop: 10, marginTop: 6 }}
-                        >
-                          <div
-                            className="rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden"
-                            style={{ width: 38, height: 38 }}
-                          >
-                            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
-                          </div>
-                          <span
-                            className="font-extrabold tracking-wide text-slate-900 uppercase"
-                            style={{ fontSize: 15 }}
-                          >
-                            Fare Collection System
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  }
-                />
-                <p className={`text-center text-[10px] mt-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                  Tap the card to flip
-                </p>
-
-                {/* Quick facts below the card */}
-                <div className="grid grid-cols-2 gap-3 mt-5">
-                  <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Balance</span>
-                    <div className={`text-sm font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                      {formatPeso(previewUser.balance || 0)}
-                    </div>
+              {/* Quick facts below the card */}
+              <div className="grid grid-cols-2 gap-3 mt-5">
+                <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Balance</span>
+                  <div className={`text-sm font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                    {formatPeso(previewUser.balance || 0)}
                   </div>
-                  <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</span>
-                    <div className={`text-sm font-semibold ${previewUser.status === "Active" ? (isDark ? "text-emerald-400" : "text-emerald-600") : (isDark ? "text-red-400" : "text-red-600")}`}>
-                      {previewUser.status}
-                    </div>
+                </div>
+                <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Status</span>
+                  <div className={`text-sm font-semibold ${previewUser.status === "Active" ? (isDark ? "text-emerald-400" : "text-emerald-600") : (isDark ? "text-red-400" : "text-red-600")}`}>
+                    {previewUser.status}
                   </div>
-                  <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card Valid Until</span>
-                    <div className={`text-sm font-semibold font-mono ${isDark ? "text-slate-200" : "text-slate-800"}`}>
-                      {formatDate(previewUser.expirationDate)}
-                    </div>
+                </div>
+                <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card Valid Until</span>
+                  <div className={`text-sm font-semibold font-mono ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                    {formatDate(previewUser.expirationDate)}
                   </div>
-                  <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      <LinkIcon size={10} /> Linked Account
-                    </span>
-                    <div className={`text-sm font-mono ${normalizeEmail(previewUser.email) ? (isDark ? "text-blue-400" : "text-blue-600") : (isDark ? "text-slate-500 italic" : "text-slate-400 italic")}`}>
-                      {normalizeEmail(previewUser.email) ?? "No account linked"}
-                    </div>
+                </div>
+                <div className={`rounded-lg border px-3 py-2 ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    <LinkIcon size={10} /> Linked Account
+                  </span>
+                  <div className={`text-sm font-mono ${normalizeEmail(previewUser.email) ? (isDark ? "text-blue-400" : "text-blue-600") : (isDark ? "text-slate-500 italic" : "text-slate-400 italic")}`}>
+                    {normalizeEmail(previewUser.email) ?? "No account linked"}
                   </div>
                 </div>
               </div>
-            );
-          })()}
+            </div>
+          )}
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 flex-wrap">
+            {/* ⬇️ NEW: Download buttons — available sa lahat ng admin (kasama view_only).
+                Kung gusto mong i-restrict, i-wrap sa {canManage && (...)} */}
+            <Button
+              variant="outline"
+              onClick={downloadCardImage}
+              disabled={!!isExporting}
+              className="text-xs font-semibold cursor-pointer gap-1.5 disabled:cursor-not-allowed"
+            >
+              {isExporting === "png" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              Download Image
+            </Button>
+            <Button
+              variant="outline"
+              onClick={downloadCardPdf}
+              disabled={!!isExporting}
+              className="text-xs font-semibold cursor-pointer gap-1.5 disabled:cursor-not-allowed"
+            >
+              {isExporting === "pdf" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+              Download PDF
+            </Button>
+
             <Button
               variant="ghost"
               onClick={() => setPreviewUser(null)}
@@ -2542,6 +2644,35 @@ export default function UserManagementPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ⬇️ NEW: Hidden EXPORT LAYER — unscaled, non-flipped, off-screen (NOT
+          display:none, so it can still be rendered and captured). Front and
+          back are each exactly 700x394. Sits outside the Dialog so the
+          dialog's transform can't affect its fixed positioning. */}
+      {previewUser && (
+        <div
+          aria-hidden
+          style={{ position: "fixed", left: -10000, top: 0, pointerEvents: "none" }}
+        >
+          <div
+            ref={exportSheetRef}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 24,
+              padding: 24,
+              backgroundColor: "#ffffff",
+            }}
+          >
+            <div ref={exportFrontRef} style={{ width: CARD_DESIGN_WIDTH, height: CARD_DESIGN_HEIGHT }}>
+              <CardFront user={previewUser} withShadow={false} />
+            </div>
+            <div ref={exportBackRef} style={{ width: CARD_DESIGN_WIDTH, height: CARD_DESIGN_HEIGHT }}>
+              <CardBack withShadow={false} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
