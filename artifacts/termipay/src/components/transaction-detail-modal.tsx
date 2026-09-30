@@ -51,7 +51,7 @@ export type FareRoute = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-// 🆕 Discount applied to Fare transactions for every card type except "regular"
+// Discount already applied to the stored Fare amount for every card type except "regular"
 const FARE_DISCOUNT_RATE = 0.2; // 20%
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -132,14 +132,14 @@ function formatCardType(type?: string | null): string {
   return map[key] ?? type.charAt(0).toUpperCase() + type.slice(1);
 }
 
-// 🆕 Every card type gets the discount EXCEPT regular (or empty)
+// Every card type gets the discount EXCEPT regular (or empty)
 function isDiscountedCard(type?: string | null): boolean {
   if (!type) return false;
   const key = type.toLowerCase().trim();
   return key !== "" && key !== "regular";
 }
 
-// 🆕 Round to 2 decimals (avoids floating point noise like 7.199999)
+// Round to 2 decimals (avoids floating point noise)
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
@@ -199,15 +199,17 @@ export function TransactionDetailModal({
   const feeAmount = getFeeAmount(tx);
   const vatAmount = getVatAmount(tx);
 
-  // 🆕 Fare discount (20% for senior / pwd / student — none for regular)
+  // tx.amount for Fare is ALREADY discounted → do NOT subtract again.
+  // We only back-compute the original fare + discount for display.
   const hasFareDiscount = isFare && isDiscountedCard(tx.card_type);
-  const fareDiscount = hasFareDiscount
-    ? round2(originalAmount * FARE_DISCOUNT_RATE)
-    : 0;
-  const fareTotal = round2(originalAmount - fareDiscount);
+  const fareTotal = originalAmount; // what was actually deducted (already discounted)
+  const fareBase = hasFareDiscount
+    ? round2(fareTotal / (1 - FARE_DISCOUNT_RATE))
+    : fareTotal;
+  const fareDiscount = hasFareDiscount ? round2(fareBase - fareTotal) : 0;
   const discountPercentLabel = `${Math.round(FARE_DISCOUNT_RATE * 100)}%`;
 
-  // 🆕 Hero amount: for Fare use the discounted total
+  // Hero amount: Fare shows the stored (already discounted) amount
   const heroAmount = isFare
     ? fareTotal
     : netAmount != null
@@ -473,7 +475,7 @@ export function TransactionDetailModal({
                 ? formatAmount(fareTotal)
                 : formatNullableAmount(heroAmount)}
             </p>
-            {/* 🆕 Discount badge */}
+            {/* Discount badge (display only) */}
             {hasFareDiscount && (
               <p className={`text-[9px] sm:text-[10px] font-semibold mt-0.5 ${
                 isDark ? "text-amber-400" : "text-amber-600"
@@ -526,7 +528,7 @@ export function TransactionDetailModal({
                 </div>
               ))}
 
-              {/* 🆕 Fare + Discount rows — Fare type with a discounted card only */}
+              {/* Original fare + Discount rows — display only (amount is already discounted) */}
               {hasFareDiscount && (
                 <>
                   <div className={`flex items-center justify-between gap-3 px-3 py-1.5 sm:py-2 ${
@@ -535,12 +537,12 @@ export function TransactionDetailModal({
                     <span className={`text-[9px] sm:text-[10px] font-semibold uppercase tracking-widest shrink-0 ${
                       isDark ? "text-slate-500" : "text-slate-400"
                     }`}>
-                      Fare
+                      Original fare
                     </span>
                     <span className={`text-[10px] sm:text-xs font-mono font-medium ${
                       isDark ? "text-slate-200" : "text-slate-700"
                     }`}>
-                      {formatAmount(originalAmount)}
+                      {formatAmount(fareBase)}
                     </span>
                   </div>
                   <div className={`flex items-center justify-between gap-3 px-3 py-1.5 sm:py-2 ${
@@ -555,7 +557,7 @@ export function TransactionDetailModal({
                     <span className={`text-[10px] sm:text-xs font-mono font-bold ${
                       isDark ? "text-amber-400" : "text-amber-600"
                     }`}>
-                      -{formatAmount(fareDiscount)}
+                      {formatAmount(fareDiscount)}
                     </span>
                   </div>
                 </>
