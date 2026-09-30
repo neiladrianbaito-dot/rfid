@@ -1170,13 +1170,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   className="w-full h-full object-cover"
                 />
               </div>
-              <div>
+              <div className="min-w-0">
+                {/* Company name — nasa itaas ng "Fare Collection System" */}
+                <p className={`text-[10px] font-bold uppercase tracking-wide leading-tight mb-0.5 ${isDark ? "text-blue-400/80" : "text-blue-200"}`}>
+                  D' TURBANADA TRANSPORT, INC.
+                </p>
                 <h1 className="text-sm font-bold tracking-tight text-white">
                   Fare Collection<span className="text-blue-300"> System</span>
                 </h1>
-                <p className={`text-[10px] font-semibold uppercase tracking-widest leading-tight ${isDark ? "text-blue-400/70" : "text-blue-200"}`}>
-                  Admin Console
-                </p>
               </div>
             </div>
           </div>
