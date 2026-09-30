@@ -4,6 +4,8 @@ import { useListTransactions } from "@workspace/api-client-react";
 import { useTheme } from "@/hooks/use-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { supabase } from "@/lib/supabase";
+import { toPng } from "html-to-image";
+import { jsPDF } from "jspdf";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +46,18 @@ import {
   CreditCard,
   ArrowLeftRight,
   ArrowRightLeft,
+  Hash,
+  Calendar,
+  Receipt,
+  ShieldCheck,
+  Wallet,
+  X,
+  Download,
+  FileText,
+  Printer,
+  Loader2,
+  User,
+  BadgeCheck,
 } from "lucide-react";
 
 const PAGE_SIZE = 10;
@@ -94,6 +108,12 @@ type FinancialFields = {
   net_amount: number | null;
 };
 
+// 🆕 Passenger info looked up from the `users` table by card_uid
+type PassengerInfo = {
+  full_name: string | null;
+  card_type: string | null;
+};
+
 type TxView = "topup" | "fare" | "transfers";
 type TxType = "Fare" | "Top-up";
 
@@ -128,8 +148,6 @@ const TX_CSS = `
     0 12px 28px -10px rgba(0, 0, 0, 0.55);
 }
 
-/* One master container: transparent shell, flush to the page edges, fills
-   the remaining height. */
 .tp {
   position: relative;
   display: flex;
@@ -141,7 +159,6 @@ const TX_CSS = `
   background: transparent;
 }
 
-/* Tab strip: transparent, no padding — first tab starts at the left edge. */
 .tp-tabs {
   position: relative;
   z-index: 2;
@@ -170,7 +187,7 @@ const TX_CSS = `
   white-space: nowrap;
   color: var(--tp-muted);
   background: transparent;
-  border: 1px solid transparent;   /* reserved so hover/active don't shift layout */
+  border: 1px solid transparent;
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
   cursor: pointer;
@@ -183,7 +200,7 @@ const TX_CSS = `
 }
 .tp-tab[aria-selected="true"] {
   color: var(--tp-accent);
-  background: var(--tp-bg);     /* same fill as the panel below it — merges into one shape */
+  background: var(--tp-bg);
   border-color: var(--tp-border);
   box-shadow:
     0 -2px 6px rgba(24, 24, 27, 0.08),
@@ -207,7 +224,6 @@ const TX_CSS = `
   border-color: var(--tp-border);
 }
 
-/* Body: the one white panel. Square top-left so the first tab sits flush. */
 .tp-body {
   position: relative;
   z-index: 1;
@@ -220,14 +236,12 @@ const TX_CSS = `
   overflow: hidden;
   background: var(--tp-bg);
   color: var(--tp-text);
-  border: 1px solid var(--tp-border);  /* subtle gray border around the panel */
-  border-top: 0;                       /* merges flush with the active tab above */
+  border: 1px solid var(--tp-border);
+  border-top: 0;
   border-radius: 0 var(--tp-radius) var(--tp-radius) var(--tp-radius);
   box-shadow: var(--tp-shadow);
 }
 
-/* Toolbar (LIVE badge / search / status filter) — a plain row with a
-   divider, not a nested card header. */
 .tp-toolbar {
   flex: none;
   padding: 16px 24px;
@@ -235,7 +249,6 @@ const TX_CSS = `
   background: transparent;
 }
 
-/* Sticky table head takes the panel color instead of a hard-coded white. */
 .tp .tp-thead { background: var(--tp-bg); }
 
 .tp-tab:focus-visible {
@@ -250,8 +263,6 @@ const TX_CSS = `
 `;
 
 // ── 🧊 NO-FLICKER HELPER ────────────────────────────────────────────────────
-// Kapag pareho ang laman ng lumang data at bagong data, ibinabalik ang LUMANG
-// reference — walang re-render, walang effect na tumatakbo ulit, walang blink.
 function sameData(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   try {
@@ -261,7 +272,6 @@ function sameData(a: unknown, b: unknown): boolean {
   }
 }
 
-// Kunin ang listahan kahit array ang response o may wrapper ({ data: [...] }).
 function extractList(value: unknown): any[] | null {
   if (Array.isArray(value)) return value;
   const v = value as any;
@@ -271,8 +281,6 @@ function extractList(value: unknown): any[] | null {
   return null;
 }
 
-// Hanapin ang route ng fare transaction: route_id / routeId, o kung ang
-// transaction mismo ay may origin/destination.
 function findRouteFor(tx: any, routes: FareRoute[]): FareRoute | null {
   const routeId = tx?.route_id ?? tx?.routeId;
   if (routeId != null && routeId !== "") {
@@ -364,6 +372,8 @@ function formatPaymentMethod(method?: string | null): string {
     card: "Card",
     grab_pay: "GrabPay",
     billease: "BillEase",
+    dob: "Online Banking",
+    dob_ubp: "UnionBank",
     qrph: "QR Ph",
   };
   const key = method.toLowerCase().trim();
@@ -375,6 +385,42 @@ function getPaymentMethodLogo(method?: string | null): string | null {
   const key = method.toLowerCase().trim();
   if (key === "gcash") return "/gcash.svg";
   return null;
+}
+
+// 🆕 Card type → display label ("Senior Citizen", "senior-citizen", "PWD"...)
+function formatCardType(type?: string | null): string {
+  if (!type) return "—";
+  const key = type.toLowerCase().trim().replace(/[\s-]+/g, "_");
+  const map: Record<string, string> = {
+    senior: "Senior Citizen",
+    senior_citizen: "Senior Citizen",
+    pwd: "PWD",
+    student: "Student",
+    regular: "Regular",
+  };
+  return map[key] ?? type.charAt(0).toUpperCase() + type.slice(1);
+}
+
+// 🆕 Passenger name / card type readers (accept snake_case + camelCase)
+function getPassengerName(tx: any): string {
+  const value =
+    tx?.passenger_name ?? tx?.passengerName ?? tx?.full_name ?? tx?.fullName ?? "";
+  const name = String(value).trim();
+  return name || "—";
+}
+
+function getCardType(tx: any): string | null {
+  return tx?.card_type ?? tx?.cardType ?? null;
+}
+
+// 🆕 Load a data URL into an <img> so we can read its natural size (for PDF)
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
 }
 
 // ── 🗂️ One-folder container: transparent tab strip + single white body ─────
@@ -395,7 +441,6 @@ function TxPanel({
 }) {
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  // Arrow keys / Home / End (WAI-ARIA tabs pattern)
   const handleKeyDown = (e: KeyboardEvent, index: number) => {
     let next = index;
     if (e.key === "ArrowRight") next = (index + 1) % tabs.length;
@@ -443,7 +488,7 @@ function TxPanel({
   );
 }
 
-// ── Reusable row para sa mga modal ──────────────────────────────────────────
+// ── Reusable row para sa Transfer modal ─────────────────────────────────────
 function DetailRow({
   label,
   isDark,
@@ -474,7 +519,40 @@ function DetailRow({
   );
 }
 
-// ── Receipt Modal ───────────────────────────────────────────────────────────
+// ── 🆕 Small row used inside the receipt (same look as the user dashboard) ──
+function ReceiptRow({
+  isDark,
+  icon,
+  label,
+  upper,
+  children,
+}: {
+  isDark: boolean;
+  icon?: ReactNode;
+  label: string;
+  upper?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 px-3 py-1.5 sm:py-2 ${
+        isDark ? "bg-slate-950/40" : "bg-slate-50"
+      }`}
+    >
+      <span
+        className={`flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] shrink-0 ${
+          upper ? "font-semibold uppercase tracking-widest" : ""
+        } ${isDark ? "text-slate-500" : "text-slate-400"}`}
+      >
+        {icon}
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+// ── 🆕 Receipt Modal — SAME design for Top-up and Fare ──────────────────────
 function ReceiptModal({
   tx,
   routes,
@@ -486,56 +564,153 @@ function ReceiptModal({
   onClose: () => void;
   isDark: boolean;
 }) {
+  // hooks must stay above the early return
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState<null | "image" | "pdf" | "print">(null);
+
   if (!tx) return null;
 
   const isFare = normalizeTxType(tx.type) === "Fare";
-
-  const originalAmountNumber = Math.abs(Number(tx.amount));
-  const originalAmount = originalAmountNumber.toLocaleString("en-PH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-  const netAmount = getNetAmount(tx);
-  const heroAmount = !isFare && netAmount != null ? formatAmount(netAmount) : originalAmount;
+  const date = new Date(tx.timestamp || tx.created_at);
 
   const matchedRoute = isFare ? findRouteFor(tx, routes) : null;
 
   const paymentMethodLabel = !isFare ? formatPaymentMethod(tx.payment_method) : null;
   const paymentMethodLogo = !isFare ? getPaymentMethodLogo(tx.payment_method) : null;
 
-  const StatusIcon =
-    tx.status === "Failed" ? XCircle : tx.status === "Pending" ? Clock : CheckCircle2;
-
-  const statusRingClass = isFare
-    ? isDark
-      ? "ring-red-900 bg-red-950/40 text-red-400"
-      : "ring-red-100 bg-red-50 text-red-600"
-    : isDark
-      ? "ring-emerald-900 bg-emerald-950/40 text-emerald-400"
-      : "ring-emerald-100 bg-emerald-50 text-emerald-600";
+  const originalAmount = Math.abs(Number(tx.amount || 0));
+  const netAmount = getNetAmount(tx);
+  const feeAmount = getFeeAmount(tx);
+  const vatAmount = getVatAmount(tx);
+  const heroAmount = !isFare && netAmount != null ? netAmount : originalAmount;
 
   const amountColor = isFare
     ? isDark ? "text-red-400" : "text-red-600"
     : isDark ? "text-emerald-400" : "text-emerald-600";
 
-  const accentColor = isFare ? "from-red-500 to-rose-400" : "from-emerald-500 to-cyan-400";
-  const closeBg = isFare ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700";
-
-  const valueText = isDark ? "text-slate-300" : "text-slate-700";
+  const valueText = isDark ? "text-slate-200" : "text-slate-700";
+  const mutedDash = isDark ? "text-slate-600" : "text-slate-400";
+  const iconCls = "h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0";
 
   const statusTextColor =
     tx.status === "Failed"
       ? isDark ? "text-red-400" : "text-red-600"
       : tx.status === "Pending"
         ? isDark ? "text-amber-400" : "text-amber-600"
-        : isDark ? "text-emerald-400" : "text-emerald-600";
+        : isDark ? "text-white" : "text-slate-900";
+
+  // ── Export helpers ────────────────────────────────────────────────────────
+  const fileBase = `receipt-TXN-${tx.id}`;
+
+  const captureReceipt = async (): Promise<string> => {
+    const node = receiptRef.current;
+    if (!node) throw new Error("Receipt not ready");
+    return toPng(node, {
+      pixelRatio: 3,
+      cacheBust: true,
+      backgroundColor: isDark ? "#0f172a" : "#ffffff",
+      filter: (n) =>
+        !(n instanceof HTMLElement && n.dataset.noCapture === "true"),
+    });
+  };
+
+  const handleDownloadImage = async () => {
+    try {
+      setBusy("image");
+      const dataUrl = await captureReceipt();
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = `${fileBase}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      console.error("Failed to save receipt image:", err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      setBusy("pdf");
+      const dataUrl = await captureReceipt();
+      const img = await loadImage(dataUrl);
+
+      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const imgW = 90;
+      const imgH = (img.naturalHeight / img.naturalWidth) * imgW;
+      const x = (pageW - imgW) / 2;
+      const y = 15;
+      pdf.addImage(dataUrl, "PNG", x, y, imgW, imgH);
+      pdf.save(`${fileBase}.pdf`);
+    } catch (err) {
+      console.error("Failed to create receipt PDF:", err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handlePrint = async () => {
+    try {
+      setBusy("print");
+      const dataUrl = await captureReceipt();
+
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc || !iframe.contentWindow) throw new Error("Print frame unavailable");
+
+      doc.open();
+      doc.write(`<!DOCTYPE html>
+<html>
+  <head>
+    <title>${fileBase}</title>
+    <style>
+      @page { size: A4; margin: 15mm; }
+      html, body { margin: 0; padding: 0; }
+      body { display: flex; justify-content: center; }
+      img { width: 90mm; height: auto; }
+    </style>
+  </head>
+  <body><img id="receipt" src="${dataUrl}" /></body>
+</html>`);
+      doc.close();
+
+      const img = doc.getElementById("receipt") as HTMLImageElement | null;
+      const doPrint = () => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        setTimeout(() => iframe.remove(), 1000);
+      };
+      if (img && !img.complete) img.onload = doPrint;
+      else doPrint();
+    } catch (err) {
+      console.error("Failed to print receipt:", err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const actionBtnClass = `h-8 gap-1.5 text-[10px] sm:text-xs font-semibold cursor-pointer ${
+    isDark
+      ? "border-slate-700 bg-slate-800/60 text-slate-200 hover:bg-slate-800"
+      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+  }`;
 
   return (
     <Dialog open={!!tx} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
-        className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:cursor-pointer ${
-          isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+        className={`max-w-sm p-0 overflow-hidden rounded-2xl gap-0 [&>button]:hidden ${
+          isDark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"
         }`}
       >
         <VisuallyHidden>
@@ -543,139 +718,274 @@ function ReceiptModal({
           <DialogDescription>Transaction #{tx.id}</DialogDescription>
         </VisuallyHidden>
 
-        <div className={`h-1 w-full bg-gradient-to-r ${accentColor}`} />
+        {/* Everything inside this wrapper is what gets exported */}
+        <div ref={receiptRef} className={isDark ? "bg-slate-900" : "bg-white"}>
+          {/* Top accent stripe */}
+          <div className={`h-1 w-full ${isFare ? "bg-red-500" : "bg-emerald-500"}`} />
 
-        <div className="px-5 pt-5 pb-6 space-y-5">
-          {/* Hero */}
-          <div className="flex flex-col items-center gap-2 pt-1">
-            <div className={`flex items-center justify-center w-12 h-12 rounded-full ring-2 ${statusRingClass}`}>
-              <StatusIcon className="w-5 h-5" />
+          {/* Company header */}
+          <div
+            className={`px-4 sm:px-5 pt-3 pb-2.5 text-center border-b border-dashed ${
+              isDark ? "border-slate-700" : "border-slate-300"
+            }`}
+          >
+            <p className={`text-xs sm:text-sm font-black tracking-wide ${isDark ? "text-white" : "text-slate-900"}`}>
+              D&apos; TURBANADA TRANSPORT, INC.
+            </p>
+            <p className={`text-[9px] sm:text-[10px] leading-snug mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              JD Avelino St., Brgy. West Awang, Calbayog City, Samar, Philippines
+            </p>
+            <p className={`text-[9px] sm:text-[10px] leading-snug ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Non Vat Reg. TIN 496-013-435-00005
+            </p>
+            <p className={`text-[9px] sm:text-[10px] leading-snug ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              CP #09171281530
+            </p>
+          </div>
+
+          {/* Header */}
+          <div
+            className={`flex items-center justify-between px-4 sm:px-5 py-2 sm:py-2.5 border-b ${
+              isDark ? "border-slate-800" : "border-slate-100"
+            }`}
+          >
+            <div className="flex items-center gap-2 sm:gap-2.5">
+              <div
+                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                  isFare ? "bg-red-500/10" : "bg-emerald-500/10"
+                }`}
+              >
+                <Receipt
+                  className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${isFare ? "text-red-400" : "text-emerald-400"}`}
+                />
+              </div>
+              <div>
+                <p className={`text-xs sm:text-sm font-semibold leading-none ${isDark ? "text-white" : "text-slate-900"}`}>
+                  Receipt
+                </p>
+                <p className={`text-[9px] sm:text-[10px] font-mono mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  #TXN-{tx.id}
+                </p>
+              </div>
             </div>
-            <p className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              {isFare ? "Fare Deduction" : "Balance Top-up"}
+            {/* excluded from the export */}
+            <Button
+              data-no-capture="true"
+              size="icon"
+              variant="ghost"
+              onClick={onClose}
+              className={`h-7 w-7 rounded-lg shrink-0 cursor-pointer ${
+                isFare
+                  ? "text-red-500 hover:text-red-300 hover:bg-red-500/10"
+                  : "text-emerald-500 hover:text-emerald-300 hover:bg-emerald-500/10"
+              }`}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Amount hero */}
+          <div
+            className={`px-4 sm:px-5 pt-2.5 sm:pt-3 pb-2 sm:pb-2.5 border-b border-dashed text-center ${
+              isDark ? "border-slate-700" : "border-slate-300"
+            }`}
+          >
+            <p className={`text-2xl sm:text-3xl font-black tracking-tighter ${amountColor}`}>
+              {isFare ? `₱${formatAmount(originalAmount)}` : formatNullableAmount(heroAmount)}
             </p>
-            <p className={`text-4xl font-bold tabular-nums tracking-tight ${amountColor}`}>
-              {isFare ? `−₱${originalAmount}` : `+₱${heroAmount}`}
+            <p className={`text-[9px] sm:text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              {date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} ·{" "}
+              {date.toLocaleTimeString()}
             </p>
           </div>
 
-          <div className={`border-t border-dashed ${isDark ? "border-slate-800" : "border-slate-200"}`} />
-
-          {/* Details */}
-          <div
-            className={`rounded-xl overflow-hidden border divide-y ${
-              isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-100"
-            }`}
-          >
-            <DetailRow label="Transaction ID" isDark={isDark}>
-              <span className={`text-xs font-mono font-medium ${valueText}`}>#{tx.id}</span>
-            </DetailRow>
-
-            <DetailRow label="Timestamp" isDark={isDark}>
-              <span className={`text-xs text-right font-medium ${valueText}`}>
-                {new Date(tx.timestamp || tx.created_at).toLocaleString("en-PH", {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                })}
-              </span>
-            </DetailRow>
-
-            <DetailRow label="Card UID" isDark={isDark}>
-              <span className={`text-xs font-mono font-semibold ${isDark ? "text-blue-400" : "text-blue-600"}`}>
-                {tx.card_uid || tx.cardUid || "—"}
-              </span>
-            </DetailRow>
-
-            <DetailRow label="Full Name" isDark={isDark}>
-              <span className={`text-xs font-bold text-right truncate max-w-[60%] ${valueText}`}>
-                {tx.full_name || tx.fullName || "—"}
-              </span>
-            </DetailRow>
-
-            <DetailRow label="Status" isDark={isDark}>
-              <span className={`text-xs font-bold ${statusTextColor}`}>{tx.status}</span>
-            </DetailRow>
-
-            {/* Top-up only: Amount / Fee / VAT / Net */}
-            {!isFare && (
-              <>
-                <DetailRow label="Amount" isDark={isDark}>
-                  <span className={`text-xs font-mono font-bold ${isDark ? "text-slate-200" : "text-slate-900"}`}>
-                    ₱{originalAmount}
-                  </span>
-                </DetailRow>
-
-                <DetailRow label="Fee" isDark={isDark}>
-                  <span className={`text-xs font-mono font-medium ${valueText}`}>
-                    {formatNullableAmount(getFeeAmount(tx))}
-                  </span>
-                </DetailRow>
-
-                <DetailRow label="VAT" isDark={isDark}>
-                  <span className={`text-xs font-mono font-medium ${valueText}`}>
-                    {formatNullableAmount(getVatAmount(tx))}
-                  </span>
-                </DetailRow>
-
-                <DetailRow label="Net Amount" isDark={isDark}>
-                  <span className={`text-xs font-mono font-bold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                    {formatNetAmountWithSign(netAmount)}
-                  </span>
-                </DetailRow>
-              </>
-            )}
-
-            {/* Fare only: Route */}
-            {isFare && (
-              <DetailRow label="Route" isDark={isDark} icon={<Route className="w-3.5 h-3.5" />}>
-                <span className={`text-xs text-right flex items-center justify-end gap-1 max-w-[60%] ${valueText}`}>
-                  {matchedRoute ? (
-                    <>
-                      <span className="truncate">{matchedRoute.origin}</span>
-                      <ArrowLeftRight className="w-3 h-3 shrink-0 opacity-60" />
-                      <span className="truncate">{matchedRoute.destination}</span>
-                    </>
-                  ) : (
-                    "—"
-                  )}
+          {/* Detail rows */}
+          <div className="px-4 sm:px-5 pt-2 sm:pt-2.5 pb-1.5">
+            <p className={`text-[9px] font-black uppercase tracking-widest mb-1.5 ${isDark ? "text-slate-600" : "text-slate-400"}`}>
+              Transaction details
+            </p>
+            <div
+              className={`rounded-xl overflow-hidden border divide-y ${
+                isDark ? "border-slate-800 divide-slate-800" : "border-slate-200 divide-slate-200"
+              }`}
+            >
+              <ReceiptRow isDark={isDark} icon={<Hash className={iconCls} />} label="Transaction ID">
+                <span className={`text-[10px] sm:text-xs font-mono text-right truncate max-w-[55%] ${valueText}`}>
+                  {String(tx.id)}
                 </span>
-              </DetailRow>
-            )}
+              </ReceiptRow>
 
-            {/* Top-up only: Payment method */}
-            {!isFare && (
-              <DetailRow label="Payment method" isDark={isDark} icon={<CreditCard className="w-3.5 h-3.5" />}>
-                <span className={`flex items-center justify-end gap-1.5 text-xs font-medium text-right max-w-[60%] ${valueText}`}>
-                  {paymentMethodLogo && (
-                    <img
-                      src={paymentMethodLogo}
-                      alt={paymentMethodLabel ?? ""}
-                      className="h-9 sm:h-10 w-auto max-w-[64px] object-contain shrink-0"
-                    />
-                  )}
-                  <span className="truncate">{paymentMethodLabel}</span>
+              <ReceiptRow isDark={isDark} icon={<Calendar className={iconCls} />} label="Date">
+                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                  {date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
                 </span>
-              </DetailRow>
-            )}
+              </ReceiptRow>
+
+              <ReceiptRow isDark={isDark} icon={<Clock className={iconCls} />} label="Time">
+                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                  {date.toLocaleTimeString()}
+                </span>
+              </ReceiptRow>
+
+              <ReceiptRow isDark={isDark} icon={<CreditCard className={iconCls} />} label="Card UID">
+                <span className={`text-[10px] sm:text-xs font-mono font-semibold text-right truncate max-w-[55%] ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+                  {tx.card_uid || tx.cardUid || "—"}
+                </span>
+              </ReceiptRow>
+
+              <ReceiptRow isDark={isDark} icon={<CreditCard className={iconCls} />} label="Service type">
+                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                  {isFare ? "Fare" : "Top-up"}
+                </span>
+              </ReceiptRow>
+
+              <ReceiptRow isDark={isDark} icon={<User className={iconCls} />} label="Passenger">
+                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                  {getPassengerName(tx)}
+                </span>
+              </ReceiptRow>
+
+              <ReceiptRow isDark={isDark} icon={<BadgeCheck className={iconCls} />} label="Card type">
+                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                  {formatCardType(getCardType(tx))}
+                </span>
+              </ReceiptRow>
+
+              {/* Payment method — Top-up only */}
+              {!isFare && (
+                <ReceiptRow isDark={isDark} icon={<Wallet className={iconCls} />} label="Payment method">
+                  <span className={`flex items-center justify-end gap-1.5 text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                    {paymentMethodLabel && paymentMethodLabel !== "—" ? (
+                      <>
+                        {paymentMethodLogo && (
+                          <img
+                            src={paymentMethodLogo}
+                            alt={paymentMethodLabel}
+                            className="h-6 sm:h-7 w-auto max-w-[40px] object-contain shrink-0"
+                          />
+                        )}
+                        <span className="truncate">{paymentMethodLabel}</span>
+                      </>
+                    ) : (
+                      <span className={mutedDash}>—</span>
+                    )}
+                  </span>
+                </ReceiptRow>
+              )}
+
+              {/* Amount / Fee / VAT / Net — Top-up only */}
+              {!isFare && (
+                <>
+                  <ReceiptRow isDark={isDark} label="Amount" upper>
+                    <span className={`text-[10px] sm:text-xs font-mono font-bold ${valueText}`}>
+                      ₱{formatAmount(originalAmount)}
+                    </span>
+                  </ReceiptRow>
+                  <ReceiptRow isDark={isDark} label="Fee" upper>
+                    <span className={`text-[10px] sm:text-xs font-mono font-medium ${valueText}`}>
+                      {formatNullableAmount(feeAmount)}
+                    </span>
+                  </ReceiptRow>
+                  <ReceiptRow isDark={isDark} label="VAT" upper>
+                    <span className={`text-[10px] sm:text-xs font-mono font-medium ${valueText}`}>
+                      {formatNullableAmount(vatAmount)}
+                    </span>
+                  </ReceiptRow>
+                  <ReceiptRow isDark={isDark} label="Net Amount" upper>
+                    <span className={`text-[10px] sm:text-xs font-mono font-bold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                      {formatNullableAmount(netAmount)}
+                    </span>
+                  </ReceiptRow>
+                </>
+              )}
+
+              {/* Status */}
+              <ReceiptRow isDark={isDark} icon={<ShieldCheck className={iconCls} />} label="Status">
+                <span className={`text-[10px] sm:text-xs font-medium ${statusTextColor}`}>
+                  {tx.status}
+                </span>
+              </ReceiptRow>
+
+              {/* Route — Fare only */}
+              {isFare && (
+                <ReceiptRow isDark={isDark} icon={<Route className={iconCls} />} label="Route">
+                  <span className={`flex items-center gap-1 sm:gap-1.5 justify-end text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                    {matchedRoute ? (
+                      <>
+                        <span className="truncate">{matchedRoute.origin}</span>
+                        <ArrowLeftRight className={iconCls} />
+                        <span className="truncate">{matchedRoute.destination}</span>
+                      </>
+                    ) : (
+                      <span className={mutedDash}>—</span>
+                    )}
+                  </span>
+                </ReceiptRow>
+              )}
+            </div>
           </div>
 
-          {/* Footer total */}
+          {/* Total line */}
           <div
-            className={`border-t border-dashed pt-3 flex items-center justify-between ${
-              isDark ? "border-slate-800" : "border-slate-200"
+            className={`mx-4 sm:mx-5 mt-1.5 sm:mt-2 mb-3 border-t border-dashed pt-1.5 sm:pt-2 flex items-center justify-between gap-2 ${
+              isDark ? "border-slate-700" : "border-slate-300"
             }`}
           >
-            <span className={`text-[11px] font-medium ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            <span className={`text-[10px] sm:text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               {isFare ? "Amount deducted" : "Net Amount"}
             </span>
-            <span className={`text-sm font-bold ${amountColor}`}>
-              {isFare ? `−₱${originalAmount}` : formatNetAmountWithSign(netAmount)}
+            <span className={`text-xs sm:text-sm font-black ${amountColor}`}>
+              {isFare ? `₱${formatAmount(originalAmount)}` : formatNullableAmount(netAmount)}
             </span>
+          </div>
+        </div>
+        {/* ── end of exported area ── */}
+
+        {/* Footer (not exported) — Image / PDF / Print for BOTH types */}
+        <div className="px-4 sm:px-5 pb-3 sm:pb-4 space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy !== null}
+              onClick={handleDownloadImage}
+              className={actionBtnClass}
+            >
+              {busy === "image" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              Image
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy !== null}
+              onClick={handleDownloadPdf}
+              className={actionBtnClass}
+            >
+              {busy === "pdf" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+              PDF
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy !== null}
+              onClick={handlePrint}
+              className={actionBtnClass}
+            >
+              {busy === "print" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+              Print
+            </Button>
           </div>
 
           <Button
             onClick={onClose}
-            className={`w-full text-white font-semibold uppercase text-[11px] tracking-widest ${closeBg} transition-colors cursor-pointer`}
+            className="w-full text-white border-0 font-semibold transition-colors text-sm sm:text-base cursor-pointer"
+            style={{ backgroundColor: isFare ? "#dc2626" : "#059669" }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.backgroundColor = isFare ? "#ef4444" : "#10b981";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.backgroundColor = isFare ? "#dc2626" : "#059669";
+            }}
           >
             Close
           </Button>
@@ -824,10 +1134,11 @@ export default function TransactionsPage() {
   const [page, setPage] = useState(1);
   const [routes, setRoutes] = useState<FareRoute[]>([]);
   const [financialById, setFinancialById] = useState<Record<string, FinancialFields>>({});
+  // 🆕 passenger name + card type, keyed by card_uid
+  const [passengerByCardUid, setPassengerByCardUid] = useState<Record<string, PassengerInfo>>({});
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const [transfers, setTransfers] = useState<CardTransfer[]>([]);
-  // Skeleton ay lalabas LANG sa unang load — hindi na sa bawat realtime event.
   const [transfersLoading, setTransfersLoading] = useState(true);
   const [transferSearch, setTransferSearch] = useState("");
   const [transferStatusFilter, setTransferStatusFilter] = useState("all");
@@ -845,7 +1156,6 @@ export default function TransactionsPage() {
         .select("id, origin, destination, fare_amount")
         .order("id");
       if (cancelled || error || !data) return;
-      // 🧊 walang pagbabago → walang re-render
       setRoutes((prev) => (sameData(prev, data) ? prev : (data as FareRoute[])));
     };
 
@@ -863,14 +1173,6 @@ export default function TransactionsPage() {
   }, []);
 
   // ── Card transfers (realtime, silent refresh) ─────────────────────────────
-  // Plain select + hiwalay na users query (walang FK embed), snapshot columns
-  // ang fallback kapag burado na ang user.
-  //
-  // 🧊 Mga ginawa laban sa "reload":
-  //   • Hindi na nagse-set ng loading=true sa bawat event (skeleton flash).
-  //   • Pinagsasama ang sunod-sunod na events sa isang load (300ms).
-  //   • Kapag may mas bagong request, binabalewala ang lumang sagot.
-  //   • Kapag pareho ang laman, walang state update.
   useEffect(() => {
     let cancelled = false;
     let requestId = 0;
@@ -879,7 +1181,6 @@ export default function TransactionsPage() {
     const loadTransfers = async () => {
       const myRequest = ++requestId;
 
-      // 1) plain select — kasama ang optional snapshot columns
       const { data, error } = await supabase
         .from("card_balance_transfers")
         .select("*")
@@ -893,7 +1194,6 @@ export default function TransactionsPage() {
         return;
       }
 
-      // 2) kunin ang lahat ng users na kasama sa ISANG query
       const userIds = Array.from(
         new Set(
           data
@@ -922,7 +1222,6 @@ export default function TransactionsPage() {
         }
       }
 
-      // 3) live user muna → snapshot (burado na ang user) → null
       const resolveCard = (
         id: number | null,
         snapshotUid?: string | null,
@@ -995,8 +1294,6 @@ export default function TransactionsPage() {
     },
   });
 
-  // 🧊 Panatilihin ang huling data habang naglo-load ang bago (hal. nagpalit ng
-  // search/status filter). Kaya hindi na nagfla-flash ang skeleton / "No records".
   const lastTransactionsRef = useRef<any[] | null>(null);
   const currentList = extractList(transactions);
   if (currentList) {
@@ -1004,11 +1301,8 @@ export default function TransactionsPage() {
   }
   const rawTransactionList: any[] = currentList ?? lastTransactionsRef.current ?? EMPTY_LIST;
 
-  // Skeleton: unang load lang, kapag wala pang naipakitang data kahit isang beses.
   const showListSkeleton = isLoading && lastTransactionsRef.current === null;
 
-  // 🧊 Realtime: pinagsasama ang sunod-sunod na events sa isang refetch, at
-  // stable ang callback para hindi nagre-resubscribe ang realtime hook.
   const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleTransactionsRealtime = useCallback(() => {
     if (realtimeTimerRef.current) return;
@@ -1027,10 +1321,8 @@ export default function TransactionsPage() {
   useRealtimeRefetch(["transactions"], handleTransactionsRealtime);
 
   // ── Fee / VAT / Net ───────────────────────────────────────────────────────
-  // 🧊 Hindi na binubura ang lumang values habang naglo-load ang bago (dati:
-  // nagiging {} muna → "—" ang lahat → babalik = blink). Minemerge na lang.
   useEffect(() => {
-    if (rawTransactionList.length === 0) return; // panatilihin ang huling values
+    if (rawTransactionList.length === 0) return;
 
     let cancelled = false;
 
@@ -1087,6 +1379,61 @@ export default function TransactionsPage() {
     };
   }, [rawTransactionList]);
 
+  // ── 🆕 Passenger name + card type (from `users`, by card_uid) ─────────────
+  useEffect(() => {
+    if (rawTransactionList.length === 0) return;
+
+    let cancelled = false;
+
+    const loadPassengers = async () => {
+      const uids = Array.from(
+        new Set(
+          rawTransactionList
+            .map((tx: any) => tx?.card_uid ?? tx?.cardUid)
+            .filter((uid: any) => typeof uid === "string" && uid.trim() !== ""),
+        ),
+      ) as string[];
+
+      if (uids.length === 0) return;
+
+      const { data, error } = await supabase
+        .from("users")
+        .select("card_uid, full_name, type")
+        .in("card_uid", uids);
+
+      if (cancelled) return;
+
+      if (error) {
+        console.warn("Unable to load passenger info:", error.message);
+        return;
+      }
+
+      setPassengerByCardUid((prev) => {
+        let changed = false;
+        const next: Record<string, PassengerInfo> = { ...prev };
+        for (const row of data ?? []) {
+          const key = String(row.card_uid);
+          const value: PassengerInfo = {
+            full_name: row.full_name ?? null,
+            card_type: row.type ?? null,
+          };
+          const old = prev[key];
+          if (!old || old.full_name !== value.full_name || old.card_type !== value.card_type) {
+            next[key] = value;
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    };
+
+    loadPassengers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rawTransactionList]);
+
   // ── Lists + pagination ────────────────────────────────────────────────────
   const topupList = useMemo(
     () => rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === "Top-up"),
@@ -1103,7 +1450,6 @@ export default function TransactionsPage() {
   const startIndex = (safePage - 1) * PAGE_SIZE;
   const paginatedList = currentTypeList.slice(startIndex, startIndex + PAGE_SIZE);
 
-  // "Last sync" label lang ang nagbabago — walang highlight/blink sa rows.
   useEffect(() => {
     if (activeView === "transfers") return;
     if (currentTypeList.length === 0) return;
@@ -1197,7 +1543,6 @@ export default function TransactionsPage() {
     isDark ? "border-slate-800" : "border-zinc-200"
   }`;
 
-  // LIVE pill — shared by both toolbars
   const livePill = (
     <div className="flex items-center gap-2 mr-2 shrink-0">
       <span
@@ -1348,7 +1693,6 @@ export default function TransactionsPage() {
                           {isFareView ? (
                             <>
                               <TableHead className={headClass}>Origin</TableHead>
-                              {/* ↔ column sa pagitan ng Origin at Destination */}
                               <TableHead className="w-10 px-0 text-center">
                                 <ArrowLeftRight
                                   className={`mx-auto h-3.5 w-3.5 ${isDark ? "text-slate-600" : "text-slate-300"}`}
@@ -1395,9 +1739,23 @@ export default function TransactionsPage() {
                           </TableRow>
                         ) : (
                           paginatedList.map((rawTx: any) => {
+                            const uid = rawTx?.card_uid ?? rawTx?.cardUid;
+                            const passenger = uid ? passengerByCardUid[String(uid)] : undefined;
+
+                            // 🆕 enriched tx: fee/vat/net + passenger name + card type
                             const tx = {
                               ...rawTx,
                               ...(financialById[String(rawTx?.id)] ?? {}),
+                              full_name:
+                                rawTx?.full_name || rawTx?.fullName || passenger?.full_name || null,
+                              passenger_name:
+                                rawTx?.passenger_name ||
+                                rawTx?.full_name ||
+                                rawTx?.fullName ||
+                                passenger?.full_name ||
+                                null,
+                              card_type:
+                                rawTx?.card_type || rawTx?.cardType || passenger?.card_type || null,
                             };
 
                             const matchedRoute = isFareView ? findRouteFor(tx, routes) : null;
