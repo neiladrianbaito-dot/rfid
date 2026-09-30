@@ -27,7 +27,6 @@ import { ChangePasswordModal } from "@/components/change-password-modal";
 import { TransactionDetailModal, type Transaction } from "@/components/transaction-detail-modal";
 import { AuthCheckingScreen } from "@/components/dashboard/auth-checking-screen";
 import { SkeletonBar, SkeletonRow } from "@/components/dashboard/skeletons";
-import { VirtualCard, VirtualCardSkeleton } from "@/components/dashboard/virtual-card";
 import { MobileTxRow } from "@/components/dashboard/mobile-tx-row";
 import { LinkReminderBanner } from "@/components/dashboard/link-reminder-banner";
 import { formatAmount, getInitials, normalizeApiBaseUrl } from "@/lib/dashboard-formatters";
@@ -130,6 +129,383 @@ function UserAvatar({
       referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
       className={`h-full w-full object-cover rounded-full ${className ?? ""}`}
+    />
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 🪪 LOCKED-SCALE RFID CARD — EXACT SAME SYSTEM AS USER MANAGEMENT
+//
+// Ang card ay dinisenyo ONCE sa fixed na 700 x 441 px canvas (true CR80 /
+// ID-1 ratio: 85.60 mm x 53.98 mm). Lahat ng nasa loob ay fixed px lang,
+// tapos ini-scale ng isang `transform: scale()` para kumasya sa lapad ng
+// parent. Kaya PAREHONG-PAREHO ang itsura/proporsyon sa User Management
+// preview at dito sa User Dashboard.
+//
+// (Ang CSS para sa .card-flip-*-locked ay nasa <style> sa loob ng page.)
+// ═══════════════════════════════════════════════════════════════════════
+
+// 📏 Real-world CR80 card size in millimeters
+const CARD_MM_WIDTH = 85.6;
+const CARD_MM_HEIGHT = 53.98;
+
+const CARD_DESIGN_WIDTH = 700;
+// Height derived from the real CR80 ratio → 700 x 441
+const CARD_DESIGN_HEIGHT = Math.round((CARD_DESIGN_WIDTH * CARD_MM_HEIGHT) / CARD_MM_WIDTH); // 441
+
+// 📅 "Mon Day, Year" (e.g. Jan 15, 2026)
+const formatCardDate = (value: string | null | undefined) => {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  if (isNaN(date.getTime())) return "N/A";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+// 🪪 Card theming — accent color + label color per type, matching the physical card
+// 🔵 Regular = navy card (white text)
+// ⚪ Discounted types (Student/Senior/PWD) = WHITE card (dark text)
+function getCardTheme(type: string | null | undefined) {
+  const t = (type || "Regular").toLowerCase();
+  switch (t) {
+    case "student":
+      return {
+        accent: "#2563eb",
+        pattern: "#3b82f6",
+        label: "STUDENT",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
+    case "senior":
+      return {
+        accent: "#ca8a04",
+        pattern: "#eab308",
+        label: "SENIOR",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
+    case "pwd":
+      return {
+        accent: "#059669",
+        pattern: "#10b981",
+        label: "PWD",
+        cardBg: "#ffffff",
+        textColor: "#0f172a",
+        subTextColor: "#475569",
+        uidColor: "#1b1f5c",
+        isLight: true,
+      };
+    case "regular":
+    default:
+      return {
+        accent: "#f87171",
+        pattern: "#f97316",
+        label: "REGULAR",
+        cardBg: "#1b1f5c",
+        textColor: "#ffffff",
+        subTextColor: "rgba(255,255,255,0.7)",
+        uidColor: "#5eead4",
+        isLight: false,
+      };
+  }
+}
+
+// 🪪 Staircase chevron pattern used on the card face
+function ChevronStaircase({ color }: { color: string }) {
+  const rows = 6;
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {Array.from({ length: rows }).map((_, i) => {
+        const offset = (rows - 1 - i) * 11; // % pushed in from the right per row
+        return (
+          <div
+            key={i}
+            className="absolute right-0 h-[15%] w-full"
+            style={{ top: `${i * (100 / rows)}%`, transform: `translateX(${offset}%)` }}
+          >
+            {/* dashed accent rule on top of each step */}
+            <div
+              className="absolute top-0 left-0 right-0 h-[2px]"
+              style={{
+                backgroundImage: `repeating-linear-gradient(90deg, ${color} 0 10px, transparent 10px 16px)`,
+              }}
+            />
+            {/* the chevron teeth themselves */}
+            <div
+              className="absolute inset-x-0 bottom-0 h-[70%] opacity-80"
+              style={{
+                backgroundImage: `repeating-linear-gradient(135deg, ${color}55 0px, ${color}55 7px, transparent 7px, transparent 14px), repeating-linear-gradient(45deg, ${color}55 0px, ${color}55 7px, transparent 7px, transparent 14px)`,
+                backgroundSize: "28px 100%",
+              }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// 📐 Measures the container width live and returns the scale ratio
+function useScaleToFit(designWidth: number) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const w = el.offsetWidth;
+      if (w > 0) setScale(w / designWidth);
+    };
+    update();
+
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [designWidth]);
+
+  return { containerRef, scale };
+}
+
+// 🔒 Fixed-size, flippable card canvas that scales as ONE locked unit to fit
+// whatever width its parent gives it.
+function LockedFlipCard({
+  flipped,
+  onFlip,
+  front,
+  back,
+}: {
+  flipped: boolean;
+  onFlip: () => void;
+  front: React.ReactNode;
+  back: React.ReactNode;
+}) {
+  const { containerRef, scale } = useScaleToFit(CARD_DESIGN_WIDTH);
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full cursor-pointer select-none"
+      style={{ aspectRatio: `${CARD_DESIGN_WIDTH} / ${CARD_DESIGN_HEIGHT}` }}
+      onClick={onFlip}
+      role="button"
+      tabIndex={0}
+      aria-label="Flip card"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onFlip();
+        }
+      }}
+    >
+      {/* Fixed-size design canvas, scaled as a single locked unit */}
+      <div
+        className="absolute top-0 left-0"
+        style={{
+          width: CARD_DESIGN_WIDTH,
+          height: CARD_DESIGN_HEIGHT,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        <div className="card-flip-scene-locked">
+          <div className={`card-flip-inner-locked ${flipped ? "is-flipped" : ""}`}>
+            <div className="card-face-locked">{front}</div>
+            <div className="card-face-locked card-face-back-locked">{back}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 🪪 FRONT FACE — identical to User Management
+function CardFront({
+  user,
+  withShadow = true,
+  square = false,
+}: {
+  user: any;
+  withShadow?: boolean;
+  square?: boolean;
+}) {
+  const theme = getCardTheme(user?.type);
+  return (
+    <div
+      className={`${square ? "" : "rounded-2xl border"} overflow-hidden h-full w-full relative`}
+      style={{
+        backgroundColor: theme.cardBg,
+        borderColor: square ? "transparent" : theme.isLight ? "#cbd5e1" : "transparent",
+        boxShadow: !withShadow
+          ? "none"
+          : theme.isLight
+          ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
+          : "0 10px 25px -5px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.2)",
+      }}
+    >
+      <ChevronStaircase color={theme.pattern} />
+
+      <div className="relative h-full w-full flex flex-col justify-between" style={{ padding: 32 }}>
+        {/* small "Non-transferable" tag for discounted card types */}
+        {theme.isLight && (
+          <div
+            className="absolute uppercase font-bold text-center"
+            style={{
+              top: 10,
+              left: 0,
+              right: 0,
+              fontSize: 15,
+              letterSpacing: 0.5,
+              color: theme.accent,
+              lineHeight: 1.3,
+            }}
+          >
+            Non-Transferable
+          </div>
+        )}
+
+        {/* Header / logo badge */}
+        <div className="flex items-center" style={{ gap: 16 }}>
+          <div
+            className="rounded-full border-2 flex items-center justify-center flex-shrink-0 overflow-hidden"
+            style={{
+              width: 66,
+              height: 66,
+              backgroundColor: theme.isLight ? "#f1f5f9" : "rgba(255,255,255,0.10)",
+              borderColor: theme.isLight ? "#cbd5e1" : "rgba(255,255,255,0.30)",
+            }}
+          >
+            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+          </div>
+          <span
+            className="font-bold tracking-wide uppercase"
+            style={{ color: theme.textColor, fontSize: 23, lineHeight: 1.15 }}
+          >
+            Fare Collection System
+          </span>
+        </div>
+
+        {/* Body */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div
+            className="font-mono font-extrabold tracking-wide"
+            style={{ color: theme.uidColor, fontSize: 46, lineHeight: 1.1 }}
+          >
+            {user?.cardUid}
+          </div>
+          <div
+            className="font-semibold"
+            style={{ color: theme.textColor, fontSize: 26, lineHeight: 1.2 }}
+          >
+            {user?.fullName}
+          </div>
+        </div>
+
+        {/* Footer row: type label (left) + valid until (right) */}
+        <div className="flex items-end justify-between">
+          <div
+            className="font-extrabold tracking-wide"
+            style={{ color: theme.accent, fontSize: 25, lineHeight: 1.1 }}
+          >
+            {theme.label}
+          </div>
+          <div className="text-right">
+            <div
+              className="uppercase tracking-wide font-semibold"
+              style={{ color: theme.subTextColor, fontSize: 12, lineHeight: 1.3 }}
+            >
+              Valid Until
+            </div>
+            <div
+              className="font-mono font-bold"
+              style={{ color: theme.textColor, fontSize: 16, lineHeight: 1.3 }}
+            >
+              {formatCardDate(user?.expirationDate)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 🪪 BACK FACE — identical to User Management
+function CardBack({
+  withShadow = true,
+  square = false,
+}: {
+  withShadow?: boolean;
+  square?: boolean;
+}) {
+  return (
+    <div
+      className={`${square ? "" : "rounded-2xl border border-slate-300"} overflow-hidden bg-[#eceae4] flex flex-col h-full w-full`}
+      style={{
+        boxShadow: withShadow
+          ? "0 10px 25px -5px rgba(0,0,0,0.25), 0 4px 6px -2px rgba(0,0,0,0.1)"
+          : "none",
+      }}
+    >
+      <div style={{ height: "18%" }} className="bg-[#221f20] flex-shrink-0" />
+      <div className="flex-1 min-h-0 flex flex-col" style={{ padding: "14px 30px" }}>
+        <div
+          className="bg-white border-y border-slate-300"
+          style={{ padding: "8px 14px", marginBottom: 14 }}
+        >
+          <span className="font-extrabold text-slate-900" style={{ fontSize: 20 }}>
+            Terms and Condition
+          </span>
+        </div>
+        <ul
+          className="text-slate-800 flex-1 min-h-0 overflow-hidden"
+          style={{ fontSize: 14, lineHeight: 1.45, display: "flex", flexDirection: "column", gap: 4 }}
+        >
+          <li>• Property of the Fare Collection System Operator.</li>
+          <li>• Non-transferable and subject to transit system rules.</li>
+          <li>• Positive balance required to pass through.</li>
+          <li>• Non-refundable card issuance fee applies.</li>
+          <li>• Operator is not responsible for lost or stolen cards.</li>
+          <li>• Unused balances on unregistered cards are non-refundable.</li>
+          <li>• Tampering or unauthorized duplication is strictly prohibited.</li>
+        </ul>
+        <div
+          className="flex items-center border-t border-slate-300"
+          style={{ gap: 10, paddingTop: 10, marginTop: 6 }}
+        >
+          <div
+            className="rounded-full bg-[#1b1f5c] flex items-center justify-center flex-shrink-0 overflow-hidden"
+            style={{ width: 40, height: 40 }}
+          >
+            <img src="/calbayog.png" alt="Calbayog" className="w-full h-full object-cover" />
+          </div>
+          <span
+            className="font-extrabold tracking-wide text-slate-900 uppercase"
+            style={{ fontSize: 16 }}
+          >
+            Fare Collection System
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 🦴 Skeleton na may EKSAKTONG parehong aspect ratio ng card (700 / 441)
+function LockedCardSkeleton({ isDark }: { isDark: boolean }) {
+  return (
+    <div
+      className={`w-full rounded-2xl animate-pulse ${isDark ? "bg-slate-800/60" : "bg-slate-200"}`}
+      style={{ aspectRatio: `${CARD_DESIGN_WIDTH} / ${CARD_DESIGN_HEIGHT}` }}
     />
   );
 }
@@ -1148,19 +1524,28 @@ export default function PaymongoDashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Virtual Card — mobile only */}
+            {/* 🪪 Virtual RFID Card — mobile only.
+                LOCKED-SCALE CR80 (700 x 441): parehong-pareho sa User Management preview.
+                max-w-lg = kapareho ng lapad ng preview dialog sa admin. */}
             {isLinked && (
               <div className="col-span-1 md:hidden">
-                {user ? (
-                  <VirtualCard
-                    user={user}
-                    isDark={isDark}
-                    flipped={virtualCardFlipped}
-                    onFlip={() => setVirtualCardFlipped((f) => !f)}
-                  />
-                ) : (
-                  <VirtualCardSkeleton isDark={isDark} />
-                )}
+                <div className="w-full max-w-lg mx-auto space-y-2">
+                  {user ? (
+                    <>
+                      <LockedFlipCard
+                        flipped={virtualCardFlipped}
+                        onFlip={() => setVirtualCardFlipped((f) => !f)}
+                        front={<CardFront user={user} />}
+                        back={<CardBack />}
+                      />
+                      <p className={`text-center text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                        Tap the card to flip
+                      </p>
+                    </>
+                  ) : (
+                    <LockedCardSkeleton isDark={isDark} />
+                  )}
+                </div>
               </div>
             )}
 
