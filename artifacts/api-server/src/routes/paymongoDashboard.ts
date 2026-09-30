@@ -38,11 +38,6 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
       return;
     }
 
-    // 🔧 FIX: u.id was never selected here, so the dashboard never knew this
-    // user's numeric primary key. Anything downstream that needed to query
-    // by the real users.id (like card_balance_transfers, which references
-    // source_card_id/target_card_id → users.id) silently failed because
-    // user.id was always undefined on the frontend.
     const userResult = await db.execute(sql`
       select
         u.id              as "id",
@@ -79,13 +74,6 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
       return;
     }
 
-    // 🔧 FIX: switched from the Drizzle `.select().from(transactionsTable)`
-    // query to explicit raw SQL so fee_amount / vat_amount / net_amount are
-    // guaranteed to come back even if the Drizzle schema object for
-    // transactionsTable doesn't declare those columns. This is what the
-    // user dashboard's Top-up Fee/VAT/Net columns and receipt modal need —
-    // without this, the frontend was trying (and failing, due to RLS) to
-    // fetch those fields directly from Supabase on its own.
     type TxRow = {
       id: number;
       timestamp: string;
@@ -98,8 +86,12 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
       feeAmount: string | null;
       vatAmount: string | null;
       netAmount: string | null;
+      passengerName: string | null; // 🆕
+      cardType: string | null;      // 🆕
     };
 
+    // 🔧 FIX: join users so each transaction carries the passenger's
+    // full_name and card type (users.type: Regular / Senior / PWD / Student).
     const txResult = await db.execute(sql`
       select
         t.id,
@@ -112,8 +104,11 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
         t.payment_method as "paymentMethod",
         t.fee_amount     as "feeAmount",
         t.vat_amount     as "vatAmount",
-        t.net_amount     as "netAmount"
+        t.net_amount     as "netAmount",
+        u.full_name      as "passengerName",
+        u.type           as "cardType"
       from transactions t
+      left join users u on u.card_uid = t.card_uid
       where t.card_uid = ${cardUid}
       order by t.timestamp desc
       limit 100
@@ -121,12 +116,6 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
 
     const txRows = extractRows<TxRow>(txResult);
 
-    // 🆕 Fetch card_balance_transfers where this user's card is either the
-    // source or the target, joining `users` twice to pull each side's
-    // card_uid + full_name — same shape the admin Transactions page uses.
-    // This runs through the backend (which already has access), so it
-    // doesn't depend on Supabase RLS letting the anon/user client read the
-    // table directly.
     type TransferRow = {
       id: number;
       sourceCardId: number;
@@ -172,7 +161,7 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
 
     res.json({
       user: {
-        id:             user.id, // 🔧 FIX: now included in the response
+        id:             user.id,
         cardUid:        user.cardUid,
         fullName:       user.fullName,
         contactNumber:  user.contactNumber,
@@ -191,15 +180,13 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
         status:         tx.status,
         route_id:       tx.routeId ?? null,
         payment_method: tx.paymentMethod ?? null,
-        // 🆕 Fee / VAT / Net amount — now included so the frontend can
-        // render the Top-up breakdown without a separate direct Supabase
-        // query (which was silently failing due to RLS).
         fee_amount:     tx.feeAmount != null ? Number(tx.feeAmount) : null,
         vat_amount:     tx.vatAmount != null ? Number(tx.vatAmount) : null,
         net_amount:     tx.netAmount != null ? Number(tx.netAmount) : null,
+        // 🆕 Passenger info (falls back to the logged-in card owner)
+        passenger_name: tx.passengerName ?? user.fullName ?? null,
+        card_type:      tx.cardType ?? user.type ?? "Regular",
       })),
-      // 🆕 Shaped to match what the frontend's CardTransfer type expects:
-      // nested `source` / `target` objects with card_uid + full_name.
       transfers: transferRows.map((t) => ({
         id: t.id,
         source_card_id: t.sourceCardId,
@@ -215,7 +202,6 @@ router.get("/paymongo/dashboard", async (req, res): Promise<void> => {
         target: { card_uid: t.targetCardUid, full_name: t.targetFullName },
       })),
     });
-
   } catch (err) {
     console.error("[dashboard] Error:", err);
     res.status(500).json({
