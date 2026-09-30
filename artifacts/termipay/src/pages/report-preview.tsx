@@ -477,8 +477,21 @@ export default function ReportPreviewPage() {
                 <div style={{ fontSize: "16pt", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.06em", color: THEME.darkest }}>
                   Fare Collection System
                 </div>
-                <div style={{ fontSize: "8pt", letterSpacing: "0.12em", textTransform: "uppercase", color: THEME.muted, marginTop: "4px" }}>
-                  City Accounting Office &nbsp;•&nbsp; Calbayog City, Western Samar
+
+                {/* Company header */}
+                <div style={{ marginTop: "6px", lineHeight: 1.35 }}>
+                  <div style={{ fontSize: "11pt", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.04em", color: THEME.darkest }}>
+                    D' TURBANADA TRANSPORT, INC.
+                  </div>
+                  <div style={{ fontSize: "8pt", color: THEME.muted }}>
+                    JD Avelino St., Brgy. West Awang, Calbayog City, Samar, Philippines
+                  </div>
+                  <div style={{ fontSize: "8pt", color: THEME.muted }}>
+                    Non Vat Reg. TIN 496-013-435-00005
+                  </div>
+                  <div style={{ fontSize: "8pt", color: THEME.muted }}>
+                    CP #09171281530
+                  </div>
                 </div>
               </div>
               <img src="/calbayog.png" alt="Calbayog City Seal" style={{ width: "72px", height: "72px", flexShrink: 0, objectFit: "contain" }} />
