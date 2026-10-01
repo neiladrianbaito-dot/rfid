@@ -118,9 +118,12 @@ type TxView = "topup" | "fare" | "transfers";
 type TxType = "Fare" | "Top-up";
 
 // ══════════════════════════════════════════════════════════════════════════
-// PAGE STYLES — single-file build. ONE-FOLDER look: the active tab and the
-// body are visually ONE continuous shape (no seam / no cut between them).
-// Inactive tabs are transparent; hover only changes the TEXT color.
+// PAGE STYLES — ONE-FOLDER look. The active tab and the body are ONE shape.
+// • No overflow on the tab strip (nothing gets clipped = no "cut").
+// • Active tab has an ::after "cover" that hides the body's top border
+//   under it (no reliance on a fragile -1px overlap alone).
+// • Hover = TEXT color only.
+// • Responsive: on small screens the tabs share the full width equally.
 // ══════════════════════════════════════════════════════════════════════════
 const TX_CSS = `
 .tp {
@@ -159,7 +162,7 @@ const TX_CSS = `
   background: transparent;
 }
 
-/* NOTE: no overflow here — overflow clips the -1px overlap and caused the "cut" */
+/* No overflow here on purpose — overflow would clip the active tab's cover. */
 .tp-tabs {
   position: relative;
   z-index: 2;
@@ -168,6 +171,8 @@ const TX_CSS = `
   flex-wrap: nowrap;
   align-items: flex-end;
   gap: 4px;
+  width: 100%;
+  min-width: 0;
   padding: 0;
   background: transparent;
 }
@@ -176,7 +181,9 @@ const TX_CSS = `
   position: relative;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  min-width: 0;
   padding: 10px 18px;
   margin: 0;
   font: inherit;
@@ -189,11 +196,12 @@ const TX_CSS = `
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
   box-shadow: none;
+  outline: none;
   cursor: pointer;
   transition: color 0.15s ease;
 }
 
-/* Hover = TEXT ONLY. No background, no border, no shadow. */
+/* Hover = TEXT ONLY */
 .tp-tab:hover {
   color: var(--tp-text);
   background: transparent;
@@ -201,8 +209,7 @@ const TX_CSS = `
   box-shadow: none;
 }
 
-/* Active tab = same color as the body, overlaps the body's top border by 1px
-   so the tab + body look like ONE piece. */
+/* Active tab = same color as the body → looks like ONE piece */
 .tp-tab[aria-selected="true"],
 .tp-tab[aria-selected="true"]:hover {
   color: var(--tp-accent);
@@ -214,7 +221,25 @@ const TX_CSS = `
   z-index: 3;
 }
 
+/* Cover: hides the body's top border directly under the active tab */
+.tp-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 3px;
+  background: var(--tp-bg);
+  pointer-events: none;
+}
+
 .tp-tab svg { width: 14px; height: 14px; flex: none; }
+.tp-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tp-count {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
@@ -223,9 +248,7 @@ const TX_CSS = `
   color: var(--tp-muted);
   border: 1px solid var(--tp-divider);
 }
-.tp-tab:hover .tp-count {
-  color: var(--tp-text);
-}
+.tp-tab:hover .tp-count { color: var(--tp-text); }
 .tp-tab[aria-selected="true"] .tp-count {
   color: var(--tp-accent);
   border-color: var(--tp-border);
@@ -248,7 +271,7 @@ const TX_CSS = `
   box-shadow: var(--tp-shadow);
 }
 
-/* If the FIRST tab is not active, round the top-left corner of the body */
+/* If the FIRST tab is not active, round the body's top-left corner */
 .tp[data-first="false"] .tp-body {
   border-top-left-radius: var(--tp-radius);
 }
@@ -267,9 +290,27 @@ const TX_CSS = `
   outline-offset: 2px;
 }
 
+/* ── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
+  .tp-tabs { gap: 2px; }
+  .tp-tab {
+    flex: 1 1 0;
+    gap: 5px;
+    padding: 9px 6px;
+    font-size: 11px;
+    border-radius: 10px 10px 0 0;
+  }
+  .tp-tab[aria-selected="true"],
+  .tp-tab[aria-selected="true"]:hover { padding-bottom: 10px; }
+  .tp-count { padding: 0 5px; font-size: 9px; }
   .tp-toolbar { padding: 12px 16px; }
-  .tp-tab { padding: 8px 12px; }
+  .tp { --tp-radius: 14px; }
+}
+
+@media (max-width: 420px) {
+  .tp-tab { gap: 4px; padding: 8px 4px; font-size: 10.5px; }
+  .tp-tab svg { width: 12px; height: 12px; }
+  .tp-count { display: none; }
   .tp-tab[aria-selected="true"],
   .tp-tab[aria-selected="true"]:hover { padding-bottom: 9px; }
 }
@@ -477,6 +518,7 @@ function TxPanel({
         {tabs.map(({ key, label, icon: Icon, count }, i) => (
           <button
             key={key}
+            type="button"
             ref={(el) => { tabRefs.current[key] = el; }}
             role="tab"
             id={`tp-tab-${key}`}
@@ -488,7 +530,7 @@ function TxPanel({
             onKeyDown={(e) => handleKeyDown(e, i)}
           >
             <Icon aria-hidden="true" />
-            {label}
+            <span className="tp-label">{label}</span>
             <span className="tp-count">{count}</span>
           </button>
         ))}
