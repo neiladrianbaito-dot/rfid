@@ -58,9 +58,13 @@ import {
   Loader2,
   User,
   BadgeCheck,
+  Percent,
 } from "lucide-react";
 
 const PAGE_SIZE = 10;
+
+// Discount already applied to the stored Fare amount for every card type except "regular"
+const FARE_DISCOUNT_RATE = 0.2; // 20%
 
 // Stable empty array — para hindi magbago ang reference habang wala pang data.
 const EMPTY_LIST: any[] = [];
@@ -455,6 +459,18 @@ function formatCardType(type?: string | null): string {
   return map[key] ?? type.charAt(0).toUpperCase() + type.slice(1);
 }
 
+// 🆕 Every card type gets the discount EXCEPT regular (or empty)
+function isDiscountedCard(type?: string | null): boolean {
+  if (!type) return false;
+  const key = type.toLowerCase().trim().replace(/[\s-]+/g, "_");
+  return key !== "" && key !== "regular";
+}
+
+// 🆕 Round to 2 decimals (avoids floating point noise)
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
 // 🆕 Passenger name / card type readers (accept snake_case + camelCase)
 function getPassengerName(tx: any): string {
   const value =
@@ -672,6 +688,16 @@ function ReceiptModal({
   const vatAmount = getVatAmount(tx);
   const heroAmount = !isFare && netAmount != null ? netAmount : originalAmount;
 
+  // 🆕 tx.amount for Fare is ALREADY discounted → don't subtract again.
+  // We only back-compute the original fare + discount for display.
+  const hasFareDiscount = isFare && isDiscountedCard(getCardType(tx));
+  const fareTotal = originalAmount;
+  const fareBase = hasFareDiscount
+    ? round2(fareTotal / (1 - FARE_DISCOUNT_RATE))
+    : fareTotal;
+  const fareDiscount = hasFareDiscount ? round2(fareBase - fareTotal) : 0;
+  const discountPercentLabel = `${Math.round(FARE_DISCOUNT_RATE * 100)}%`;
+
   const amountColor = isFare
     ? isDark ? "text-red-400" : "text-red-600"
     : isDark ? "text-emerald-400" : "text-emerald-600";
@@ -881,6 +907,18 @@ function ReceiptModal({
             <p className={`text-2xl sm:text-3xl font-black tracking-tighter ${amountColor}`}>
               {isFare ? `₱${formatAmount(originalAmount)}` : formatNullableAmount(heroAmount)}
             </p>
+
+            {/* 🆕 Discount badge (display only) */}
+            {hasFareDiscount && (
+              <p
+                className={`text-[9px] sm:text-[10px] font-semibold mt-0.5 ${
+                  isDark ? "text-amber-400" : "text-amber-600"
+                }`}
+              >
+                {discountPercentLabel} {formatCardType(getCardType(tx))} discount applied
+              </p>
+            )}
+
             <p className={`text-[9px] sm:text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
               {date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} ·{" "}
               {date.toLocaleTimeString()}
@@ -938,6 +976,31 @@ function ReceiptModal({
                   {formatCardType(getCardType(tx))}
                 </span>
               </ReceiptRow>
+
+              {/* 🆕 Original fare + Discount — Fare with discounted card only */}
+              {hasFareDiscount && (
+                <>
+                  <ReceiptRow isDark={isDark} label="Original fare" upper>
+                    <span className={`text-[10px] sm:text-xs font-mono font-medium ${valueText}`}>
+                      ₱{formatAmount(fareBase)}
+                    </span>
+                  </ReceiptRow>
+
+                  <ReceiptRow
+                    isDark={isDark}
+                    icon={<Percent className={iconCls} />}
+                    label={`Discount (${discountPercentLabel})`}
+                  >
+                    <span
+                      className={`text-[10px] sm:text-xs font-mono font-bold ${
+                        isDark ? "text-amber-400" : "text-amber-600"
+                      }`}
+                    >
+                      ₱{formatAmount(fareDiscount)}
+                    </span>
+                  </ReceiptRow>
+                </>
+              )}
 
               {/* Payment method — Top-up only */}
               {!isFare && (
