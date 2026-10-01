@@ -187,29 +187,36 @@ body:has(.rp-page) {
 }
 
 /* 4. TAB STRIP --------------------------------------------------------------
-   The strip is the top edge of the folder. The active tab takes the panel's
-   own background and drops its bottom border, so it reads as one shape with
-   the body below it. */
+   Same logic as the Transactions page:
+   - NO wrap, NO overflow  -> tabs never drop to a 2nd row, nothing gets clipped
+   - active tab has an ::after "cover" that hides the body's top border
+   - hover = text color only
+   - small screens: only the ACTIVE tab shows its label, the rest are icon-only */
 .rp-tabs {
   position: relative;
   z-index: 2;
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
+  flex-wrap: nowrap;
   align-items: flex-end;
-  gap: 0;
-  padding: 0;                /* flush: first tab starts exactly at the left edge */
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
   background: transparent;
   border: 0;
-  min-width: 0;
 }
 
 .rp-tab {
   position: relative;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 10px 18px;
-  margin-bottom: -1px;       /* sink 1px into the body to hide its top border */
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 10px 14px;
+  margin: 0;
   font: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -219,20 +226,50 @@ body:has(.rp-page) {
   border: 1px solid transparent;
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
+  box-shadow: none;
+  outline: none;
   cursor: pointer;
   transition: color 0.15s ease;
 }
+
+/* Hover = TEXT ONLY */
 .rp-tab:hover {
   color: var(--rp-text);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
-.rp-tab[aria-selected="true"] {
+
+/* Active tab = same color as the body -> ONE piece */
+.rp-tab[aria-selected="true"],
+.rp-tab[aria-selected="true"]:hover {
   color: var(--rp-accent);
   background: var(--rp-bg);
   border-color: var(--rp-border);
-  padding-bottom: 11px;              /* covers the body's top border underneath */
+  box-shadow: none;
+  margin-bottom: -1px;
+  padding-bottom: 11px;
   z-index: 3;
 }
+
+/* Cover: hides the body's top border directly under the active tab */
+.rp-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 3px;
+  background: var(--rp-bg);
+  pointer-events: none;
+}
+
 .rp-tab svg { width: 14px; height: 14px; flex: none; }
+.rp-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 5. CONTENT AREA ----------------------------------------------------------- */
 .rp-body {
@@ -384,9 +421,32 @@ body:has(.rp-page) {
   outline-offset: 2px;
 }
 
-@media (max-width: 640px) {
+/* If the FIRST tab is not active, round the body's top-left corner */
+.rp[data-first="false"] .rp-body {
+  border-top-left-radius: var(--rp-radius);
+}
+
+@media (max-width: 1100px) {
+  .rp-tab { padding: 10px 10px; gap: 6px; }
+}
+
+@media (max-width: 760px) {
   .rp-body { padding: 16px; }
-  .rp-tab { padding: 8px 12px; }
+  .rp { --rp-radius: 14px; }
+  .rp-tabs { gap: 2px; }
+  .rp-tab {
+    flex: 1 1 0;
+    padding: 9px 6px;
+    border-radius: 10px 10px 0 0;
+  }
+  .rp-tab[aria-selected="true"],
+  .rp-tab[aria-selected="true"]:hover {
+    flex: 0 0 auto;            /* active tab keeps its full label */
+    padding: 9px 12px 10px;
+  }
+  /* inactive tabs become icon-only so all 6 always fit on one row */
+  .rp-tab[aria-selected="false"] .rp-label { display: none; }
+  .rp-tab svg { width: 16px; height: 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -445,16 +505,24 @@ export function ReportsPanel<K extends string>({
   };
 
   return (
-    <div className="rp" data-theme={isDark ? "dark" : "light"} data-testid="reports-panel">
+    <div
+      className="rp"
+      data-theme={isDark ? "dark" : "light"}
+      data-first={active === tabs[0]?.key ? "true" : "false"}
+      data-testid="reports-panel"
+    >
       <div className="rp-tabs" role="tablist" aria-label="Report sections">
         {tabs.map(({ key, label, icon: Icon }, i) => (
           <button
             key={key}
-            ref={(el) => (tabRefs.current[key] = el)}
+            type="button"
+            ref={(el) => { tabRefs.current[key] = el; }}
             role="tab"
             id={`rp-tab-${key}`}
             aria-selected={active === key}
             aria-controls={`rp-panel-${key}`}
+            aria-label={label}
+            title={label}
             tabIndex={active === key ? 0 : -1}
             className="rp-tab"
             data-testid={`button-tab-${key}`}
@@ -462,7 +530,7 @@ export function ReportsPanel<K extends string>({
             onKeyDown={(e) => handleKeyDown(e, i)}
           >
             <Icon aria-hidden="true" />
-            {label}
+            <span className="rp-label">{label}</span>
           </button>
         ))}
       </div>
