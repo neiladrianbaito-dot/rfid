@@ -118,9 +118,9 @@ type TxView = "topup" | "fare" | "transfers";
 type TxType = "Fare" | "Top-up";
 
 // ══════════════════════════════════════════════════════════════════════════
-// PAGE STYLES — single-file build. The same one-folder look as the Reports
-// page: only the active tab + the content panel are visible (white); the
-// tab strip itself is transparent and starts flush at the left edge.
+// PAGE STYLES — single-file build. ONE-FOLDER look: the active tab and the
+// body are visually ONE continuous shape (no seam / no cut between them).
+// Inactive tabs are transparent; hover only changes the TEXT color.
 // ══════════════════════════════════════════════════════════════════════════
 const TX_CSS = `
 .tp {
@@ -159,6 +159,7 @@ const TX_CSS = `
   background: transparent;
 }
 
+/* NOTE: no overflow here — overflow clips the -1px overlap and caused the "cut" */
 .tp-tabs {
   position: relative;
   z-index: 2;
@@ -166,13 +167,10 @@ const TX_CSS = `
   flex: none;
   flex-wrap: nowrap;
   align-items: flex-end;
-  gap: 6px;
+  gap: 4px;
   padding: 0;
   background: transparent;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-.tp-tabs::-webkit-scrollbar { display: none; }
 
 .tp-tab {
   position: relative;
@@ -180,7 +178,7 @@ const TX_CSS = `
   align-items: center;
   gap: 8px;
   padding: 10px 18px;
-  margin-bottom: 0;
+  margin: 0;
   font: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -190,26 +188,32 @@ const TX_CSS = `
   border: 1px solid transparent;
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
+  box-shadow: none;
   cursor: pointer;
-  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: color 0.15s ease;
 }
+
+/* Hover = TEXT ONLY. No background, no border, no shadow. */
 .tp-tab:hover {
   color: var(--tp-text);
-  background: color-mix(in srgb, var(--tp-bg) 55%, transparent);
-  border-color: var(--tp-border);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
-.tp-tab[aria-selected="true"] {
+
+/* Active tab = same color as the body, overlaps the body's top border by 1px
+   so the tab + body look like ONE piece. */
+.tp-tab[aria-selected="true"],
+.tp-tab[aria-selected="true"]:hover {
   color: var(--tp-accent);
   background: var(--tp-bg);
   border-color: var(--tp-border);
-  box-shadow:
-    0 -2px 6px rgba(24, 24, 27, 0.08),
-    0 -1px 0 rgba(24, 24, 27, 0.04);
+  box-shadow: none;
+  margin-bottom: -1px;
+  padding-bottom: 11px;
   z-index: 3;
 }
-.tp-tab[aria-selected="true"] {
-  margin-bottom: -1px;
-}
+
 .tp-tab svg { width: 14px; height: 14px; flex: none; }
 .tp-count {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -218,6 +222,9 @@ const TX_CSS = `
   border-radius: 6px;
   color: var(--tp-muted);
   border: 1px solid var(--tp-divider);
+}
+.tp-tab:hover .tp-count {
+  color: var(--tp-text);
 }
 .tp-tab[aria-selected="true"] .tp-count {
   color: var(--tp-accent);
@@ -237,9 +244,13 @@ const TX_CSS = `
   background: var(--tp-bg);
   color: var(--tp-text);
   border: 1px solid var(--tp-border);
-  border-top: 0;
   border-radius: 0 var(--tp-radius) var(--tp-radius) var(--tp-radius);
   box-shadow: var(--tp-shadow);
+}
+
+/* If the FIRST tab is not active, round the top-left corner of the body */
+.tp[data-first="false"] .tp-body {
+  border-top-left-radius: var(--tp-radius);
 }
 
 .tp-toolbar {
@@ -259,6 +270,8 @@ const TX_CSS = `
 @media (max-width: 640px) {
   .tp-toolbar { padding: 12px 16px; }
   .tp-tab { padding: 8px 12px; }
+  .tp-tab[aria-selected="true"],
+  .tp-tab[aria-selected="true"]:hover { padding-bottom: 9px; }
 }
 `;
 
@@ -454,7 +467,12 @@ function TxPanel({
   };
 
   return (
-    <div className="tp" data-theme={isDark ? "dark" : "light"} data-testid="transactions-panel">
+    <div
+      className="tp"
+      data-theme={isDark ? "dark" : "light"}
+      data-first={active === tabs[0]?.key ? "true" : "false"}
+      data-testid="transactions-panel"
+    >
       <div className="tp-tabs" role="tablist" aria-label="Transaction types">
         {tabs.map(({ key, label, icon: Icon, count }, i) => (
           <button
