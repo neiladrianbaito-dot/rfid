@@ -467,6 +467,34 @@ function getCardType(tx: any): string | null {
   return tx?.card_type ?? tx?.cardType ?? null;
 }
 
+// 🔎 CLIENT-SIDE SEARCH for Top-up / Fare.
+// Matches: Txn ID ("12", "#12", "TXN-12"), Card UID, Full Name, Payment Method.
+function matchesTxSearch(tx: any, query: string, passenger?: PassengerInfo): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+
+  const id = String(tx?.id ?? "").trim().toLowerCase();
+
+  // Strip "#" or "TXN-" prefix so "#12" / "TXN-12" / "12" all work
+  const idQuery = q.replace(/^#/, "").replace(/^txn[-_\s]*/, "").trim();
+  if (idQuery && id && id.includes(idQuery)) return true;
+
+  const haystack = [
+    id,
+    `#${id}`,
+    `txn-${id}`,
+    tx?.card_uid ?? tx?.cardUid ?? "",
+    tx?.full_name ?? tx?.fullName ?? "",
+    tx?.passenger_name ?? tx?.passengerName ?? "",
+    passenger?.full_name ?? "",
+    formatPaymentMethod(tx?.payment_method),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(q);
+}
+
 // 🆕 Load a data URL into an <img> so we can read its natural size (for PDF)
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -1332,8 +1360,10 @@ export default function TransactionsPage() {
   }, []);
 
   // ── Transactions query ────────────────────────────────────────────────────
+  // 🔎 NOTE: `search` is NOT sent to the API anymore. The backend only matched
+  // card UID / name, so searching by Txn ID returned nothing. Search is now
+  // done on the client (see `searchedList` below) so Txn ID works too.
   const params: any = {};
-  if (search) params.search = search;
   if (statusFilter !== "all") params.status = statusFilter;
 
   useEffect(() => {
@@ -1494,14 +1524,25 @@ export default function TransactionsPage() {
     };
   }, [rawTransactionList]);
 
+  // ── 🔎 Client-side search (Txn ID, Card UID, Full Name, Payment Method) ───
+  const searchedList = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rawTransactionList;
+    return rawTransactionList.filter((tx: any) => {
+      const uid = tx?.card_uid ?? tx?.cardUid;
+      const passenger = uid ? passengerByCardUid[String(uid)] : undefined;
+      return matchesTxSearch(tx, q, passenger);
+    });
+  }, [rawTransactionList, search, passengerByCardUid]);
+
   // ── Lists + pagination ────────────────────────────────────────────────────
   const topupList = useMemo(
-    () => rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === "Top-up"),
-    [rawTransactionList],
+    () => searchedList.filter((tx: any) => normalizeTxType(tx.type) === "Top-up"),
+    [searchedList],
   );
   const fareList = useMemo(
-    () => rawTransactionList.filter((tx: any) => normalizeTxType(tx.type) === "Fare"),
-    [rawTransactionList],
+    () => searchedList.filter((tx: any) => normalizeTxType(tx.type) === "Fare"),
+    [searchedList],
   );
 
   const currentTypeList = activeView === "fare" ? fareList : topupList;
@@ -1527,8 +1568,17 @@ export default function TransactionsPage() {
 
     const q = transferSearch.trim().toLowerCase();
     if (q) {
+      // "#5", "TRF-5" and "5" all match transfer ID 5
+      const idQuery = q.replace(/^#/, "").replace(/^(trf|transfer)[-_\s]*/, "").trim();
+
       list = list.filter((transfer) => {
+        const id = String(transfer.id ?? "").toLowerCase();
+        if (idQuery && id.includes(idQuery)) return true;
+
         const haystack = [
+          id,
+          `#${id}`,
+          `trf-${id}`,
           cardUidOf(transfer.source),
           fullNameOf(transfer.source),
           cardUidOf(transfer.target),
@@ -1693,7 +1743,7 @@ export default function TransactionsPage() {
                     }`}
                   />
                   <Input
-                    placeholder="Search card UID or name..."
+                    placeholder="Search Txn ID, card UID or name..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     className={`pl-10 font-medium text-sm focus-visible:ring-blue-500 ${
@@ -1990,7 +2040,7 @@ export default function TransactionsPage() {
                     }`}
                   />
                   <Input
-                    placeholder="Search source/target card UID or name..."
+                    placeholder="Search Transfer ID, card UID or name..."
                     value={transferSearch}
                     onChange={(e) => setTransferSearch(e.target.value)}
                     className="pl-10 text-sm"
