@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,6 +31,7 @@ import {
   Eye,
   XCircle,
   Clock,
+  Search,
 } from "lucide-react";
 
 const formatPeso = (value: number) =>
@@ -132,6 +134,36 @@ function getChannelLabel(row: any): string {
 function isBdoChannel(row: any): boolean {
   const code = (row.bank_code ?? row.channel_code ?? row.channel ?? "").toString().trim();
   return code === "PH_BDO";
+}
+
+// 🔎 CLIENT-SIDE SEARCH para sa Disbursement History.
+// Matches: Disbursement ID ("12", "#12", "DSB-12"), Xendit ID,
+// Account Name, Account Number.
+function matchesDisbursementSearch(row: any, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+
+  const id = String(row?.id ?? "").trim().toLowerCase();
+
+  // Alisin ang "#" o "DSB-" para gumana ang "#12", "DSB-12" at "12"
+  const idQuery = q
+    .replace(/^#/, "")
+    .replace(/^(dsb|disbursement)[-_\s]*/, "")
+    .trim();
+  if (idQuery && id && id.includes(idQuery)) return true;
+
+  const haystack = [
+    id,
+    `#${id}`,
+    `dsb-${id}`,
+    row?.xendit_disbursement_id ?? "",
+    row?.account_holder_name ?? "",
+    row?.account_number ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(q);
 }
 
 // ── Receipt helpers ─────────────────────────────────────────────────────────
@@ -439,6 +471,8 @@ function DisbursementPage() {
   const [disbursementPage, setDisbursementPage] = useState(1);
   const [disbursementStatusFilter, setDisbursementStatusFilter] =
     useState<DisbursementStatusFilterType>("All");
+  // 🔎 search text para sa Disbursement History (ID, Xendit ID, name, account no.)
+  const [disbursementSearch, setDisbursementSearch] = useState("");
 
   // synchronous guard against double-submit
   const isSubmittingRef = useRef(false);
@@ -673,16 +707,27 @@ function DisbursementPage() {
     return counts;
   }, [disbursementHistory]);
 
+  // 🔎 status filter + search (Disbursement ID, Xendit ID, name, account no.)
   const filteredDisbursementHistory = useMemo(() => {
-    if (disbursementStatusFilter === "All") return disbursementHistory;
-    return disbursementHistory.filter(
-      (row: any) => (row.status || "").toString().toUpperCase() === disbursementStatusFilter.toUpperCase()
-    );
-  }, [disbursementHistory, disbursementStatusFilter]);
+    let list = disbursementHistory;
+
+    if (disbursementStatusFilter !== "All") {
+      list = list.filter(
+        (row: any) => (row.status || "").toString().toUpperCase() === disbursementStatusFilter.toUpperCase()
+      );
+    }
+
+    const q = disbursementSearch.trim();
+    if (q) {
+      list = list.filter((row: any) => matchesDisbursementSearch(row, q));
+    }
+
+    return list;
+  }, [disbursementHistory, disbursementStatusFilter, disbursementSearch]);
 
   useEffect(() => {
     setDisbursementPage(1);
-  }, [disbursementStatusFilter]);
+  }, [disbursementStatusFilter, disbursementSearch]);
 
   const disbursementTotalPages = Math.max(1, Math.ceil(filteredDisbursementHistory.length / DISBURSEMENTS_PER_PAGE));
   const disbursementPageClamped = Math.min(disbursementPage, disbursementTotalPages);
@@ -762,6 +807,39 @@ function DisbursementPage() {
               </span>
             </CardTitle>
             <div className="flex items-center gap-2 flex-wrap">
+              {/* 🔎 SEARCH — Disbursement ID, Xendit ID, name, account no. */}
+              <div className="relative w-full sm:w-[260px]">
+                <Search
+                  className={`absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none ${
+                    isDark ? "text-slate-500" : "text-slate-400"
+                  }`}
+                />
+                <Input
+                  value={disbursementSearch}
+                  onChange={(e) => setDisbursementSearch(e.target.value)}
+                  placeholder="Search Disbursement ID, name..."
+                  data-testid="input-disbursement-search"
+                  className={`h-8 pl-8 pr-8 text-[11px] font-medium focus-visible:ring-indigo-500 ${
+                    isDark
+                      ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
+                      : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
+                  }`}
+                />
+                {disbursementSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setDisbursementSearch("")}
+                    aria-label="Clear search"
+                    data-testid="button-clear-disbursement-search"
+                    className={`absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer ${
+                      isDark ? "text-slate-500 hover:text-white" : "text-slate-400 hover:text-slate-900"
+                    }`}
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
               <Select
                 value={disbursementStatusFilter}
                 onValueChange={(v) => setDisbursementStatusFilter(v as DisbursementStatusFilterType)}
@@ -822,12 +900,18 @@ function DisbursementPage() {
             </div>
           ) : filteredDisbursementHistory.length === 0 ? (
             <div className={`py-10 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              Walang disbursement na may status na "{disbursementStatusFilter}".
+              {disbursementSearch.trim()
+                ? disbursementStatusFilter === "All"
+                  ? `Walang disbursement na tumutugma sa "${disbursementSearch.trim()}".`
+                  : `Walang "${disbursementStatusFilter}" na disbursement na tumutugma sa "${disbursementSearch.trim()}".`
+                : `Walang disbursement na may status na "${disbursementStatusFilter}".`}
             </div>
           ) : (
             <Table>
               <TableHeader className={isDark ? "bg-slate-900" : "bg-white"}>
                 <TableRow className={`hover:bg-transparent ${isDark ? "border-slate-800" : "border-slate-200"}`}>
+                  {/* 🆔 Disbursement ID — PINAKAUNA */}
+                  <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Disbursement ID</TableHead>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Date</TableHead>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Account</TableHead>
                   <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Channel</TableHead>
@@ -846,6 +930,10 @@ function DisbursementPage() {
                     key={row.id}
                     className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
                   >
+                    {/* 🆔 Disbursement ID — PINAKAUNA */}
+                    <TableCell className={`text-xs font-mono font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                      #{row.id}
+                    </TableCell>
                     <TableCell className={`text-sm ${isDark ? "text-slate-300" : "text-slate-700"}`}>
                       {row.created_at ? new Date(row.created_at).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
                     </TableCell>
