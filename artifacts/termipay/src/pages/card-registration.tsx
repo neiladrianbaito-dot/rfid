@@ -310,9 +310,12 @@ function getTypeTextColor(type: string, isDark: boolean) {
  *
  * ONE searchable field for barangay / city / province / region.
  * Virtualized: only ~15 visible rows (+ overscan) are rendered at a time.
- * May location icon, at buo ang address (nagwa-wrap, hindi pinuputol).
+ *
+ * Ang search bar (trigger) ay nagpapakita ng BUONG address kasama ang
+ * ZIP code at "Philippines" (galing sa `displayLabel`). Habang
+ * naghahanap pa ng ZIP (`resolving`), may spinner at loading text muna.
  */
-const COMBOBOX_ITEM_HEIGHT = 48; // 👈 mas mataas para kasya ang 2 lines
+const COMBOBOX_ITEM_HEIGHT = 48; // mas mataas para kasya ang 2 lines
 const COMBOBOX_LIST_HEIGHT = 240;
 const COMBOBOX_OVERSCAN = 6;
 const COMBOBOX_MAX_RESULTS = 300;
@@ -327,6 +330,10 @@ interface AddressComboboxProps {
   loading?: boolean;
   disabled?: boolean;
   isDark: boolean;
+  // 📮 Buong address (may ZIP + Philippines) na ipapakita sa search bar
+  displayLabel?: string;
+  // 🔄 True habang hinahanap pa ang ZIP code
+  resolving?: boolean;
 }
 
 function AddressCombobox({
@@ -338,6 +345,8 @@ function AddressCombobox({
   loading,
   disabled,
   isDark,
+  displayLabel,
+  resolving,
 }: AddressComboboxProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -393,10 +402,21 @@ function AddressCombobox({
   const totalHeight = filtered.length * COMBOBOX_ITEM_HEIGHT;
   const offsetY = startIndex * COMBOBOX_ITEM_HEIGHT;
 
+  // Ano ang ipapakita sa search bar (trigger)
+  const showSpinner = !!resolving || (!!loading && !selected);
+
+  const triggerText = resolving
+    ? "Loading address and ZIP code..."
+    : displayLabel ||
+      selected?.label ||
+      (loading ? loadingPlaceholder ?? "Loading..." : placeholder);
+
+  const hasValue = !resolving && !!(displayLabel || selected);
+
   return (
     <Popover open={open} onOpenChange={(next) => !disabled && setOpen(next)}>
       <PopoverTrigger asChild>
-        {/* 📍 Trigger: may location icon, at buo ang address (nagwa-wrap, hindi na pinuputol) */}
+        {/* 📍 Trigger: location icon + buong address (may ZIP at Philippines), nagwa-wrap */}
         <button
           type="button"
           disabled={disabled}
@@ -407,19 +427,22 @@ function AddressCombobox({
           }`}
         >
           <span className="flex min-w-0 flex-1 items-start gap-2">
-            <MapPin
-              className={`mt-px h-3.5 w-3.5 shrink-0 ${
-                selected ? "text-cyan-500" : "opacity-50"
-              }`}
-            />
+            {showSpinner ? (
+              <Loader2 className="mt-px h-3.5 w-3.5 shrink-0 animate-spin text-cyan-500" />
+            ) : (
+              <MapPin
+                className={`mt-px h-3.5 w-3.5 shrink-0 ${
+                  hasValue ? "text-cyan-500" : "opacity-50"
+                }`}
+              />
+            )}
 
             <span
               className={`min-w-0 flex-1 whitespace-normal break-words leading-snug ${
-                !selected ? "opacity-50" : ""
+                !hasValue ? "opacity-60" : ""
               }`}
             >
-              {selected?.label ??
-                (loading ? loadingPlaceholder ?? "Loading..." : placeholder)}
+              {triggerText}
             </span>
           </span>
 
@@ -573,8 +596,8 @@ export default function CardRegistrationPage() {
   const [loadingAddressOptions, setLoadingAddressOptions] = useState(false);
 
   // 📮 True habang hinahanap pa ang ZIP pagkapili ng barangay.
-  // Habang true, hindi pa lumalabas ang Full Address — para sabay na
-  // mag-fill ang ZIP at ang buong address.
+  // Habang true, hindi pa lumalabas ang address sa search bar at sa
+  // Full Address — para sabay na mag-fill ang ZIP at ang buong address.
   const [resolvingAddress, setResolvingAddress] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -683,6 +706,28 @@ export default function CardRegistrationPage() {
 
   const requiresIdImage = form.type !== "Regular";
 
+  // 📍 Buong address para sa search bar: Barangay, City, Province,
+  // Region + ZIP, Philippines. (Walang street, kasi yun ay hiwalay na field.)
+  const searchBarAddress = useMemo(() => {
+    if (!form.barangayCode) return "";
+
+    return buildFullAddress({
+      streetAddress: "",
+      barangayName: form.barangayName,
+      cityName: form.cityName,
+      provinceName: form.provinceName,
+      regionName: form.regionName,
+      zipCode: form.zipCode,
+    });
+  }, [
+    form.barangayCode,
+    form.barangayName,
+    form.cityName,
+    form.provinceName,
+    form.regionName,
+    form.zipCode,
+  ]);
+
   /*
    * LOAD ADDRESS DATA (once, on mount)
    */
@@ -790,7 +835,7 @@ export default function CardRegistrationPage() {
    *
    * Pagkatapos ng lookup (nahanap man o hindi, o nag-timeout), isang beses
    * lang itatakda ang ZIP at papatayin ang loading — kaya sabay na
-   * lalabas ang ZIP at ang buong Full Address.
+   * lalabas ang ZIP sa search bar at sa Full Address.
    */
   useEffect(() => {
     if (!form.barangayCode) {
@@ -1873,7 +1918,7 @@ export default function CardRegistrationPage() {
                     />
                   </div>
 
-                  {/* Row 2: ONE searchable field for barangay/city/province/region */}
+                  {/* Row 2: ONE searchable field — nagpapakita ng buong address + ZIP + Philippines */}
                   <div className="space-y-1 sm:col-span-2">
                     <label className={MODAL_LABEL_CLASS}>
                       Barangay / City / Province
@@ -1889,6 +1934,8 @@ export default function CardRegistrationPage() {
                       loading={loadingAddressOptions}
                       disabled={isSubmitting}
                       isDark={isDark}
+                      displayLabel={searchBarAddress}
+                      resolving={resolvingAddress}
                     />
                   </div>
 
