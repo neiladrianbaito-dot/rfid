@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { motion } from "framer-motion";
+import zipcodes from "zipcodes-ph";
 
 import {
   CreditCard,
@@ -116,10 +117,38 @@ async function fetchPsgcRaw(path: string): Promise<any[]> {
   return Array.isArray(data) ? data : [];
 }
 
+// 📮 Auto ZIP lookup mula sa pangalan ng city. Sinusubukan ang ilang
+// variant ng pangalan dahil iba-iba ang format ng PSGC at ng zip dataset
+// (hal. "City of Cebu" vs "Cebu City"). Walang nakita = walang ZIP.
+function lookupZipCode(cityName: string): string {
+  if (!cityName) return "";
+
+  const base = cityName.trim();
+  const variants = [
+    base,
+    base.replace(/^City of\s+/i, ""),
+    base.replace(/\s+City$/i, ""),
+    `${base.replace(/^City of\s+/i, "").replace(/\s+City$/i, "")} City`,
+  ];
+
+  for (const name of variants) {
+    try {
+      const result = zipcodes.reverse(name);
+      const zip = Array.isArray(result) ? result[0] : result;
+      if (zip) return String(zip);
+    } catch {
+      // ituloy sa susunod na variant
+    }
+  }
+
+  return "";
+}
+
 // 🧩 Builds the human-readable full address string from the individual
-// street / region / province / city / barangay / zip fields. Used both to
-// auto-fill the "Full Address" textarea, and as a fallback when submitting
-// in case the textarea was somehow left empty.
+// street / barangay / city / province / region / zip fields. Format:
+// "Barangay, City, Province, Region, ZIP, Philippines"
+// Used both to auto-fill the "Full Address" textarea, and as a fallback
+// when submitting in case the textarea was somehow left empty.
 function buildFullAddress(fields: {
   streetAddress: string;
   barangayName: string;
@@ -142,9 +171,9 @@ function buildFullAddress(fields: {
     barangayName,
     cityName,
     provinceName,
-    regionName && zipCode
-      ? `${regionName} ${zipCode}`
-      : regionName || zipCode,
+    regionName,
+    zipCode.trim(),
+    "Philippines",
   ]
     .filter(Boolean)
     .join(", ");
@@ -158,6 +187,8 @@ const INITIAL_FORM = {
   type: "Regular",
 
   streetAddress: "",
+  // 📮 Hindi na ito input field — awtomatikong napupunan mula sa
+  // napiling city (tingnan ang handleAddressSelect) at ipinapadala pa rin sa API.
   zipCode: "",
 
   regionCode: "",
@@ -828,7 +859,8 @@ export default function CardRegistrationPage() {
 
   /*
    * ADDRESS SELECTED FROM THE SEARCHABLE COMBOBOX
-   * Fills region/province/city/barangay all at once from a single pick.
+   * Fills region/province/city/barangay all at once from a single pick,
+   * and auto-looks-up the ZIP code from the selected city.
    */
   function handleAddressSelect(option: AddressSearchOption) {
     setForm((current) => ({
@@ -845,6 +877,8 @@ export default function CardRegistrationPage() {
 
       barangayCode: option.barangayCode,
       barangayName: option.barangayName,
+
+      zipCode: lookupZipCode(option.cityName),
     }));
   }
 
@@ -1153,6 +1187,7 @@ export default function CardRegistrationPage() {
             form.streetAddress.trim() ||
             null,
 
+          // 📮 Auto-filled from the selected city (no input field anymore)
           zipCode:
             form.zipCode.trim() ||
             null,
@@ -1727,14 +1762,15 @@ export default function CardRegistrationPage() {
                 </div>
               </div>
 
-              {/* ADDRESS — now a single searchable field instead of 4
-                  cascading dropdowns */}
+              {/* ADDRESS — single searchable field instead of 4 cascading
+                  dropdowns. ZIP is auto-filled (no input) and shown inside
+                  the Full Address. */}
               <div className="space-y-2">
                 <SectionTitle icon={MapPin} text="Address" />
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {/* Row 1: Street Address + ZIP Code */}
-                  <div className="space-y-1">
+                  {/* Row 1: Street Address (full width) */}
+                  <div className="space-y-1 sm:col-span-2">
                     <label className={MODAL_LABEL_CLASS}>
                       Street Address{" "}
                       <span className="font-normal text-muted-foreground">
@@ -1748,30 +1784,6 @@ export default function CardRegistrationPage() {
                         updateForm("streetAddress", event.target.value)
                       }
                       placeholder="House number, street, sitio"
-                      disabled={isSubmitting}
-                      className={MODAL_INPUT_CLASS}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className={MODAL_LABEL_CLASS}>
-                      ZIP Code{" "}
-                      <span className="font-normal text-muted-foreground">
-                        (Optional)
-                      </span>
-                    </label>
-
-                    <Input
-                      value={form.zipCode}
-                      onChange={(event) =>
-                        updateForm(
-                          "zipCode",
-                          event.target.value.replace(/\D/g, "")
-                        )
-                      }
-                      placeholder="6710"
-                      maxLength={10}
-                      inputMode="numeric"
                       disabled={isSubmitting}
                       className={MODAL_INPUT_CLASS}
                     />
