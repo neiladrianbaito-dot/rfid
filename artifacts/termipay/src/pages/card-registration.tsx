@@ -82,6 +82,9 @@ const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 const ID_IMAGE_BUCKET = "id-verifications";
 const MAX_ID_IMAGE_SIZE = 5 * 1024 * 1024;
 
+// ⏱️ Max na hihintayin sa ZIP lookup bago ituloy ang address nang walang ZIP.
+const ZIP_LOOKUP_TIMEOUT_MS = 6000;
+
 // 🔎 ONE flattened, searchable address record (barangay + its full parent
 // chain: city/municipality, province, region) built once on page load.
 interface AddressSearchOption {
@@ -536,6 +539,11 @@ export default function CardRegistrationPage() {
   );
   const [loadingAddressOptions, setLoadingAddressOptions] = useState(false);
 
+  // 📮 True habang hinahanap pa ang ZIP pagkapili ng barangay.
+  // Habang true, hindi pa lumalabas ang Full Address — para sabay na
+  // mag-fill ang ZIP at ang buong address.
+  const [resolvingAddress, setResolvingAddress] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ✅ Realtime pulse state (same pattern as TransactionsPage)
@@ -743,19 +751,35 @@ export default function CardRegistrationPage() {
   }, [toast]);
 
   /*
-   * AUTO ZIP CODE (tahimik, walang loading UI)
-   * Kapag may napiling barangay, hahanapin ang ZIP automatically sa
-   * background. Susubukan muna barangay + city + province, kung wala,
-   * city + province lang. Pumapasok lang ito sa Full Address kapag nahanap na.
+   * AUTO ZIP CODE
+   * Kapag may napiling barangay, hahanapin ang ZIP. Susubukan muna
+   * barangay + city + province, kung wala, city + province lang.
+   *
+   * Pagkatapos ng lookup (nahanap man o hindi, o nag-timeout), isang beses
+   * lang itatakda ang ZIP at papatayin ang loading — kaya sabay na
+   * lalabas ang ZIP at ang buong Full Address.
    */
   useEffect(() => {
-    if (!form.barangayCode) return;
+    if (!form.barangayCode) {
+      setResolvingAddress(false);
+      return;
+    }
 
     const controller = new AbortController();
+    let cleanedUp = false;
 
-    const timer = setTimeout(async () => {
+    // ⏱️ Safety timeout: kapag mabagal ang Nominatim, itutuloy ang address
+    // nang walang ZIP imbes na maiwang naka-loading.
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      ZIP_LOOKUP_TIMEOUT_MS
+    );
+
+    (async () => {
+      let zip = "";
+
       try {
-        let zip = await lookupZipCode(
+        zip = await lookupZipCode(
           [form.barangayName, form.cityName, form.provinceName],
           controller.signal
         );
@@ -766,19 +790,25 @@ export default function CardRegistrationPage() {
             controller.signal
           );
         }
-
-        if (!controller.signal.aborted && zip) {
-          setForm((current) => ({ ...current, zipCode: zip }));
-        }
       } catch (error: any) {
         if (error?.name !== "AbortError") {
           console.error("ZIP lookup failed:", error);
         }
+      } finally {
+        clearTimeout(timeoutId);
+
+        // Kapag napalitan na ang napiling address (cleanup), huwag galawin.
+        if (!cleanedUp) {
+          // Isang batch lang: ZIP + patay ang loading nang sabay.
+          setForm((current) => ({ ...current, zipCode: zip }));
+          setResolvingAddress(false);
+        }
       }
-    }, 150);
+    })();
 
     return () => {
-      clearTimeout(timer);
+      cleanedUp = true;
+      clearTimeout(timeoutId);
       controller.abort();
     };
   }, [form.barangayCode, form.barangayName, form.cityName, form.provinceName]);
@@ -788,8 +818,13 @@ export default function CardRegistrationPage() {
    * Rebuilds the "Full Address" textarea whenever street, ZIP, or the
    * selected barangay/city/province/region changes. Always ends with
    * "Philippines".
+   *
+   * Hindi ito gumagana habang `resolvingAddress` ay true — hinihintay muna
+   * ang ZIP para sabay silang lumabas.
    */
   useEffect(() => {
+    if (resolvingAddress) return;
+
     const computed = buildFullAddress({
       streetAddress: form.streetAddress,
       barangayName: form.barangayName,
@@ -799,12 +834,14 @@ export default function CardRegistrationPage() {
       zipCode: form.zipCode,
     });
 
-    setForm((current) => ({
-      ...current,
-      fullAddress: computed,
-    }));
+    setForm((current) =>
+      current.fullAddress === computed
+        ? current
+        : { ...current, fullAddress: computed }
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    resolvingAddress,
     form.streetAddress,
     form.barangayName,
     form.cityName,
@@ -823,6 +860,7 @@ export default function CardRegistrationPage() {
     }
 
     setForm(INITIAL_FORM);
+    setResolvingAddress(false);
 
     setIdImageFile(null);
     setIdImagePreview(null);
@@ -845,6 +883,7 @@ export default function CardRegistrationPage() {
     setIsModalOpen(false);
 
     setForm(INITIAL_FORM);
+    setResolvingAddress(false);
 
     setIdImageFile(null);
     setIdImagePreview(null);
@@ -870,13 +909,22 @@ export default function CardRegistrationPage() {
   /*
    * ADDRESS SELECTED FROM THE SEARCHABLE COMBOBOX
    * Fills region/province/city/barangay all at once from a single pick.
-   * Nire-reset ang ZIP para hindi maiwan ang ZIP ng dating address.
+   * Nire-reset ang ZIP at Full Address, tapos magsisimula ang loading
+   * hanggang makuha ang ZIP.
    */
   function handleAddressSelect(option: AddressSearchOption) {
+    // Kapag parehong barangay ang pinili ulit, walang gagawin.
+    if (option.barangayCode === form.barangayCode) {
+      return;
+    }
+
+    setResolvingAddress(true);
+
     setForm((current) => ({
       ...current,
 
       zipCode: "",
+      fullAddress: "",
 
       regionCode: option.regionCode,
       regionName: option.regionName,
@@ -1047,7 +1095,7 @@ export default function CardRegistrationPage() {
       return;
     }
 
-    if (isSubmitting) {
+    if (isSubmitting || resolvingAddress) {
       return;
     }
 
@@ -1811,22 +1859,40 @@ export default function CardRegistrationPage() {
                     />
                   </div>
 
-                  {/* Row 3: Full Address — auto-filled (with ZIP + Philippines), editable */}
+                  {/* Row 3: Full Address — lalabas nang sabay kasama ang ZIP + Philippines */}
                   <div className="space-y-1 sm:col-span-2">
                     <label className={MODAL_LABEL_CLASS}>
                       Full Address
                     </label>
 
-                    <Textarea
-                      value={form.fullAddress}
-                      onChange={(event) =>
-                        updateForm("fullAddress", event.target.value)
-                      }
-                      placeholder="Auto-filled from the search above — you can still edit it"
-                      disabled={isSubmitting}
-                      rows={2}
-                      className="min-h-0 resize-none px-2.5 py-1.5 text-xs"
-                    />
+                    <div className="relative">
+                      <Textarea
+                        value={form.fullAddress}
+                        onChange={(event) =>
+                          updateForm("fullAddress", event.target.value)
+                        }
+                        placeholder={
+                          resolvingAddress
+                            ? ""
+                            : "Auto-filled from the search above — you can still edit it"
+                        }
+                        disabled={isSubmitting || resolvingAddress}
+                        rows={2}
+                        className="min-h-0 resize-none px-2.5 py-1.5 text-xs"
+                      />
+
+                      {/* 🔄 Loading overlay habang hinahanap ang ZIP */}
+                      {resolvingAddress && (
+                        <div
+                          className={`pointer-events-none absolute inset-0 flex items-center gap-2 px-2.5 text-xs ${
+                            isDark ? "text-slate-400" : "text-slate-500"
+                          }`}
+                        >
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Preparing full address...
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1851,7 +1917,7 @@ export default function CardRegistrationPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || resolvingAddress}
                   className="h-8 gap-1.5 text-xs"
                 >
                   {isSubmitting ? (
