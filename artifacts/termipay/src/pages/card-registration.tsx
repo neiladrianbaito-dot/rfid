@@ -310,8 +310,9 @@ function getTypeTextColor(type: string, isDark: boolean) {
  *
  * ONE searchable field for barangay / city / province / region.
  * Virtualized: only ~15 visible rows (+ overscan) are rendered at a time.
+ * May location icon, at buo ang address (nagwa-wrap, hindi pinuputol).
  */
-const COMBOBOX_ITEM_HEIGHT = 32;
+const COMBOBOX_ITEM_HEIGHT = 48; // 👈 mas mataas para kasya ang 2 lines
 const COMBOBOX_LIST_HEIGHT = 240;
 const COMBOBOX_OVERSCAN = 6;
 const COMBOBOX_MAX_RESULTS = 300;
@@ -395,20 +396,34 @@ function AddressCombobox({
   return (
     <Popover open={open} onOpenChange={(next) => !disabled && setOpen(next)}>
       <PopoverTrigger asChild>
+        {/* 📍 Trigger: may location icon, at buo ang address (nagwa-wrap, hindi na pinuputol) */}
         <button
           type="button"
           disabled={disabled}
-          className={`flex h-8 w-full items-center justify-between rounded-md border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+          className={`flex min-h-8 w-full items-start justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
             isDark
               ? "border-slate-800 bg-slate-950 text-slate-200"
               : "border-slate-200 bg-white text-slate-900"
           }`}
         >
-          <span className={`truncate ${!selected ? "opacity-50" : ""}`}>
-            {selected?.label ??
-              (loading ? loadingPlaceholder ?? "Loading..." : placeholder)}
+          <span className="flex min-w-0 flex-1 items-start gap-2">
+            <MapPin
+              className={`mt-px h-3.5 w-3.5 shrink-0 ${
+                selected ? "text-cyan-500" : "opacity-50"
+              }`}
+            />
+
+            <span
+              className={`min-w-0 flex-1 whitespace-normal break-words leading-snug ${
+                !selected ? "opacity-50" : ""
+              }`}
+            >
+              {selected?.label ??
+                (loading ? loadingPlaceholder ?? "Loading..." : placeholder)}
+            </span>
           </span>
-          <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+
+          <ChevronsUpDown className="mt-px h-3.5 w-3.5 shrink-0 opacity-50" />
         </button>
       </PopoverTrigger>
 
@@ -498,12 +513,30 @@ function AddressCombobox({
                             : "text-slate-800 hover:bg-slate-50"
                       }`}
                     >
+                      <MapPin
+                        className={`h-3.5 w-3.5 shrink-0 ${
+                          isSelected ? "text-cyan-500" : "opacity-40"
+                        }`}
+                      />
+
+                      {/* Hanggang 2 lines, wrap ang mahahabang address */}
+                      <span
+                        className="min-w-0 flex-1 whitespace-normal break-words leading-snug"
+                        style={{
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {option.label}
+                      </span>
+
                       <Check
                         className={`h-3.5 w-3.5 shrink-0 ${
                           isSelected ? "opacity-100" : "opacity-0"
                         }`}
                       />
-                      <span className="truncate">{option.label}</span>
                     </button>
                   );
                 })}
