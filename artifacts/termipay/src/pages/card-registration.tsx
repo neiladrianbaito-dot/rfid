@@ -113,6 +113,9 @@ async function fetchPsgcRaw(path: string): Promise<any[]> {
   return Array.isArray(data) ? data : [];
 }
 
+// 📮 ZIP cache — kapag nahanap na ang ZIP ng isang lugar, instant na sa susunod.
+const zipCache = new Map<string, string>();
+
 // 📮 Auto ZIP lookup via Nominatim (OpenStreetMap). Walang package na kailangan.
 // Nagbabalik ng 4-digit PH ZIP code, o "" kapag walang nahanap.
 async function lookupZipCode(
@@ -120,6 +123,10 @@ async function lookupZipCode(
   signal: AbortSignal
 ): Promise<string> {
   const q = [...parts.filter(Boolean), "Philippines"].join(", ");
+
+  if (zipCache.has(q)) {
+    return zipCache.get(q) as string;
+  }
 
   const response = await fetch(
     `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=ph&q=${encodeURIComponent(
@@ -134,7 +141,11 @@ async function lookupZipCode(
   const postcode = String(data?.[0]?.address?.postcode ?? "");
 
   // PH ZIP codes are 4 digits
-  return postcode.match(/\d{4}/)?.[0] ?? "";
+  const zip = postcode.match(/\d{4}/)?.[0] ?? "";
+
+  zipCache.set(q, zip);
+
+  return zip;
 }
 
 // 🧩 Builds the human-readable full address string from the individual
@@ -525,9 +536,6 @@ export default function CardRegistrationPage() {
   );
   const [loadingAddressOptions, setLoadingAddressOptions] = useState(false);
 
-  // 📮 True habang hinahanap pa ang ZIP code
-  const [loadingZip, setLoadingZip] = useState(false);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ✅ Realtime pulse state (same pattern as TransactionsPage)
@@ -735,9 +743,10 @@ export default function CardRegistrationPage() {
   }, [toast]);
 
   /*
-   * AUTO ZIP CODE
-   * Kapag may napiling barangay, hahanapin ang ZIP automatically.
-   * Susubukan muna barangay + city + province, kung wala, city + province lang.
+   * AUTO ZIP CODE (tahimik, walang loading UI)
+   * Kapag may napiling barangay, hahanapin ang ZIP automatically sa
+   * background. Susubukan muna barangay + city + province, kung wala,
+   * city + province lang. Pumapasok lang ito sa Full Address kapag nahanap na.
    */
   useEffect(() => {
     if (!form.barangayCode) return;
@@ -746,8 +755,6 @@ export default function CardRegistrationPage() {
 
     const timer = setTimeout(async () => {
       try {
-        setLoadingZip(true);
-
         let zip = await lookupZipCode(
           [form.barangayName, form.cityName, form.provinceName],
           controller.signal
@@ -760,19 +767,15 @@ export default function CardRegistrationPage() {
           );
         }
 
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && zip) {
           setForm((current) => ({ ...current, zipCode: zip }));
         }
       } catch (error: any) {
         if (error?.name !== "AbortError") {
           console.error("ZIP lookup failed:", error);
         }
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoadingZip(false);
-        }
       }
-    }, 400);
+    }, 150);
 
     return () => {
       clearTimeout(timer);
@@ -842,7 +845,6 @@ export default function CardRegistrationPage() {
     setIsModalOpen(false);
 
     setForm(INITIAL_FORM);
-    setLoadingZip(false);
 
     setIdImageFile(null);
     setIdImagePreview(null);
@@ -1765,12 +1767,12 @@ export default function CardRegistrationPage() {
                 </div>
               </div>
 
-              {/* ADDRESS — single searchable field; ZIP code is now automatic */}
+              {/* ADDRESS — single searchable field; ZIP code is automatic */}
               <div className="space-y-2">
                 <SectionTitle icon={MapPin} text="Address" />
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {/* Row 1: Street Address (full width, wala nang ZIP field) */}
+                  {/* Row 1: Street Address */}
                   <div className="space-y-1 sm:col-span-2">
                     <label className={MODAL_LABEL_CLASS}>
                       Street Address{" "}
@@ -1813,11 +1815,6 @@ export default function CardRegistrationPage() {
                   <div className="space-y-1 sm:col-span-2">
                     <label className={MODAL_LABEL_CLASS}>
                       Full Address
-                      {loadingZip && (
-                        <span className="ml-2 font-normal opacity-60">
-                          Looking up ZIP code...
-                        </span>
-                      )}
                     </label>
 
                     <Textarea
