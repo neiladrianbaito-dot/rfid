@@ -7,7 +7,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
 import { motion } from "framer-motion";
-import zipcodes from "zipcodes-ph";
 
 import {
   CreditCard,
@@ -85,9 +84,6 @@ const MAX_ID_IMAGE_SIZE = 5 * 1024 * 1024;
 
 // 🔎 ONE flattened, searchable address record (barangay + its full parent
 // chain: city/municipality, province, region) built once on page load.
-// This replaces the old region -> province -> city -> barangay cascading
-// dropdown flow with a single type-to-search field, same UX as the old
-// barangay picker but now covering the whole country at once.
 interface AddressSearchOption {
   code: string; // barangayCode — used as the combobox value
   label: string; // "Barangay, City, Province, Region" — what gets searched/shown
@@ -117,38 +113,33 @@ async function fetchPsgcRaw(path: string): Promise<any[]> {
   return Array.isArray(data) ? data : [];
 }
 
-// 📮 Auto ZIP lookup mula sa pangalan ng city. Sinusubukan ang ilang
-// variant ng pangalan dahil iba-iba ang format ng PSGC at ng zip dataset
-// (hal. "City of Cebu" vs "Cebu City"). Walang nakita = walang ZIP.
-function lookupZipCode(cityName: string): string {
-  if (!cityName) return "";
+// 📮 Auto ZIP lookup via Nominatim (OpenStreetMap). Walang package na kailangan.
+// Nagbabalik ng 4-digit PH ZIP code, o "" kapag walang nahanap.
+async function lookupZipCode(
+  parts: string[],
+  signal: AbortSignal
+): Promise<string> {
+  const q = [...parts.filter(Boolean), "Philippines"].join(", ");
 
-  const base = cityName.trim();
-  const variants = [
-    base,
-    base.replace(/^City of\s+/i, ""),
-    base.replace(/\s+City$/i, ""),
-    `${base.replace(/^City of\s+/i, "").replace(/\s+City$/i, "")} City`,
-  ];
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=ph&q=${encodeURIComponent(
+      q
+    )}`,
+    { signal, headers: { Accept: "application/json" } }
+  );
 
-  for (const name of variants) {
-    try {
-      const result = zipcodes.reverse(name);
-      const zip = Array.isArray(result) ? result[0] : result;
-      if (zip) return String(zip);
-    } catch {
-      // ituloy sa susunod na variant
-    }
-  }
+  if (!response.ok) return "";
 
-  return "";
+  const data = await response.json();
+  const postcode = String(data?.[0]?.address?.postcode ?? "");
+
+  // PH ZIP codes are 4 digits
+  return postcode.match(/\d{4}/)?.[0] ?? "";
 }
 
 // 🧩 Builds the human-readable full address string from the individual
-// street / barangay / city / province / region / zip fields. Format:
-// "Barangay, City, Province, Region, ZIP, Philippines"
-// Used both to auto-fill the "Full Address" textarea, and as a fallback
-// when submitting in case the textarea was somehow left empty.
+// street / region / province / city / barangay / zip fields. Always ends
+// with "Philippines".
 function buildFullAddress(fields: {
   streetAddress: string;
   barangayName: string;
@@ -171,8 +162,9 @@ function buildFullAddress(fields: {
     barangayName,
     cityName,
     provinceName,
-    regionName,
-    zipCode.trim(),
+    regionName && zipCode
+      ? `${regionName} ${zipCode}`
+      : regionName || zipCode,
     "Philippines",
   ]
     .filter(Boolean)
@@ -187,8 +179,6 @@ const INITIAL_FORM = {
   type: "Regular",
 
   streetAddress: "",
-  // 📮 Hindi na ito input field — awtomatikong napupunan mula sa
-  // napiling city (tingnan ang handleAddressSelect) at ipinapadala pa rin sa API.
   zipCode: "",
 
   regionCode: "",
@@ -217,7 +207,6 @@ function SuccessTitle({ text }: { text: string }) {
 }
 
 // ✳️ Red asterisk shown next to every REQUIRED field label (e.g. "Full Name *").
-// aria-hidden keeps screen readers from reading out "star" on every label.
 function RequiredMark() {
   return (
     <span className="ml-0.5 font-bold text-red-500" aria-hidden="true">
@@ -227,7 +216,6 @@ function RequiredMark() {
 }
 
 // 📐 COMPACT MODAL STYLES — shared by every field in the registration modal
-// so the whole form stays small, aligned, and consistent.
 const MODAL_LABEL_CLASS = "text-xs font-medium leading-none";
 const MODAL_INPUT_CLASS = "h-8 px-2.5 text-xs";
 
@@ -247,8 +235,7 @@ function SectionTitle({
   );
 }
 
-// 🎨 Card type -> color mapping (old table style)
-// 🟥 Regular  🟦 Student  🟨 Senior  🟩 PWD
+// 🎨 Card type -> color mapping
 // Card type colors: Regular = red, Student = blue, Senior = orange, PWD = green
 function getTypeBadgeStyle(type: string | null | undefined, isDark: boolean) {
   const t = (type || "Regular").toLowerCase();
@@ -307,18 +294,8 @@ function getTypeTextColor(type: string, isDark: boolean) {
 /*
  * ADDRESS COMBOBOX
  *
- * Replaces the old 4-level cascading Region -> Province -> City ->
- * Barangay pickers with ONE searchable field. The options list is built
- * once (see loadAddressData below) by flattening every barangay in the
- * country together with its city/municipality, province, and region name,
- * so the user can just type "tondo manila" or "poblacion cebu" and jump
- * straight to the right barangay without walking the hierarchy manually.
- *
- * Same virtualization approach as the old barangay list: only ~15 visible
- * rows (+ overscan) are ever rendered, no matter how large the filtered
- * result set is, so it stays smooth even over ~42k barangays nationwide.
- * Results are also capped and only computed once the user has typed
- * something, so we never try to render the full national list at once.
+ * ONE searchable field for barangay / city / province / region.
+ * Virtualized: only ~15 visible rows (+ overscan) are rendered at a time.
  */
 const COMBOBOX_ITEM_HEIGHT = 32;
 const COMBOBOX_LIST_HEIGHT = 240;
@@ -529,14 +506,9 @@ export default function CardRegistrationPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  // ✅ FIX: same hook signature as TransactionsPage — { isDark } destructured
-  // directly instead of deriving it from a separate `theme` string. This
-  // keeps both pages reacting identically when the user toggles the theme.
   const { isDark } = useTheme();
 
-  // 🔒 ADMIN ACCESS: `canManage` = false kapag view_only.
-  // `loaded` = true kapag tapos na ma-load ang access info (para hindi
-  // mag-flash ang button habang naglo-load pa).
+  // 🔒 ADMIN ACCESS
   const { canManage, loaded } = useAdminAccess();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -547,13 +519,14 @@ export default function CardRegistrationPage() {
   const [idImageFile, setIdImageFile] = useState<File | null>(null);
   const [idImagePreview, setIdImagePreview] = useState<string | null>(null);
 
-  // 🔎 Flattened, searchable nationwide address list (barangay + city +
-  // province + region combined). Loaded once on mount — no more cascading
-  // region -> province -> city -> barangay fetches per selection.
+  // 🔎 Flattened, searchable nationwide address list
   const [addressOptions, setAddressOptions] = useState<AddressSearchOption[]>(
     []
   );
   const [loadingAddressOptions, setLoadingAddressOptions] = useState(false);
+
+  // 📮 True habang hinahanap pa ang ZIP code
+  const [loadingZip, setLoadingZip] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -573,9 +546,6 @@ export default function CardRegistrationPage() {
     },
   });
 
-  // Mag-subscribe sa Postgres changes ng users table. Tuwing may bagong
-  // na-register na card (INSERT) o na-edit (UPDATE), mag-re-refetch —
-  // parehong pattern gaya ng ginagamit sa TransactionsPage.
   useRealtimeRefetch(["users"], () => {
     refetchRecentUsers();
   });
@@ -666,12 +636,6 @@ export default function CardRegistrationPage() {
 
   /*
    * LOAD ADDRESS DATA (once, on mount)
-   *
-   * Fetches regions, provinces, cities/municipalities, and barangays in
-   * parallel, then flattens every barangay together with its full parent
-   * chain into a single searchable list. This is what replaced the old
-   * cascading region -> province -> city -> barangay fetch-per-selection
-   * flow — everything is fetched once up front instead.
    */
   useEffect(() => {
     let cancelled = false;
@@ -771,13 +735,56 @@ export default function CardRegistrationPage() {
   }, [toast]);
 
   /*
+   * AUTO ZIP CODE
+   * Kapag may napiling barangay, hahanapin ang ZIP automatically.
+   * Susubukan muna barangay + city + province, kung wala, city + province lang.
+   */
+  useEffect(() => {
+    if (!form.barangayCode) return;
+
+    const controller = new AbortController();
+
+    const timer = setTimeout(async () => {
+      try {
+        setLoadingZip(true);
+
+        let zip = await lookupZipCode(
+          [form.barangayName, form.cityName, form.provinceName],
+          controller.signal
+        );
+
+        if (!zip) {
+          zip = await lookupZipCode(
+            [form.cityName, form.provinceName],
+            controller.signal
+          );
+        }
+
+        if (!controller.signal.aborted) {
+          setForm((current) => ({ ...current, zipCode: zip }));
+        }
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.error("ZIP lookup failed:", error);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoadingZip(false);
+        }
+      }
+    }, 400);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [form.barangayCode, form.barangayName, form.cityName, form.provinceName]);
+
+  /*
    * AUTO-FILL FULL ADDRESS
-   *
-   * Every time the street address, ZIP, or the selected barangay/city/
-   * province/region changes, rebuild the "Full Address" textarea value
-   * automatically. The textarea itself stays editable (onChange calls
-   * updateForm("fullAddress", ...)), but any address search selection will
-   * re-sync it.
+   * Rebuilds the "Full Address" textarea whenever street, ZIP, or the
+   * selected barangay/city/province/region changes. Always ends with
+   * "Philippines".
    */
   useEffect(() => {
     const computed = buildFullAddress({
@@ -835,6 +842,7 @@ export default function CardRegistrationPage() {
     setIsModalOpen(false);
 
     setForm(INITIAL_FORM);
+    setLoadingZip(false);
 
     setIdImageFile(null);
     setIdImagePreview(null);
@@ -859,12 +867,14 @@ export default function CardRegistrationPage() {
 
   /*
    * ADDRESS SELECTED FROM THE SEARCHABLE COMBOBOX
-   * Fills region/province/city/barangay all at once from a single pick,
-   * and auto-looks-up the ZIP code from the selected city.
+   * Fills region/province/city/barangay all at once from a single pick.
+   * Nire-reset ang ZIP para hindi maiwan ang ZIP ng dating address.
    */
   function handleAddressSelect(option: AddressSearchOption) {
     setForm((current) => ({
       ...current,
+
+      zipCode: "",
 
       regionCode: option.regionCode,
       regionName: option.regionName,
@@ -877,8 +887,6 @@ export default function CardRegistrationPage() {
 
       barangayCode: option.barangayCode,
       barangayName: option.barangayName,
-
-      zipCode: lookupZipCode(option.cityName),
     }));
   }
 
@@ -1025,8 +1033,7 @@ export default function CardRegistrationPage() {
   ) {
     event.preventDefault();
 
-    // 🔒 Safety guard: kahit ma-bypass ang UI, hindi tutuloy ang submit
-    // kapag view_only ang admin.
+    // 🔒 Safety guard
     if (!canManage) {
       toast({
         title: "View Only Access",
@@ -1151,8 +1158,7 @@ export default function CardRegistrationPage() {
       /*
        * FULL ADDRESS
        * Uses the (auto-filled, but user-editable) textarea value.
-       * Falls back to a freshly computed string in the unlikely case the
-       * textarea is empty.
+       * Falls back to a freshly computed string if the textarea is empty.
        */
       const fullAddress =
         form.fullAddress.trim() ||
@@ -1187,7 +1193,7 @@ export default function CardRegistrationPage() {
             form.streetAddress.trim() ||
             null,
 
-          // 📮 Auto-filled from the selected city (no input field anymore)
+          // 📮 Auto-filled ZIP (galing sa lookup), hindi na manual input
           zipCode:
             form.zipCode.trim() ||
             null,
@@ -1304,7 +1310,7 @@ export default function CardRegistrationPage() {
         }
       `}</style>
 
-      {/* PAGE HEADER — same logo + text positioning/color pattern as TransactionsPage */}
+      {/* PAGE HEADER */}
       <div
         className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6 ${
           isDark ? "border-slate-800" : "border-slate-200"
@@ -1351,7 +1357,7 @@ export default function CardRegistrationPage() {
         )}
       </div>
 
-      {/* RECENT USERS — realtime table (badges, dot colors, LIVE indicator, row pulse, last sync) */}
+      {/* RECENT USERS — realtime table */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
         <Card className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
           <CardHeader className={`flex flex-row items-center justify-between border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
@@ -1462,10 +1468,7 @@ export default function CardRegistrationPage() {
         </Card>
       </motion.div>
 
-      {/* REGISTRATION MODAL — 🔒 hindi na-re-render kapag view_only
-          Same layout/positions as before — single column, stacked
-          sections — just with the 4-level address picker collapsed into
-          one searchable field. */}
+      {/* REGISTRATION MODAL — 🔒 hindi na-re-render kapag view_only */}
       {canManage && (
         <Dialog
           open={isModalOpen}
@@ -1762,14 +1765,12 @@ export default function CardRegistrationPage() {
                 </div>
               </div>
 
-              {/* ADDRESS — single searchable field instead of 4 cascading
-                  dropdowns. ZIP is auto-filled (no input) and shown inside
-                  the Full Address. */}
+              {/* ADDRESS — single searchable field; ZIP code is now automatic */}
               <div className="space-y-2">
                 <SectionTitle icon={MapPin} text="Address" />
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {/* Row 1: Street Address (full width) */}
+                  {/* Row 1: Street Address (full width, wala nang ZIP field) */}
                   <div className="space-y-1 sm:col-span-2">
                     <label className={MODAL_LABEL_CLASS}>
                       Street Address{" "}
@@ -1808,10 +1809,15 @@ export default function CardRegistrationPage() {
                     />
                   </div>
 
-                  {/* Row 3: Full Address — auto-filled from the search above, editable */}
+                  {/* Row 3: Full Address — auto-filled (with ZIP + Philippines), editable */}
                   <div className="space-y-1 sm:col-span-2">
                     <label className={MODAL_LABEL_CLASS}>
                       Full Address
+                      {loadingZip && (
+                        <span className="ml-2 font-normal opacity-60">
+                          Looking up ZIP code...
+                        </span>
+                      )}
                     </label>
 
                     <Textarea
