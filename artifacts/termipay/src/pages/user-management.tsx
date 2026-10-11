@@ -8,6 +8,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, Radio, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard, Download, FileText } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard, Download, FileText } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   AlertDialog,
@@ -30,9 +31,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
-import { supabase } from "@/lib/supabase"; // 👈 BAGO: direct Supabase client para sa renew_card() / balance transfer RPC calls
+import { supabase } from "@/lib/supabase"; // 👈 direct Supabase client para sa renew_card() / balance transfer RPC calls
 
-// ⬇️ NEW: card image / PDF export
+// ⬇️ card image / PDF export
 import { toPng } from "html-to-image";
 import { jsPDF } from "jspdf";
 
@@ -52,53 +53,139 @@ const STATUS_FILTERS = ["All", "Active", "Inactive", "Blocked", "Expired"] as co
 // ➕ Reasons a card would need a balance transfer (lost/stolen/damaged replacement)
 const TRANSFER_REASONS = ["Lost Card", "Stolen Card", "Damaged Card", "Other"] as const;
 
-const PSGC_API = "https://psgc.gitlab.io/api";
+const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 
 const ID_IMAGE_BUCKET = "id-verifications";
 const MAX_ID_IMAGE_SIZE = 5 * 1024 * 1024;
 
-const REGION_OPTIONS = [
-  { code: "010000000", name: "Ilocos Region" },
-  { code: "020000000", name: "Cagayan Valley" },
-  { code: "030000000", name: "Central Luzon" },
-  { code: "040000000", name: "CALABARZON" },
-  { code: "170000000", name: "MIMAROPA Region" },
-  { code: "050000000", name: "Bicol Region" },
-  { code: "060000000", name: "Western Visayas" },
-  { code: "070000000", name: "Central Visayas" },
-  { code: "080000000", name: "Eastern Visayas" },
-  { code: "090000000", name: "Zamboanga Peninsula" },
-  { code: "100000000", name: "Northern Mindanao" },
-  { code: "110000000", name: "Davao Region" },
-  { code: "120000000", name: "SOCCSKSARGEN" },
-  { code: "130000000", name: "NCR" },
-  { code: "140000000", name: "CAR" },
-  { code: "160000000", name: "Caraga" },
-  { code: "150000000", name: "BARMM" },
-] as const;
+// ⏱️ Max na hihintayin sa ZIP lookup bago ituloy ang address nang walang ZIP.
+const ZIP_LOOKUP_TIMEOUT_MS = 6000;
 
 // ═══════════════════════════════════════════════════════════════════════
-// LOCATION COMBOBOX — same component used in Card Registration.
-// Only ~15 rows are ever in the DOM (windowed list), plus type-to-search,
-// so long PSGC lists (e.g. ~900 barangays) scroll smoothly.
+// 📍 ADDRESS HELPERS — copied from Card Registration so Update User uses
+// the exact same address behaviour (one searchable field + auto ZIP +
+// auto Full Address).
 // ═══════════════════════════════════════════════════════════════════════
-interface PsgcOption {
-  code: string;
-  name: string;
+
+// 🔎 ONE flattened, searchable address record (barangay + its full parent
+// chain: city/municipality, province, region) built once.
+interface AddressSearchOption {
+  code: string; // barangayCode — used as the combobox value
+  label: string; // "Barangay, City, Province, Region" — what gets searched/shown
+
+  regionCode: string;
+  regionName: string;
+
+  provinceCode: string;
+  provinceName: string;
+
+  cityCode: string;
+  cityName: string;
+
+  barangayCode: string;
+  barangayName: string;
 }
 
-const REGION_COMBO_OPTIONS: PsgcOption[] = REGION_OPTIONS.map((r) => ({ code: r.code, name: r.name }));
+async function fetchPsgcRaw(path: string): Promise<any[]> {
+  const response = await fetch(`${PSGC_BASE_URL}${path}`);
 
-const COMBOBOX_ITEM_HEIGHT = 36;
-const COMBOBOX_LIST_HEIGHT = 260;
+  if (!response.ok) {
+    throw new Error(`Failed to load PSGC data: ${response.status}`);
+  }
+
+  const data = await response.json();
+
+  return Array.isArray(data) ? data : [];
+}
+
+// 📮 ZIP cache — kapag nahanap na ang ZIP ng isang lugar, instant na sa susunod.
+const zipCache = new Map<string, string>();
+
+// 📮 Auto ZIP lookup via Nominatim (OpenStreetMap). Walang package na kailangan.
+// Nagbabalik ng 4-digit PH ZIP code, o "" kapag walang nahanap.
+async function lookupZipCode(
+  parts: string[],
+  signal: AbortSignal
+): Promise<string> {
+  const q = [...parts.filter(Boolean), "Philippines"].join(", ");
+
+  if (zipCache.has(q)) {
+    return zipCache.get(q) as string;
+  }
+
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=ph&q=${encodeURIComponent(
+      q
+    )}`,
+    { signal, headers: { Accept: "application/json" } }
+  );
+
+  if (!response.ok) return "";
+
+  const data = await response.json();
+  const postcode = String(data?.[0]?.address?.postcode ?? "");
+
+  // PH ZIP codes are 4 digits
+  const zip = postcode.match(/\d{4}/)?.[0] ?? "";
+
+  zipCache.set(q, zip);
+
+  return zip;
+}
+
+// 🧩 Builds the human-readable full address string from the individual
+// street / region / province / city / barangay / zip fields. Always ends
+// with "Philippines".
+function buildFullAddress(fields: {
+  streetAddress: string;
+  barangayName: string;
+  cityName: string;
+  provinceName: string;
+  regionName: string;
+  zipCode: string;
+}): string {
+  const {
+    streetAddress,
+    barangayName,
+    cityName,
+    provinceName,
+    regionName,
+    zipCode,
+  } = fields;
+
+  return [
+    (streetAddress || "").trim(),
+    barangayName,
+    cityName,
+    provinceName,
+    regionName && zipCode
+      ? `${regionName} ${zipCode}`
+      : regionName || zipCode,
+    "Philippines",
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+/*
+ * ADDRESS COMBOBOX (same as Card Registration)
+ *
+ * ONE searchable field for barangay / city / province / region.
+ * Virtualized: only ~15 visible rows (+ overscan) are rendered at a time.
+ * May location icon, at buo ang address (nagwa-wrap, hindi pinuputol).
+ */
+const COMBOBOX_ITEM_HEIGHT = 48; // 👈 mas mataas para kasya ang 2 lines
+const COMBOBOX_LIST_HEIGHT = 240;
 const COMBOBOX_OVERSCAN = 6;
+const COMBOBOX_MAX_RESULTS = 300;
+const COMBOBOX_MIN_SEARCH_LENGTH = 2;
 
-interface LocationComboboxProps {
-  options: PsgcOption[];
-  value: string;
-  // Fallback label shown when the saved value isn't in `options` (yet)
-  selectedName?: string;
-  onChange: (code: string, name: string) => void;
+interface AddressComboboxProps {
+  options: AddressSearchOption[];
+  value: string; // selected barangayCode
+  // Fallback label shown when the saved barangay isn't in `options` (yet)
+  selectedLabel?: string;
+  onChange: (option: AddressSearchOption) => void;
   placeholder: string;
   loadingPlaceholder?: string;
   loading?: boolean;
@@ -106,41 +193,67 @@ interface LocationComboboxProps {
   isDark: boolean;
 }
 
-function LocationCombobox({
+function AddressCombobox({
   options,
   value,
-  selectedName,
+  selectedLabel,
   onChange,
   placeholder,
   loadingPlaceholder,
   loading,
   disabled,
   isDark,
-}: LocationComboboxProps) {
+}: AddressComboboxProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
+  const query = search.trim().toLowerCase();
+
   const filtered = useMemo(() => {
-    if (!search.trim()) return options;
-    const query = search.trim().toLowerCase();
-    return options.filter((option) => option.name.toLowerCase().includes(query));
-  }, [options, search]);
+    if (query.length < COMBOBOX_MIN_SEARCH_LENGTH) return [];
+
+    const tokens = query.split(/\s+/).filter(Boolean);
+
+    const matches: AddressSearchOption[] = [];
+
+    for (const option of options) {
+      const haystack = option.label.toLowerCase();
+
+      if (tokens.every((token) => haystack.includes(token))) {
+        matches.push(option);
+
+        if (matches.length >= COMBOBOX_MAX_RESULTS) break;
+      }
+    }
+
+    return matches;
+  }, [options, query]);
 
   useEffect(() => {
     if (open) {
       setSearch("");
       setScrollTop(0);
-      if (listRef.current) listRef.current.scrollTop = 0;
+
+      if (listRef.current) {
+        listRef.current.scrollTop = 0;
+      }
     }
   }, [open]);
 
   const selected = options.find((option) => option.code === value);
-  const label = selected?.name ?? (value ? selectedName : undefined);
+  const displayLabel = selected?.label ?? (value ? selectedLabel : undefined);
 
-  const visibleCount = Math.ceil(COMBOBOX_LIST_HEIGHT / COMBOBOX_ITEM_HEIGHT) + COMBOBOX_OVERSCAN * 2;
-  const startIndex = Math.max(0, Math.floor(scrollTop / COMBOBOX_ITEM_HEIGHT) - COMBOBOX_OVERSCAN);
+  const visibleCount =
+    Math.ceil(COMBOBOX_LIST_HEIGHT / COMBOBOX_ITEM_HEIGHT) +
+    COMBOBOX_OVERSCAN * 2;
+
+  const startIndex = Math.max(
+    0,
+    Math.floor(scrollTop / COMBOBOX_ITEM_HEIGHT) - COMBOBOX_OVERSCAN
+  );
+
   const endIndex = Math.min(filtered.length, startIndex + visibleCount);
   const visibleItems = filtered.slice(startIndex, endIndex);
   const totalHeight = filtered.length * COMBOBOX_ITEM_HEIGHT;
@@ -149,36 +262,62 @@ function LocationCombobox({
   return (
     <Popover open={open} onOpenChange={(next) => !disabled && setOpen(next)}>
       <PopoverTrigger asChild>
+        {/* 📍 Trigger: may location icon, at buo ang address (nagwa-wrap, hindi na pinuputol) */}
         <button
           type="button"
           disabled={disabled}
-          className={`flex h-9 w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
-            isDark ? "border-slate-800 bg-slate-950 text-slate-200" : "border-slate-200 bg-white text-slate-900"
+          className={`flex min-h-9 w-full items-start justify-between gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
+            isDark
+              ? "border-slate-800 bg-slate-950 text-slate-200"
+              : "border-slate-200 bg-white text-slate-900"
           }`}
         >
-          <span className={`truncate ${!label ? "opacity-50" : ""}`}>
-            {label ?? (loading ? loadingPlaceholder ?? "Loading..." : placeholder)}
+          <span className="flex min-w-0 flex-1 items-start gap-2">
+            <MapPin
+              className={`mt-px h-3.5 w-3.5 shrink-0 ${
+                displayLabel ? "text-cyan-500" : "opacity-50"
+              }`}
+            />
+
+            <span
+              className={`min-w-0 flex-1 whitespace-normal break-words leading-snug ${
+                !displayLabel ? "opacity-50" : ""
+              }`}
+            >
+              {displayLabel ??
+                (loading ? loadingPlaceholder ?? "Loading..." : placeholder)}
+            </span>
           </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+
+          <ChevronsUpDown className="mt-px h-3.5 w-3.5 shrink-0 opacity-50" />
         </button>
       </PopoverTrigger>
 
       <PopoverContent
         align="start"
-        className={`w-[--radix-popover-trigger-width] p-0 ${isDark ? "border-slate-800 bg-slate-950" : "bg-white"}`}
+        className={`w-[--radix-popover-trigger-width] min-w-[260px] p-0 ${
+          isDark ? "border-slate-800 bg-slate-950" : "bg-white"
+        }`}
       >
-        <div className={`flex items-center gap-2 border-b px-3 py-2 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
-          <Search className="h-4 w-4 shrink-0 opacity-50" />
+        <div
+          className={`flex items-center gap-2 border-b px-3 py-1.5 ${
+            isDark ? "border-slate-800" : "border-slate-100"
+          }`}
+        >
+          <Search className="h-3.5 w-3.5 shrink-0 opacity-50" />
           <input
             autoFocus
             value={search}
             onChange={(event) => {
               setSearch(event.target.value);
               setScrollTop(0);
-              if (listRef.current) listRef.current.scrollTop = 0;
+
+              if (listRef.current) {
+                listRef.current.scrollTop = 0;
+              }
             }}
-            placeholder="Search..."
-            className={`w-full bg-transparent text-sm outline-none placeholder:opacity-50 ${
+            placeholder="Search barangay, city, or province..."
+            className={`w-full bg-transparent text-xs outline-none placeholder:opacity-50 ${
               isDark ? "text-slate-200" : "text-slate-900"
             }`}
           />
@@ -195,25 +334,42 @@ function LocationCombobox({
           }}
           className="location-combobox-list"
         >
-          {filtered.length === 0 ? (
-            <div className={`px-3 py-6 text-center text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-              {loading ? "Loading..." : "No results found"}
+          {query.length < COMBOBOX_MIN_SEARCH_LENGTH ? (
+            <div
+              className={`px-3 py-6 text-center text-xs ${
+                isDark ? "text-slate-500" : "text-slate-400"
+              }`}
+            >
+              {loading
+                ? loadingPlaceholder ?? "Loading address data..."
+                : "Start typing a barangay, city, or province name"}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div
+              className={`px-3 py-6 text-center text-xs ${
+                isDark ? "text-slate-500" : "text-slate-400"
+              }`}
+            >
+              No results found
             </div>
           ) : (
             <div style={{ height: totalHeight, position: "relative" }}>
-              <div style={{ position: "absolute", top: offsetY, left: 0, right: 0 }}>
+              <div
+                style={{ position: "absolute", top: offsetY, left: 0, right: 0 }}
+              >
                 {visibleItems.map((option) => {
                   const isSelected = option.code === value;
+
                   return (
                     <button
                       type="button"
                       key={option.code}
                       onClick={() => {
-                        onChange(option.code, option.name);
+                        onChange(option);
                         setOpen(false);
                       }}
                       style={{ height: COMBOBOX_ITEM_HEIGHT }}
-                      className={`flex w-full items-center gap-2 px-3 text-left text-sm transition-colors cursor-pointer ${
+                      className={`flex w-full items-center gap-2 px-3 text-left text-xs transition-colors cursor-pointer ${
                         isSelected
                           ? isDark
                             ? "bg-cyan-950/40 text-cyan-400"
@@ -223,8 +379,30 @@ function LocationCombobox({
                             : "text-slate-800 hover:bg-slate-50"
                       }`}
                     >
-                      <Check className={`h-4 w-4 shrink-0 ${isSelected ? "opacity-100" : "opacity-0"}`} />
-                      <span className="truncate">{option.name}</span>
+                      <MapPin
+                        className={`h-3.5 w-3.5 shrink-0 ${
+                          isSelected ? "text-cyan-500" : "opacity-40"
+                        }`}
+                      />
+
+                      {/* Hanggang 2 lines, wrap ang mahahabang address */}
+                      <span
+                        className="min-w-0 flex-1 whitespace-normal break-words leading-snug"
+                        style={{
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {option.label}
+                      </span>
+
+                      <Check
+                        className={`h-3.5 w-3.5 shrink-0 ${
+                          isSelected ? "opacity-100" : "opacity-0"
+                        }`}
+                      />
                     </button>
                   );
                 })}
@@ -236,7 +414,6 @@ function LocationCombobox({
     </Popover>
   );
 }
-
 
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -264,10 +441,7 @@ function isCardExpired(expirationDate: string | null | undefined): boolean {
 }
 
 // ➕ Renewal logic: extends from the LATER of (today, current expiration).
-// This means renewing a card that's still valid adds a full year on top of
-// its remaining validity, while renewing an already-expired card starts the
-// new 1-year period from today instead of stacking onto a past date.
-// NOTE: this is now only used to render the "New Expiration" PREVIEW in the
+// NOTE: only used to render the "New Expiration" PREVIEW in the
 // confirmation dialog. The actual DB write is done server-side by the
 // renew_card() Postgres function, which is the source of truth.
 function computeRenewedExpiration(currentExpiration: string | null | undefined): Date {
@@ -762,6 +936,29 @@ function CardBack({
   );
 }
 
+// 📝 Initial/empty edit form. Region/province/city/barangay/zip are still
+// stored (the API needs them), but they are filled by the single address
+// search — there are no separate inputs for them anymore.
+const EMPTY_EDIT_FORM = {
+  fullName: "",
+  dateOfBirth: "",
+  contactNumber: "",
+  streetAddress: "",
+  regionCode: "",
+  regionName: "",
+  provinceCode: "",
+  provinceName: "",
+  cityCode: "",
+  cityName: "",
+  barangayCode: "",
+  barangayName: "",
+  zipCode: "",
+  fullAddress: "",
+  balance: "",
+  status: "",
+  type: "",
+};
+
 export default function UserManagementPage() {
   const { isDark } = useTheme();
 
@@ -778,7 +975,7 @@ export default function UserManagementPage() {
   const [previewUser, setPreviewUser] = useState<any>(null);
   const [previewFlipped, setPreviewFlipped] = useState(false);
 
-  // ⬇️ NEW: card export (PNG / PDF) state + refs
+  // ⬇️ card export (PNG / PDF) state + refs
   const [isExporting, setIsExporting] = useState<"png" | "pdf" | null>(null);
   const exportSheetRef = useRef<HTMLDivElement>(null); // front + back stacked (for PNG)
   const exportFrontRef = useRef<HTMLDivElement>(null); // front only (for PDF page 1)
@@ -786,7 +983,6 @@ export default function UserManagementPage() {
 
   // ✅ Renew confirmation modal state — holds the user pending renewal
   const [renewUser, setRenewUser] = useState<any>(null);
-  // 👈 BAGO: loading state para sa direct RPC call (kapalit ng renewMutation.isPending)
   const [isRenewing, setIsRenewing] = useState(false);
 
   // ✅ Transfer-balance state — lost/stolen card: move full balance to a replacement card
@@ -796,31 +992,22 @@ export default function UserManagementPage() {
   const [transferReason, setTransferReason] = useState<(typeof TRANSFER_REASONS)[number]>("Lost Card");
   const [isTransferring, setIsTransferring] = useState(false);
 
-  const [editForm, setEditForm] = useState({
-    fullName: "",
-    dateOfBirth: "",
-    contactNumber: "",
-    streetAddress: "",
-    regionCode: "",
-    regionName: "",
-    provinceCode: "",
-    provinceName: "",
-    cityCode: "",
-    cityName: "",
-    barangayCode: "",
-    barangayName: "",
-    zipCode: "",
-    balance: "",
-    status: "",
-    type: "",
-  });
+  const [editForm, setEditForm] = useState(EMPTY_EDIT_FORM);
   // Snapshot of the form's values at the moment Edit was opened — used to
   // detect whether the user has actually changed anything before allowing Save.
-  const [originalForm, setOriginalForm] = useState(editForm);
-  const [provinceOptions, setProvinceOptions] = useState<any[]>([]);
-  const [cityOptions, setCityOptions] = useState<any[]>([]);
-  const [barangayOptions, setBarangayOptions] = useState<any[]>([]);
-  const [isLoadingAddressOptions, setIsLoadingAddressOptions] = useState(false);
+  const [originalForm, setOriginalForm] = useState(EMPTY_EDIT_FORM);
+
+  // 🔎 Flattened, searchable nationwide address list (same as Card Registration).
+  // Loaded lazily the first time the Edit dialog opens, then reused.
+  const [addressOptions, setAddressOptions] = useState<AddressSearchOption[]>([]);
+  const [loadingAddressOptions, setLoadingAddressOptions] = useState(false);
+  const addressLoadStartedRef = useRef(false);
+
+  // 📮 True habang hinahanap pa ang ZIP pagkapili ng barangay.
+  // Habang true, hindi pa lumalabas ang Full Address — para sabay na
+  // mag-fill ang ZIP at ang buong address.
+  const [resolvingAddress, setResolvingAddress] = useState(false);
+
   const [editIdImageFile, setEditIdImageFile] = useState<File | null>(null);
   const [editIdImagePreview, setEditIdImagePreview] = useState<string | null>(null);
   const [isUploadingEditImage, setIsUploadingEditImage] = useState(false);
@@ -847,118 +1034,203 @@ export default function UserManagementPage() {
     return true;
   };
 
-  const editLabelCls = `text-[11px] font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`;
-  const editHeadingCls = `text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`;
   const editInputCls = `h-9 text-sm ${isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"}`;
-  const editTriggerCls = `h-9 w-full text-sm cursor-pointer ${isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"}`;
-  const editContentCls = isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700";
 
-
+  /*
+   * LOAD ADDRESS DATA (once, the first time the Edit dialog opens)
+   * Same data source as Card Registration: all PSGC regions, provinces,
+   * cities/municipalities and barangays, flattened into one searchable list.
+   */
   useEffect(() => {
+    if (!editUser) return;
+    if (addressLoadStartedRef.current) return;
+
+    addressLoadStartedRef.current = true;
     let cancelled = false;
 
-    const loadProvinces = async () => {
-      if (!editUser || !editForm.regionCode) {
-        setProvinceOptions([]);
-        return;
-      }
-
-      setIsLoadingAddressOptions(true);
+    async function loadAddressData() {
       try {
-        const response = await fetch(`${PSGC_API}/regions/${editForm.regionCode}/provinces/`);
-        if (!response.ok) throw new Error("Failed to load provinces");
-        const data = await response.json();
-        if (!cancelled) setProvinceOptions(Array.isArray(data) ? data : []);
+        setLoadingAddressOptions(true);
+
+        const [regionsRaw, provincesRaw, citiesRaw, barangaysRaw] =
+          await Promise.all([
+            fetchPsgcRaw("/regions/"),
+            fetchPsgcRaw("/provinces/"),
+            fetchPsgcRaw("/cities-municipalities/"),
+            fetchPsgcRaw("/barangays/"),
+          ]);
+
+        const regionsMap = new Map<string, any>();
+        regionsRaw.forEach((r) => regionsMap.set(String(r?.code ?? ""), r));
+
+        const provincesMap = new Map<string, any>();
+        provincesRaw.forEach((p) =>
+          provincesMap.set(String(p?.code ?? ""), p)
+        );
+
+        const citiesMap = new Map<string, any>();
+        citiesRaw.forEach((c) => citiesMap.set(String(c?.code ?? ""), c));
+
+        const options: AddressSearchOption[] = [];
+
+        for (const b of barangaysRaw) {
+          const barangayCode = String(b?.code ?? "");
+          const barangayName = String(b?.name ?? "");
+
+          if (!barangayCode || !barangayName) continue;
+
+          const cityCode = String(b?.cityCode || b?.municipalityCode || "");
+          const city = citiesMap.get(cityCode);
+
+          const provinceCode = String(
+            city?.provinceCode || b?.provinceCode || ""
+          );
+          const province = provincesMap.get(provinceCode);
+
+          const regionCode = String(
+            city?.regionCode || province?.regionCode || b?.regionCode || ""
+          );
+          const region = regionsMap.get(regionCode);
+
+          const cityName = String(city?.name ?? "");
+          const provinceName = String(province?.name ?? "");
+          const regionName = String(region?.name ?? "");
+
+          const label = [barangayName, cityName, provinceName, regionName]
+            .filter(Boolean)
+            .join(", ");
+
+          options.push({
+            code: barangayCode,
+            label,
+            regionCode,
+            regionName,
+            provinceCode,
+            provinceName,
+            cityCode,
+            cityName,
+            barangayCode,
+            barangayName,
+          });
+        }
+
+        if (!cancelled) {
+          setAddressOptions(options);
+        }
       } catch (error) {
-        console.error("Load provinces error:", error);
-        if (!cancelled) setProvinceOptions([]);
+        console.error("Failed to load address data:", error);
+
+        // Allow a retry the next time the Edit dialog is opened.
+        addressLoadStartedRef.current = false;
+
+        if (!cancelled) {
+          toast({
+            title: "Unable to Load Addresses",
+            description: "The Philippine address list could not be loaded.",
+            variant: "destructive",
+          });
+        }
       } finally {
-        if (!cancelled) setIsLoadingAddressOptions(false);
+        if (!cancelled) {
+          setLoadingAddressOptions(false);
+        }
+      }
+    }
+
+    loadAddressData();
+
+    return () => {
+      cancelled = true;
+      // If the dialog closed mid-load, let the next open start the load again.
+      if (addressLoadStartedRef.current) {
+        // only reset when the load did not finish
+        setLoadingAddressOptions(false);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editUser]);
 
-    loadProvinces();
-    return () => { cancelled = true; };
-  }, [editUser, editForm.regionCode]);
-
+  /*
+   * AUTO ZIP CODE
+   * Tumatakbo LANG kapag may bagong napiling barangay (resolvingAddress = true),
+   * kaya hindi ginagalaw ang saved ZIP/address pagkabukas ng Edit dialog.
+   * Susubukan muna barangay + city + province, kung wala, city + province lang.
+   *
+   * Pagkatapos ng lookup (nahanap man o hindi, o nag-timeout), isang beses
+   * lang itatakda ang ZIP + Full Address at papatayin ang loading — kaya
+   * sabay na lalabas ang ZIP at ang buong Full Address.
+   */
   useEffect(() => {
-    let cancelled = false;
+    if (!resolvingAddress) return;
 
-    const loadCities = async () => {
-      if (!editUser || !editForm.provinceCode) {
-        setCityOptions([]);
-        return;
-      }
-
-      setIsLoadingAddressOptions(true);
-      try {
-        const response = await fetch(`${PSGC_API}/provinces/${editForm.provinceCode}/cities-municipalities/`);
-        if (!response.ok) throw new Error("Failed to load cities/municipalities");
-        const data = await response.json();
-        if (!cancelled) setCityOptions(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error("Load cities/municipalities error:", error);
-        if (!cancelled) setCityOptions([]);
-      } finally {
-        if (!cancelled) setIsLoadingAddressOptions(false);
-      }
-    };
-
-    loadCities();
-    return () => { cancelled = true; };
-  }, [editUser, editForm.provinceCode]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadBarangays = async () => {
-      if (!editUser || !editForm.cityCode) {
-        setBarangayOptions([]);
-        return;
-      }
-
-      setIsLoadingAddressOptions(true);
-      try {
-        const response = await fetch(`${PSGC_API}/cities-municipalities/${editForm.cityCode}/barangays/`);
-        if (!response.ok) throw new Error("Failed to load barangays");
-        const data = await response.json();
-        if (!cancelled) setBarangayOptions(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error("Load barangays error:", error);
-        if (!cancelled) setBarangayOptions([]);
-      } finally {
-        if (!cancelled) setIsLoadingAddressOptions(false);
-      }
-    };
-
-    loadBarangays();
-    return () => { cancelled = true; };
-  }, [editUser, editForm.cityCode]);
-
-  useEffect(() => {
-    if (!editUser) {
-      setProvinceOptions([]);
-      setCityOptions([]);
-      setBarangayOptions([]);
+    if (!editForm.barangayCode) {
+      setResolvingAddress(false);
       return;
     }
 
-    const currentProvince = editForm.provinceCode || editForm.provinceName;
-    const currentCity = editForm.cityCode || editForm.cityName;
-    const currentBarangay = editForm.barangayCode || editForm.barangayName;
+    const controller = new AbortController();
+    let cleanedUp = false;
 
-    setProvinceOptions((items) => {
-      if (!currentProvince || items.some((item) => item.code === editForm.provinceCode)) return items;
-      return [{ code: editForm.provinceCode || editForm.provinceName, name: editForm.provinceName || editForm.provinceCode }, ...items];
-    });
-    setCityOptions((items) => {
-      if (!currentCity || items.some((item) => item.code === editForm.cityCode)) return items;
-      return [{ code: editForm.cityCode || editForm.cityName, name: editForm.cityName || editForm.cityCode }, ...items];
-    });
-    setBarangayOptions((items) => {
-      if (!currentBarangay || items.some((item) => item.code === editForm.barangayCode)) return items;
-      return [{ code: editForm.barangayCode || editForm.barangayName, name: editForm.barangayName || editForm.barangayCode }, ...items];
-    });
+    // ⏱️ Safety timeout: kapag mabagal ang Nominatim, itutuloy ang address
+    // nang walang ZIP imbes na maiwang naka-loading.
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      ZIP_LOOKUP_TIMEOUT_MS
+    );
+
+    (async () => {
+      let zip = "";
+
+      try {
+        zip = await lookupZipCode(
+          [editForm.barangayName, editForm.cityName, editForm.provinceName],
+          controller.signal
+        );
+
+        if (!zip) {
+          zip = await lookupZipCode(
+            [editForm.cityName, editForm.provinceName],
+            controller.signal
+          );
+        }
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.error("ZIP lookup failed:", error);
+        }
+      } finally {
+        clearTimeout(timeoutId);
+
+        // Kapag napalitan na ang napiling address (cleanup), huwag galawin.
+        if (!cleanedUp) {
+          // Isang batch lang: ZIP + Full Address + patay ang loading nang sabay.
+          setEditForm((current) => ({
+            ...current,
+            zipCode: zip,
+            fullAddress: buildFullAddress({
+              streetAddress: current.streetAddress,
+              barangayName: current.barangayName,
+              cityName: current.cityName,
+              provinceName: current.provinceName,
+              regionName: current.regionName,
+              zipCode: zip,
+            }),
+          }));
+          setResolvingAddress(false);
+        }
+      }
+    })();
+
+    return () => {
+      cleanedUp = true;
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvingAddress, editForm.barangayCode]);
+
+  // Reset the "resolving" state whenever the Edit dialog closes.
+  useEffect(() => {
+    if (!editUser) setResolvingAddress(false);
   }, [editUser]);
 
   useEffect(() => {
@@ -1026,11 +1298,6 @@ export default function UserManagementPage() {
     },
   });
 
-  // ❌ TINANGGAL: yung dating "renewMutation" (useUpdateUser instance para sa
-  // renewal) — hindi na kailangan dahil direct Supabase RPC call na ang
-  // ginagamit ng confirmRenew() sa baba, hindi na dumadaan sa generated
-  // API client na siyang dahilan kung bakit hindi umaabot sa DB ang renewal.
-
   const deleteMutation = useDeleteUser({
     mutation: {
       onSuccess: () => {
@@ -1045,22 +1312,44 @@ export default function UserManagementPage() {
     if (blockIfViewOnly()) return;
 
     setEditUser(user);
+    setResolvingAddress(false);
+
+    const streetAddress = user.streetAddress || "";
+    const regionName = user.regionName || "";
+    const provinceName = user.provinceName || "";
+    const cityName = user.cityName || "";
+    const barangayName = user.barangayName || "";
+    const zipCode = user.zipCode || "";
+
+    // Use the saved full address; if the record has none, build it from the
+    // saved pieces so the field is never empty for an existing address.
+    const fullAddress =
+      user.fullAddress ||
+      buildFullAddress({
+        streetAddress,
+        barangayName,
+        cityName,
+        provinceName,
+        regionName,
+        zipCode,
+      });
 
     const initial = {
       fullName: user.fullName || "",
       dateOfBirth: user.dateOfBirth ? String(user.dateOfBirth).slice(0, 10) : "",
       // Keep the edit field strictly numeric and capped at 11 digits.
       contactNumber: String(user.contactNumber || "").replace(/\D/g, "").slice(0, 11),
-      streetAddress: user.streetAddress || "",
+      streetAddress,
       regionCode: user.regionCode || "",
-      regionName: user.regionName || "",
+      regionName,
       provinceCode: user.provinceCode || "",
-      provinceName: user.provinceName || "",
+      provinceName,
       cityCode: user.cityCode || "",
-      cityName: user.cityName || "",
+      cityName,
       barangayCode: user.barangayCode || "",
-      barangayName: user.barangayName || "",
-      zipCode: user.zipCode || "",
+      barangayName,
+      zipCode,
+      fullAddress,
       balance: String(user.balance || 0),
       status: user.status || "",
       type: user.type || "Regular",
@@ -1068,13 +1357,64 @@ export default function UserManagementPage() {
 
     setEditForm(initial);
     setOriginalForm(initial);
-    setProvinceOptions([]);
-    setCityOptions([]);
-    setBarangayOptions([]);
     if (editIdImagePreview) URL.revokeObjectURL(editIdImagePreview);
     setEditIdImageFile(null);
     setEditIdImagePreview(null);
     if (editFileInputRef.current) editFileInputRef.current.value = "";
+  };
+
+  /*
+   * STREET ADDRESS CHANGED
+   * Rebuilds the Full Address right away (same result as the auto-fill in
+   * Card Registration). Hindi gumagana habang naghahanap pa ng ZIP.
+   */
+  const handleStreetChange = (value: string) => {
+    setEditForm((current) => ({
+      ...current,
+      streetAddress: value,
+      fullAddress: resolvingAddress
+        ? current.fullAddress
+        : buildFullAddress({
+            streetAddress: value,
+            barangayName: current.barangayName,
+            cityName: current.cityName,
+            provinceName: current.provinceName,
+            regionName: current.regionName,
+            zipCode: current.zipCode,
+          }),
+    }));
+  };
+
+  /*
+   * ADDRESS SELECTED FROM THE SEARCHABLE COMBOBOX
+   * Fills region/province/city/barangay all at once from a single pick.
+   * Nire-reset ang ZIP at Full Address, tapos magsisimula ang loading
+   * hanggang makuha ang ZIP.
+   */
+  const handleAddressSelect = (option: AddressSearchOption) => {
+    // Kapag parehong barangay ang pinili ulit, walang gagawin.
+    if (option.barangayCode === editForm.barangayCode) return;
+
+    setResolvingAddress(true);
+
+    setEditForm((current) => ({
+      ...current,
+
+      zipCode: "",
+      fullAddress: "",
+
+      regionCode: option.regionCode,
+      regionName: option.regionName,
+
+      provinceCode: option.provinceCode,
+      provinceName: option.provinceName,
+
+      cityCode: option.cityCode,
+      cityName: option.cityName,
+
+      barangayCode: option.barangayCode,
+      barangayName: option.barangayName,
+    }));
   };
 
   // IMPORTANT: selecting a new ID image is itself an edit.
@@ -1095,6 +1435,7 @@ export default function UserManagementPage() {
     editForm.barangayCode !== originalForm.barangayCode ||
     editForm.barangayName !== originalForm.barangayName ||
     editForm.zipCode !== originalForm.zipCode ||
+    editForm.fullAddress !== originalForm.fullAddress ||
     hasImageChange;
 
   // True while the edit is uploading an image or saving to the API
@@ -1173,7 +1514,7 @@ export default function UserManagementPage() {
     // 🔒 Guard: bawal mag-save ng edit kapag view_only
     if (blockIfViewOnly()) return;
 
-    if (!editUser || !hasChanges) return;
+    if (!editUser || !hasChanges || resolvingAddress) return;
 
     const normalizedContactNumber = String(editForm.contactNumber || "")
       .replace(/\D/g, "")
@@ -1205,14 +1546,18 @@ export default function UserManagementPage() {
         ? await uploadEditedIdImage(editUser)
         : null;
 
-      const fullAddress = [
-        editForm.streetAddress,
-        editForm.barangayName,
-        editForm.cityName,
-        editForm.provinceName,
-        editForm.regionName,
-        editForm.zipCode,
-      ].map((value) => value.trim()).filter(Boolean).join(", ");
+      // Uses the (auto-filled, but user-editable) Full Address textarea.
+      // Falls back to a freshly built string if the textarea was cleared.
+      const fullAddress =
+        editForm.fullAddress.trim() ||
+        buildFullAddress({
+          streetAddress: editForm.streetAddress,
+          barangayName: editForm.barangayName,
+          cityName: editForm.cityName,
+          provinceName: editForm.provinceName,
+          regionName: editForm.regionName,
+          zipCode: editForm.zipCode,
+        });
 
       // 2. WAIT for the database update to finish successfully.
       // mutateAsync makes sure we only clear local state after the DB write.
@@ -1241,7 +1586,7 @@ export default function UserManagementPage() {
       });
 
       // 3. DB update succeeded.
-      // ✅ Old ID image cleanup is now handled SERVER-SIDE by the
+      // ✅ Old ID image cleanup is handled SERVER-SIDE by the
       // "cleanup-id-images" Supabase Edge Function (Database Webhook on
       // UPDATE/DELETE). It uses the service role key, so no Storage DELETE
       // policy is needed on the client anymore.
@@ -1329,13 +1674,10 @@ export default function UserManagementPage() {
     setRenewUser(user);
   };
 
-  // ✅ BAGONG confirmRenew — direktang tumatawag sa renew_card() Postgres
-  // function sa pamamagitan ng Supabase RPC, hindi na sa generated
-  // useUpdateUser hook. Ang function mismo (sa DB) ang gumagawa ng +1 year
-  // math at nag-eextend mula sa GREATEST(current_expiration, now()).
-  // 🚫➕ GUARD: final safety check right before the RPC call — even if
-  // something upstream let a non-expired card slip through, we refuse to
-  // fire the renewal here.
+  // ✅ confirmRenew — direktang tumatawag sa renew_card() Postgres function
+  // sa pamamagitan ng Supabase RPC. Ang function mismo (sa DB) ang gumagawa
+  // ng +1 year math at nag-eextend mula sa GREATEST(current_expiration, now()).
+  // 🚫➕ GUARD: final safety check right before the RPC call.
   const confirmRenew = async () => {
     // 🔒 Guard: bawal mag-confirm ng renewal kapag view_only
     if (blockIfViewOnly()) {
@@ -1373,8 +1715,6 @@ export default function UserManagementPage() {
     setRenewUser(null);
     toast({ title: <SuccessTitle text="Card Renewed Successfully" /> });
   };
-
-
 
   // ✅ Opens the transfer-balance dialog for a given user (the lost/stolen card).
   // 🚫➕ GUARD: a card with zero balance has nothing to transfer.
@@ -1602,7 +1942,7 @@ export default function UserManagementPage() {
           .edit-sidebar-scroll { scroll-behavior: auto; }
         }
 
-        /* Windowed location list (same as Card Registration) */
+        /* Windowed address list (same as Card Registration) */
         .location-combobox-list {
           scrollbar-width: thin;
           will-change: scroll-position;
@@ -1613,32 +1953,6 @@ export default function UserManagementPage() {
         .location-combobox-list::-webkit-scrollbar-thumb {
           background: rgba(148, 163, 184, 0.4);
           border-radius: 9999px;
-        }
-
-        /* ✅ Smooth, contained scrolling for the Edit dialog body */
-        .edit-scroll {
-          overflow-y: auto;
-          overscroll-behavior: contain;        /* scroll doesn't leak to the page behind */
-          scroll-behavior: smooth;             /* glides when tabbing/focusing fields */
-          -webkit-overflow-scrolling: touch;   /* momentum scrolling on iOS */
-          scrollbar-width: thin;
-          scrollbar-color: rgba(100,116,139,0.5) transparent;
-          scrollbar-gutter: stable;            /* no layout jump when scrollbar appears */
-        }
-        .edit-scroll::-webkit-scrollbar { width: 8px; }
-        .edit-scroll::-webkit-scrollbar-track { background: transparent; }
-        .edit-scroll::-webkit-scrollbar-thumb {
-          background: rgba(100,116,139,0.45);
-          border-radius: 9999px;
-          border: 2px solid transparent;
-          background-clip: content-box;
-        }
-        .edit-scroll::-webkit-scrollbar-thumb:hover {
-          background: rgba(100,116,139,0.75);
-          background-clip: content-box;
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .edit-scroll { scroll-behavior: auto; }
         }
       `}</style>
 
@@ -2171,11 +2485,11 @@ export default function UserManagementPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Dialog — same layout/scroll pattern as Card Registration:
-          the whole modal scrolls (max-h-[92vh] + overflow-y-auto) and the
-          Region / Province / City / Barangay fields use the virtualized,
-          searchable LocationCombobox instead of Radix <Select>, which is what
-          made long lists (barangays) laggy.
+      {/* Edit Dialog — ADDRESS now works exactly like Card Registration:
+          ONE searchable "Barangay / City / Province" field, ZIP is automatic,
+          and the Full Address textarea is auto-filled (but still editable).
+          The old separate Region / Province / City / Barangay / ZIP inputs
+          were removed.
           🔒 `open` ay naka-gate sa canManage — hindi kailanman magbubukas kapag view_only. */}
       <Dialog open={canManage && !!editUser} onOpenChange={(open) => { if (!open && !isSavingEdit) setEditUser(null); }}>
         <DialogContent
@@ -2335,7 +2649,7 @@ export default function UserManagementPage() {
               </div>
             </div>
 
-            {/* ADDRESS */}
+            {/* ADDRESS — single searchable field; ZIP code is automatic */}
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-cyan-500" />
@@ -2343,126 +2657,80 @@ export default function UserManagementPage() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
+                {/* Row 1: Street Address */}
                 <div className="space-y-2 sm:col-span-2">
-                  <label className="text-sm font-medium">Street Address</label>
+                  <label className="text-sm font-medium">
+                    Street Address{" "}
+                    <span className="font-normal text-muted-foreground">
+                      (Optional)
+                    </span>
+                  </label>
                   <Input
                     value={editForm.streetAddress}
-                    onChange={(e) => setEditForm((c) => ({ ...c, streetAddress: e.target.value }))}
+                    onChange={(e) => handleStreetChange(e.target.value)}
                     placeholder="House number, street, sitio"
                     disabled={isSavingEdit}
                     className={editInputCls}
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Region</label>
-                  <LocationCombobox
-                    options={REGION_COMBO_OPTIONS}
-                    value={editForm.regionCode}
-                    selectedName={editForm.regionName}
-                    onChange={(code, name) => {
-                      setEditForm((c) => ({
-                        ...c,
-                        regionCode: code,
-                        regionName: name,
-                        provinceCode: "",
-                        provinceName: "",
-                        cityCode: "",
-                        cityName: "",
-                        barangayCode: "",
-                        barangayName: "",
-                      }));
-                      setProvinceOptions([]);
-                      setCityOptions([]);
-                      setBarangayOptions([]);
-                    }}
-                    placeholder="Select region"
-                    disabled={isSavingEdit}
-                    isDark={isDark}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Province</label>
-                  <LocationCombobox
-                    options={provinceOptions}
-                    value={editForm.provinceCode}
-                    selectedName={editForm.provinceName}
-                    onChange={(code, name) => {
-                      setEditForm((c) => ({
-                        ...c,
-                        provinceCode: code,
-                        provinceName: name,
-                        cityCode: "",
-                        cityName: "",
-                        barangayCode: "",
-                        barangayName: "",
-                      }));
-                      setCityOptions([]);
-                      setBarangayOptions([]);
-                    }}
-                    placeholder="Select province"
-                    loadingPlaceholder="Loading provinces..."
-                    loading={isLoadingAddressOptions}
-                    disabled={isSavingEdit || !editForm.regionCode}
-                    isDark={isDark}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">City / Municipality</label>
-                  <LocationCombobox
-                    options={cityOptions}
-                    value={editForm.cityCode}
-                    selectedName={editForm.cityName}
-                    onChange={(code, name) => {
-                      setEditForm((c) => ({
-                        ...c,
-                        cityCode: code,
-                        cityName: name,
-                        barangayCode: "",
-                        barangayName: "",
-                      }));
-                      setBarangayOptions([]);
-                    }}
-                    placeholder="Select city / municipality"
-                    loadingPlaceholder="Loading cities..."
-                    loading={isLoadingAddressOptions}
-                    disabled={isSavingEdit || !editForm.provinceCode}
-                    isDark={isDark}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Barangay</label>
-                  <LocationCombobox
-                    options={barangayOptions}
+                {/* Row 2: ONE searchable field for barangay/city/province/region */}
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium">Barangay / City / Province</label>
+                  <AddressCombobox
+                    options={addressOptions}
                     value={editForm.barangayCode}
-                    selectedName={editForm.barangayName}
-                    onChange={(code, name) =>
-                      setEditForm((c) => ({ ...c, barangayCode: code, barangayName: name }))
-                    }
-                    placeholder="Select barangay"
-                    loadingPlaceholder="Loading barangays..."
-                    loading={isLoadingAddressOptions}
-                    disabled={isSavingEdit || !editForm.cityCode}
+                    selectedLabel={[
+                      editForm.barangayName,
+                      editForm.cityName,
+                      editForm.provinceName,
+                      editForm.regionName,
+                    ]
+                      .filter(Boolean)
+                      .join(", ")}
+                    onChange={handleAddressSelect}
+                    placeholder="Search barangay, city, or province..."
+                    loadingPlaceholder="Loading address data..."
+                    loading={loadingAddressOptions}
+                    disabled={isSavingEdit}
                     isDark={isDark}
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">ZIP Code</label>
-                  <Input
-                    value={editForm.zipCode}
-                    onChange={(e) =>
-                      setEditForm((c) => ({ ...c, zipCode: e.target.value.replace(/\D/g, "").slice(0, 4) }))
-                    }
-                    inputMode="numeric"
-                    maxLength={4}
-                    placeholder="6710"
-                    disabled={isSavingEdit}
-                    className={`${editInputCls} font-mono`}
-                  />
+                {/* Row 3: Full Address — lalabas nang sabay kasama ang ZIP + Philippines */}
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium">Full Address</label>
+
+                  <div className="relative">
+                    <Textarea
+                      value={editForm.fullAddress}
+                      onChange={(e) =>
+                        setEditForm((c) => ({ ...c, fullAddress: e.target.value }))
+                      }
+                      placeholder={
+                        resolvingAddress
+                          ? ""
+                          : "Auto-filled from the search above — you can still edit it"
+                      }
+                      disabled={isSavingEdit || resolvingAddress}
+                      rows={2}
+                      className={`min-h-0 resize-none px-2.5 py-2 text-xs ${
+                        isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"
+                      }`}
+                    />
+
+                    {/* 🔄 Loading overlay habang hinahanap ang ZIP */}
+                    {resolvingAddress && (
+                      <div
+                        className={`pointer-events-none absolute inset-0 flex items-center gap-2 px-2.5 text-xs ${
+                          isDark ? "text-slate-400" : "text-slate-500"
+                        }`}
+                      >
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Preparing full address...
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -2487,7 +2755,7 @@ export default function UserManagementPage() {
 
               <Button
                 type="submit"
-                disabled={!hasChanges || isSavingEdit}
+                disabled={!hasChanges || isSavingEdit || resolvingAddress}
                 className="gap-2 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isSavingEdit ? (
