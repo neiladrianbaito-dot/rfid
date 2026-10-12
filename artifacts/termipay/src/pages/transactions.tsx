@@ -487,6 +487,33 @@ function getPaymentMethodLogo(method?: string | null): string | null {
   return key ? PAYMENT_LOGOS[key] ?? null : null;
 }
 
+// 🆕 PAYMENT METHOD FILTER (Top-up tab dropdown)
+// "all"   = no filtering
+// "other" = payment methods we don't recognize (or empty)
+// otherwise = one of the PaymentKey values above
+type PaymentFilter = "all" | "other" | PaymentKey;
+
+const PAYMENT_FILTER_OPTIONS: { value: PaymentFilter; label: string }[] = [
+  { value: "all", label: "All Methods" },
+  { value: "gcash", label: "GCash" },
+  { value: "grab", label: "GrabPay" },
+  { value: "shopee", label: "ShopeePay" },
+  { value: "maya", label: "Maya" },
+  { value: "card", label: "Card" },
+  { value: "billease", label: "BillEase" },
+  { value: "online_banking", label: "Online Banking" },
+  { value: "unionbank", label: "UnionBank" },
+  { value: "qrph", label: "QR Ph" },
+  { value: "other", label: "Other" },
+];
+
+function matchesPaymentFilter(tx: any, filter: string): boolean {
+  if (filter === "all") return true;
+  const key = detectPaymentKey(getPaymentMethodValue(tx));
+  if (filter === "other") return key === null;
+  return key === filter;
+}
+
 // 🆕 Logo image that hides itself if the file is missing (no broken icon)
 function PaymentLogo({
   src,
@@ -1356,6 +1383,8 @@ export default function TransactionsPage() {
   const [activeView, setActiveView] = useState<TxView>("topup");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  // 🆕 Payment method filter (Top-up tab only)
+  const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [viewTx, setViewTx] = useState<any>(null);
   const [page, setPage] = useState(1);
   const [routes, setRoutes] = useState<FareRoute[]>([]);
@@ -1501,12 +1530,13 @@ export default function TransactionsPage() {
   // 🔎 NOTE: `search` is NOT sent to the API anymore. The backend only matched
   // card UID / name, so searching by Txn ID returned nothing. Search is now
   // done on the client (see `searchedList` below) so Txn ID works too.
+  // 🆕 Payment method filter is also done on the client (see `topupList`).
   const params: any = {};
   if (statusFilter !== "all") params.status = statusFilter;
 
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, activeView]);
+  }, [search, statusFilter, paymentFilter, activeView]);
 
   useEffect(() => {
     setTransferPage(1);
@@ -1674,9 +1704,14 @@ export default function TransactionsPage() {
   }, [rawTransactionList, search, passengerByCardUid]);
 
   // ── Lists + pagination ────────────────────────────────────────────────────
+  // 🆕 Top-up list is also filtered by the selected payment method
   const topupList = useMemo(
-    () => searchedList.filter((tx: any) => normalizeTxType(tx.type) === "Top-up"),
-    [searchedList],
+    () =>
+      searchedList.filter(
+        (tx: any) =>
+          normalizeTxType(tx.type) === "Top-up" && matchesPaymentFilter(tx, paymentFilter),
+      ),
+    [searchedList, paymentFilter],
   );
   const fareList = useMemo(
     () => searchedList.filter((tx: any) => normalizeTxType(tx.type) === "Fare"),
@@ -1892,6 +1927,41 @@ export default function TransactionsPage() {
                   />
                 </div>
                 <div className="flex gap-3 w-full lg:w-auto">
+                  {/* 🆕 Payment Method filter — Top-up tab only */}
+                  {!isFareView && (
+                    <Select value={paymentFilter} onValueChange={setPaymentFilter}>
+                      <SelectTrigger
+                        className={`w-full lg:w-[170px] font-medium text-xs cursor-pointer ${
+                          isDark
+                            ? "bg-slate-950 border-slate-800 text-slate-300"
+                            : "bg-white border-slate-200 text-slate-600"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Wallet className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                          <SelectValue placeholder="Payment Method" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent
+                        className={
+                          isDark
+                            ? "bg-slate-900 border-slate-800 text-slate-300"
+                            : "bg-white border-slate-200 text-slate-600"
+                        }
+                      >
+                        {PAYMENT_FILTER_OPTIONS.map((opt) => (
+                          <SelectItem
+                            key={opt.value}
+                            value={opt.value}
+                            className="cursor-pointer"
+                          >
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+
                   <Select value={statusFilter} onValueChange={setStatusFilter}>
                     <SelectTrigger
                       className={`w-full lg:w-[150px] font-medium text-xs cursor-pointer ${
