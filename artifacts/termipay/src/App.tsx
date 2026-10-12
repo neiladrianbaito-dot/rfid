@@ -26,6 +26,7 @@ import Layout from "@/components/layout";
 import { useAuth } from "@/hooks/use-auth";
 import SettingsPage from "@/pages/settings";
 import DisbursementPage from "@/pages/disbursement";
+import ExcelPage from "@/pages/excel";
 
 const USER_AUTH_TOKEN_KEY = "termipay_user_auth_token";
 
@@ -47,7 +48,7 @@ function FullPageLoading() {
     <div className="flex h-screen w-full flex-col items-center justify-center bg-background">
       <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
       <p className="mt-4 text-sm font-medium text-muted-foreground animate-pulse">
-          Fare Collection System: Validating Session...
+        Fare Collection System: Validating Session...
       </p>
     </div>
   );
@@ -142,6 +143,9 @@ function AppRouter() {
       <Route path="/reports">
         <ProtectedRoute component={ReportsPage} />
       </Route>
+      <Route path="/excel">
+        <ProtectedRoute component={ExcelPage} />
+      </Route>
       <Route path="/settings">
         <ProtectedRoute component={SettingsPage} />
       </Route>
@@ -156,13 +160,13 @@ const queryClient = new QueryClient({
     queries: {
       retry: false,
       refetchOnWindowFocus: false,
-      staleTime: 1000 * 60 * 5,     
+      staleTime: 1000 * 60 * 5,
     },
   },
 });
 
 function App() {
-  // Removed useEffect — setup already done at module level abovey
+  // Removed useEffect — setup already done at module level above
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
