@@ -421,49 +421,102 @@ function formatNetAmountWithSign(value: number | null): string {
   return value == null || !Number.isFinite(value) ? "—" : `+₱${formatAmount(value)}`;
 }
 
+// 🆕 Read payment method from either snake_case or camelCase
+function getPaymentMethodValue(tx: any): string | null {
+  const value = tx?.payment_method ?? tx?.paymentMethod ?? tx?.method ?? null;
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text === "" ? null : text;
+}
+
+// 🆕 Normalize any spelling ("GrabPay", "grab_pay", "Shopee Pay"...) to ONE key
+type PaymentKey =
+  | "gcash"
+  | "grab"
+  | "shopee"
+  | "maya"
+  | "card"
+  | "billease"
+  | "online_banking"
+  | "unionbank"
+  | "qrph";
+
+function detectPaymentKey(method?: string | null): PaymentKey | null {
+  if (!method) return null;
+  const k = method.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (k.includes("gcash")) return "gcash";
+  if (k.includes("grab")) return "grab";
+  if (k.includes("shopee")) return "shopee";
+  if (k.includes("maya")) return "maya"; // matches "maya" and "paymaya"
+  if (k.includes("billease")) return "billease";
+  if (k.includes("dobubp") || k.includes("unionbank")) return "unionbank";
+  if (k === "dob") return "online_banking";
+  if (k.includes("qrph")) return "qrph";
+  if (k === "card" || k.includes("creditcard") || k.includes("debitcard")) return "card";
+  return null;
+}
+
 function formatPaymentMethod(method?: string | null): string {
   if (!method) return "—";
-  const map: Record<string, string> = {
+  const labels: Record<PaymentKey, string> = {
     gcash: "GCash",
-    paymaya: "Maya",
+    grab: "GrabPay",
+    shopee: "ShopeePay",
     maya: "Maya",
     card: "Card",
-    grab_pay: "GrabPay",
-    grabpay: "GrabPay",
-    grab: "GrabPay",
-    shopee_pay: "ShopeePay",
-    shopeepay: "ShopeePay",
-    shopee: "ShopeePay",
     billease: "BillEase",
-    dob: "Online Banking",
-    dob_ubp: "UnionBank",
+    online_banking: "Online Banking",
+    unionbank: "UnionBank",
     qrph: "QR Ph",
   };
-  const key = method.toLowerCase().trim();
-  return map[key] ?? method.charAt(0).toUpperCase() + method.slice(1);
+  const key = detectPaymentKey(method);
+  if (key) return labels[key];
+  return method.charAt(0).toUpperCase() + method.slice(1);
 }
 
 // 🆕 Payment method → logo file inside /public
+const PAYMENT_LOGOS: Partial<Record<PaymentKey, string>> = {
+  gcash: "/gcash.svg",
+  grab: "/grab.svg",
+  shopee: "/shopee.svg",
+  maya: "/maya.svg",
+};
+
 function getPaymentMethodLogo(method?: string | null): string | null {
-  if (!method) return null;
-  const key = method.toLowerCase().trim().replace(/[\s-]+/g, "_");
-  switch (key) {
-    case "gcash":
-      return "/gcash.svg";
-    case "grab_pay":
-    case "grabpay":
-    case "grab":
-      return "/grab.svg";
-    case "shopee_pay":
-    case "shopeepay":
-    case "shopee":
-      return "/shopee.svg";
-    case "paymaya":
-    case "maya":
-      return "/maya.svg";
-    default:
-      return null;
-  }
+  const key = detectPaymentKey(method);
+  return key ? PAYMENT_LOGOS[key] ?? null : null;
+}
+
+// 🆕 Logo image that hides itself if the file is missing (no broken icon)
+function PaymentLogo({
+  src,
+  alt,
+  className,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (failed) return null;
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="eager"
+      className={className}
+      onError={() => {
+        console.warn(`Payment logo not found: ${src} — put it in your /public folder`);
+        setFailed(true);
+      }}
+    />
+  );
 }
 
 // 🆕 Card type → display label ("Senior Citizen", "senior-citizen", "PWD"...)
@@ -524,7 +577,7 @@ function matchesTxSearch(tx: any, query: string, passenger?: PassengerInfo): boo
     tx?.full_name ?? tx?.fullName ?? "",
     tx?.passenger_name ?? tx?.passengerName ?? "",
     passenger?.full_name ?? "",
-    formatPaymentMethod(tx?.payment_method),
+    formatPaymentMethod(getPaymentMethodValue(tx)),
   ]
     .join(" ")
     .toLowerCase();
@@ -700,8 +753,9 @@ function ReceiptModal({
 
   const matchedRoute = isFare ? findRouteFor(tx, routes) : null;
 
-  const paymentMethodLabel = !isFare ? formatPaymentMethod(tx.payment_method) : null;
-  const paymentMethodLogo = !isFare ? getPaymentMethodLogo(tx.payment_method) : null;
+  const rawPaymentMethod = !isFare ? getPaymentMethodValue(tx) : null;
+  const paymentMethodLabel = !isFare ? formatPaymentMethod(rawPaymentMethod) : null;
+  const paymentMethodLogo = !isFare ? getPaymentMethodLogo(rawPaymentMethod) : null;
 
   const originalAmount = Math.abs(Number(tx.amount || 0));
   const netAmount = getNetAmount(tx);
@@ -1030,7 +1084,7 @@ function ReceiptModal({
                     {paymentMethodLabel && paymentMethodLabel !== "—" ? (
                       <>
                         {paymentMethodLogo && (
-                          <img
+                          <PaymentLogo
                             src={paymentMethodLogo}
                             alt={paymentMethodLabel}
                             className="h-6 sm:h-7 w-auto max-w-[40px] object-contain shrink-0"
@@ -1954,11 +2008,13 @@ export default function TransactionsPage() {
 
                             const matchedRoute = isFareView ? findRouteFor(tx, routes) : null;
 
+                            // 🆕 works with payment_method OR paymentMethod
+                            const rawPaymentMethod = !isFareView ? getPaymentMethodValue(tx) : null;
                             const paymentMethodLabel = !isFareView
-                              ? formatPaymentMethod(tx.payment_method)
+                              ? formatPaymentMethod(rawPaymentMethod)
                               : null;
                             const paymentMethodLogo = !isFareView
-                              ? getPaymentMethodLogo(tx.payment_method)
+                              ? getPaymentMethodLogo(rawPaymentMethod)
                               : null;
 
                             return (
@@ -2000,15 +2056,15 @@ export default function TransactionsPage() {
                                   </>
                                 ) : (
                                   <TableCell className="text-xs">
-                                    <div className="flex items-center gap-1.5">
+                                    <div className="flex items-center gap-2">
                                       {paymentMethodLogo && (
-                                        <img
+                                        <PaymentLogo
                                           src={paymentMethodLogo}
-                                          alt=""
+                                          alt={paymentMethodLabel ?? "Payment method"}
                                           className="h-6 w-auto max-w-[52px] object-contain shrink-0"
                                         />
                                       )}
-                                      <span>{paymentMethodLabel}</span>
+                                      <span className="font-medium">{paymentMethodLabel}</span>
                                     </div>
                                   </TableCell>
                                 )}
