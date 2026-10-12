@@ -429,6 +429,11 @@ function formatPaymentMethod(method?: string | null): string {
     maya: "Maya",
     card: "Card",
     grab_pay: "GrabPay",
+    grabpay: "GrabPay",
+    grab: "GrabPay",
+    shopee_pay: "ShopeePay",
+    shopeepay: "ShopeePay",
+    shopee: "ShopeePay",
     billease: "BillEase",
     dob: "Online Banking",
     dob_ubp: "UnionBank",
@@ -438,11 +443,27 @@ function formatPaymentMethod(method?: string | null): string {
   return map[key] ?? method.charAt(0).toUpperCase() + method.slice(1);
 }
 
+// 🆕 Payment method → logo file inside /public
 function getPaymentMethodLogo(method?: string | null): string | null {
   if (!method) return null;
-  const key = method.toLowerCase().trim();
-  if (key === "gcash") return "/gcash.svg";
-  return null;
+  const key = method.toLowerCase().trim().replace(/[\s-]+/g, "_");
+  switch (key) {
+    case "gcash":
+      return "/gcash.svg";
+    case "grab_pay":
+    case "grabpay":
+    case "grab":
+      return "/grab.svg";
+    case "shopee_pay":
+    case "shopeepay":
+    case "shopee":
+      return "/shopee.svg";
+    case "paymaya":
+    case "maya":
+      return "/maya.svg";
+    default:
+      return null;
+  }
 }
 
 // 🆕 Card type → display label ("Senior Citizen", "senior-citizen", "PWD"...)
