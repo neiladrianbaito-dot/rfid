@@ -8,7 +8,6 @@ import {
   Map,
   ScrollText,
   FileBarChart,
-  FileSpreadsheet,
   LogOut,
   Menu,
   X,
@@ -292,7 +291,6 @@ const navGroups = [
     label: "Reports & Settings",
     items: [
       { path: "/reports", label: "Reports", icon: FileBarChart },
-      { path: "/excel", label: "Excel", icon: FileSpreadsheet },
       { path: "/settings", label: "Settings", icon: Settings },
     ],
   },
