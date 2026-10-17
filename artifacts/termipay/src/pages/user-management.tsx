@@ -61,6 +61,24 @@ const MAX_ID_IMAGE_SIZE = 5 * 1024 * 1024;
 // ⏱️ Max na hihintayin sa ZIP lookup bago ituloy ang address nang walang ZIP.
 const ZIP_LOOKUP_TIMEOUT_MS = 6000;
 
+// 📞 PH country code para sa contact number.
+const PH_COUNTRY_CODE = "+63";
+
+// 📞 Kinukuha lang ang 10 digits pagkatapos ng +63 (hal. 9XXXXXXXXX).
+// Tumatanggap ng "09XXXXXXXXX", "639XXXXXXXXX", o "+639XXXXXXXXX"
+// (pati ang mga lumang record na naka-09...) at ginagawang 10-digit local number.
+function normalizePhContactDigits(raw: string): string {
+  let digits = String(raw || "").replace(/\D/g, "");
+
+  if (digits.startsWith("63")) {
+    digits = digits.slice(2);
+  } else if (digits.startsWith("0")) {
+    digits = digits.slice(1);
+  }
+
+  return digits.slice(0, 10);
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // 📍 ADDRESS HELPERS — copied from Card Registration so Update User uses
 // the exact same address behaviour (one searchable field + auto ZIP +
@@ -942,6 +960,7 @@ function CardBack({
 const EMPTY_EDIT_FORM = {
   fullName: "",
   dateOfBirth: "",
+  // 📞 10 digits lang (pagkatapos ng +63), hal. "9171234567"
   contactNumber: "",
   streetAddress: "",
   regionCode: "",
@@ -1337,8 +1356,9 @@ export default function UserManagementPage() {
     const initial = {
       fullName: user.fullName || "",
       dateOfBirth: user.dateOfBirth ? String(user.dateOfBirth).slice(0, 10) : "",
-      // Keep the edit field strictly numeric and capped at 11 digits.
-      contactNumber: String(user.contactNumber || "").replace(/\D/g, "").slice(0, 11),
+      // 📞 Naka-save man bilang "09XXXXXXXXX" o "+639XXXXXXXXX", ginagawang
+      // 10 digits (9XXXXXXXXX) para tumugma sa +63 prefix ng field.
+      contactNumber: normalizePhContactDigits(user.contactNumber || ""),
       streetAddress,
       regionCode: user.regionCode || "",
       regionName,
@@ -1516,22 +1536,26 @@ export default function UserManagementPage() {
 
     if (!editUser || !hasChanges || resolvingAddress) return;
 
-    const normalizedContactNumber = String(editForm.contactNumber || "")
-      .replace(/\D/g, "")
-      .slice(0, 11);
+    // 📞 10 digits lang ang laman ng field (pagkatapos ng +63)
+    const contactDigits = normalizePhContactDigits(editForm.contactNumber);
 
-    if (normalizedContactNumber.length !== 11) {
+    // PH mobile: +63 9XX XXX XXXX → 10 digits, nagsisimula sa 9
+    if (!/^9\d{9}$/.test(contactDigits)) {
       toast({
         title: "Invalid Contact Number",
-        description: "Contact number must contain exactly 11 digits.",
+        description:
+          "Enter a valid PH mobile number: 10 digits starting with 9 (e.g. +63 9123456789).",
         variant: "destructive",
       });
       return;
     }
 
+    // Final na format na ipapadala: +639XXXXXXXXX
+    const normalizedContactNumber = `${PH_COUNTRY_CODE}${contactDigits}`;
+
     // Keep the state normalized before saving.
-    if (editForm.contactNumber !== normalizedContactNumber) {
-      setEditForm((current) => ({ ...current, contactNumber: normalizedContactNumber }));
+    if (editForm.contactNumber !== contactDigits) {
+      setEditForm((current) => ({ ...current, contactNumber: contactDigits }));
     }
 
     const replacingImage = !!editIdImageFile;
@@ -1565,6 +1589,7 @@ export default function UserManagementPage() {
         id: editUser.id,
         data: {
           fullName: editForm.fullName.trim(),
+          // 📞 Naka +63 na (hal. +639123456789)
           contactNumber: normalizedContactNumber,
           dateOfBirth: editForm.dateOfBirth || undefined,
           streetAddress: editForm.streetAddress.trim() || undefined,
@@ -2632,19 +2657,37 @@ export default function UserManagementPage() {
                   />
                 </div>
 
+                {/* 📞 CONTACT NUMBER — fixed +63 prefix, user types 10 digits */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Contact Number</label>
-                  <Input
-                    value={editForm.contactNumber}
-                    onChange={(e) =>
-                      setEditForm((c) => ({ ...c, contactNumber: e.target.value.replace(/\D/g, "").slice(0, 11) }))
-                    }
-                    placeholder="09XXXXXXXXX"
-                    inputMode="numeric"
-                    maxLength={11}
-                    disabled={isSavingEdit}
-                    className={`${editInputCls} font-mono`}
-                  />
+
+                  <div className="relative">
+                    <span
+                      className={`pointer-events-none absolute inset-y-0 left-0 flex items-center gap-1.5 border-r px-3 text-sm font-semibold ${
+                        isDark
+                          ? "border-slate-800 text-slate-300"
+                          : "border-slate-200 text-slate-700"
+                      }`}
+                    >
+                      🇵🇭 {PH_COUNTRY_CODE}
+                    </span>
+
+                    <Input
+                      value={editForm.contactNumber}
+                      onChange={(e) =>
+                        setEditForm((c) => ({
+                          ...c,
+                          contactNumber: normalizePhContactDigits(e.target.value),
+                        }))
+                      }
+                      placeholder="9XXXXXXXXX"
+                      inputMode="numeric"
+                      autoComplete="tel-national"
+                      maxLength={13}
+                      disabled={isSavingEdit}
+                      className={`${editInputCls} pl-[5rem] font-mono`}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
