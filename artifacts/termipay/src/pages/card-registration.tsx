@@ -85,6 +85,24 @@ const MAX_ID_IMAGE_SIZE = 5 * 1024 * 1024;
 // ⏱️ Max na hihintayin sa ZIP lookup bago ituloy ang address nang walang ZIP.
 const ZIP_LOOKUP_TIMEOUT_MS = 6000;
 
+// 📞 PH country code para sa contact number.
+const PH_COUNTRY_CODE = "+63";
+
+// 📞 Kinukuha lang ang 10 digits pagkatapos ng +63 (hal. 9XXXXXXXXX).
+// Tumatanggap ng paste na "09XXXXXXXXX", "639XXXXXXXXX", o "+639XXXXXXXXX"
+// at ginagawang 10-digit local number.
+function normalizePhContactDigits(raw: string): string {
+  let digits = raw.replace(/\D/g, "");
+
+  if (digits.startsWith("63")) {
+    digits = digits.slice(2);
+  } else if (digits.startsWith("0")) {
+    digits = digits.slice(1);
+  }
+
+  return digits.slice(0, 10);
+}
+
 // 🔎 ONE flattened, searchable address record (barangay + its full parent
 // chain: city/municipality, province, region) built once on page load.
 interface AddressSearchOption {
@@ -189,6 +207,7 @@ const INITIAL_FORM = {
   cardUid: "",
   fullName: "",
   dob: "",
+  // 📞 10 digits lang (pagkatapos ng +63), hal. "9171234567"
   contactNumber: "",
   type: "Regular",
 
@@ -1138,8 +1157,9 @@ export default function CardRegistrationPage() {
     const normalizedCardUid = form.cardUid
       .trim()
       .toUpperCase();
-    const normalizedContactNumber = form.contactNumber
-      .trim();
+
+    // 📞 10 digits lang ang laman ng field (pagkatapos ng +63)
+    const contactDigits = normalizePhContactDigits(form.contactNumber);
 
     if (!/^[A-Z0-9]{8}$/.test(normalizedCardUid)) {
       toast({
@@ -1150,14 +1170,19 @@ export default function CardRegistrationPage() {
       return;
     }
 
-    if (!/^\d{11}$/.test(normalizedContactNumber)) {
+    // 📞 PH mobile: +63 9XX XXX XXXX → 10 digits, nagsisimula sa 9
+    if (!/^9\d{9}$/.test(contactDigits)) {
       toast({
         title: "Invalid Contact Number",
-        description: "Contact number must be exactly 11 digits.",
+        description:
+          "Enter a valid PH mobile number: 10 digits starting with 9 (e.g. +63 9123456789).",
         variant: "destructive",
       });
       return;
     }
+
+    // Final na format na ipapadala: +639XXXXXXXXX
+    const normalizedContactNumber = `${PH_COUNTRY_CODE}${contactDigits}`;
 
     if (!form.fullName.trim()) {
       toast({
@@ -1175,17 +1200,6 @@ export default function CardRegistrationPage() {
         title: "Date of Birth Required",
         description:
           "Please select the date of birth.",
-        variant: "destructive",
-      });
-
-      return;
-    }
-
-    if (!form.contactNumber.trim()) {
-      toast({
-        title: "Contact Number Required",
-        description:
-          "Please enter the contact number.",
         variant: "destructive",
       });
 
@@ -1267,6 +1281,7 @@ export default function CardRegistrationPage() {
           dateOfBirth:
             form.dob,
 
+          // 📞 Naka +63 na (hal. +639123456789)
           contactNumber: normalizedContactNumber,
 
           type:
@@ -1821,29 +1836,41 @@ export default function CardRegistrationPage() {
                     </div>
                   </div>
 
+                  {/* 📞 CONTACT NUMBER — fixed +63 prefix, user types 10 digits */}
                   <div className="space-y-1">
                     <label className={MODAL_LABEL_CLASS}>
                       Contact Number
                       <RequiredMark />
                     </label>
 
-                    <Input
-                      value={form.contactNumber}
-                      onChange={(event) =>
-                        updateForm(
-                          "contactNumber",
-                          event.target.value
-                            .replace(/\D/g, "")
-                            .slice(0, 11)
-                        )
-                      }
-                      placeholder="09XXXXXXXXX"
-                      disabled={isSubmitting}
-                      maxLength={11}
-                      inputMode="numeric"
-                      aria-required="true"
-                      className={MODAL_INPUT_CLASS}
-                    />
+                    <div className="relative">
+                      <span
+                        className={`pointer-events-none absolute inset-y-0 left-0 flex items-center gap-1.5 border-r px-2.5 text-xs font-semibold ${
+                          isDark
+                            ? "border-slate-800 text-slate-300"
+                            : "border-slate-200 text-slate-700"
+                        }`}
+                      >
+                        🇵🇭 {PH_COUNTRY_CODE}
+                      </span>
+
+                      <Input
+                        value={form.contactNumber}
+                        onChange={(event) =>
+                          updateForm(
+                            "contactNumber",
+                            normalizePhContactDigits(event.target.value)
+                          )
+                        }
+                        placeholder="9XXXXXXXXX"
+                        disabled={isSubmitting}
+                        maxLength={13}
+                        inputMode="numeric"
+                        autoComplete="tel-national"
+                        aria-required="true"
+                        className={`${MODAL_INPUT_CLASS} pl-[4.5rem]`}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
