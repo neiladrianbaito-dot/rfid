@@ -469,11 +469,9 @@ export default function ReportPreviewPage() {
           >
             {/* Letterhead */}
             <div style={{ borderBottom: `3px double ${THEME.darkest}`, paddingBottom: "10px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "16px" }}>
-              <img src="/bagong.png" alt="Bagong Pilipinas" style={{ width: "72px", height: "72px", flexShrink: 0, objectFit: "contain" }} />
+              {/* Empty spacer (same size as the logo) so the title stays centered */}
+              <div style={{ width: "72px", height: "72px", flexShrink: 0 }} aria-hidden="true" />
               <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ fontSize: "9pt", fontWeight: "bold", letterSpacing: "0.15em", textTransform: "uppercase", borderBottom: `1px solid ${THEME.dark}`, paddingBottom: "2px", marginBottom: "6px", color: THEME.dark }}>
-                  Republic of the Philippines
-                </div>
                 <div style={{ fontSize: "16pt", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.06em", color: THEME.darkest }}>
                   Fare Collection System
                 </div>
@@ -494,7 +492,7 @@ export default function ReportPreviewPage() {
                   </div>
                 </div>
               </div>
-              <img src="/calbayog.png" alt="Calbayog City Seal" style={{ width: "72px", height: "72px", flexShrink: 0, objectFit: "contain" }} />
+              <img src="/calbayog.png" alt="Fare Collection System Logo" style={{ width: "72px", height: "72px", flexShrink: 0, objectFit: "contain" }} />
             </div>
 
             {/* Document title */}
