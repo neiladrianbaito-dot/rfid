@@ -59,6 +59,9 @@ import {
   Wifi,
   WifiOff,
   Route as RouteIcon, // 🗺️ NEW
+  Lock, // 🔒 NEW: pin lock
+  Unlock, // 🔒 NEW
+  RotateCcw, // 🔒 NEW: reset pins
 } from "lucide-react";
 import {
   AlertDialog,
@@ -237,6 +240,9 @@ function DistanceFareDialog({
   const [isEstimate, setIsEstimate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 🔒 NEW: when true, pins can't be dragged and map clicks are ignored.
+  // Auto-locks after a successful Calculate so the distance can't go stale.
+  const [locked, setLocked] = useState(false);
 
   // Leaflet map plumbing
   const [mapEl, setMapEl] = useState<HTMLDivElement | null>(null);
@@ -256,6 +262,7 @@ function DistanceFareDialog({
       setIsEstimate(false);
       setError(null);
       setViceVersa(true);
+      setLocked(false);
     }
   }, [open]);
 
@@ -281,20 +288,23 @@ function DistanceFareDialog({
     };
   }, [mapEl]);
 
-  // Click on map: first click sets Origin, later clicks set Destination
+  // Click on map: first click sets Origin, second click sets Destination.
+  // 🔒 CHANGED: once both pins exist (or the pins are locked), further map
+  // clicks are ignored — before, a 3rd click silently moved the Destination.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const onClick = (e: L.LeafletMouseEvent) => {
+      if (locked) return;
       const pt = { lat: e.latlng.lat, lng: e.latlng.lng };
       if (!originPt) setOriginPt(pt);
-      else setDestPt(pt);
+      else if (!destPt) setDestPt(pt);
     };
     map.on("click", onClick);
     return () => {
       map.off("click", onClick);
     };
-  }, [mapEl, originPt]);
+  }, [mapEl, originPt, destPt, locked]);
 
   // Keep draggable markers in sync with state
   useEffect(() => {
@@ -316,7 +326,7 @@ function DistanceFareDialog({
       if (!ref.current) {
         const m = L.marker([pt.lat, pt.lng], {
           icon: mapPin(color, label),
-          draggable: true,
+          draggable: !locked,
         }).addTo(map);
         m.on("dragend", () => {
           const p = m.getLatLng();
@@ -326,12 +336,15 @@ function DistanceFareDialog({
       } else {
         ref.current.setLatLng([pt.lat, pt.lng]);
       }
+      // 🔒 NEW: enable/disable dragging depending on the lock state
+      if (locked) ref.current.dragging?.disable();
+      else ref.current.dragging?.enable();
     };
 
     // ✅ CHANGED: labels are now "Origin" and "Destination" (was "A" / "B")
     sync(originMarker, originPt, "#2563eb", "Origin", setOriginPt);
     sync(destMarker, destPt, "#059669", "Destination", setDestPt);
-  }, [originPt, destPt, mapEl]);
+  }, [originPt, destPt, mapEl, locked]);
 
   // Any point change invalidates the previous calculation
   useEffect(() => {
@@ -398,6 +411,7 @@ function DistanceFareDialog({
       if (r) {
         setDistanceKm(r.km);
         setIsEstimate(false);
+        setLocked(true); // 🔒 lock pins so the distance can't go stale
         if (map) {
           routeLine.current?.remove();
           routeLine.current = L.polyline(r.coords, { color: "#2563eb", weight: 5 }).addTo(map);
@@ -407,6 +421,7 @@ function DistanceFareDialog({
         // Fallback: straight-line distance (underestimates road distance)
         setDistanceKm(haversineKm(originPt, destPt));
         setIsEstimate(true);
+        setLocked(true); // 🔒 lock pins so the distance can't go stale
         map?.fitBounds(
           [
             [originPt.lat, originPt.lng],
@@ -479,7 +494,7 @@ function DistanceFareDialog({
               variant="outline"
               size="sm"
               onClick={findPlaces}
-              disabled={busy}
+              disabled={busy || locked}
               className="cursor-pointer"
             >
               <Search className="w-3.5 h-3.5 mr-1" /> Find on map
@@ -493,10 +508,46 @@ function DistanceFareDialog({
             >
               {busy ? "Working..." : "Calculate distance & fare"}
             </Button>
+
+            {/* 🔒 NEW: manual lock / unlock of the pins */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setLocked((v) => !v)}
+              disabled={busy || !originPt || !destPt}
+              className="cursor-pointer"
+            >
+              {locked ? (
+                <><Unlock className="w-3.5 h-3.5 mr-1" /> Unlock pins</>
+              ) : (
+                <><Lock className="w-3.5 h-3.5 mr-1" /> Lock pins</>
+              )}
+            </Button>
+
+            {/* 🔒 NEW: clear both pins and start over */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setLocked(false);
+                setOriginPt(null);
+                setDestPt(null);
+                setDistanceKm(null);
+                setError(null);
+              }}
+              disabled={busy || (!originPt && !destPt)}
+              className={`cursor-pointer ${muted}`}
+            >
+              <RotateCcw className="w-3.5 h-3.5 mr-1" /> Reset pins
+            </Button>
           </div>
 
-          <p className={`text-xs ${muted}`}>
-            Tip: you can also click the map to drop the Origin pin first, then the Destination pin, and drag the pins to adjust.
+          <p className={`text-xs ${locked ? "text-emerald-500 font-medium" : muted}`}>
+            {locked
+              ? "🔒 Pins are locked — Origin and Destination can't be moved. Click “Unlock pins” if you need to adjust them (you'll need to recalculate)."
+              : "Tip: click the map to drop the Origin pin first, then the Destination pin, and drag the pins to adjust. Pins lock automatically after you calculate."}
           </p>
 
           <div
