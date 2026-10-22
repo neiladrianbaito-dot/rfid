@@ -7,6 +7,8 @@ import {
   getListRoutesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import L from "leaflet"; // 🗺️ NEW: npm i leaflet && npm i -D @types/leaflet
+import "leaflet/dist/leaflet.css"; // 🗺️ NEW
 import { supabase } from "@/lib/supabase"; // 👈 adjust to your actual supabase client path
 import { useAuth } from "@/hooks/use-auth"; // ⬅️ NEW: for the current admin's username
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,6 +58,7 @@ import {
   Cpu,
   Wifi,
   WifiOff,
+  Route as RouteIcon, // 🗺️ NEW
 } from "lucide-react";
 import {
   AlertDialog,
@@ -122,6 +125,484 @@ type Device = {
   // updated_at removed — column does not exist on this table
 };
 
+/* ═══════════════════════════════════════════════════════════════════════
+   🗺️ DISTANCE-BASED FARE (LTFRB: Base Fare + Succeeding Distance)
+   Total Fare = Base Fare + max(0, Distance − Base Distance) × Succeeding Rate
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const DEFAULT_BASE_FARE = 15; // ₱ for the first BASE_KM
+const DEFAULT_BASE_KM = 4;
+const DEFAULT_RATE = 2.2; // ₱ per succeeding km
+
+type LatLng = { lat: number; lng: number };
+
+function computeLtfrbFare(
+  distanceKm: number,
+  baseFare: number,
+  baseKm: number,
+  ratePerKm: number
+) {
+  const excess = Math.max(0, distanceKm - baseKm);
+  return Math.round((baseFare + excess * ratePerKm) * 100) / 100;
+}
+
+function haversineKm(a: LatLng, b: LatLng) {
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// Nominatim (OpenStreetMap) geocoder — free, keep usage light (1 req/sec policy).
+async function geocode(query: string): Promise<LatLng | null> {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(
+    query
+  )}`;
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!Array.isArray(data) || data.length === 0) return null;
+  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+}
+
+// OSRM public demo server — real road distance + route geometry.
+async function roadRoute(
+  a: LatLng,
+  b: LatLng
+): Promise<{ km: number; coords: [number, number][] } | null> {
+  const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const data = await res.json();
+  const r = data?.routes?.[0];
+  if (!r) return null;
+  return {
+    km: r.distance / 1000,
+    coords: r.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]),
+  };
+}
+
+const mapPin = (color: string, label: string) =>
+  L.divIcon({
+    className: "",
+    html: `<div style="background:${color};color:#fff;width:26px;height:26px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font:700 12px sans-serif">${label}</div>`,
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+  });
+
+type DistanceFareSavePayload = {
+  origin: string;
+  destination: string;
+  fareAmount: number;
+  viceVersa: boolean;
+  activate: boolean;
+};
+
+type DistanceFareDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  isDark: boolean;
+  saving: boolean;
+  onSave: (payload: DistanceFareSavePayload) => Promise<void>;
+};
+
+function DistanceFareDialog({
+  open,
+  onOpenChange,
+  isDark,
+  saving,
+  onSave,
+}: DistanceFareDialogProps) {
+  const [originName, setOriginName] = useState("Calbayog");
+  const [destName, setDestName] = useState("");
+  const [originPt, setOriginPt] = useState<LatLng | null>(null);
+  const [destPt, setDestPt] = useState<LatLng | null>(null);
+
+  const [baseFare, setBaseFare] = useState(String(DEFAULT_BASE_FARE));
+  const [baseKm, setBaseKm] = useState(String(DEFAULT_BASE_KM));
+  const [rate, setRate] = useState(String(DEFAULT_RATE));
+  const [viceVersa, setViceVersa] = useState(true);
+
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [isEstimate, setIsEstimate] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Leaflet map plumbing
+  const [mapEl, setMapEl] = useState<HTMLDivElement | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const originMarker = useRef<L.Marker | null>(null);
+  const destMarker = useRef<L.Marker | null>(null);
+  const routeLine = useRef<L.Polyline | null>(null);
+
+  // Reset when the dialog closes
+  useEffect(() => {
+    if (!open) {
+      setOriginName("Calbayog");
+      setDestName("");
+      setOriginPt(null);
+      setDestPt(null);
+      setDistanceKm(null);
+      setIsEstimate(false);
+      setError(null);
+      setViceVersa(true);
+    }
+  }, [open]);
+
+  // Create the map once the container div is mounted inside the dialog
+  useEffect(() => {
+    if (!mapEl) return;
+    const map = L.map(mapEl, { center: [11.65, 124.8], zoom: 8 });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors",
+      maxZoom: 19,
+    }).addTo(map);
+    mapRef.current = map;
+    // Dialog animates in — recalc size so tiles fill the container.
+    const t = setTimeout(() => map.invalidateSize(), 250);
+
+    return () => {
+      clearTimeout(t);
+      map.remove();
+      mapRef.current = null;
+      originMarker.current = null;
+      destMarker.current = null;
+      routeLine.current = null;
+    };
+  }, [mapEl]);
+
+  // Click on map: first click sets Origin (A), later clicks set Destination (B)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const onClick = (e: L.LeafletMouseEvent) => {
+      const pt = { lat: e.latlng.lat, lng: e.latlng.lng };
+      if (!originPt) setOriginPt(pt);
+      else setDestPt(pt);
+    };
+    map.on("click", onClick);
+    return () => {
+      map.off("click", onClick);
+    };
+  }, [mapEl, originPt]);
+
+  // Keep draggable markers in sync with state
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const sync = (
+      ref: React.MutableRefObject<L.Marker | null>,
+      pt: LatLng | null,
+      color: string,
+      label: string,
+      setPt: (p: LatLng) => void
+    ) => {
+      if (!pt) {
+        ref.current?.remove();
+        ref.current = null;
+        return;
+      }
+      if (!ref.current) {
+        const m = L.marker([pt.lat, pt.lng], {
+          icon: mapPin(color, label),
+          draggable: true,
+        }).addTo(map);
+        m.on("dragend", () => {
+          const p = m.getLatLng();
+          setPt({ lat: p.lat, lng: p.lng });
+        });
+        ref.current = m;
+      } else {
+        ref.current.setLatLng([pt.lat, pt.lng]);
+      }
+    };
+
+    sync(originMarker, originPt, "#2563eb", "A", setOriginPt);
+    sync(destMarker, destPt, "#059669", "B", setDestPt);
+  }, [originPt, destPt, mapEl]);
+
+  // Any point change invalidates the previous calculation
+  useEffect(() => {
+    setDistanceKm(null);
+    routeLine.current?.remove();
+    routeLine.current = null;
+  }, [originPt, destPt]);
+
+  const fare = useMemo(() => {
+    if (distanceKm == null) return null;
+    const bf = parseFloat(baseFare);
+    const bk = parseFloat(baseKm);
+    const r = parseFloat(rate);
+    if ([bf, bk, r].some((n) => Number.isNaN(n) || n < 0)) return null;
+    return computeLtfrbFare(distanceKm, bf, bk, r);
+  }, [distanceKm, baseFare, baseKm, rate]);
+
+  const excessKm =
+    distanceKm != null ? Math.max(0, distanceKm - (parseFloat(baseKm) || 0)) : 0;
+
+  const findPlaces = async () => {
+    setError(null);
+    if (!originName.trim() || !destName.trim()) {
+      setError("Enter both an origin and a destination.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const o = await geocode(`${originName.trim()}, Philippines`);
+      await new Promise((r) => setTimeout(r, 1100)); // respect Nominatim rate limit
+      const d = await geocode(`${destName.trim()}, Philippines`);
+      if (!o || !d) {
+        setError(
+          "Couldn't find one of the places. Try a more specific name, or click the map to place pins."
+        );
+        return;
+      }
+      setOriginPt(o);
+      setDestPt(d);
+      mapRef.current?.fitBounds(
+        [
+          [o.lat, o.lng],
+          [d.lat, d.lng],
+        ],
+        { padding: [40, 40] }
+      );
+    } catch {
+      setError("Place lookup failed. Check your connection or click the map to place pins.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const calculate = async () => {
+    if (!originPt || !destPt) {
+      setError("Set both pins first (search places or click the map).");
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      const r = await roadRoute(originPt, destPt).catch(() => null);
+      const map = mapRef.current;
+      if (r) {
+        setDistanceKm(r.km);
+        setIsEstimate(false);
+        if (map) {
+          routeLine.current?.remove();
+          routeLine.current = L.polyline(r.coords, { color: "#2563eb", weight: 5 }).addTo(map);
+          map.fitBounds(routeLine.current.getBounds(), { padding: [30, 30] });
+        }
+      } else {
+        // Fallback: straight-line distance (underestimates road distance)
+        setDistanceKm(haversineKm(originPt, destPt));
+        setIsEstimate(true);
+        map?.fitBounds(
+          [
+            [originPt.lat, originPt.lng],
+            [destPt.lat, destPt.lng],
+          ],
+          { padding: [40, 40] }
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const canSave = fare != null && fare > 0 && originName.trim() && destName.trim();
+
+  const submit = (activate: boolean) => {
+    if (!canSave || fare == null) return;
+    onSave({
+      origin: originName.trim(),
+      destination: destName.trim(),
+      fareAmount: fare,
+      viceVersa,
+      activate,
+    });
+  };
+
+  const muted = isDark ? "text-slate-400" : "text-slate-500";
+  const inputCls = isDark
+    ? "bg-slate-950 border-slate-800 text-slate-200"
+    : "bg-white border-slate-200 text-slate-800";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className={`max-w-2xl max-h-[92vh] overflow-y-auto [&>button]:cursor-pointer ${
+          isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+        }`}
+      >
+        <DialogHeader>
+          <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
+            <RouteIcon size={18} /> Distance-Based Fare (LTFRB)
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className={`text-xs font-semibold ${muted}`}>Origin</Label>
+              <Input
+                value={originName}
+                onChange={(e) => setOriginName(e.target.value)}
+                placeholder="e.g. Calbayog"
+                className={inputCls}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={`text-xs font-semibold ${muted}`}>Destination</Label>
+              <Input
+                value={destName}
+                onChange={(e) => setDestName(e.target.value)}
+                placeholder="e.g. Tacloban"
+                className={inputCls}
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={findPlaces}
+              disabled={busy}
+              className="cursor-pointer"
+            >
+              <Search className="w-3.5 h-3.5 mr-1" /> Find on map
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={calculate}
+              disabled={busy || !originPt || !destPt}
+              className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+            >
+              {busy ? "Working..." : "Calculate distance & fare"}
+            </Button>
+          </div>
+
+          <p className={`text-xs ${muted}`}>
+            Tip: you can also click the map to drop pin A (origin) then B (destination), and drag pins to adjust.
+          </p>
+
+          <div
+            ref={setMapEl}
+            className="w-full h-64 rounded-lg border overflow-hidden z-0"
+            style={{ borderColor: isDark ? "#1e293b" : "#e2e8f0" }}
+          />
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <Label className={`text-xs font-semibold ${muted}`}>Base fare (₱)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={baseFare}
+                onChange={(e) => setBaseFare(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={`text-xs font-semibold ${muted}`}>Base distance (km)</Label>
+              <Input
+                type="number"
+                step="0.1"
+                min="0"
+                value={baseKm}
+                onChange={(e) => setBaseKm(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={`text-xs font-semibold ${muted}`}>Rate / extra km (₱)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+          </div>
+
+          {error && <p className="text-xs text-red-500">{error}</p>}
+
+          {distanceKm != null && fare != null && (
+            <div
+              className={`rounded-lg border p-3 text-sm space-y-1 ${
+                isDark ? "bg-blue-950/30 border-blue-900" : "bg-blue-50 border-blue-100"
+              }`}
+            >
+              <p className="font-semibold">
+                {originName} → {destName}: {distanceKm.toFixed(1)} km {isEstimate && "(straight-line estimate)"}
+              </p>
+              <p className={muted}>
+                ₱{parseFloat(baseFare).toFixed(2)} + ({excessKm.toFixed(1)} km × ₱{parseFloat(rate).toFixed(2)}) ={" "}
+                <span className="font-bold text-emerald-500 text-base">₱{fare.toFixed(2)}</span>
+              </p>
+              {isEstimate && (
+                <p className="text-xs text-amber-500">
+                  Road routing was unavailable, so this uses straight-line distance and may be lower than the real fare.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div
+            className={`flex items-center gap-3 p-3 border rounded-lg ${
+              isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"
+            }`}
+          >
+            <Checkbox
+              id="dist-vice-versa"
+              checked={viceVersa}
+              onCheckedChange={(v) => setViceVersa(!!v)}
+              className="cursor-pointer"
+            />
+            <Label htmlFor="dist-vice-versa" className="cursor-pointer flex items-center gap-1 font-medium">
+              <ArrowLeftRight className="w-3.5 h-3.5" /> Also create the return direction at the same fare
+            </Label>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            className={`cursor-pointer bg-transparent hover:bg-transparent ${muted}`}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="outline"
+            disabled={!canSave || saving}
+            onClick={() => submit(false)}
+            className="cursor-pointer disabled:cursor-not-allowed"
+          >
+            {saving ? "Saving..." : "Save route"}
+          </Button>
+          <Button
+            disabled={!canSave || saving}
+            onClick={() => submit(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer disabled:cursor-not-allowed"
+          >
+            Save & Activate
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function FareMatrixPage() {
   const { isDark } = useTheme();
   const { user } = useAuth(); // ⬅️ NEW: current logged-in admin
@@ -153,6 +634,10 @@ export default function FareMatrixPage() {
   const [originalEditForm, setOriginalEditForm] = useState(editForm);
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  // 🗺️ NEW: distance-fare dialog state
+  const [showDistance, setShowDistance] = useState(false);
+  const [savingDistance, setSavingDistance] = useState(false);
 
   // ✅ Activate-with-device modal state
   const [activateRoute, setActivateRoute] = useState<any>(null);
@@ -428,6 +913,59 @@ export default function FareMatrixPage() {
     fetchActiveDevices(route.id);
   };
 
+  // 🗺️ NEW: Save a route computed by the distance-fare dialog. Creates the
+  // route (or updates its fare if it already exists), optionally the return
+  // direction too, then — if requested — chains into the device-selection
+  // modal so the admin can activate it right away.
+  const handleDistanceSave = async (p: DistanceFareSavePayload) => {
+    // 🔒 Guard
+    if (blockIfViewOnly()) return;
+
+    setSavingDistance(true);
+    try {
+      const upsert = async (origin: string, destination: string) => {
+        const existing = Array.isArray(routes)
+          ? routes.find((r) => r.origin === origin && r.destination === destination)
+          : null;
+        if (existing) {
+          await updateMutation.mutateAsync({
+            id: existing.id,
+            data: { origin, destination, fareAmount: p.fareAmount },
+          });
+        } else {
+          await createMutation.mutateAsync({
+            data: { origin, destination, fareAmount: p.fareAmount },
+          });
+        }
+      };
+
+      await upsert(p.origin, p.destination);
+      if (p.viceVersa && p.origin !== p.destination) {
+        await upsert(p.destination, p.origin);
+      }
+
+      // Reload so we have the saved row (with its id) before activating
+      const fresh = await refetchRoutes();
+      const list: any[] = Array.isArray(fresh.data) ? fresh.data : [];
+      const saved = list.find(
+        (r) => r.origin === p.origin && r.destination === p.destination
+      );
+
+      setShowDistance(false);
+      toast({
+        title: <SuccessTitle text={`Route Saved — ₱${p.fareAmount.toFixed(2)}`} />,
+      });
+
+      // The vice-versa route is activated automatically by confirmActivate
+      // (findReverseRoute), same as any other route.
+      if (p.activate && saved) openActivateModal(saved);
+    } catch {
+      toast({ title: "Failed to save route", variant: "destructive" });
+    } finally {
+      setSavingDistance(false);
+    }
+  };
+
   // ✅ FIXED: activate now goes through a single SECURITY DEFINER Postgres
   // RPC function (`activate_route`) instead of calling the toggle-route API
   // and then separately writing device_id via the client. The old two-step
@@ -671,6 +1209,19 @@ export default function FareMatrixPage() {
               <Zap className="text-blue-500" size={16} />
               <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
             </div>
+
+            {/* 🗺️ NEW: Distance Fare button — makikita lang kapag may permission */}
+            {loaded && canManage && (
+              <Button
+                variant="outline"
+                onClick={() => setShowDistance(true)}
+                data-testid="button-distance-fare"
+                className="font-semibold cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                <RouteIcon className="w-4 h-4 mr-2" />
+                Distance Fare
+              </Button>
+            )}
 
             {/* 🔒 Add Route button — makikita lang kapag loaded na at may permission (hindi view_only) */}
             {loaded && canManage && (
@@ -992,6 +1543,16 @@ export default function FareMatrixPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* 🗺️ NEW: Distance-based fare dialog (Leaflet + OSRM + LTFRB formula)
+          🔒 `open` naka-gate sa canManage */}
+      <DistanceFareDialog
+        open={canManage && showDistance}
+        onOpenChange={setShowDistance}
+        isDark={isDark}
+        saving={savingDistance}
+        onSave={handleDistanceSave}
+      />
 
       {/* Add Route Dialog
           🔒 `open` naka-gate sa canManage — hindi kailanman magbubukas kapag view_only */}
