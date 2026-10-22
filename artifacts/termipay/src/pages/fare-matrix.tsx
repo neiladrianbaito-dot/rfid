@@ -194,12 +194,12 @@ const mapPin = (color: string, label: string) =>
     iconAnchor: [13, 13],
   });
 
+// ✅ CHANGED: removed `activate` — the dialog now only saves the route.
 type DistanceFareSavePayload = {
   origin: string;
   destination: string;
   fareAmount: number;
   viceVersa: boolean;
-  activate: boolean;
 };
 
 type DistanceFareDialogProps = {
@@ -415,14 +415,14 @@ function DistanceFareDialog({
 
   const canSave = fare != null && fare > 0 && originName.trim() && destName.trim();
 
-  const submit = (activate: boolean) => {
+  // ✅ CHANGED: no more `activate` argument — just saves the route.
+  const submit = () => {
     if (!canSave || fare == null) return;
     onSave({
       origin: originName.trim(),
       destination: destName.trim(),
       fareAmount: fare,
       viceVersa,
-      activate,
     });
   };
 
@@ -574,6 +574,8 @@ function DistanceFareDialog({
           </div>
         </div>
 
+        {/* ✅ CHANGED: green "Save & Activate" button removed. "Save route" is
+            now the single (primary) save action. */}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button
             variant="ghost"
@@ -583,19 +585,11 @@ function DistanceFareDialog({
             Cancel
           </Button>
           <Button
-            variant="outline"
             disabled={!canSave || saving}
-            onClick={() => submit(false)}
-            className="cursor-pointer disabled:cursor-not-allowed"
+            onClick={submit}
+            className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed"
           >
             {saving ? "Saving..." : "Save route"}
-          </Button>
-          <Button
-            disabled={!canSave || saving}
-            onClick={() => submit(true)}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer disabled:cursor-not-allowed"
-          >
-            Save & Activate
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -913,10 +907,10 @@ export default function FareMatrixPage() {
     fetchActiveDevices(route.id);
   };
 
-  // 🗺️ NEW: Save a route computed by the distance-fare dialog. Creates the
-  // route (or updates its fare if it already exists), optionally the return
-  // direction too, then — if requested — chains into the device-selection
-  // modal so the admin can activate it right away.
+  // ✅ CHANGED: Save a route computed by the distance-fare dialog. Creates the
+  // route (or updates its fare if it already exists), plus the return
+  // direction if requested. It no longer opens the activation modal —
+  // activation is done separately from the table's Activate button.
   const handleDistanceSave = async (p: DistanceFareSavePayload) => {
     // 🔒 Guard
     if (blockIfViewOnly()) return;
@@ -944,21 +938,12 @@ export default function FareMatrixPage() {
         await upsert(p.destination, p.origin);
       }
 
-      // Reload so we have the saved row (with its id) before activating
-      const fresh = await refetchRoutes();
-      const list: any[] = Array.isArray(fresh.data) ? fresh.data : [];
-      const saved = list.find(
-        (r) => r.origin === p.origin && r.destination === p.destination
-      );
+      queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
 
       setShowDistance(false);
       toast({
         title: <SuccessTitle text={`Route Saved — ₱${p.fareAmount.toFixed(2)}`} />,
       });
-
-      // The vice-versa route is activated automatically by confirmActivate
-      // (findReverseRoute), same as any other route.
-      if (p.activate && saved) openActivateModal(saved);
     } catch {
       toast({ title: "Failed to save route", variant: "destructive" });
     } finally {
