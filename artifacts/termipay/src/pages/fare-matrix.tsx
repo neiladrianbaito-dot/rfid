@@ -385,6 +385,10 @@ function DistanceFareDialog({
     }
   };
 
+  // ✅ FIXED: "Calculate" no longer calls map.fitBounds(). Before, it re-zoomed
+  // and re-panned the map after every calculation, which made the Origin and
+  // Destination pins look like they "moved". Now the map view and the pins stay
+  // exactly where they were — only the blue route line is drawn on top.
   const calculate = async () => {
     if (!originPt || !destPt) {
       setError("Set both pins first (search places or click the map).");
@@ -393,27 +397,33 @@ function DistanceFareDialog({
     setError(null);
     setBusy(true);
     try {
-      const r = await roadRoute(originPt, destPt).catch(() => null);
+      // Snapshot the pins so they can't change mid-calculation.
+      const o = { ...originPt };
+      const d = { ...destPt };
+
+      const r = await roadRoute(o, d).catch(() => null);
       const map = mapRef.current;
+
+      // Remove any previous route line first.
+      routeLine.current?.remove();
+      routeLine.current = null;
+
       if (r) {
         setDistanceKm(r.km);
         setIsEstimate(false);
         if (map) {
-          routeLine.current?.remove();
-          routeLine.current = L.polyline(r.coords, { color: "#2563eb", weight: 5 }).addTo(map);
-          map.fitBounds(routeLine.current.getBounds(), { padding: [30, 30] });
+          // Draw the road route only — NO fitBounds, so the view/pins don't move.
+          routeLine.current = L.polyline(r.coords, {
+            color: "#2563eb",
+            weight: 5,
+            interactive: false, // clicks on the line won't be swallowed / won't move pins
+          }).addTo(map);
         }
       } else {
-        // Fallback: straight-line distance (underestimates road distance)
-        setDistanceKm(haversineKm(originPt, destPt));
+        // Fallback: straight-line distance (underestimates road distance).
+        setDistanceKm(haversineKm(o, d));
         setIsEstimate(true);
-        map?.fitBounds(
-          [
-            [originPt.lat, originPt.lng],
-            [destPt.lat, destPt.lng],
-          ],
-          { padding: [40, 40] }
-        );
+        // Also NO fitBounds here — pins stay put.
       }
     } finally {
       setBusy(false);
