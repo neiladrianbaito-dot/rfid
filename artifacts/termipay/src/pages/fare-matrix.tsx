@@ -186,12 +186,18 @@ async function roadRoute(
   };
 }
 
+// ✅ CHANGED: markers now show the words "Origin" / "Destination" (a label
+// pill with a little pointer underneath) instead of the letters "A" / "B".
+// The bottom tip of the pointer sits exactly on the pin's coordinates.
 const mapPin = (color: string, label: string) =>
   L.divIcon({
     className: "",
-    html: `<div style="background:${color};color:#fff;width:26px;height:26px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font:700 12px sans-serif">${label}</div>`,
-    iconSize: [26, 26],
-    iconAnchor: [13, 13],
+    html: `<div style="width:100%;display:flex;flex-direction:column;align-items:center;">
+      <div style="background:${color};color:#fff;padding:3px 10px;border-radius:999px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);font:700 11px sans-serif;white-space:nowrap;line-height:1.2;">${label}</div>
+      <div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:9px solid ${color};margin-top:-1px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.3));"></div>
+    </div>`,
+    iconSize: [100, 34],
+    iconAnchor: [50, 34],
   });
 
 // ✅ CHANGED: removed `activate` — the dialog now only saves the route.
@@ -275,7 +281,7 @@ function DistanceFareDialog({
     };
   }, [mapEl]);
 
-  // Click on map: first click sets Origin (A), later clicks set Destination (B)
+  // Click on map: first click sets Origin, later clicks set Destination
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -322,8 +328,9 @@ function DistanceFareDialog({
       }
     };
 
-    sync(originMarker, originPt, "#2563eb", "A", setOriginPt);
-    sync(destMarker, destPt, "#059669", "B", setDestPt);
+    // ✅ CHANGED: labels are now "Origin" and "Destination" (was "A" / "B")
+    sync(originMarker, originPt, "#2563eb", "Origin", setOriginPt);
+    sync(destMarker, destPt, "#059669", "Destination", setDestPt);
   }, [originPt, destPt, mapEl]);
 
   // Any point change invalidates the previous calculation
@@ -489,7 +496,7 @@ function DistanceFareDialog({
           </div>
 
           <p className={`text-xs ${muted}`}>
-            Tip: you can also click the map to drop pin A (origin) then B (destination), and drag pins to adjust.
+            Tip: you can also click the map to drop the Origin pin first, then the Destination pin, and drag the pins to adjust.
           </p>
 
           <div
