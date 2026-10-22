@@ -659,10 +659,6 @@ export default function FareMatrixPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // 🗑️ NEW: when true, the delete mutation won't show its "Route Deleted"
-  // toast (used when replacing old routes during a Distance Fare save).
-  const silentDeleteRef = useRef(false);
-
   // 🔒 Safety guard helper — ginagamit sa lahat ng Add/Edit/Delete/Activate/
   // Deactivate handlers. Kapag view_only, magpapakita ng toast at ibabalik
   // ang `true` para mag-early return ang caller. Proteksyon ito kahit
@@ -842,10 +838,7 @@ export default function FareMatrixPage() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
-        // 🗑️ Skip the toast when we're replacing routes from Distance Fare
-        if (!silentDeleteRef.current) {
-          toast({ title: <SuccessTitle text="Route Deleted Successfully" /> });
-        }
+        toast({ title: <SuccessTitle text="Route Deleted Successfully" /> });
       },
     },
   });
@@ -920,71 +913,55 @@ export default function FareMatrixPage() {
     fetchActiveDevices(route.id);
   };
 
-  // 🗺️ UPDATED: Save a route computed by the distance-fare dialog.
-  // If a route with the same origin → destination already exists (and its
-  // reverse, when "vice versa" is checked), the OLD record is deleted first
-  // and a fresh one is created with the new distance-based fare. If the old
-  // record was active, it is deactivated first so its reader device is freed.
-  // Then — if requested — chains into the device-selection modal so the admin
-  // can activate the new route right away.
+  // 🗺️ NEW: Save a route computed by the distance-fare dialog. Creates the
+  // route (or updates its fare if it already exists), optionally the return
+  // direction too, then — if requested — chains into the device-selection
+  // modal so the admin can activate it right away.
   const handleDistanceSave = async (p: DistanceFareSavePayload) => {
     // 🔒 Guard
     if (blockIfViewOnly()) return;
 
     setSavingDistance(true);
-    silentDeleteRef.current = true;
-
     try {
-      const same = (a: string, b: string) =>
-        a.trim().toLowerCase() === b.trim().toLowerCase();
-
-      const replaceRoute = async (origin: string, destination: string) => {
-        const olds = Array.isArray(routes)
-          ? routes.filter((r) => same(r.origin, origin) && same(r.destination, destination))
-          : [];
-
-        for (const old of olds) {
-          // Free the reader device first if the old record was active
-          if (old.isActive) {
-            const { error } = await supabase.rpc("deactivate_route", {
-              p_route_id: old.id,
-              p_actor: actorUsername,
-            });
-            if (error) throw error;
-          }
-          await deleteMutation.mutateAsync({ id: old.id });
+      const upsert = async (origin: string, destination: string) => {
+        const existing = Array.isArray(routes)
+          ? routes.find((r) => r.origin === origin && r.destination === destination)
+          : null;
+        if (existing) {
+          await updateMutation.mutateAsync({
+            id: existing.id,
+            data: { origin, destination, fareAmount: p.fareAmount },
+          });
+        } else {
+          await createMutation.mutateAsync({
+            data: { origin, destination, fareAmount: p.fareAmount },
+          });
         }
-
-        await createMutation.mutateAsync({
-          data: { origin, destination, fareAmount: p.fareAmount },
-        });
       };
 
-      await replaceRoute(p.origin, p.destination);
-      if (p.viceVersa && !same(p.origin, p.destination)) {
-        await replaceRoute(p.destination, p.origin);
+      await upsert(p.origin, p.destination);
+      if (p.viceVersa && p.origin !== p.destination) {
+        await upsert(p.destination, p.origin);
       }
 
-      // Reload so we have the new row (with its id) before activating
+      // Reload so we have the saved row (with its id) before activating
       const fresh = await refetchRoutes();
       const list: any[] = Array.isArray(fresh.data) ? fresh.data : [];
       const saved = list.find(
-        (r) => same(r.origin, p.origin) && same(r.destination, p.destination)
+        (r) => r.origin === p.origin && r.destination === p.destination
       );
 
       setShowDistance(false);
       toast({
-        title: <SuccessTitle text={`Route Replaced — ₱${p.fareAmount.toFixed(2)}`} />,
+        title: <SuccessTitle text={`Route Saved — ₱${p.fareAmount.toFixed(2)}`} />,
       });
 
       // The vice-versa route is activated automatically by confirmActivate
       // (findReverseRoute), same as any other route.
       if (p.activate && saved) openActivateModal(saved);
-    } catch (err) {
-      console.error("handleDistanceSave error:", err);
+    } catch {
       toast({ title: "Failed to save route", variant: "destructive" });
     } finally {
-      silentDeleteRef.current = false;
       setSavingDistance(false);
     }
   };
