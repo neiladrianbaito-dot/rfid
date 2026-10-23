@@ -7,10 +7,10 @@ import {
   getListRoutesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import L from "leaflet"; // 🗺️ NEW: npm i leaflet && npm i -D @types/leaflet
-import "leaflet/dist/leaflet.css"; // 🗺️ NEW
+import L from "leaflet"; // npm i leaflet && npm i -D @types/leaflet
+import "leaflet/dist/leaflet.css";
 import { supabase } from "@/lib/supabase"; // 👈 adjust to your actual supabase client path
-import { useAuth } from "@/hooks/use-auth"; // ⬅️ NEW: for the current admin's username
+import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -56,7 +56,8 @@ import {
   Cpu,
   Wifi,
   WifiOff,
-  Route as RouteIcon, // 🗺️ NEW
+  Route as RouteIcon,
+  Loader2,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -69,36 +70,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
-
-// 🔒 ADMIN ACCESS: nagbibigay ng `canManage` (false kapag view_only ang admin)
-// at `loaded` (true kapag tapos na ma-fetch ang access info).
 import { useAdminAccess } from "@/hooks/use-admin-access";
-
-const CALBAYOG_BARANGAYS = [
-  "Bugtong",
-  "Tinaplacan",
-  "Malaga",
-  "Cag-Manipis",
-  "Malayog",
-  "Peña",
-  "Cag-Olango",
-  "Cagnipa",
-  "San Joaquin",
-  "Baay",
-  "Binaliw",
-  "Manginoo",
-  "Bantian",
-  "Marcatubig",
-  "Malajog",
-  "Malopalo",
-  "Tinambacan",
-  "Amampacang",
-  "Lonoy",
-  "Sabang",
-  "Talahid",
-];
-
-const DEFAULT_DESTINATION = "Calbayog";
 
 // ✅ Small helper so the toast title shows a green check icon next to the text
 function SuccessTitle({ text }: { text: string }) {
@@ -111,7 +83,6 @@ function SuccessTitle({ text }: { text: string }) {
 }
 
 // ✅ Device type coming from Supabase `devices` table
-// NOTE: `location` column removed — it does not exist on this table.
 type Device = {
   device_id: string;
   name: string;
@@ -120,17 +91,312 @@ type Device = {
   firmware_version: string | null;
   last_ping: string | null;
   created_at: string;
-  // updated_at removed — column does not exist on this table
 };
+
+/* ═══════════════════════════════════════════════════════════════════════
+   📍 PSGC PLACES — Samar Island only
+   (Samar, Northern Samar, Eastern Samar)
+   Source: PSGC API  https://psgc.gitlab.io/api
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const PSGC = "https://psgc.gitlab.io/api";
+
+type Place = {
+  code: string;
+  label: string; // what gets typed/saved: "Bugtong, Calbayog City" or "Calbayog City"
+  kind: "barangay" | "city" | "municipality";
+  barangay?: string; // barangay name only (for barangay kind)
+  municipality: string; // city/municipality name
+  province: string;
+};
+
+async function getJson<T = any>(url: string): Promise<T> {
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`PSGC request failed: ${res.status}`);
+  return res.json();
+}
+
+const isCityName = (name: string) => /^city of\s+/i.test(name) || /\scity$/i.test(name);
+
+// "City of Calbayog" -> "Calbayog City"
+const cleanMuniName = (name: string) =>
+  /^city of\s+/i.test(name) ? `${name.replace(/^city of\s+/i, "").trim()} City` : name.trim();
+
+async function fetchSamarPlaces(): Promise<Place[]> {
+  const allProvinces = await getJson<any[]>(`${PSGC}/provinces.json`);
+  // Samar, Northern Samar, Eastern Samar  (Biliran is a separate island → excluded)
+  const provinces = allProvinces.filter((p) => /samar/i.test(p.name));
+
+  const out: Place[] = [];
+
+  await Promise.all(
+    provinces.map(async (prov) => {
+      const provName: string = prov.name;
+      const munis = await getJson<any[]>(`${PSGC}/provinces/${prov.code}/cities-municipalities.json`);
+
+      const muniMap = new Map<string, string>(); // code -> clean name
+      munis.forEach((m) => {
+        const name = cleanMuniName(m.name);
+        muniMap.set(m.code, name);
+        out.push({
+          code: m.code,
+          label: name,
+          kind: isCityName(m.name) ? "city" : "municipality",
+          municipality: name,
+          province: provName,
+        });
+      });
+
+      const pushBarangays = (brgys: any[], forcedMuniCode?: string) => {
+        brgys.forEach((b) => {
+          const muniCode: string =
+            forcedMuniCode ||
+            b.cityCode ||
+            b.municipalityCode ||
+            `${String(b.code).slice(0, 7)}000`;
+          const muniName = muniMap.get(muniCode);
+          if (!muniName) return;
+          out.push({
+            code: b.code,
+            label: `${b.name}, ${muniName}`,
+            kind: "barangay",
+            barangay: b.name,
+            municipality: muniName,
+            province: provName,
+          });
+        });
+      };
+
+      try {
+        // One request per province
+        const brgys = await getJson<any[]>(`${PSGC}/provinces/${prov.code}/barangays.json`);
+        pushBarangays(brgys);
+      } catch {
+        // Fallback: one request per city/municipality
+        await Promise.all(
+          munis.map(async (m) => {
+            try {
+              const brgys = await getJson<any[]>(`${PSGC}/cities-municipalities/${m.code}/barangays.json`);
+              pushBarangays(brgys, m.code);
+            } catch {
+              /* skip this municipality */
+            }
+          })
+        );
+      }
+    })
+  );
+
+  return out.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// Module-level cache so the list is only downloaded once per page load.
+let placesPromise: Promise<Place[]> | null = null;
+function loadSamarPlaces() {
+  if (!placesPromise) {
+    placesPromise = fetchSamarPlaces().catch((e) => {
+      placesPromise = null; // allow retry next time
+      throw e;
+    });
+  }
+  return placesPromise;
+}
+
+function useSamarPlaces() {
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    loadSamarPlaces()
+      .then((p) => {
+        if (!cancelled) {
+          setPlaces(p);
+          setError(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError("Couldn't load the Samar places list. Check your connection.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { places, loading, error };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   🔎 PlaceCombobox — type to search, pick from the dropdown list
+   ═══════════════════════════════════════════════════════════════════════ */
+
+type PlaceComboboxProps = {
+  value: string;
+  onChange: (text: string, place: Place | null) => void;
+  places: Place[];
+  loading: boolean;
+  placeholder?: string;
+  isDark: boolean;
+  className?: string;
+  testId?: string;
+};
+
+function PlaceCombobox({
+  value,
+  onChange,
+  places,
+  loading,
+  placeholder,
+  isDark,
+  className,
+  testId,
+}: PlaceComboboxProps) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const results = useMemo(() => {
+    const q = value.trim().toLowerCase();
+    if (!q) {
+      // No text yet → show cities & municipalities first
+      return places.filter((p) => p.kind !== "barangay").slice(0, 60);
+    }
+    const matches = places.filter((p) => `${p.label} ${p.province}`.toLowerCase().includes(q));
+    matches.sort((a, b) => {
+      const as = a.label.toLowerCase().startsWith(q) ? 0 : 1;
+      const bs = b.label.toLowerCase().startsWith(q) ? 0 : 1;
+      if (as !== bs) return as - bs;
+      return a.label.localeCompare(b.label);
+    });
+    return matches.slice(0, 60);
+  }, [value, places]);
+
+  useEffect(() => {
+    setActive(0);
+  }, [value]);
+
+  // keep the highlighted item in view
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  const pick = (p: Place) => {
+    onChange(p.label, p);
+    setOpen(false);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      setOpen(true);
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((i) => Math.min(i + 1, results.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      if (open && results[active]) {
+        e.preventDefault();
+        pick(results[active]);
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+    }
+  };
+
+  const kindLabel = (k: Place["kind"]) =>
+    k === "barangay" ? "Barangay" : k === "city" ? "City" : "Municipality";
+
+  return (
+    <div className="relative">
+      <Input
+        data-testid={testId}
+        value={value}
+        placeholder={placeholder}
+        autoComplete="off"
+        onChange={(e) => {
+          onChange(e.target.value, null);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={onKeyDown}
+        className={className}
+      />
+
+      {open && (
+        <div
+          ref={listRef}
+          className={`absolute z-50 mt-1 w-full max-h-60 overflow-y-auto rounded-md border shadow-lg ${
+            isDark ? "bg-slate-900 border-slate-700 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+          }`}
+        >
+          {loading ? (
+            <div className="flex items-center gap-2 px-3 py-3 text-xs text-slate-500">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading Samar places...
+            </div>
+          ) : results.length === 0 ? (
+            <div className="px-3 py-3 text-xs text-slate-500">No matching place in Samar Island</div>
+          ) : (
+            results.map((p, i) => (
+              <div
+                key={p.code}
+                data-idx={i}
+                // onMouseDown fires before the input's onBlur, so the click isn't lost
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(p);
+                }}
+                onMouseEnter={() => setActive(i)}
+                className={`flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer ${
+                  i === active ? (isDark ? "bg-slate-800" : "bg-blue-50") : ""
+                }`}
+              >
+                <div className="min-w-0">
+                  <p className="font-medium truncate">{p.label}</p>
+                  <p className={`text-[11px] truncate ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    {p.kind === "barangay" ? `${p.municipality}, ` : ""}
+                    {p.province}
+                  </p>
+                </div>
+                <span
+                  className={`text-[10px] font-semibold uppercase shrink-0 px-1.5 py-0.5 rounded ${
+                    p.kind === "barangay"
+                      ? isDark
+                        ? "bg-slate-800 text-slate-400"
+                        : "bg-slate-100 text-slate-500"
+                      : isDark
+                        ? "bg-blue-950/60 text-blue-400"
+                        : "bg-blue-50 text-blue-600"
+                  }`}
+                >
+                  {kindLabel(p.kind)}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ═══════════════════════════════════════════════════════════════════════
    🗺️ DISTANCE-BASED FARE (LTFRB: Base Fare + Succeeding Distance)
    Total Fare = Base Fare + max(0, Distance − Base Distance) × Succeeding Rate
    ═══════════════════════════════════════════════════════════════════════ */
 
-const DEFAULT_BASE_FARE = 15; // ₱ for the first BASE_KM
+const DEFAULT_BASE_FARE = 15;
 const DEFAULT_BASE_KM = 4;
-const DEFAULT_RATE = 2.2; // ₱ per succeeding km
+const DEFAULT_RATE = 2.2;
 
 type LatLng = { lat: number; lng: number };
 
@@ -167,6 +433,19 @@ async function geocode(query: string): Promise<LatLng | null> {
   return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Geocode a PSGC place. For barangays: try "Barangay, Municipality, Province"
+// first, then fall back to the municipality itself.
+async function geocodePlace(p: Place): Promise<LatLng | null> {
+  if (p.kind === "barangay" && p.barangay) {
+    const hit = await geocode(`${p.barangay}, ${p.municipality}, ${p.province}, Philippines`);
+    if (hit) return hit;
+    await sleep(1100);
+  }
+  return geocode(`${p.municipality}, ${p.province}, Philippines`);
+}
+
 // OSRM public demo server — real road distance + route geometry.
 async function roadRoute(
   a: LatLng,
@@ -184,9 +463,6 @@ async function roadRoute(
   };
 }
 
-// Markers show the words "Origin" / "Destination" (a label pill with a little
-// pointer underneath). The bottom tip of the pointer sits exactly on the
-// pin's coordinates.
 const mapPin = (color: string, label: string) =>
   L.divIcon({
     className: "",
@@ -198,7 +474,6 @@ const mapPin = (color: string, label: string) =>
     iconAnchor: [50, 34],
   });
 
-// ✅ CHANGED: removed `viceVersa` — the dialog now saves only the one route.
 type DistanceFareSavePayload = {
   origin: string;
   destination: string;
@@ -211,6 +486,9 @@ type DistanceFareDialogProps = {
   isDark: boolean;
   saving: boolean;
   onSave: (payload: DistanceFareSavePayload) => Promise<void>;
+  places: Place[];
+  placesLoading: boolean;
+  placesError: string | null;
 };
 
 function DistanceFareDialog({
@@ -219,9 +497,16 @@ function DistanceFareDialog({
   isDark,
   saving,
   onSave,
+  places,
+  placesLoading,
+  placesError,
 }: DistanceFareDialogProps) {
-  const [originName, setOriginName] = useState("Calbayog");
+  // Text in the inputs + the PSGC place actually picked from the list.
+  const [originName, setOriginName] = useState("");
   const [destName, setDestName] = useState("");
+  const [originPlace, setOriginPlace] = useState<Place | null>(null);
+  const [destPlace, setDestPlace] = useState<Place | null>(null);
+
   const [originPt, setOriginPt] = useState<LatLng | null>(null);
   const [destPt, setDestPt] = useState<LatLng | null>(null);
 
@@ -234,10 +519,7 @@ function DistanceFareDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 🔒 Pins are locked as soon as "Find on map" places them (or as soon as
-  // both pins are dropped by clicking the map). There is NO unlock button —
-  // once locked, the pins stay exactly where they are: not draggable, and
-  // map clicks are ignored.
+  // 🔒 Pins lock once "Find on map" places them (or both pins are clicked).
   const [pinsLocked, setPinsLocked] = useState(false);
 
   // Leaflet map plumbing
@@ -247,17 +529,32 @@ function DistanceFareDialog({
   const destMarker = useRef<L.Marker | null>(null);
   const routeLine = useRef<L.Polyline | null>(null);
 
+  // Default origin = Calbayog City (set once, after the places list loads)
+  const defaultedOrigin = useRef(false);
+  useEffect(() => {
+    if (!open || defaultedOrigin.current || places.length === 0) return;
+    const calbayog = places.find((p) => p.kind === "city" && /^calbayog/i.test(p.label));
+    if (calbayog) {
+      setOriginName(calbayog.label);
+      setOriginPlace(calbayog);
+      defaultedOrigin.current = true;
+    }
+  }, [open, places]);
+
   // Reset when the dialog closes
   useEffect(() => {
     if (!open) {
-      setOriginName("Calbayog");
+      setOriginName("");
       setDestName("");
+      setOriginPlace(null);
+      setDestPlace(null);
       setOriginPt(null);
       setDestPt(null);
       setDistanceKm(null);
       setIsEstimate(false);
       setError(null);
-      setPinsLocked(false); // 🔒 fresh start next time the dialog opens
+      setPinsLocked(false);
+      defaultedOrigin.current = false;
     }
   }, [open]);
 
@@ -265,15 +562,14 @@ function DistanceFareDialog({
   useEffect(() => {
     if (!mapEl) return;
     const map = L.map(mapEl, {
-      center: [11.65, 124.8],
+      center: [11.65, 125.0], // Samar Island
       zoom: 8,
-      attributionControl: false, // 👈 hides the "Leaflet | © OpenStreetMap" watermark
+      attributionControl: false,
     });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
     }).addTo(map);
     mapRef.current = map;
-    // Dialog animates in — recalc size so tiles fill the container.
     const t = setTimeout(() => map.invalidateSize(), 250);
 
     return () => {
@@ -286,20 +582,18 @@ function DistanceFareDialog({
     };
   }, [mapEl]);
 
-  // Click on map: first click sets Origin, second click sets Destination.
-  // When pins are locked, map clicks do nothing. Dropping the Destination
-  // pin (the second click) locks both pins.
+  // Click on map: first click = Origin, second click = Destination (then locks).
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const onClick = (e: L.LeafletMouseEvent) => {
-      if (pinsLocked) return; // 🔒 locked — ignore clicks
+      if (pinsLocked) return;
       const pt = { lat: e.latlng.lat, lng: e.latlng.lng };
       if (!originPt) {
         setOriginPt(pt);
       } else {
         setDestPt(pt);
-        setPinsLocked(true); // 🔒 both pins are now set → lock them
+        setPinsLocked(true);
       }
     };
     map.on("click", onClick);
@@ -309,7 +603,6 @@ function DistanceFareDialog({
   }, [mapEl, originPt, pinsLocked]);
 
   // Keep markers in sync with state.
-  // 🔒 Markers are only draggable while pins are NOT locked.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -340,7 +633,6 @@ function DistanceFareDialog({
         ref.current.setLatLng([pt.lat, pt.lng]);
       }
 
-      // 🔒 enable / disable dragging on the existing marker
       const marker = ref.current;
       if (marker?.dragging) {
         if (pinsLocked) marker.dragging.disable();
@@ -371,27 +663,27 @@ function DistanceFareDialog({
   const excessKm =
     distanceKm != null ? Math.max(0, distanceKm - (parseFloat(baseKm) || 0)) : 0;
 
-  // 🔒 After "Find on map" places the pins, they are LOCKED.
+  // "Find on map" → geocodes the two PSGC places and locks the pins there.
   const findPlaces = async () => {
     setError(null);
-    if (!originName.trim() || !destName.trim()) {
-      setError("Enter both an origin and a destination.");
+    if (!originPlace || !destPlace) {
+      setError("Pick both the origin and the destination from the list (Samar Island only).");
       return;
     }
     setBusy(true);
     try {
-      const o = await geocode(`${originName.trim()}, Philippines`);
-      await new Promise((r) => setTimeout(r, 1100)); // respect Nominatim rate limit
-      const d = await geocode(`${destName.trim()}, Philippines`);
+      const o = await geocodePlace(originPlace);
+      await sleep(1100); // respect Nominatim rate limit
+      const d = await geocodePlace(destPlace);
       if (!o || !d) {
         setError(
-          "Couldn't find one of the places. Try a more specific name, or click the map to place pins."
+          "Couldn't locate one of the places on the map. Click the map to place the pins manually."
         );
         return;
       }
       setOriginPt(o);
       setDestPt(d);
-      setPinsLocked(true); // 🔒 pins stay exactly where Find on map put them
+      setPinsLocked(true);
       mapRef.current?.fitBounds(
         [
           [o.lat, o.lng],
@@ -406,24 +698,20 @@ function DistanceFareDialog({
     }
   };
 
-  // "Calculate" does not call map.fitBounds() and does not touch the pins —
-  // only the blue route line is drawn on top.
   const calculate = async () => {
     if (!originPt || !destPt) {
-      setError("Set both pins first (search places or click the map).");
+      setError("Set both pins first (Find on map, or click the map).");
       return;
     }
     setError(null);
     setBusy(true);
     try {
-      // Snapshot the pins so they can't change mid-calculation.
       const o = { ...originPt };
       const d = { ...destPt };
 
       const r = await roadRoute(o, d).catch(() => null);
       const map = mapRef.current;
 
-      // Remove any previous route line first.
       routeLine.current?.remove();
       routeLine.current = null;
 
@@ -434,11 +722,10 @@ function DistanceFareDialog({
           routeLine.current = L.polyline(r.coords, {
             color: "#2563eb",
             weight: 5,
-            interactive: false, // clicks on the line won't be swallowed / won't move pins
+            interactive: false,
           }).addTo(map);
         }
       } else {
-        // Fallback: straight-line distance (underestimates road distance).
         setDistanceKm(haversineKm(o, d));
         setIsEstimate(true);
       }
@@ -447,14 +734,14 @@ function DistanceFareDialog({
     }
   };
 
-  const canSave = fare != null && fare > 0 && originName.trim() && destName.trim();
+  // Must pick both places from the PSGC list before saving.
+  const canSave = fare != null && fare > 0 && !!originPlace && !!destPlace;
 
-  // ✅ CHANGED: no more viceVersa — just saves the one route.
   const submit = () => {
-    if (!canSave || fare == null) return;
+    if (!canSave || fare == null || !originPlace || !destPlace) return;
     onSave({
-      origin: originName.trim(),
-      destination: destName.trim(),
+      origin: originPlace.label,
+      destination: destPlace.label,
       fareAmount: fare,
     });
   };
@@ -481,23 +768,42 @@ function DistanceFareDialog({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className={`text-xs font-semibold ${muted}`}>Origin</Label>
-              <Input
+              <PlaceCombobox
                 value={originName}
-                onChange={(e) => setOriginName(e.target.value)}
-                placeholder="e.g. Calbayog"
+                places={places}
+                loading={placesLoading}
+                isDark={isDark}
+                placeholder="Search barangay / city / municipality..."
                 className={inputCls}
+                testId="input-distance-origin"
+                onChange={(text, place) => {
+                  setOriginName(text);
+                  setOriginPlace(place);
+                }}
               />
             </div>
             <div className="space-y-1.5">
               <Label className={`text-xs font-semibold ${muted}`}>Destination</Label>
-              <Input
+              <PlaceCombobox
                 value={destName}
-                onChange={(e) => setDestName(e.target.value)}
-                placeholder="e.g. Tacloban"
+                places={places}
+                loading={placesLoading}
+                isDark={isDark}
+                placeholder="Search barangay / city / municipality..."
                 className={inputCls}
+                testId="input-distance-destination"
+                onChange={(text, place) => {
+                  setDestName(text);
+                  setDestPlace(place);
+                }}
               />
             </div>
           </div>
+
+          {placesError && <p className="text-xs text-red-500">{placesError}</p>}
+          <p className={`text-[11px] ${muted}`}>
+            Samar Island only (Samar, Northern Samar, Eastern Samar). Type to search, then pick from the list.
+          </p>
 
           <div className="flex flex-wrap gap-2">
             <Button
@@ -505,7 +811,7 @@ function DistanceFareDialog({
               variant="outline"
               size="sm"
               onClick={findPlaces}
-              disabled={busy}
+              disabled={busy || !originPlace || !destPlace}
               className="cursor-pointer disabled:cursor-not-allowed"
             >
               <Search className="w-3.5 h-3.5 mr-1" /> Find on map
@@ -521,7 +827,6 @@ function DistanceFareDialog({
             </Button>
           </div>
 
-    
           <div
             ref={setMapEl}
             className="w-full h-64 rounded-lg border overflow-hidden z-0"
@@ -611,16 +916,18 @@ function DistanceFareDialog({
 
 export default function FareMatrixPage() {
   const { isDark } = useTheme();
-  const { user } = useAuth(); // ⬅️ NEW: current logged-in admin
-  // ⬅️ NEW: username to attribute audit log entries to when activating/
-  // deactivating a route (matches GetMeResponse.username from api-zod).
+  const { user } = useAuth();
   const actorUsername = user?.username ?? "unknown";
 
-  // 🔒 ADMIN ACCESS: `canManage` = false kapag view_only.
-  // `loaded` = true kapag tapos na ma-load ang access info.
   const { canManage, loaded } = useAdminAccess();
 
-  // ✅ REMOVED: showAdd + addForm state (Add Route feature removed)
+  // 📍 Samar Island places (PSGC) — shared by Distance Fare + Edit dialogs
+  const {
+    places: samarPlaces,
+    loading: placesLoading,
+    error: placesError,
+  } = useSamarPlaces();
+
   const [searchTerm, setSearchTerm] = useState("");
   const [editRoute, setEditRoute] = useState<any>(null);
   const [deleteRoute, setDeleteRoute] = useState<any>(null);
@@ -629,40 +936,27 @@ export default function FareMatrixPage() {
     destination: "",
     fareAmount: "",
   });
-  // Snapshot of the edit form's values at the moment the dialog opened — used
-  // to detect whether the user actually changed anything before allowing Save.
   const [originalEditForm, setOriginalEditForm] = useState(editForm);
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  // 🗺️ NEW: distance-fare dialog state
   const [showDistance, setShowDistance] = useState(false);
   const [savingDistance, setSavingDistance] = useState(false);
 
-  // ✅ Activate-with-device modal state
   const [activateRoute, setActivateRoute] = useState<any>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
 
-  // ✅ Holds the device rows linked to EACH currently active route, keyed by
-  // route id — fetched live from Supabase, powers the "Reader: ..." badges.
-  // Multiple routes can be active at once (one per reader device).
   const [activeDeviceMap, setActiveDeviceMap] = useState<Record<string, Device | null>>({});
   const [loadingActiveDevices, setLoadingActiveDevices] = useState(false);
 
-  // ✅ Replaces toggleMutation.isPending now that activate/deactivate go
-  // through Supabase RPC calls instead of the generated toggle-route mutation.
   const [isTogglePending, setIsTogglePending] = useState(false);
   const [pendingRouteId, setPendingRouteId] = useState<string | number | null>(null);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // 🔒 Safety guard helper — ginagamit sa lahat ng Edit/Delete/Activate/
-  // Deactivate handlers. Kapag view_only, magpapakita ng toast at ibabalik
-  // ang `true` para mag-early return ang caller. Proteksyon ito kahit
-  // ma-bypass ang UI.
   const blockIfViewOnly = (): boolean => {
     if (canManage) return false;
     toast({
@@ -689,15 +983,8 @@ export default function FareMatrixPage() {
     }
   }, [routes]);
 
-  // ✅ Now supports MULTIPLE simultaneous active routes — one per reader
-  // device. "Active" is no longer exclusive globally; it's exclusive per
-  // device_id (enforced by the activate_route RPC).
   const activeRoutes = Array.isArray(routes) ? routes.filter((r) => r.isActive) : [];
 
-  // ✅ TAB STATE for the "Active Routes" panel — one tab per active route and
-  // a single detail card for whichever tab is selected. Falls back to the
-  // first active route whenever the current selection no longer exists
-  // (e.g. that route just got deactivated).
   const [selectedActiveRouteId, setSelectedActiveRouteId] = useState<string | number | null>(null);
   const activeRouteIdsKey = activeRoutes.map((r) => r.id).join(",");
 
@@ -716,9 +1003,6 @@ export default function FareMatrixPage() {
   const selectedActiveRoute =
     activeRoutes.find((r) => r.id === selectedActiveRouteId) ?? activeRoutes[0] ?? null;
 
-  // ✅ Fetches device info for ALL currently active routes in one go, keyed
-  // by route id. We still go straight to the fare_routes table for device_id
-  // since the generated API client's route object doesn't reliably expose it.
   const activeDeviceRouteIdsRef = useRef<string>("");
 
   const fetchActiveRoutesDevices = async (routeIds: (string | number)[]) => {
@@ -728,8 +1012,6 @@ export default function FareMatrixPage() {
       return;
     }
 
-    // Only flash "Loading..." when the SET of active routes actually changed
-    // (not on every background realtime tick, e.g. devices.last_ping).
     const key = [...routeIds].sort().join(",");
     const isNewSet = activeDeviceRouteIdsRef.current !== key;
     if (isNewSet) setLoadingActiveDevices(true);
@@ -777,7 +1059,6 @@ export default function FareMatrixPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [Array.isArray(routes) ? routes.filter((r) => r.isActive).map((r) => r.id).join(",") : ""]);
 
-  // ✅ Keep the active-route device badges live too (e.g. reflects if a reader goes offline)
   useRealtimeRefetch(["devices"], () => {
     if (activateRoute) {
       fetchActiveDevices(activateRoute.id);
@@ -813,7 +1094,6 @@ export default function FareMatrixPage() {
     return sorted;
   }, [routes, searchTerm]);
 
-  // Still needed: the Distance Fare dialog creates routes through this.
   const createMutation = useCreateRoute({
     mutation: {
       onSuccess: () => {
@@ -842,7 +1122,6 @@ export default function FareMatrixPage() {
   });
 
   const openEdit = (route: any) => {
-    // 🔒 Guard: bawal mag-edit kapag view_only
     if (blockIfViewOnly()) return;
 
     setEditRoute(route);
@@ -855,21 +1134,14 @@ export default function FareMatrixPage() {
     setOriginalEditForm(initial);
   };
 
-  // True only if origin, destination, or fare amount actually differ from
-  // what they were when the Edit dialog opened.
   const hasRouteChanges =
     editForm.origin.trim() !== originalEditForm.origin.trim() ||
     editForm.destination.trim() !== originalEditForm.destination.trim() ||
     editForm.fareAmount.trim() !== originalEditForm.fareAmount.trim();
 
-  // ✅ Fetch active (ONLINE) devices from Supabase, excluding readers that are
-  // already assigned to another active route. Each device can only power one
-  // active route at a time — once that route is deactivated, the device
-  // becomes free and reappears here.
   const fetchActiveDevices = async (excludeRouteId?: string | number) => {
     setLoadingDevices(true);
 
-    // Get device_ids currently in use by OTHER active routes.
     const { data: activeRows, error: activeErr } = await supabase
       .from("fare_routes") // 👈 adjust table name if different
       .select("id, device_id") // 👈 adjust column names if different
@@ -884,7 +1156,7 @@ export default function FareMatrixPage() {
       .select(
         "device_id, name, status, ip_address, firmware_version, last_ping, created_at"
       )
-      .eq("status", "ONLINE") // 👈 matches the actual enum value in the devices table
+      .eq("status", "ONLINE")
       .order("name", { ascending: true });
 
     if (inUseDeviceIds.length > 0) {
@@ -903,7 +1175,6 @@ export default function FareMatrixPage() {
   };
 
   const openActivateModal = (route: any) => {
-    // 🔒 Guard: bawal mag-activate kapag view_only
     if (blockIfViewOnly()) return;
 
     setActivateRoute(route);
@@ -911,11 +1182,7 @@ export default function FareMatrixPage() {
     fetchActiveDevices(route.id);
   };
 
-  // ✅ CHANGED: Save a route computed by the distance-fare dialog. Creates the
-  // route (or updates its fare if it already exists). It no longer creates a
-  // return direction — the vice versa option was removed.
   const handleDistanceSave = async (p: DistanceFareSavePayload) => {
-    // 🔒 Guard
     if (blockIfViewOnly()) return;
 
     setSavingDistance(true);
@@ -948,13 +1215,6 @@ export default function FareMatrixPage() {
     }
   };
 
-  // ✅ Activate goes through a single SECURITY DEFINER Postgres RPC function
-  // (`activate_route`). It runs at the DB level, bypasses RLS, and is atomic.
-  //
-  // ✅ One physical reader sits on one vehicle and taps riders in BOTH
-  // directions. So activating one direction also activates its
-  // reverse-direction counterpart route on the SAME device, if that reverse
-  // route exists.
   const findReverseRoute = (route: any) =>
     Array.isArray(routes)
       ? routes.find(
@@ -966,7 +1226,6 @@ export default function FareMatrixPage() {
       : null;
 
   const confirmActivate = async () => {
-    // 🔒 Guard: bawal mag-confirm ng activation kapag view_only
     if (blockIfViewOnly()) {
       setActivateRoute(null);
       setSelectedDeviceId("");
@@ -983,7 +1242,7 @@ export default function FareMatrixPage() {
     const { error } = await supabase.rpc("activate_route", {
       p_route_id: activateRoute.id,
       p_device_id: selectedDeviceId,
-      p_actor: actorUsername, // ⬅️ NEW: who activated this route
+      p_actor: actorUsername,
     });
 
     if (error) {
@@ -994,14 +1253,11 @@ export default function FareMatrixPage() {
       return;
     }
 
-    // Activate the reverse-direction route too, on the same device. Not
-    // fatal if this one fails — the primary direction is already active —
-    // but we do surface a toast so it isn't silently missed.
     if (reverseRoute) {
       const { error: reverseError } = await supabase.rpc("activate_route", {
         p_route_id: reverseRoute.id,
         p_device_id: selectedDeviceId,
-        p_actor: actorUsername, // ⬅️ NEW: who activated this route
+        p_actor: actorUsername,
       });
       if (reverseError) {
         console.error("activate_route (reverse) error:", reverseError);
@@ -1025,7 +1281,6 @@ export default function FareMatrixPage() {
         : [activateRoute.id]
     );
 
-    // Jump the tab focus to the route that was just activated.
     setSelectedActiveRouteId(activateRoute.id);
 
     setActivateRoute(null);
@@ -1034,11 +1289,7 @@ export default function FareMatrixPage() {
     setPendingRouteId(null);
   };
 
-  // ✅ Deactivate goes through a matching `deactivate_route` RPC function that
-  // also clears device_id. Also deactivates the reverse-direction counterpart
-  // route (same reasoning as activate — one reader serves both directions).
   const handleDeactivate = async (routeId: string | number) => {
-    // 🔒 Guard: bawal mag-deactivate kapag view_only
     if (blockIfViewOnly()) return;
 
     setIsTogglePending(true);
@@ -1049,7 +1300,7 @@ export default function FareMatrixPage() {
 
     const { error } = await supabase.rpc("deactivate_route", {
       p_route_id: routeId,
-      p_actor: actorUsername, // ⬅️ NEW: who deactivated this route
+      p_actor: actorUsername,
     });
 
     if (error) {
@@ -1063,7 +1314,7 @@ export default function FareMatrixPage() {
     if (reverseRoute?.isActive) {
       const { error: reverseError } = await supabase.rpc("deactivate_route", {
         p_route_id: reverseRoute.id,
-        p_actor: actorUsername, // ⬅️ NEW: who deactivated this route
+        p_actor: actorUsername,
       });
       if (reverseError) {
         console.error("deactivate_route (reverse) error:", reverseError);
@@ -1080,10 +1331,7 @@ export default function FareMatrixPage() {
     setPendingRouteId(null);
   };
 
-  // ✅ REMOVED: handleAdd (Add Route feature removed)
-
   const confirmDelete = () => {
-    // 🔒 Guard: bawal mag-delete kapag view_only
     if (blockIfViewOnly()) {
       setDeleteRoute(null);
       return;
@@ -1097,7 +1345,6 @@ export default function FareMatrixPage() {
   };
 
   const handleUpdate = () => {
-    // 🔒 Guard: bawal mag-save ng edit kapag view_only
     if (blockIfViewOnly()) return;
 
     if (!editRoute || !hasRouteChanges) return;
@@ -1142,7 +1389,6 @@ export default function FareMatrixPage() {
               <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
             </div>
 
-            {/* 🗺️ Distance Fare button — makikita lang kapag may permission */}
             {loaded && canManage && (
               <Button
                 variant="outline"
@@ -1154,8 +1400,6 @@ export default function FareMatrixPage() {
                 Distance Fare
               </Button>
             )}
-
-            {/* ✅ REMOVED: "Add Route" button */}
           </div>
         </div>
       </div>
@@ -1197,8 +1441,6 @@ export default function FareMatrixPage() {
           </div>
         </div>
 
-        {/* ✅ TAB VIEW — one tab per active route instead of stacking every
-            active route as its own row. */}
         {activeRoutes.length > 0 && (
           <div className="flex flex-col gap-3">
             <div
@@ -1239,7 +1481,6 @@ export default function FareMatrixPage() {
               })}
             </div>
 
-            {/* Detail card for whichever tab is currently selected */}
             {selectedActiveRoute && (
               <div
                 className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border p-3 ${
@@ -1391,8 +1632,6 @@ export default function FareMatrixPage() {
                           </Badge>
                         </TableCell>
 
-                        {/* 🔒 Activate / Deactivate — makikita lang kapag may permission (hindi view_only).
-                            Ang view_only ay "—" lang ang makikita. */}
                         <TableCell>
                           {canManage ? (
                             <Button
@@ -1406,10 +1645,8 @@ export default function FareMatrixPage() {
                               }
                               onClick={() => {
                                 if (route.isActive) {
-                                  // Deactivating doesn't need a device selection
                                   handleDeactivate(route.id);
                                 } else {
-                                  // Activating opens the device-selection modal
                                   openActivateModal(route);
                                 }
                               }}
@@ -1427,7 +1664,6 @@ export default function FareMatrixPage() {
                           )}
                         </TableCell>
 
-                        {/* 🔒 Edit / Delete — makikita lang kapag may permission (hindi view_only) */}
                         <TableCell className="text-right">
                           {canManage && (
                             <div className="flex justify-end gap-1">
@@ -1464,20 +1700,19 @@ export default function FareMatrixPage() {
         </CardContent>
       </Card>
 
-      {/* 🗺️ Distance-based fare dialog (Leaflet + OSRM + LTFRB formula)
-          🔒 `open` naka-gate sa canManage */}
+      {/* 🗺️ Distance-based fare dialog (Leaflet + OSRM + LTFRB formula + PSGC Samar places) */}
       <DistanceFareDialog
         open={canManage && showDistance}
         onOpenChange={setShowDistance}
         isDark={isDark}
         saving={savingDistance}
         onSave={handleDistanceSave}
+        places={samarPlaces}
+        placesLoading={placesLoading}
+        placesError={placesError}
       />
 
-      {/* ✅ REMOVED: Add Route Dialog */}
-
-      {/* Edit Route Dialog — styled to match User Management's Edit User dialog
-          🔒 `open` naka-gate sa canManage */}
+      {/* Edit Route Dialog — Origin/Destination now use the PSGC Samar Island list */}
       <Dialog open={canManage && !!editRoute} onOpenChange={(open) => !open && setEditRoute(null)}>
         <DialogContent className={`[&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
           <DialogHeader>
@@ -1488,32 +1723,30 @@ export default function FareMatrixPage() {
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Origin</Label>
-              <Input
-                data-testid="input-edit-origin"
-                list="barangay-suggestions-edit"
-                placeholder="Type or select barangay..."
+              <PlaceCombobox
+                testId="input-edit-origin"
                 value={editForm.origin}
-                onChange={(e) => setEditForm({ ...editForm, origin: e.target.value })}
+                places={samarPlaces}
+                loading={placesLoading}
+                isDark={isDark}
+                placeholder="Search barangay / city / municipality..."
+                onChange={(text) => setEditForm((f) => ({ ...f, origin: text }))}
                 className={`text-sm font-medium ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
               />
             </div>
             <div className="space-y-2">
               <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Destination</Label>
-              <Input
-                data-testid="input-edit-destination"
-                list="barangay-suggestions-edit"
-                placeholder="Type or select destination..."
+              <PlaceCombobox
+                testId="input-edit-destination"
                 value={editForm.destination}
-                onChange={(e) => setEditForm({ ...editForm, destination: e.target.value })}
+                places={samarPlaces}
+                loading={placesLoading}
+                isDark={isDark}
+                placeholder="Search barangay / city / municipality..."
+                onChange={(text) => setEditForm((f) => ({ ...f, destination: text }))}
                 className={`text-sm font-medium ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
               />
             </div>
-            <datalist id="barangay-suggestions-edit">
-              <option value={DEFAULT_DESTINATION} />
-              {CALBAYOG_BARANGAYS.map((b) => (
-                <option key={b} value={b} />
-              ))}
-            </datalist>
             <div className="space-y-2">
               <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Fare Amount (PHP)</Label>
               <Input
@@ -1547,8 +1780,7 @@ export default function FareMatrixPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ✅ Activate Route Dialog — device selection, pulled live from Supabase `devices` table
-          🔒 `open` naka-gate sa canManage */}
+      {/* Activate Route Dialog */}
       <Dialog
         open={canManage && !!activateRoute}
         onOpenChange={(open) => {
@@ -1646,8 +1878,7 @@ export default function FareMatrixPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirm — styled to match User Management's Delete Confirm dialog
-          🔒 `open` naka-gate sa canManage */}
+      {/* Delete Confirm */}
       <AlertDialog open={canManage && !!deleteRoute} onOpenChange={(open) => !open && setDeleteRoute(null)}>
         <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
           <AlertDialogHeader>
