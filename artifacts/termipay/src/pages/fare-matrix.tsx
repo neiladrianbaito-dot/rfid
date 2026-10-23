@@ -124,8 +124,10 @@ const cleanMuniName = (name: string) =>
 
 async function fetchSamarPlaces(): Promise<Place[]> {
   const allProvinces = await getJson<any[]>(`${PSGC}/provinces.json`);
-  // Samar, Northern Samar, Eastern Samar  (Biliran is a separate island → excluded)
-  const provinces = allProvinces.filter((p) => /samar/i.test(p.name));
+   // Samar Island: Samar, Northern Samar, Eastern Samar
+  // Leyte Island: Leyte, Southern Leyte
+  // (Biliran is a separate province → excluded)
+  const provinces = allProvinces.filter((p) => /samar|leyte/i.test(p.name));
 
   const out: Place[] = [];
 
@@ -187,6 +189,14 @@ async function fetchSamarPlaces(): Promise<Place[]> {
     })
   );
 
+  // If the same label exists in more than one province (e.g. "San Isidro"),
+  // append the province so the driver can tell them apart.
+  const counts = new Map<string, number>();
+  out.forEach((p) => counts.set(p.label, (counts.get(p.label) ?? 0) + 1));
+  out.forEach((p) => {
+    if ((counts.get(p.label) ?? 0) > 1) p.label = `${p.label}, ${p.province}`;
+  });
+
   return out.sort((a, b) => a.label.localeCompare(b.label));
 }
 
@@ -218,7 +228,7 @@ function useSamarPlaces() {
         }
       })
       .catch(() => {
-        if (!cancelled) setError("Couldn't load the Samar places list. Check your connection.");
+            if (!cancelled) setError("Couldn't load the Samar & Leyte places list. Check your connection.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -341,10 +351,10 @@ function PlaceCombobox({
         >
           {loading ? (
             <div className="flex items-center gap-2 px-3 py-3 text-xs text-slate-500">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading Samar places...
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading Samar & Leyte places...
             </div>
           ) : results.length === 0 ? (
-            <div className="px-3 py-3 text-xs text-slate-500">No matching place in Samar Island</div>
+            <div className="px-3 py-3 text-xs text-slate-500">No matching place in Samar or Leyte</div>
           ) : (
             results.map((p, i) => (
               <div
@@ -562,8 +572,8 @@ function DistanceFareDialog({
   useEffect(() => {
     if (!mapEl) return;
     const map = L.map(mapEl, {
-      center: [11.65, 125.0], // Samar Island
-      zoom: 8,
+            center: [11.2, 124.9], // Samar + Leyte
+      zoom: 7,
       attributionControl: false,
     });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -667,7 +677,7 @@ function DistanceFareDialog({
   const findPlaces = async () => {
     setError(null);
     if (!originPlace || !destPlace) {
-      setError("Pick both the origin and the destination from the list (Samar Island only).");
+      setError("Pick both the origin and the destination from the list (Samar & Leyte only).");
       return;
     }
     setBusy(true);
@@ -802,7 +812,7 @@ function DistanceFareDialog({
 
           {placesError && <p className="text-xs text-red-500">{placesError}</p>}
           <p className={`text-[11px] ${muted}`}>
-            Samar Island only (Samar, Northern Samar, Eastern Samar). Type to search, then pick from the list.
+                    Samar & Leyte only (Samar, Northern Samar, Eastern Samar, Leyte, Southern Leyte). Type to search, then pick from the list.
           </p>
 
           <div className="flex flex-wrap gap-2">
