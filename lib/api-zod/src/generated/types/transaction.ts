@@ -19,4 +19,6 @@ export interface Transaction {
   fee_amount?: number | null;
   vat_amount?: number | null;
   net_amount?: number | null;
+  origin?: string | null; // ✅ flattened, para madaling gamitin sa UI
+  destination?: string | null;
 }

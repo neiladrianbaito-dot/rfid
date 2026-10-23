@@ -1,5 +1,5 @@
 export type UserRecord = {
-   id: number;     
+  id: number;
   cardUid?: string;
   fullName?: string;
   email?: string | null;
@@ -29,6 +29,12 @@ export interface CardTransfer {
   target: { card_uid: string | null; full_name: string | null };
 }
 
+export type RouteInfo = {
+  id: number;
+  origin: string | null;
+  destination: string | null;
+};
+
 export type TransactionRecord = {
   id: string;
   timestamp: string;
@@ -40,11 +46,17 @@ export type TransactionRecord = {
   route_id?: number | null;
   payment_method?: string | null;
 
+  // ✅ Galing sa join ng `routes` table (via route_id)
+  origin?: string | null;
+  destination?: string | null;
+  route?: RouteInfo | null; // raw nested result mula sa Supabase join
+
   // Top-up only
   fee_amount?: string | number | null;
   vat_amount?: string | number | null;
   net_amount?: string | number | null;
 };
+
 export type CardValidationState =
   | { status: "idle" }
   | { status: "checking" }
