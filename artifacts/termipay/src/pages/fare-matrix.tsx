@@ -56,7 +56,6 @@ import {
   Cpu,
   Wifi,
   WifiOff,
-  Lock, // 🔒 NEW
   Route as RouteIcon, // 🗺️ NEW
 } from "lucide-react";
 import {
@@ -235,10 +234,10 @@ function DistanceFareDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 🔒 CHANGED: pins are now locked as soon as "Find on map" places them
-  // (or as soon as both pins are dropped by clicking the map). There is NO
-  // unlock button — once locked, the pins stay exactly where they are:
-  // not draggable, and map clicks are ignored.
+  // 🔒 Pins are locked as soon as "Find on map" places them (or as soon as
+  // both pins are dropped by clicking the map). There is NO unlock button —
+  // once locked, the pins stay exactly where they are: not draggable, and
+  // map clicks are ignored.
   const [pinsLocked, setPinsLocked] = useState(false);
 
   // Leaflet map plumbing
@@ -265,9 +264,12 @@ function DistanceFareDialog({
   // Create the map once the container div is mounted inside the dialog
   useEffect(() => {
     if (!mapEl) return;
-    const map = L.map(mapEl, { center: [11.65, 124.8], zoom: 8 });
+    const map = L.map(mapEl, {
+      center: [11.65, 124.8],
+      zoom: 8,
+      attributionControl: false, // 👈 hides the "Leaflet | © OpenStreetMap" watermark
+    });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors",
       maxZoom: 19,
     }).addTo(map);
     mapRef.current = map;
@@ -285,8 +287,8 @@ function DistanceFareDialog({
   }, [mapEl]);
 
   // Click on map: first click sets Origin, second click sets Destination.
-  // 🔒 CHANGED: when pins are locked, map clicks do nothing. Dropping the
-  // Destination pin (the second click) locks both pins.
+  // When pins are locked, map clicks do nothing. Dropping the Destination
+  // pin (the second click) locks both pins.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -369,7 +371,7 @@ function DistanceFareDialog({
   const excessKm =
     distanceKm != null ? Math.max(0, distanceKm - (parseFloat(baseKm) || 0)) : 0;
 
-  // 🔒 CHANGED: after "Find on map" places the pins, they are LOCKED.
+  // 🔒 After "Find on map" places the pins, they are LOCKED.
   const findPlaces = async () => {
     setError(null);
     if (!originName.trim() || !destName.trim()) {
@@ -519,13 +521,9 @@ function DistanceFareDialog({
             </Button>
           </div>
 
-          {/* 🔒 Status line changes depending on lock state (no unlock button) */}
-          {pinsLocked ? (
-            <p className="text-xs flex items-center gap-1.5 text-emerald-500 font-medium">
-              <Lock className="w-3.5 h-3.5" />
-              Pins are locked in place and can't be moved.
-            </p>
-          ) : (
+          {/* ✅ CHANGED: the "Pins are locked..." label is removed. The tip only
+              shows before the pins are placed. */}
+          {!pinsLocked && (
             <p className={`text-xs ${muted}`}>
               Tip: use "Find on map" to place the pins — they lock in place right away. You can also click the map to drop the Origin pin, then the Destination pin.
             </p>
