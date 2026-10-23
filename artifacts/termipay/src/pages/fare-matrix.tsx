@@ -878,11 +878,6 @@ function DistanceFareDialog({
             </div>
           </div>
 
-          {placesError && <p className="text-xs text-red-500">{placesError}</p>}
-          <p className={`text-[11px] ${muted}`}>
-            Samar & Leyte only (Samar, Northern Samar, Eastern Samar, Leyte, Southern Leyte). Type to search, pick from the list, then press OK.
-          </p>
-
           <div className="flex flex-wrap items-center gap-3">
             <Button
               type="button"
