@@ -69,13 +69,6 @@ const FARE_DISCOUNT_RATE = 0.2; // 20%
 // Stable empty array — para hindi magbago ang reference habang wala pang data.
 const EMPTY_LIST: any[] = [];
 
-type FareRoute = {
-  id: number;
-  origin: string;
-  destination: string;
-  fare_amount: number;
-};
-
 type TransferCard = {
   id: number;
   card_uid?: string | null;
@@ -106,10 +99,14 @@ type CardTransfer = {
   target: TransferCard | null;
 };
 
-type FinancialFields = {
+// 🆕 Extra columns read directly from the `transactions` table.
+// origin + destination come from here (NOT from route_id / fare_routes).
+type TxExtraFields = {
   fee_amount: number | null;
   vat_amount: number | null;
   net_amount: number | null;
+  origin: string | null;
+  destination: string | null;
 };
 
 // 🆕 Passenger info looked up from the `users` table by card_uid
@@ -339,21 +336,18 @@ function extractList(value: unknown): any[] | null {
   return null;
 }
 
-function findRouteFor(tx: any, routes: FareRoute[]): FareRoute | null {
-  const routeId = tx?.route_id ?? tx?.routeId;
-  if (routeId != null && routeId !== "") {
-    const found = routes.find((route) => route.id === Number(routeId));
-    if (found) return found;
-  }
-  if (tx?.origin || tx?.destination) {
-    return {
-      id: -1,
-      origin: tx.origin ?? "—",
-      destination: tx.destination ?? "—",
-      fare_amount: Number(tx.amount),
-    };
-  }
-  return null;
+// 🆕 Origin / Destination are read DIRECTLY from the transaction's own
+// `origin` and `destination` fields — no route_id lookup anymore.
+function getOriginDestination(
+  tx: any,
+): { origin: string; destination: string } | null {
+  const origin = String(tx?.origin ?? "").trim();
+  const destination = String(tx?.destination ?? "").trim();
+  if (!origin && !destination) return null;
+  return {
+    origin: origin || "—",
+    destination: destination || "—",
+  };
 }
 
 function normalizeTxType(type?: string | null): TxType {
@@ -585,7 +579,8 @@ function getCardType(tx: any): string | null {
 }
 
 // 🔎 CLIENT-SIDE SEARCH for Top-up / Fare.
-// Matches: Txn ID ("12", "#12", "TXN-12"), Card UID, Full Name, Payment Method.
+// Matches: Txn ID ("12", "#12", "TXN-12"), Card UID, Full Name, Payment Method,
+// and (for Fare) Origin / Destination.
 function matchesTxSearch(tx: any, query: string, passenger?: PassengerInfo): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -605,6 +600,8 @@ function matchesTxSearch(tx: any, query: string, passenger?: PassengerInfo): boo
     tx?.passenger_name ?? tx?.passengerName ?? "",
     passenger?.full_name ?? "",
     formatPaymentMethod(getPaymentMethodValue(tx)),
+    tx?.origin ?? "",
+    tx?.destination ?? "",
   ]
     .join(" ")
     .toLowerCase();
@@ -725,7 +722,7 @@ function DetailRow({
 }
 
 // ── 🆕 Small row used inside the receipt (same look as the user dashboard) ──
-// FIX: min-w-0 + overflow-hidden so long values never stretch the modal.
+// min-w-0 + overflow-hidden so long values never stretch the modal.
 function ReceiptRow({
   isDark,
   icon,
@@ -761,12 +758,10 @@ function ReceiptRow({
 // ── 🆕 Receipt Modal — SAME design for Top-up and Fare ──────────────────────
 function ReceiptModal({
   tx,
-  routes,
   onClose,
   isDark,
 }: {
   tx: any | null;
-  routes: FareRoute[];
   onClose: () => void;
   isDark: boolean;
 }) {
@@ -779,7 +774,8 @@ function ReceiptModal({
   const isFare = normalizeTxType(tx.type) === "Fare";
   const date = new Date(tx.timestamp || tx.created_at);
 
-  const matchedRoute = isFare ? findRouteFor(tx, routes) : null;
+  // 🆕 origin + destination straight from the transaction fields
+  const matchedRoute = isFare ? getOriginDestination(tx) : null;
 
   const rawPaymentMethod = !isFare ? getPaymentMethodValue(tx) : null;
   const paymentMethodLabel = !isFare ? formatPaymentMethod(rawPaymentMethod) : null;
@@ -1171,26 +1167,19 @@ function ReceiptModal({
               </ReceiptRow>
 
               {/* Route — Fare only
-                  FIX: long origin / destination are cut with "..." so the
-                  modal never stretches. min-w-0 on every flex level is what
-                  makes `truncate` actually work inside a flex row. */}
+                  Uses tx.origin + tx.destination (from the transactions table).
+                  Long text is cut with "..." so the modal never stretches. */}
               {isFare && (
                 <ReceiptRow isDark={isDark} icon={<Route className={iconCls} />} label="Route">
                   {matchedRoute ? (
                     <span
                       className={`flex min-w-0 max-w-[70%] items-center justify-end gap-1 sm:gap-1.5 text-[10px] sm:text-xs font-medium ${valueText}`}
                     >
-                      <span
-                        className="min-w-0 truncate"
-                        title={matchedRoute.origin}
-                      >
+                      <span className="min-w-0 truncate" title={matchedRoute.origin}>
                         {matchedRoute.origin}
                       </span>
                       <ArrowLeftRight className={iconCls} />
-                      <span
-                        className="min-w-0 truncate"
-                        title={matchedRoute.destination}
-                      >
+                      <span className="min-w-0 truncate" title={matchedRoute.destination}>
                         {matchedRoute.destination}
                       </span>
                     </span>
@@ -1411,8 +1400,8 @@ export default function TransactionsPage() {
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [viewTx, setViewTx] = useState<any>(null);
   const [page, setPage] = useState(1);
-  const [routes, setRoutes] = useState<FareRoute[]>([]);
-  const [financialById, setFinancialById] = useState<Record<string, FinancialFields>>({});
+  // 🆕 fee / vat / net + origin / destination, keyed by transaction id
+  const [extraById, setExtraById] = useState<Record<string, TxExtraFields>>({});
   // 🆕 passenger name + card type, keyed by card_uid
   const [passengerByCardUid, setPassengerByCardUid] = useState<Record<string, PassengerInfo>>({});
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -1424,32 +1413,6 @@ export default function TransactionsPage() {
   const [transferPage, setTransferPage] = useState(1);
   const [viewTransfer, setViewTransfer] = useState<CardTransfer | null>(null);
   const [transfersLastUpdated, setTransfersLastUpdated] = useState<Date | null>(null);
-
-  // ── Fare routes (realtime, silent refresh) ────────────────────────────────
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadRoutes = async () => {
-      const { data, error } = await supabase
-        .from("fare_routes")
-        .select("id, origin, destination, fare_amount")
-        .order("id");
-      if (cancelled || error || !data) return;
-      setRoutes((prev) => (sameData(prev, data) ? prev : (data as FareRoute[])));
-    };
-
-    loadRoutes();
-
-    const channel = supabase
-      .channel("admin_fare_routes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "fare_routes" }, loadRoutes)
-      .subscribe();
-
-    return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   // ── Card transfers (realtime, silent refresh) ─────────────────────────────
   useEffect(() => {
@@ -1602,13 +1565,13 @@ export default function TransactionsPage() {
 
   useRealtimeRefetch(["transactions"], handleTransactionsRealtime);
 
-  // ── Fee / VAT / Net ───────────────────────────────────────────────────────
+  // ── 🆕 Fee / VAT / Net + ORIGIN / DESTINATION (straight from `transactions`)
   useEffect(() => {
     if (rawTransactionList.length === 0) return;
 
     let cancelled = false;
 
-    const loadFinancialFields = async () => {
+    const loadExtraFields = async () => {
       const ids = rawTransactionList
         .map((tx: any) => tx?.id)
         .filter((id: any) => id != null)
@@ -1619,32 +1582,36 @@ export default function TransactionsPage() {
 
       const { data, error } = await supabase
         .from("transactions")
-        .select("id, fee_amount, vat_amount, net_amount")
+        .select("id, fee_amount, vat_amount, net_amount, origin, destination")
         .in("id", ids);
 
       if (cancelled) return;
 
       if (error) {
-        console.warn("Unable to load transaction fee/VAT/net fields:", error.message);
+        console.warn("Unable to load transaction extra fields:", error.message);
         return;
       }
 
-      setFinancialById((prev) => {
+      setExtraById((prev) => {
         let changed = false;
-        const next: Record<string, FinancialFields> = { ...prev };
+        const next: Record<string, TxExtraFields> = { ...prev };
         for (const row of data ?? []) {
           const key = String(row.id);
-          const value: FinancialFields = {
+          const value: TxExtraFields = {
             fee_amount: row.fee_amount == null ? null : Number(row.fee_amount),
             vat_amount: row.vat_amount == null ? null : Number(row.vat_amount),
             net_amount: row.net_amount == null ? null : Number(row.net_amount),
+            origin: row.origin == null ? null : String(row.origin),
+            destination: row.destination == null ? null : String(row.destination),
           };
           const old = prev[key];
           if (
             !old ||
             old.fee_amount !== value.fee_amount ||
             old.vat_amount !== value.vat_amount ||
-            old.net_amount !== value.net_amount
+            old.net_amount !== value.net_amount ||
+            old.origin !== value.origin ||
+            old.destination !== value.destination
           ) {
             next[key] = value;
             changed = true;
@@ -1654,7 +1621,7 @@ export default function TransactionsPage() {
       });
     };
 
-    loadFinancialFields();
+    loadExtraFields();
 
     return () => {
       cancelled = true;
@@ -1723,9 +1690,18 @@ export default function TransactionsPage() {
     return rawTransactionList.filter((tx: any) => {
       const uid = tx?.card_uid ?? tx?.cardUid;
       const passenger = uid ? passengerByCardUid[String(uid)] : undefined;
-      return matchesTxSearch(tx, q, passenger);
+      // 🆕 include origin/destination from the extra fields in the search
+      const extra = extraById[String(tx?.id)];
+      const enriched = extra
+        ? {
+            ...tx,
+            origin: extra.origin ?? tx?.origin,
+            destination: extra.destination ?? tx?.destination,
+          }
+        : tx;
+      return matchesTxSearch(enriched, q, passenger);
     });
-  }, [rawTransactionList, search, passengerByCardUid]);
+  }, [rawTransactionList, search, passengerByCardUid, extraById]);
 
   // ── Lists + pagination ────────────────────────────────────────────────────
   // 🆕 Top-up list is also filtered by the selected payment method
@@ -2083,11 +2059,15 @@ export default function TransactionsPage() {
                           paginatedList.map((rawTx: any) => {
                             const uid = rawTx?.card_uid ?? rawTx?.cardUid;
                             const passenger = uid ? passengerByCardUid[String(uid)] : undefined;
+                            const extra = extraById[String(rawTx?.id)];
 
-                            // 🆕 enriched tx: fee/vat/net + passenger name + card type
+                            // 🆕 enriched tx: fee/vat/net + origin/destination
+                            // + passenger name + card type
                             const tx = {
                               ...rawTx,
-                              ...(financialById[String(rawTx?.id)] ?? {}),
+                              ...(extra ?? {}),
+                              origin: extra?.origin ?? rawTx?.origin ?? null,
+                              destination: extra?.destination ?? rawTx?.destination ?? null,
                               full_name:
                                 rawTx?.full_name || rawTx?.fullName || passenger?.full_name || null,
                               passenger_name:
@@ -2100,7 +2080,8 @@ export default function TransactionsPage() {
                                 rawTx?.card_type || rawTx?.cardType || passenger?.card_type || null,
                             };
 
-                            const matchedRoute = isFareView ? findRouteFor(tx, routes) : null;
+                            // 🆕 origin / destination from the transaction fields
+                            const matchedRoute = isFareView ? getOriginDestination(tx) : null;
 
                             // 🆕 works with payment_method OR paymentMethod
                             const rawPaymentMethod = !isFareView ? getPaymentMethodValue(tx) : null;
@@ -2429,7 +2410,6 @@ export default function TransactionsPage() {
 
       <ReceiptModal
         tx={viewTx}
-        routes={routes}
         onClose={() => setViewTx(null)}
         isDark={isDark}
       />
