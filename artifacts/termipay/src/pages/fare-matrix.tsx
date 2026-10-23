@@ -42,6 +42,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
 import {
   RotateCcw,
+  Lock,
   MapPin,
   Power,
   PowerOff,
