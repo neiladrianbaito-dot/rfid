@@ -725,6 +725,7 @@ function DetailRow({
 }
 
 // ── 🆕 Small row used inside the receipt (same look as the user dashboard) ──
+// FIX: min-w-0 + overflow-hidden so long values never stretch the modal.
 function ReceiptRow({
   isDark,
   icon,
@@ -740,12 +741,12 @@ function ReceiptRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-3 px-3 py-1.5 sm:py-2 ${
+      className={`flex min-w-0 items-center justify-between gap-3 overflow-hidden px-3 py-1.5 sm:py-2 ${
         isDark ? "bg-slate-950/40" : "bg-slate-50"
       }`}
     >
       <span
-        className={`flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] shrink-0 ${
+        className={`flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] shrink-0 whitespace-nowrap ${
           upper ? "font-semibold uppercase tracking-widest" : ""
         } ${isDark ? "text-slate-500" : "text-slate-400"}`}
       >
@@ -807,6 +808,8 @@ function ReceiptModal({
   const valueText = isDark ? "text-slate-200" : "text-slate-700";
   const mutedDash = isDark ? "text-slate-600" : "text-slate-400";
   const iconCls = "h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0";
+
+  const passengerName = getPassengerName(tx);
 
   const statusTextColor =
     tx.status === "Failed"
@@ -935,7 +938,10 @@ function ReceiptModal({
         </VisuallyHidden>
 
         {/* Everything inside this wrapper is what gets exported */}
-        <div ref={receiptRef} className={isDark ? "bg-slate-900" : "bg-white"}>
+        <div
+          ref={receiptRef}
+          className={`w-full min-w-0 overflow-hidden ${isDark ? "bg-slate-900" : "bg-white"}`}
+        >
           {/* Top accent stripe */}
           <div className={`h-1 w-full ${isFare ? "bg-red-500" : "bg-emerald-500"}`} />
 
@@ -1038,43 +1044,46 @@ function ReceiptModal({
               }`}
             >
               <ReceiptRow isDark={isDark} icon={<Hash className={iconCls} />} label="Transaction ID">
-                <span className={`text-[10px] sm:text-xs font-mono text-right truncate max-w-[55%] ${valueText}`}>
+                <span className={`min-w-0 max-w-[55%] truncate text-[10px] sm:text-xs font-mono text-right ${valueText}`}>
                   {String(tx.id)}
                 </span>
               </ReceiptRow>
 
               <ReceiptRow isDark={isDark} icon={<Calendar className={iconCls} />} label="Date">
-                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                <span className={`min-w-0 max-w-[55%] truncate text-[10px] sm:text-xs font-medium text-right ${valueText}`}>
                   {date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
                 </span>
               </ReceiptRow>
 
               <ReceiptRow isDark={isDark} icon={<Clock className={iconCls} />} label="Time">
-                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                <span className={`min-w-0 max-w-[55%] truncate text-[10px] sm:text-xs font-medium text-right ${valueText}`}>
                   {date.toLocaleTimeString()}
                 </span>
               </ReceiptRow>
 
               <ReceiptRow isDark={isDark} icon={<CreditCard className={iconCls} />} label="Card UID">
-                <span className={`text-[10px] sm:text-xs font-mono font-semibold text-right truncate max-w-[55%] ${isDark ? "text-blue-400" : "text-blue-600"}`}>
+                <span className={`min-w-0 max-w-[55%] truncate text-[10px] sm:text-xs font-mono font-semibold text-right ${isDark ? "text-blue-400" : "text-blue-600"}`}>
                   {tx.card_uid || tx.cardUid || "—"}
                 </span>
               </ReceiptRow>
 
               <ReceiptRow isDark={isDark} icon={<CreditCard className={iconCls} />} label="Service type">
-                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                <span className={`min-w-0 max-w-[55%] truncate text-[10px] sm:text-xs font-medium text-right ${valueText}`}>
                   {isFare ? "Fare" : "Top-up"}
                 </span>
               </ReceiptRow>
 
               <ReceiptRow isDark={isDark} icon={<User className={iconCls} />} label="Passenger">
-                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
-                  {getPassengerName(tx)}
+                <span
+                  title={passengerName}
+                  className={`min-w-0 max-w-[60%] truncate text-[10px] sm:text-xs font-medium text-right ${valueText}`}
+                >
+                  {passengerName}
                 </span>
               </ReceiptRow>
 
               <ReceiptRow isDark={isDark} icon={<BadgeCheck className={iconCls} />} label="Card type">
-                <span className={`text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                <span className={`min-w-0 max-w-[55%] truncate text-[10px] sm:text-xs font-medium text-right ${valueText}`}>
                   {formatCardType(getCardType(tx))}
                 </span>
               </ReceiptRow>
@@ -1107,7 +1116,7 @@ function ReceiptModal({
               {/* Payment method — Top-up only */}
               {!isFare && (
                 <ReceiptRow isDark={isDark} icon={<Wallet className={iconCls} />} label="Payment method">
-                  <span className={`flex items-center justify-end gap-1.5 text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
+                  <span className={`flex min-w-0 max-w-[55%] items-center justify-end gap-1.5 text-[10px] sm:text-xs font-medium text-right ${valueText}`}>
                     {paymentMethodLabel && paymentMethodLabel !== "—" ? (
                       <>
                         {paymentMethodLogo && (
@@ -1117,7 +1126,9 @@ function ReceiptModal({
                             className="h-6 sm:h-7 w-auto max-w-[40px] object-contain shrink-0"
                           />
                         )}
-                        <span className="truncate">{paymentMethodLabel}</span>
+                        <span className="min-w-0 truncate" title={paymentMethodLabel}>
+                          {paymentMethodLabel}
+                        </span>
                       </>
                     ) : (
                       <span className={mutedDash}>—</span>
@@ -1159,20 +1170,33 @@ function ReceiptModal({
                 </span>
               </ReceiptRow>
 
-              {/* Route — Fare only */}
+              {/* Route — Fare only
+                  FIX: long origin / destination are cut with "..." so the
+                  modal never stretches. min-w-0 on every flex level is what
+                  makes `truncate` actually work inside a flex row. */}
               {isFare && (
                 <ReceiptRow isDark={isDark} icon={<Route className={iconCls} />} label="Route">
-                  <span className={`flex items-center gap-1 sm:gap-1.5 justify-end text-[10px] sm:text-xs font-medium text-right truncate max-w-[55%] ${valueText}`}>
-                    {matchedRoute ? (
-                      <>
-                        <span className="truncate">{matchedRoute.origin}</span>
-                        <ArrowLeftRight className={iconCls} />
-                        <span className="truncate">{matchedRoute.destination}</span>
-                      </>
-                    ) : (
-                      <span className={mutedDash}>—</span>
-                    )}
-                  </span>
+                  {matchedRoute ? (
+                    <span
+                      className={`flex min-w-0 max-w-[70%] items-center justify-end gap-1 sm:gap-1.5 text-[10px] sm:text-xs font-medium ${valueText}`}
+                    >
+                      <span
+                        className="min-w-0 truncate"
+                        title={matchedRoute.origin}
+                      >
+                        {matchedRoute.origin}
+                      </span>
+                      <ArrowLeftRight className={iconCls} />
+                      <span
+                        className="min-w-0 truncate"
+                        title={matchedRoute.destination}
+                      >
+                        {matchedRoute.destination}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className={mutedDash}>—</span>
+                  )}
                 </ReceiptRow>
               )}
             </div>
