@@ -97,8 +97,9 @@ router.get("/transactions", async (req, res) => {
         route_id: transactionsTable.routeId,
 
         // ✅ BAGO: galing sa routes join
-        origin: routesTable.origin,
-        destination: routesTable.destination,
+        // Prefer the saved transaction snapshot; use routes as fallback.
+        origin: sql<string | null>`COALESCE(${transactionsTable.origin}, ${routesTable.origin})`.as("origin"),
+        destination: sql<string | null>`COALESCE(${transactionsTable.destination}, ${routesTable.destination})`.as("destination"),
 
         // =====================================================
         // TOP-UP FINANCIAL BREAKDOWN
@@ -265,6 +266,14 @@ router.post("/transactions", async (req, res) => {
               }
             : {},
 
+          ...((data as any).origin !== undefined
+            ? { origin: (data as any).origin ?? null }
+            : {}),
+
+          ...((data as any).destination !== undefined
+            ? { destination: (data as any).destination ?? null }
+            : {}),
+
           ...(data as any).fee_amount !== undefined
             ? {
                 fee_amount:
@@ -295,6 +304,8 @@ router.post("/transactions", async (req, res) => {
           status: transactionsTable.status,
           payment_method: transactionsTable.payment_method,
           route_id: transactionsTable.routeId,
+          origin: transactionsTable.origin,
+          destination: transactionsTable.destination,
           fee_amount: transactionsTable.fee_amount,
           vat_amount: transactionsTable.vat_amount,
           net_amount: transactionsTable.net_amount,
@@ -404,8 +415,8 @@ router.post("/transactions", async (req, res) => {
             : Number(newTx.route_id),
 
         // ✅ BAGO
-        origin: routeInfo.origin,
-        destination: routeInfo.destination,
+        origin: (newTx as any).origin ?? routeInfo.origin,
+        destination: (newTx as any).destination ?? routeInfo.destination,
 
         fee_amount:
           newTx.fee_amount === null ||
@@ -508,6 +519,8 @@ router.patch("/transactions/:id", async (req, res) => {
           status: transactionsTable.status,
           payment_method: transactionsTable.payment_method,
           route_id: transactionsTable.routeId,
+          origin: transactionsTable.origin,
+          destination: transactionsTable.destination,
           fee_amount: transactionsTable.fee_amount,
           vat_amount: transactionsTable.vat_amount,
           net_amount: transactionsTable.net_amount,
@@ -555,6 +568,8 @@ router.patch("/transactions/:id", async (req, res) => {
           status: transactionsTable.status,
           payment_method: transactionsTable.payment_method,
           route_id: transactionsTable.routeId,
+          origin: transactionsTable.origin,
+          destination: transactionsTable.destination,
           fee_amount: transactionsTable.fee_amount,
           vat_amount: transactionsTable.vat_amount,
           net_amount: transactionsTable.net_amount,
@@ -679,8 +694,8 @@ router.patch("/transactions/:id", async (req, res) => {
             : Number(newTx.route_id),
 
         // ✅ BAGO
-        origin: routeInfo.origin,
-        destination: routeInfo.destination,
+        origin: (newTx as any).origin ?? routeInfo.origin,
+        destination: (newTx as any).destination ?? routeInfo.destination,
 
         fee_amount:
           newTx.fee_amount === null ||

@@ -221,6 +221,9 @@ export const CreateTransactionBody = zod.object({
 
   // ✅ BAGO: dati natatanggal ang mga ito kaya hindi nase-save sa POST
   route_id: zod.coerce.number().nullable().optional(),
+  // Optional transaction snapshot; preserves route labels if the route changes later.
+  origin: zod.string().nullable().optional(),
+  destination: zod.string().nullable().optional(),
   payment_method: zod.string().nullable().optional(),
   fee_amount: zod.coerce.number().nullable().optional(),
   vat_amount: zod.coerce.number().nullable().optional(),
