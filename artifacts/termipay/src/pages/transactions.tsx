@@ -106,10 +106,15 @@ type CardTransfer = {
   target: TransferCard | null;
 };
 
+// 🆕 Fields read DIRECTLY from the `transactions` table (the API list doesn't
+// return route_id / origin / destination, so we fetch them ourselves).
 type FinancialFields = {
   fee_amount: number | null;
   vat_amount: number | null;
   net_amount: number | null;
+  route_id: number | null;
+  origin: string | null;
+  destination: string | null;
 };
 
 // 🆕 Passenger info looked up from the `users` table by card_uid
@@ -339,20 +344,28 @@ function extractList(value: unknown): any[] | null {
   return null;
 }
 
+// 🆕 FIXED: the SNAPSHOT saved on the transaction (origin / destination) wins.
+// That way the route still shows even after the fare route was hard-deleted.
+// The live `fare_routes` row is only a fallback for old rows with no snapshot.
 function findRouteFor(tx: any, routes: FareRoute[]): FareRoute | null {
+  const snapOrigin = tx?.origin ? String(tx.origin).trim() : "";
+  const snapDestination = tx?.destination ? String(tx.destination).trim() : "";
+
+  if (snapOrigin || snapDestination) {
+    return {
+      id: Number(tx?.route_id ?? tx?.routeId ?? -1),
+      origin: snapOrigin || "—",
+      destination: snapDestination || "—",
+      fare_amount: Number(tx?.amount),
+    };
+  }
+
   const routeId = tx?.route_id ?? tx?.routeId;
   if (routeId != null && routeId !== "") {
     const found = routes.find((route) => route.id === Number(routeId));
     if (found) return found;
   }
-  if (tx?.origin || tx?.destination) {
-    return {
-      id: -1,
-      origin: tx.origin ?? "—",
-      destination: tx.destination ?? "—",
-      fare_amount: Number(tx.amount),
-    };
-  }
+
   return null;
 }
 
@@ -1578,7 +1591,10 @@ export default function TransactionsPage() {
 
   useRealtimeRefetch(["transactions"], handleTransactionsRealtime);
 
-  // ── Fee / VAT / Net ───────────────────────────────────────────────────────
+  // ── Fee / VAT / Net + 🆕 route_id / origin / destination ──────────────────
+  // The API list does not return route_id / origin / destination, so we read
+  // them straight from the `transactions` table. The origin/destination
+  // SNAPSHOT stays there even after the fare route is hard-deleted.
   useEffect(() => {
     if (rawTransactionList.length === 0) return;
 
@@ -1595,13 +1611,13 @@ export default function TransactionsPage() {
 
       const { data, error } = await supabase
         .from("transactions")
-        .select("id, fee_amount, vat_amount, net_amount")
+        .select("id, fee_amount, vat_amount, net_amount, route_id, origin, destination")
         .in("id", ids);
 
       if (cancelled) return;
 
       if (error) {
-        console.warn("Unable to load transaction fee/VAT/net fields:", error.message);
+        console.warn("Unable to load transaction fee/VAT/net/route fields:", error.message);
         return;
       }
 
@@ -1614,13 +1630,19 @@ export default function TransactionsPage() {
             fee_amount: row.fee_amount == null ? null : Number(row.fee_amount),
             vat_amount: row.vat_amount == null ? null : Number(row.vat_amount),
             net_amount: row.net_amount == null ? null : Number(row.net_amount),
+            route_id: row.route_id == null ? null : Number(row.route_id),
+            origin: row.origin ?? null,
+            destination: row.destination ?? null,
           };
           const old = prev[key];
           if (
             !old ||
             old.fee_amount !== value.fee_amount ||
             old.vat_amount !== value.vat_amount ||
-            old.net_amount !== value.net_amount
+            old.net_amount !== value.net_amount ||
+            old.route_id !== value.route_id ||
+            old.origin !== value.origin ||
+            old.destination !== value.destination
           ) {
             next[key] = value;
             changed = true;
@@ -2059,11 +2081,16 @@ export default function TransactionsPage() {
                           paginatedList.map((rawTx: any) => {
                             const uid = rawTx?.card_uid ?? rawTx?.cardUid;
                             const passenger = uid ? passengerByCardUid[String(uid)] : undefined;
+                            const fin = financialById[String(rawTx?.id)];
 
-                            // 🆕 enriched tx: fee/vat/net + passenger name + card type
+                            // 🆕 enriched tx: fee/vat/net + route snapshot + passenger + card type
                             const tx = {
                               ...rawTx,
-                              ...(financialById[String(rawTx?.id)] ?? {}),
+                              ...(fin ?? {}),
+                              // never let a null from the table overwrite a real value
+                              route_id: fin?.route_id ?? rawTx?.route_id ?? rawTx?.routeId ?? null,
+                              origin: fin?.origin ?? rawTx?.origin ?? null,
+                              destination: fin?.destination ?? rawTx?.destination ?? null,
                               full_name:
                                 rawTx?.full_name || rawTx?.fullName || passenger?.full_name || null,
                               passenger_name:
