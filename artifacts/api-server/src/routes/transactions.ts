@@ -1,6 +1,11 @@
 import { Router, type IRouter } from "express";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { db, transactionsTable, usersTable } from "@workspace/db";
+import {
+  db,
+  transactionsTable,
+  usersTable,
+  routesTable, // ✅ BAGO
+} from "@workspace/db";
 import {
   ListTransactionsQueryParams,
   ListTransactionsResponse,
@@ -12,6 +17,34 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+/* =========================================================
+   HELPER: kunin ang origin/destination mula sa route_id
+   (ginagamit sa POST at PATCH)
+   ========================================================= */
+
+async function getRouteInfo(
+  executor: Pick<typeof db, "select">,
+  routeId: number | string | null | undefined,
+) {
+  if (routeId === null || routeId === undefined) {
+    return { origin: null as string | null, destination: null as string | null };
+  }
+
+  const result = await executor
+    .select({
+      origin: routesTable.origin,
+      destination: routesTable.destination,
+    })
+    .from(routesTable)
+    .where(eq(routesTable.id, Number(routeId)))
+    .limit(1);
+
+  return {
+    origin: (result[0]?.origin ?? null) as string | null,
+    destination: (result[0]?.destination ?? null) as string | null,
+  };
+}
 
 /* =========================================================
    GET /transactions
@@ -63,6 +96,10 @@ router.get("/transactions", async (req, res) => {
         payment_method: transactionsTable.payment_method,
         route_id: transactionsTable.routeId,
 
+        // ✅ BAGO: galing sa routes join
+        origin: routesTable.origin,
+        destination: routesTable.destination,
+
         // =====================================================
         // TOP-UP FINANCIAL BREAKDOWN
         // =====================================================
@@ -74,6 +111,11 @@ router.get("/transactions", async (req, res) => {
       .leftJoin(
         usersTable,
         eq(transactionsTable.cardUid, usersTable.cardUid),
+      )
+      // ✅ BAGO: join sa routes table
+      .leftJoin(
+        routesTable,
+        eq(transactionsTable.routeId, routesTable.id),
       )
       .where(
         conditions.length > 0
@@ -110,6 +152,10 @@ router.get("/transactions", async (req, res) => {
           ? null
           : Number(row.route_id),
 
+      // ✅ BAGO
+      origin: row.origin ?? null,
+      destination: row.destination ?? null,
+
       fee_amount:
         row.fee_amount === null || row.fee_amount === undefined
           ? null
@@ -127,8 +173,8 @@ router.get("/transactions", async (req, res) => {
     }));
 
     /*
-     * Search is performed here so card UID and full name
-     * can both be searched.
+     * Search is performed here so card UID, full name,
+     * origin, and destination can all be searched.
      */
     if (search) {
       const searchValue = search.toLowerCase().trim();
@@ -136,16 +182,24 @@ router.get("/transactions", async (req, res) => {
       result = result.filter((row) => {
         const cardUid = row.cardUid?.toLowerCase() ?? "";
         const fullName = row.fullName?.toLowerCase() ?? "";
+        const origin = row.origin?.toLowerCase() ?? "";
+        const destination = row.destination?.toLowerCase() ?? "";
 
         return (
           cardUid.includes(searchValue) ||
-          fullName.includes(searchValue)
+          fullName.includes(searchValue) ||
+          origin.includes(searchValue) ||
+          destination.includes(searchValue)
         );
       });
     }
 
     /*
      * Validate final response against API schema.
+     *
+     * NOTE: Aalisin ng .parse() ang mga field na wala sa zod schema.
+     * Kailangang nasa OpenAPI spec ang `origin` at `destination`
+     * at naka-regenerate na ang api-zod (npx orval).
      */
     const response = ListTransactionsResponse.parse(result);
 
@@ -328,6 +382,9 @@ router.post("/transactions", async (req, res) => {
 
       const updatedUser = updatedUserResult[0];
 
+      // ✅ BAGO: kunin ang origin/destination ng route
+      const routeInfo = await getRouteInfo(tx, newTx.route_id);
+
       return {
         id: newTx.id,
         timestamp: newTx.timestamp,
@@ -345,6 +402,10 @@ router.post("/transactions", async (req, res) => {
           newTx.route_id === undefined
             ? null
             : Number(newTx.route_id),
+
+        // ✅ BAGO
+        origin: routeInfo.origin,
+        destination: routeInfo.destination,
 
         fee_amount:
           newTx.fee_amount === null ||
@@ -596,6 +657,9 @@ router.patch("/transactions/:id", async (req, res) => {
         }
       }
 
+      // ✅ BAGO: kunin ang origin/destination ng route
+      const routeInfo = await getRouteInfo(tx, newTx.route_id);
+
       return {
         id: newTx.id,
         timestamp: newTx.timestamp,
@@ -613,6 +677,10 @@ router.patch("/transactions/:id", async (req, res) => {
           newTx.route_id === undefined
             ? null
             : Number(newTx.route_id),
+
+        // ✅ BAGO
+        origin: routeInfo.origin,
+        destination: routeInfo.destination,
 
         fee_amount:
           newTx.fee_amount === null ||
