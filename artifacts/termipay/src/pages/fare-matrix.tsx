@@ -1,9 +1,8 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   useListRoutes,
   useCreateRoute,
   useUpdateRoute,
-  useDeleteRoute,
   getListRoutesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -42,8 +41,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
 import {
-  Pencil,
-  Trash2,
+  RotateCcw,
   MapPin,
   Power,
   PowerOff,
@@ -94,8 +92,56 @@ type Device = {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
-   📍 PSGC PLACES — Samar Island only
-   (Samar, Northern Samar, Eastern Samar)
+   🙈 UI-ONLY SOFT DELETE ("Reset")
+   Reset hides a route from this page only. The row stays in the database.
+   Hidden route IDs are remembered in this browser's localStorage.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const HIDDEN_KEY = "fare_matrix_hidden_routes";
+
+function readHidden(): string[] {
+  try {
+    const raw = localStorage.getItem(HIDDEN_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeHidden(ids: string[]) {
+  try {
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify(ids));
+  } catch {
+    /* storage unavailable — hiding just won't persist across reloads */
+  }
+}
+
+function useHiddenRoutes() {
+  const [hiddenIds, setHiddenIds] = useState<string[]>(() => readHidden());
+
+  const hide = useCallback((ids: (string | number)[]) => {
+    setHiddenIds((prev) => {
+      const next = Array.from(new Set([...prev, ...ids.map(String)]));
+      writeHidden(next);
+      return next;
+    });
+  }, []);
+
+  const unhide = useCallback((ids: (string | number)[]) => {
+    setHiddenIds((prev) => {
+      const remove = new Set(ids.map(String));
+      const next = prev.filter((id) => !remove.has(id));
+      writeHidden(next);
+      return next;
+    });
+  }, []);
+
+  return { hiddenIds, hide, unhide };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   📍 PSGC PLACES — Samar Island + Leyte Island
    Source: PSGC API  https://psgc.gitlab.io/api
    ═══════════════════════════════════════════════════════════════════════ */
 
@@ -124,7 +170,7 @@ const cleanMuniName = (name: string) =>
 
 async function fetchSamarPlaces(): Promise<Place[]> {
   const allProvinces = await getJson<any[]>(`${PSGC}/provinces.json`);
-   // Samar Island: Samar, Northern Samar, Eastern Samar
+  // Samar Island: Samar, Northern Samar, Eastern Samar
   // Leyte Island: Leyte, Southern Leyte
   // (Biliran is a separate province → excluded)
   const provinces = allProvinces.filter((p) => /samar|leyte/i.test(p.name));
@@ -228,7 +274,7 @@ function useSamarPlaces() {
         }
       })
       .catch(() => {
-            if (!cancelled) setError("Couldn't load the Samar & Leyte places list. Check your connection.");
+        if (!cancelled) setError("Couldn't load the Samar & Leyte places list. Check your connection.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -572,7 +618,7 @@ function DistanceFareDialog({
   useEffect(() => {
     if (!mapEl) return;
     const map = L.map(mapEl, {
-            center: [11.2, 124.9], // Samar + Leyte
+      center: [11.2, 124.9], // Samar + Leyte
       zoom: 7,
       attributionControl: false,
     });
@@ -812,7 +858,7 @@ function DistanceFareDialog({
 
           {placesError && <p className="text-xs text-red-500">{placesError}</p>}
           <p className={`text-[11px] ${muted}`}>
-                    Samar & Leyte only (Samar, Northern Samar, Eastern Samar, Leyte, Southern Leyte). Type to search, then pick from the list.
+            Samar & Leyte only (Samar, Northern Samar, Eastern Samar, Leyte, Southern Leyte). Type to search, then pick from the list.
           </p>
 
           <div className="flex flex-wrap gap-2">
@@ -931,22 +977,19 @@ export default function FareMatrixPage() {
 
   const { canManage, loaded } = useAdminAccess();
 
-  // 📍 Samar Island places (PSGC) — shared by Distance Fare + Edit dialogs
+  // 📍 Samar & Leyte places (PSGC) — used by the Distance Fare dialog
   const {
     places: samarPlaces,
     loading: placesLoading,
     error: placesError,
   } = useSamarPlaces();
 
+  // 🙈 UI-only soft delete (Reset) — DB rows are never removed
+  const { hiddenIds, hide: hideRoutes, unhide: unhideRoutes } = useHiddenRoutes();
+
   const [searchTerm, setSearchTerm] = useState("");
-  const [editRoute, setEditRoute] = useState<any>(null);
-  const [deleteRoute, setDeleteRoute] = useState<any>(null);
-  const [editForm, setEditForm] = useState({
-    origin: "",
-    destination: "",
-    fareAmount: "",
-  });
-  const [originalEditForm, setOriginalEditForm] = useState(editForm);
+  const [resetRoute, setResetRoute] = useState<any>(null);
+  const [isResetting, setIsResetting] = useState(false);
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -993,7 +1036,14 @@ export default function FareMatrixPage() {
     }
   }, [routes]);
 
-  const activeRoutes = Array.isArray(routes) ? routes.filter((r) => r.isActive) : [];
+  // ✅ Everything on this page works off the VISIBLE routes only
+  const visibleRoutes = useMemo(() => {
+    if (!Array.isArray(routes)) return [];
+    const hidden = new Set(hiddenIds);
+    return routes.filter((r) => !hidden.has(String(r.id)));
+  }, [routes, hiddenIds]);
+
+  const activeRoutes = visibleRoutes.filter((r) => r.isActive);
 
   const [selectedActiveRouteId, setSelectedActiveRouteId] = useState<string | number | null>(null);
   const activeRouteIdsKey = activeRoutes.map((r) => r.id).join(",");
@@ -1067,7 +1117,7 @@ export default function FareMatrixPage() {
   useEffect(() => {
     fetchActiveRoutesDevices(activeRoutes.map((r) => r.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [Array.isArray(routes) ? routes.filter((r) => r.isActive).map((r) => r.id).join(",") : ""]);
+  }, [activeRouteIdsKey]);
 
   useRealtimeRefetch(["devices"], () => {
     if (activateRoute) {
@@ -1079,9 +1129,7 @@ export default function FareMatrixPage() {
   const sortOrderRef = useRef<(string | number)[]>([]);
 
   const filteredRoutes = useMemo(() => {
-    if (!Array.isArray(routes)) return [];
-
-    const filtered = routes.filter(
+    const filtered = visibleRoutes.filter(
       (r) =>
         r.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
         r.destination.toLowerCase().includes(searchTerm.toLowerCase())
@@ -1102,7 +1150,7 @@ export default function FareMatrixPage() {
     const sorted = [...activeItems, ...inactiveItems];
     sortOrderRef.current = sorted.map((r) => r.id);
     return sorted;
-  }, [routes, searchTerm]);
+  }, [visibleRoutes, searchTerm]);
 
   const createMutation = useCreateRoute({
     mutation: {
@@ -1112,42 +1160,14 @@ export default function FareMatrixPage() {
     },
   });
 
+  // Only used when "Distance Fare" saves a route that already exists
   const updateMutation = useUpdateRoute({
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
-        setEditRoute(null);
-        toast({ title: <SuccessTitle text="Route Updated Successfully" /> });
       },
     },
   });
-
-  const deleteMutation = useDeleteRoute({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
-        toast({ title: <SuccessTitle text="Route Deleted Successfully" /> });
-      },
-    },
-  });
-
-  const openEdit = (route: any) => {
-    if (blockIfViewOnly()) return;
-
-    setEditRoute(route);
-    const initial = {
-      origin: route.origin,
-      destination: route.destination,
-      fareAmount: String(route.fareAmount),
-    };
-    setEditForm(initial);
-    setOriginalEditForm(initial);
-  };
-
-  const hasRouteChanges =
-    editForm.origin.trim() !== originalEditForm.origin.trim() ||
-    editForm.destination.trim() !== originalEditForm.destination.trim() ||
-    editForm.fareAmount.trim() !== originalEditForm.fareAmount.trim();
 
   const fetchActiveDevices = async (excludeRouteId?: string | number) => {
     setLoadingDevices(true);
@@ -1192,6 +1212,17 @@ export default function FareMatrixPage() {
     fetchActiveDevices(route.id);
   };
 
+  // Looks through ALL routes (including hidden ones) so both directions stay in sync
+  const findReverseRoute = (route: any) =>
+    Array.isArray(routes)
+      ? routes.find(
+          (r) =>
+            r.id !== route.id &&
+            r.origin === route.destination &&
+            r.destination === route.origin
+        ) ?? null
+      : null;
+
   const handleDistanceSave = async (p: DistanceFareSavePayload) => {
     if (blockIfViewOnly()) return;
 
@@ -1202,10 +1233,14 @@ export default function FareMatrixPage() {
         : null;
 
       if (existing) {
+        // Same origin/destination was saved (and maybe reset) before →
+        // refresh its fare and bring it back into the UI.
         await updateMutation.mutateAsync({
           id: existing.id,
           data: { origin: p.origin, destination: p.destination, fareAmount: p.fareAmount },
         });
+        const reverse = findReverseRoute(existing);
+        unhideRoutes([existing.id, ...(reverse ? [reverse.id] : [])]);
       } else {
         await createMutation.mutateAsync({
           data: { origin: p.origin, destination: p.destination, fareAmount: p.fareAmount },
@@ -1224,16 +1259,6 @@ export default function FareMatrixPage() {
       setSavingDistance(false);
     }
   };
-
-  const findReverseRoute = (route: any) =>
-    Array.isArray(routes)
-      ? routes.find(
-          (r) =>
-            r.id !== route.id &&
-            r.origin === route.destination &&
-            r.destination === route.origin
-        ) ?? null
-      : null;
 
   const confirmActivate = async () => {
     if (blockIfViewOnly()) {
@@ -1281,15 +1306,13 @@ export default function FareMatrixPage() {
     toast({ title: <SuccessTitle text="Route Status Updated" /> });
 
     queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
-    await fetchActiveRoutesDevices(
-      Array.isArray(routes)
-        ? [
-            ...routes.filter((r) => r.isActive && r.id !== activateRoute.id && r.id !== reverseRoute?.id).map((r) => r.id),
-            activateRoute.id,
-            ...(reverseRoute ? [reverseRoute.id] : []),
-          ]
-        : [activateRoute.id]
-    );
+    await fetchActiveRoutesDevices([
+      ...visibleRoutes
+        .filter((r) => r.isActive && r.id !== activateRoute.id && r.id !== reverseRoute?.id)
+        .map((r) => r.id),
+      activateRoute.id,
+      ...(reverseRoute ? [reverseRoute.id] : []),
+    ]);
 
     setSelectedActiveRouteId(activateRoute.id);
 
@@ -1341,34 +1364,51 @@ export default function FareMatrixPage() {
     setPendingRouteId(null);
   };
 
-  const confirmDelete = () => {
+  // 🔄 RESET = soft delete in the UI only.
+  // - If the route is active, it is deactivated first so the reader stops
+  //   using a route that is no longer visible.
+  // - The route (and its return direction) is then hidden from this page.
+  // - NOTHING is deleted from the database.
+  const confirmReset = async () => {
     if (blockIfViewOnly()) {
-      setDeleteRoute(null);
+      setResetRoute(null);
+      return;
+    }
+    if (!resetRoute) return;
+
+    setIsResetting(true);
+
+    const reverseRoute = findReverseRoute(resetRoute);
+    const targets = [resetRoute, ...(reverseRoute ? [reverseRoute] : [])];
+
+    let deactivateFailed = false;
+    for (const r of targets) {
+      if (!r.isActive) continue;
+      const { error } = await supabase.rpc("deactivate_route", {
+        p_route_id: r.id,
+        p_actor: actorUsername,
+      });
+      if (error) {
+        console.error("deactivate_route (reset) error:", error);
+        deactivateFailed = true;
+      }
+    }
+
+    if (deactivateFailed) {
+      toast({
+        title: "Couldn't deactivate the route, so it was not reset",
+        variant: "destructive",
+      });
+      setIsResetting(false);
       return;
     }
 
-    if (!deleteRoute) return;
-    deleteMutation.mutate(
-      { id: deleteRoute.id },
-      { onSettled: () => setDeleteRoute(null) }
-    );
-  };
+    hideRoutes(targets.map((r) => r.id));
+    queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
+    toast({ title: <SuccessTitle text="Route Reset — add a new origin & destination" /> });
 
-  const handleUpdate = () => {
-    if (blockIfViewOnly()) return;
-
-    if (!editRoute || !hasRouteChanges) return;
-    const origin = editForm.origin.trim();
-    const destination = editForm.destination.trim();
-    const fare = parseFloat(editForm.fareAmount) || 0;
-    if (!origin || !destination || fare <= 0) {
-      toast({ title: "Please fill in all fields", variant: "destructive" });
-      return;
-    }
-    updateMutation.mutate({
-      id: editRoute.id,
-      data: { origin, destination, fareAmount: fare },
-    });
+    setResetRoute(null);
+    setIsResetting(false);
   };
 
   return (
@@ -1540,7 +1580,7 @@ export default function FareMatrixPage() {
                   Configured Routes
                 </CardTitle>
                 <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  One active route per reader device. A route stays active until you deactivate it or reassign that reader.
+                  One active route per reader device. Use Reset to clear a route from this list, then add a new origin and destination with Distance Fare.
                 </p>
               </div>
             </div>
@@ -1589,6 +1629,11 @@ export default function FareMatrixPage() {
                           <p className="text-xs font-semibold uppercase tracking-widest">
                             {searchTerm ? "No routes matched" : "No routes configured"}
                           </p>
+                          {!searchTerm && canManage && (
+                            <p className="text-[11px] mt-1 normal-case tracking-normal">
+                              Click "Distance Fare" to add a new origin and destination.
+                            </p>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1676,26 +1721,20 @@ export default function FareMatrixPage() {
 
                         <TableCell className="text-right">
                           {canManage && (
-                            <div className="flex justify-end gap-1">
+                            <div className="flex justify-end">
                               <Button
                                 variant="ghost"
-                                size="icon"
-                                className={`h-8 w-8 cursor-pointer ${isDark ? "text-blue-400 hover:text-blue-300 hover:bg-blue-950/40" : "text-blue-500 hover:text-blue-700 hover:bg-blue-50"}`}
-                                onClick={() => openEdit(route)}
-                                data-testid={`button-edit-route-${route.id}`}
-                                title="Edit route"
+                                size="sm"
+                                className={`h-8 px-2 text-xs font-semibold cursor-pointer ${isDark ? "text-amber-400 hover:text-amber-300 hover:bg-amber-950/40" : "text-amber-600 hover:text-amber-700 hover:bg-amber-50"}`}
+                                onClick={() => {
+                                  if (blockIfViewOnly()) return;
+                                  setResetRoute(route);
+                                }}
+                                data-testid={`button-reset-route-${route.id}`}
+                                title="Reset — clear this route from the list"
                               >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className={`h-8 w-8 cursor-pointer ${isDark ? "text-red-400 hover:text-red-300 hover:bg-red-950/40" : "text-red-500 hover:text-red-700 hover:bg-red-50"}`}
-                                onClick={() => setDeleteRoute(route)}
-                                data-testid={`button-delete-route-${route.id}`}
-                                title="Delete route"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                                Reset
                               </Button>
                             </div>
                           )}
@@ -1710,7 +1749,7 @@ export default function FareMatrixPage() {
         </CardContent>
       </Card>
 
-      {/* 🗺️ Distance-based fare dialog (Leaflet + OSRM + LTFRB formula + PSGC Samar places) */}
+      {/* 🗺️ Distance-based fare dialog (Leaflet + OSRM + LTFRB formula + PSGC places) */}
       <DistanceFareDialog
         open={canManage && showDistance}
         onOpenChange={setShowDistance}
@@ -1721,74 +1760,6 @@ export default function FareMatrixPage() {
         placesLoading={placesLoading}
         placesError={placesError}
       />
-
-      {/* Edit Route Dialog — Origin/Destination now use the PSGC Samar Island list */}
-      <Dialog open={canManage && !!editRoute} onOpenChange={(open) => !open && setEditRoute(null)}>
-        <DialogContent className={`[&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
-          <DialogHeader>
-            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
-              <Pencil size={18} /> Update Route
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Origin</Label>
-              <PlaceCombobox
-                testId="input-edit-origin"
-                value={editForm.origin}
-                places={samarPlaces}
-                loading={placesLoading}
-                isDark={isDark}
-                placeholder="Search barangay / city / municipality..."
-                onChange={(text) => setEditForm((f) => ({ ...f, origin: text }))}
-                className={`text-sm font-medium ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Destination</Label>
-              <PlaceCombobox
-                testId="input-edit-destination"
-                value={editForm.destination}
-                places={samarPlaces}
-                loading={placesLoading}
-                isDark={isDark}
-                placeholder="Search barangay / city / municipality..."
-                onChange={(text) => setEditForm((f) => ({ ...f, destination: text }))}
-                className={`text-sm font-medium ${isDark ? "bg-slate-950 border-slate-800 text-white" : "bg-white border-slate-200"}`}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Fare Amount (PHP)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                className={`font-semibold text-sm font-mono focus-visible:ring-emerald-500 ${isDark ? "bg-slate-950 border-slate-800 text-emerald-400" : "bg-white border-slate-200 text-emerald-600"}`}
-                value={editForm.fareAmount}
-                onChange={(e) => setEditForm({ ...editForm, fareAmount: e.target.value })}
-                data-testid="input-edit-fare"
-              />
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button
-              variant="ghost"
-              onClick={() => setEditRoute(null)}
-              className={`text-xs font-medium cursor-pointer border-0 shadow-none bg-transparent hover:bg-transparent ${isDark ? "text-slate-400 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"}`}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleUpdate}
-              disabled={updateMutation.isPending || !hasRouteChanges}
-              title={!hasRouteChanges ? "No changes to save" : undefined}
-              data-testid="button-update-route"
-              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-6 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-blue-600"
-            >
-              {updateMutation.isPending ? "Saving..." : "Save Changes"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Activate Route Dialog */}
       <Dialog
@@ -1888,22 +1859,27 @@ export default function FareMatrixPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirm */}
-      <AlertDialog open={canManage && !!deleteRoute} onOpenChange={(open) => !open && setDeleteRoute(null)}>
+      {/* Reset Confirm (UI-only soft delete — database is untouched) */}
+      <AlertDialog open={canManage && !!resetRoute} onOpenChange={(open) => !open && !isResetting && setResetRoute(null)}>
         <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
           <AlertDialogHeader>
             <AlertDialogTitle className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
-              <ShieldAlert className="text-red-500" size={18} /> Confirm Deletion
+              <ShieldAlert className="text-amber-500" size={18} /> Reset this route?
             </AlertDialogTitle>
             <AlertDialogDescription className={`text-sm leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              This will permanently remove this route from the fare matrix. If this route is
-              currently active, RFID tap deductions will stop working until another route is
-              activated. This action cannot be undone.
+              {resetRoute && (
+                <span className="block font-semibold mb-2">
+                  {resetRoute.origin} → {resetRoute.destination}
+                </span>
+              )}
+              This clears the route (and its return direction) from the Fare Matrix list so you can
+              set a new origin and destination. If it is currently active, it will be deactivated
+              first. The route is only hidden from this page — it is not deleted from the database.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel
-              disabled={deleteMutation.isPending}
+              disabled={isResetting}
               className={`text-xs font-medium cursor-pointer disabled:cursor-not-allowed border-0 shadow-none bg-transparent hover:bg-transparent ${
                 isDark ? "text-slate-400 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
               }`}
@@ -1911,11 +1887,15 @@ export default function FareMatrixPage() {
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              onClick={confirmDelete}
-              disabled={deleteMutation.isPending}
-              className="bg-red-600 text-white hover:bg-red-700 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
+              onClick={(e) => {
+                e.preventDefault();
+                confirmReset();
+              }}
+              disabled={isResetting}
+              data-testid="button-confirm-reset"
+              className="bg-amber-600 text-white hover:bg-amber-700 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
             >
-              {deleteMutation.isPending ? "Deleting..." : "Confirm Delete"}
+              {isResetting ? "Resetting..." : "Confirm Reset"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
