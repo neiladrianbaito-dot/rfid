@@ -99,24 +99,18 @@ type CardTransfer = {
   target: TransferCard | null;
 };
 
-// 🔧 Extra columns read directly from the `transactions` table.
-// Added route_id so we can fall back to the `routes` table.
+// Extra columns read directly from the `transactions` table.
+// origin / destination are snapshotted by the DB trigger
+// `trg_snapshot_route_names` on INSERT, so we do NOT touch `routes` anymore.
 type TxExtraFields = {
   fee_amount: number | null;
   vat_amount: number | null;
   net_amount: number | null;
   origin: string | null;
   destination: string | null;
-  route_id: number | null;
 };
 
-// 🔧 NEW: row from the `routes` table
-type RouteRow = {
-  origin: string | null;
-  destination: string | null;
-};
-
-// 🆕 Passenger info looked up from the `users` table by card_uid
+// Passenger info looked up from the `users` table by card_uid
 type PassengerInfo = {
   full_name: string | null;
   card_type: string | null;
@@ -343,9 +337,9 @@ function extractList(value: unknown): any[] | null {
   return null;
 }
 
-// Origin / Destination are read from the (already enriched) transaction's
-// `origin` and `destination` fields. See `enrichTx` in the page component:
-// it fills these from `transactions` first, then from the `routes` table.
+// Origin / Destination are read from the enriched transaction's `origin`
+// and `destination` fields (see `enrichTx`), which come ONLY from the
+// `transactions` table.
 function getOriginDestination(
   tx: any,
 ): { origin: string; destination: string } | null {
@@ -423,7 +417,7 @@ function formatNetAmountWithSign(value: number | null): string {
   return value == null || !Number.isFinite(value) ? "—" : `+₱${formatAmount(value)}`;
 }
 
-// 🆕 Read payment method from either snake_case or camelCase
+// Read payment method from either snake_case or camelCase
 function getPaymentMethodValue(tx: any): string | null {
   const value = tx?.payment_method ?? tx?.paymentMethod ?? tx?.method ?? null;
   if (value == null) return null;
@@ -431,7 +425,7 @@ function getPaymentMethodValue(tx: any): string | null {
   return text === "" ? null : text;
 }
 
-// 🆕 Normalize any spelling ("GrabPay", "grab_pay", "Shopee Pay"...) to ONE key
+// Normalize any spelling ("GrabPay", "grab_pay", "Shopee Pay"...) to ONE key
 type PaymentKey =
   | "gcash"
   | "grab"
@@ -476,7 +470,7 @@ function formatPaymentMethod(method?: string | null): string {
   return method.charAt(0).toUpperCase() + method.slice(1);
 }
 
-// 🆕 Payment method → logo file inside /public
+// Payment method → logo file inside /public
 const PAYMENT_LOGOS: Partial<Record<PaymentKey, string>> = {
   gcash: "/gcash.svg",
   grab: "/grab.svg",
@@ -489,7 +483,7 @@ function getPaymentMethodLogo(method?: string | null): string | null {
   return key ? PAYMENT_LOGOS[key] ?? null : null;
 }
 
-// 🆕 PAYMENT METHOD FILTER (Top-up tab dropdown)
+// PAYMENT METHOD FILTER (Top-up tab dropdown)
 // "all"   = no filtering
 // "other" = payment methods we don't recognize (or empty)
 // otherwise = one of the PaymentKey values above
@@ -516,7 +510,7 @@ function matchesPaymentFilter(tx: any, filter: string): boolean {
   return key === filter;
 }
 
-// 🆕 Logo image that hides itself if the file is missing (no broken icon)
+// Logo image that hides itself if the file is missing (no broken icon)
 function PaymentLogo({
   src,
   alt,
@@ -548,7 +542,7 @@ function PaymentLogo({
   );
 }
 
-// 🆕 Card type → display label ("Senior Citizen", "senior-citizen", "PWD"...)
+// Card type → display label ("Senior Citizen", "senior-citizen", "PWD"...)
 function formatCardType(type?: string | null): string {
   if (!type) return "—";
   const key = type.toLowerCase().trim().replace(/[\s-]+/g, "_");
@@ -562,19 +556,19 @@ function formatCardType(type?: string | null): string {
   return map[key] ?? type.charAt(0).toUpperCase() + type.slice(1);
 }
 
-// 🆕 Every card type gets the discount EXCEPT regular (or empty)
+// Every card type gets the discount EXCEPT regular (or empty)
 function isDiscountedCard(type?: string | null): boolean {
   if (!type) return false;
   const key = type.toLowerCase().trim().replace(/[\s-]+/g, "_");
   return key !== "" && key !== "regular";
 }
 
-// 🆕 Round to 2 decimals (avoids floating point noise)
+// Round to 2 decimals (avoids floating point noise)
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
-// 🆕 Passenger name / card type readers (accept snake_case + camelCase)
+// Passenger name / card type readers (accept snake_case + camelCase)
 function getPassengerName(tx: any): string {
   const value =
     tx?.passenger_name ?? tx?.passengerName ?? tx?.full_name ?? tx?.fullName ?? "";
@@ -584,11 +578,6 @@ function getPassengerName(tx: any): string {
 
 function getCardType(tx: any): string | null {
   return tx?.card_type ?? tx?.cardType ?? null;
-}
-
-// 🔧 NEW: read route_id from either snake_case or camelCase
-function getRouteIdValue(tx: any): number | null {
-  return toNullableNumber(tx?.route_id ?? tx?.routeId);
 }
 
 // 🔎 CLIENT-SIDE SEARCH for Top-up / Fare.
@@ -622,7 +611,7 @@ function matchesTxSearch(tx: any, query: string, passenger?: PassengerInfo): boo
   return haystack.includes(q);
 }
 
-// 🆕 Load a data URL into an <img> so we can read its natural size (for PDF)
+// Load a data URL into an <img> so we can read its natural size (for PDF)
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -734,7 +723,7 @@ function DetailRow({
   );
 }
 
-// ── 🆕 Small row used inside the receipt (same look as the user dashboard) ──
+// ── Small row used inside the receipt (same look as the user dashboard) ─────
 // min-w-0 + overflow-hidden so long values never stretch the modal.
 function ReceiptRow({
   isDark,
@@ -768,7 +757,7 @@ function ReceiptRow({
   );
 }
 
-// ── 🆕 Receipt Modal — SAME design for Top-up and Fare ──────────────────────
+// ── Receipt Modal — SAME design for Top-up and Fare ─────────────────────────
 function ReceiptModal({
   tx,
   onClose,
@@ -800,7 +789,7 @@ function ReceiptModal({
   const vatAmount = getVatAmount(tx);
   const heroAmount = !isFare && netAmount != null ? netAmount : originalAmount;
 
-  // 🆕 tx.amount for Fare is ALREADY discounted → don't subtract again.
+  // tx.amount for Fare is ALREADY discounted → don't subtract again.
   // We only back-compute the original fare + discount for display.
   const hasFareDiscount = isFare && isDiscountedCard(getCardType(tx));
   const fareTotal = originalAmount;
@@ -1025,7 +1014,7 @@ function ReceiptModal({
               {isFare ? `₱${formatAmount(originalAmount)}` : formatNullableAmount(heroAmount)}
             </p>
 
-            {/* 🆕 Discount badge (display only) */}
+            {/* Discount badge (display only) */}
             {hasFareDiscount && (
               <p
                 className={`text-[9px] sm:text-[10px] font-semibold mt-0.5 ${
@@ -1097,7 +1086,7 @@ function ReceiptModal({
                 </span>
               </ReceiptRow>
 
-              {/* 🆕 Original fare + Discount — Fare with discounted card only */}
+              {/* Original fare + Discount — Fare with discounted card only */}
               {hasFareDiscount && (
                 <>
                   <ReceiptRow isDark={isDark} label="Original fare" upper>
@@ -1180,9 +1169,9 @@ function ReceiptModal({
               </ReceiptRow>
 
               {/* Route — Fare only
-                  Uses tx.origin + tx.destination (enriched from transactions
-                  or the routes table). Long text is cut with "..." so the
-                  modal never stretches. */}
+                  Uses tx.origin + tx.destination (from the `transactions`
+                  table). Long text is cut with "..." so the modal never
+                  stretches. */}
               {isFare && (
                 <ReceiptRow isDark={isDark} icon={<Route className={iconCls} />} label="Route">
                   {matchedRoute ? (
@@ -1410,15 +1399,13 @@ export default function TransactionsPage() {
   const [activeView, setActiveView] = useState<TxView>("topup");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  // 🆕 Payment method filter (Top-up tab only)
+  // Payment method filter (Top-up tab only)
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [viewTx, setViewTx] = useState<any>(null);
   const [page, setPage] = useState(1);
-  // fee / vat / net + origin / destination + route_id, keyed by transaction id
+  // fee / vat / net + origin / destination, keyed by transaction id
   const [extraById, setExtraById] = useState<Record<string, TxExtraFields>>({});
-  // 🔧 NEW: origin / destination from the `routes` table, keyed by route id
-  const [routeById, setRouteById] = useState<Record<string, RouteRow>>({});
-  // 🆕 passenger name + card type, keyed by card_uid
+  // passenger name + card type, keyed by card_uid
   const [passengerByCardUid, setPassengerByCardUid] = useState<Record<string, PassengerInfo>>({});
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -1533,7 +1520,7 @@ export default function TransactionsPage() {
   // 🔎 NOTE: `search` is NOT sent to the API anymore. The backend only matched
   // card UID / name, so searching by Txn ID returned nothing. Search is now
   // done on the client (see `searchedList` below) so Txn ID works too.
-  // 🆕 Payment method filter is also done on the client (see `topupList`).
+  // Payment method filter is also done on the client (see `topupList`).
   const params: any = {};
   if (statusFilter !== "all") params.status = statusFilter;
 
@@ -1581,10 +1568,9 @@ export default function TransactionsPage() {
 
   useRealtimeRefetch(["transactions"], handleTransactionsRealtime);
 
-  // ── 🔧 Fee / VAT / Net + ORIGIN / DESTINATION + ROUTE_ID (from `transactions`)
-  // The query is tried with progressively fewer columns. Before, if the
-  // `origin` / `destination` columns did not exist in Supabase, the WHOLE
-  // query failed and fee/vat/net disappeared too.
+  // ── Fee / VAT / Net + ORIGIN / DESTINATION (straight from `transactions`) ──
+  // origin / destination are snapshotted by the DB trigger on INSERT, so no
+  // lookup to `routes` / `fare_routes` / `route_id` is needed anymore.
   useEffect(() => {
     if (rawTransactionList.length === 0) return;
 
@@ -1599,39 +1585,22 @@ export default function TransactionsPage() {
 
       if (ids.length === 0) return;
 
-      const selectAttempts = [
-        "id, route_id, fee_amount, vat_amount, net_amount, origin, destination",
-        "id, route_id, fee_amount, vat_amount, net_amount",
-        "id, fee_amount, vat_amount, net_amount",
-      ];
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("id, fee_amount, vat_amount, net_amount, origin, destination")
+        .in("id", ids);
 
-      let rows: any[] | null = null;
-      let lastError: string | null = null;
+      if (cancelled) return;
 
-      for (const columns of selectAttempts) {
-        const { data, error } = await supabase
-          .from("transactions")
-          .select(columns)
-          .in("id", ids);
-
-        if (cancelled) return;
-
-        if (!error) {
-          rows = (data as any[]) ?? [];
-          break;
-        }
-        lastError = error.message;
-      }
-
-      if (rows === null) {
-        console.warn("Unable to load transaction extra fields:", lastError);
+      if (error) {
+        console.warn("Unable to load transaction extra fields:", error.message);
         return;
       }
 
       setExtraById((prev) => {
         let changed = false;
         const next: Record<string, TxExtraFields> = { ...prev };
-        for (const row of rows as any[]) {
+        for (const row of (data as any[]) ?? []) {
           const key = String(row.id);
           const value: TxExtraFields = {
             fee_amount: row.fee_amount == null ? null : Number(row.fee_amount),
@@ -1639,7 +1608,6 @@ export default function TransactionsPage() {
             net_amount: row.net_amount == null ? null : Number(row.net_amount),
             origin: row.origin == null ? null : String(row.origin),
             destination: row.destination == null ? null : String(row.destination),
-            route_id: row.route_id == null ? null : Number(row.route_id),
           };
           const old = prev[key];
           if (
@@ -1648,8 +1616,7 @@ export default function TransactionsPage() {
             old.vat_amount !== value.vat_amount ||
             old.net_amount !== value.net_amount ||
             old.origin !== value.origin ||
-            old.destination !== value.destination ||
-            old.route_id !== value.route_id
+            old.destination !== value.destination
           ) {
             next[key] = value;
             changed = true;
@@ -1666,81 +1633,7 @@ export default function TransactionsPage() {
     };
   }, [rawTransactionList]);
 
-  // ── 🔧 NEW: ORIGIN / DESTINATION from the `routes` table (by route_id) ────
-  // Used as the fallback when the transaction itself has no origin/destination
-  // (which is the case when only `route_id` is stored in Supabase).
-  const routeIdsKey = useMemo(() => {
-    const set = new Set<number>();
-    for (const tx of rawTransactionList) {
-      const id = getRouteIdValue(tx);
-      if (id != null) set.add(id);
-    }
-    for (const extra of Object.values(extraById)) {
-      if (extra.route_id != null) set.add(extra.route_id);
-    }
-    return Array.from(set).sort((a, b) => a - b).join(",");
-  }, [rawTransactionList, extraById]);
-
-  useEffect(() => {
-    if (!routeIdsKey) return;
-
-    let cancelled = false;
-
-    const loadRoutes = async () => {
-      const ids = routeIdsKey.split(",").map(Number);
-
-      // Try "routes" first, then "fare_routes" in case that is the table name.
-      const tableNames = ["routes", "fare_routes"];
-      let rows: any[] | null = null;
-      let lastError: string | null = null;
-
-      for (const table of tableNames) {
-        const { data, error } = await supabase
-          .from(table)
-          .select("id, origin, destination")
-          .in("id", ids);
-
-        if (cancelled) return;
-
-        if (!error) {
-          rows = (data as any[]) ?? [];
-          break;
-        }
-        lastError = `${table}: ${error.message}`;
-      }
-
-      if (rows === null) {
-        console.warn("Unable to load routes (origin/destination):", lastError);
-        return;
-      }
-
-      setRouteById((prev) => {
-        let changed = false;
-        const next: Record<string, RouteRow> = { ...prev };
-        for (const row of rows as any[]) {
-          const key = String(row.id);
-          const value: RouteRow = {
-            origin: row.origin == null ? null : String(row.origin),
-            destination: row.destination == null ? null : String(row.destination),
-          };
-          const old = prev[key];
-          if (!old || old.origin !== value.origin || old.destination !== value.destination) {
-            next[key] = value;
-            changed = true;
-          }
-        }
-        return changed ? next : prev;
-      });
-    };
-
-    loadRoutes();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [routeIdsKey]);
-
-  // ── 🆕 Passenger name + card type (from `users`, by card_uid) ─────────────
+  // ── Passenger name + card type (from `users`, by card_uid) ────────────────
   useEffect(() => {
     if (rawTransactionList.length === 0) return;
 
@@ -1795,35 +1688,27 @@ export default function TransactionsPage() {
     };
   }, [rawTransactionList]);
 
-  // ── 🔧 ONE place that builds the full transaction object ──────────────────
-  // Origin / destination priority:
-  //   1. transactions.origin / destination (extra query or API response)
-  //   2. routes.origin / destination (looked up with route_id)
+  // ── ONE place that builds the full transaction object ─────────────────────
+  // Origin / destination come ONLY from the `transactions` table.
   const enrichTx = useCallback(
     (rawTx: any) => {
       const uid = rawTx?.card_uid ?? rawTx?.cardUid;
       const passenger = uid ? passengerByCardUid[String(uid)] : undefined;
       const extra = extraById[String(rawTx?.id)];
 
-      const routeId = extra?.route_id ?? getRouteIdValue(rawTx);
-      const route = routeId != null ? routeById[String(routeId)] : undefined;
-
       const origin =
         (extra?.origin && extra.origin.trim()) ||
         (rawTx?.origin && String(rawTx.origin).trim()) ||
-        route?.origin ||
         null;
 
       const destination =
         (extra?.destination && extra.destination.trim()) ||
         (rawTx?.destination && String(rawTx.destination).trim()) ||
-        route?.destination ||
         null;
 
       return {
         ...rawTx,
         ...(extra ?? {}),
-        route_id: routeId,
         origin,
         destination,
         full_name:
@@ -1838,7 +1723,7 @@ export default function TransactionsPage() {
           rawTx?.card_type || rawTx?.cardType || passenger?.card_type || null,
       };
     },
-    [extraById, routeById, passengerByCardUid],
+    [extraById, passengerByCardUid],
   );
 
   // ── 🔎 Client-side search (Txn ID, Card UID, Full Name, Payment Method,
@@ -1854,7 +1739,7 @@ export default function TransactionsPage() {
   }, [rawTransactionList, search, passengerByCardUid, enrichTx]);
 
   // ── Lists + pagination ────────────────────────────────────────────────────
-  // 🆕 Top-up list is also filtered by the selected payment method
+  // Top-up list is also filtered by the selected payment method
   const topupList = useMemo(
     () =>
       searchedList.filter(
@@ -2077,7 +1962,7 @@ export default function TransactionsPage() {
                   />
                 </div>
                 <div className="flex gap-3 w-full lg:w-auto">
-                  {/* 🆕 Payment Method filter — Top-up tab only */}
+                  {/* Payment Method filter — Top-up tab only */}
                   {!isFareView && (
                     <Select value={paymentFilter} onValueChange={setPaymentFilter}>
                       <SelectTrigger
@@ -2207,13 +2092,13 @@ export default function TransactionsPage() {
                           </TableRow>
                         ) : (
                           paginatedList.map((rawTx: any) => {
-                            // 🔧 fee/vat/net + origin/destination (transactions
-                            // → routes fallback) + passenger name + card type
+                            // fee/vat/net + origin/destination (from
+                            // `transactions`) + passenger name + card type
                             const tx = enrichTx(rawTx);
 
                             const matchedRoute = isFareView ? getOriginDestination(tx) : null;
 
-                            // 🆕 works with payment_method OR paymentMethod
+                            // works with payment_method OR paymentMethod
                             const rawPaymentMethod = !isFareView ? getPaymentMethodValue(tx) : null;
                             const paymentMethodLabel = !isFareView
                               ? formatPaymentMethod(rawPaymentMethod)

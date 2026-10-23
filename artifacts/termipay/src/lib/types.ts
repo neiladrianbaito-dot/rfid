@@ -49,7 +49,7 @@ export type TransactionRecord = {
   // ✅ Galing sa join ng `routes` table (via route_id)
   origin?: string | null;
   destination?: string | null;
-  route?: RouteInfo | null; // raw nested result mula sa Supabase join
+  fare_route?: RouteInfo | null; // raw nested result mula sa Supabase join
 
   // Top-up only
   fee_amount?: string | number | null;
