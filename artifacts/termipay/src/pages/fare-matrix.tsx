@@ -574,9 +574,10 @@ function DistanceFareDialog({
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [isEstimate, setIsEstimate] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState("Working...");
   const [error, setError] = useState<string | null>(null);
 
-  // 🔒 Pins lock once "Find on map" places them (or both pins are clicked).
+  // 🔒 Pins lock once "OK" places them (or both pins are clicked).
   const [pinsLocked, setPinsLocked] = useState(false);
 
   // Leaflet map plumbing
@@ -611,6 +612,8 @@ function DistanceFareDialog({
       setIsEstimate(false);
       setError(null);
       setPinsLocked(false);
+      setBusy(false);
+      setBusyLabel("Working...");
       defaultedOrigin.current = false;
     }
   }, [open]);
@@ -708,6 +711,14 @@ function DistanceFareDialog({
     routeLine.current = null;
   }, [originPt, destPt]);
 
+  // Changing the picked origin/destination also invalidates the previous fare,
+  // so an old fare can never be saved under a new place. Press OK again.
+  useEffect(() => {
+    setDistanceKm(null);
+    routeLine.current?.remove();
+    routeLine.current = null;
+  }, [originPlace, destPlace]);
+
   const fare = useMemo(() => {
     if (distanceKm == null) return null;
     const bf = parseFloat(baseFare);
@@ -720,52 +731,52 @@ function DistanceFareDialog({
   const excessKm =
     distanceKm != null ? Math.max(0, distanceKm - (parseFloat(baseKm) || 0)) : 0;
 
-  // "Find on map" → geocodes the two PSGC places and locks the pins there.
-  const findPlaces = async () => {
+  // ✅ ONE BUTTON: OK
+  // 1) Finds both places on the map (geocode) and drops the pins
+  // 2) Immediately calculates the road distance + fare
+  // If no places were picked but both pins were clicked on the map by hand,
+  // it skips step 1 and just calculates.
+  const findAndCalculate = async () => {
     setError(null);
-    if (!originPlace || !destPlace) {
+
+    const hasPlaces = !!originPlace && !!destPlace;
+    const hasPins = !!originPt && !!destPt;
+
+    if (!hasPlaces && !hasPins) {
       setError("Pick both the origin and the destination from the list (Samar & Leyte only).");
       return;
     }
+
     setBusy(true);
     try {
-      const o = await geocodePlace(originPlace);
-      await sleep(1100); // respect Nominatim rate limit
-      const d = await geocodePlace(destPlace);
-      if (!o || !d) {
-        setError(
-          "Couldn't locate one of the places on the map. Click the map to place the pins manually."
-        );
-        return;
+      let o: LatLng;
+      let d: LatLng;
+
+      if (hasPlaces) {
+        // ── Step 1: find the places on the map ──
+        setBusyLabel("Finding places...");
+        const oHit = await geocodePlace(originPlace!);
+        await sleep(1100); // respect Nominatim rate limit
+        const dHit = await geocodePlace(destPlace!);
+
+        if (!oHit || !dHit) {
+          setError(
+            "Couldn't locate one of the places on the map. Click the map to place the pins manually."
+          );
+          return;
+        }
+        o = oHit;
+        d = dHit;
+        setOriginPt(o);
+        setDestPt(d);
+        setPinsLocked(true);
+      } else {
+        o = { ...originPt! };
+        d = { ...destPt! };
       }
-      setOriginPt(o);
-      setDestPt(d);
-      setPinsLocked(true);
-      mapRef.current?.fitBounds(
-        [
-          [o.lat, o.lng],
-          [d.lat, d.lng],
-        ],
-        { padding: [40, 40] }
-      );
-    } catch {
-      setError("Place lookup failed. Check your connection or click the map to place pins.");
-    } finally {
-      setBusy(false);
-    }
-  };
 
-  const calculate = async () => {
-    if (!originPt || !destPt) {
-      setError("Set both pins first (Find on map, or click the map).");
-      return;
-    }
-    setError(null);
-    setBusy(true);
-    try {
-      const o = { ...originPt };
-      const d = { ...destPt };
-
+      // ── Step 2: calculate the road distance + fare ──
+      setBusyLabel("Calculating route...");
       const r = await roadRoute(o, d).catch(() => null);
       const map = mapRef.current;
 
@@ -776,23 +787,35 @@ function DistanceFareDialog({
         setDistanceKm(r.km);
         setIsEstimate(false);
         if (map) {
-          routeLine.current = L.polyline(r.coords, {
+          const line = L.polyline(r.coords, {
             color: "#2563eb",
             weight: 5,
             interactive: false,
           }).addTo(map);
+          routeLine.current = line;
+          map.fitBounds(line.getBounds(), { padding: [40, 40] });
         }
       } else {
         setDistanceKm(haversineKm(o, d));
         setIsEstimate(true);
+        map?.fitBounds(
+          [
+            [o.lat, o.lng],
+            [d.lat, d.lng],
+          ],
+          { padding: [40, 40] }
+        );
       }
+    } catch {
+      setError("Lookup failed. Check your connection or click the map to place pins.");
     } finally {
       setBusy(false);
+      setBusyLabel("Working...");
     }
   };
 
   // Must pick both places from the PSGC list before saving.
-  const canSave = fare != null && fare > 0 && !!originPlace && !!destPlace;
+  const canSave = fare != null && fare > 0 && !!originPlace && !!destPlace && !busy;
 
   const submit = () => {
     if (!canSave || fare == null || !originPlace || !destPlace) return;
@@ -802,6 +825,8 @@ function DistanceFareDialog({
       fareAmount: fare,
     });
   };
+
+  const canPressOk = (!!originPlace && !!destPlace) || (!!originPt && !!destPt);
 
   const muted = isDark ? "text-slate-400" : "text-slate-500";
   const inputCls = isDark
@@ -859,29 +884,33 @@ function DistanceFareDialog({
 
           {placesError && <p className="text-xs text-red-500">{placesError}</p>}
           <p className={`text-[11px] ${muted}`}>
-            Samar & Leyte only (Samar, Northern Samar, Eastern Samar, Leyte, Southern Leyte). Type to search, then pick from the list.
+            Samar & Leyte only (Samar, Northern Samar, Eastern Samar, Leyte, Southern Leyte). Type to search, pick from the list, then press OK.
           </p>
 
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={findPlaces}
-              disabled={busy || !originPlace || !destPlace}
-              className="cursor-pointer disabled:cursor-not-allowed"
-            >
-              <Search className="w-3.5 h-3.5 mr-1" /> Find on map
-            </Button>
+          <div className="flex flex-wrap items-center gap-3">
             <Button
               type="button"
               size="sm"
-              onClick={calculate}
-              disabled={busy || !originPt || !destPt}
-              className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed"
+              onClick={findAndCalculate}
+              disabled={busy || !canPressOk}
+              data-testid="button-distance-ok"
+              className="min-w-[96px] bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed"
             >
-              {busy ? "Working..." : "Calculate distance & fare"}
+              {busy ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  OK
+                </>
+              ) : (
+                "OK"
+              )}
             </Button>
+            {busy && (
+              <span className={`text-xs flex items-center gap-1.5 ${muted}`}>
+                <Loader2 className="w-3 h-3 animate-spin" />
+                {busyLabel}
+              </span>
+            )}
           </div>
 
           <div
