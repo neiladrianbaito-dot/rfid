@@ -9,6 +9,10 @@
  * OpenAPI spec and re-run `orval` as soon as you can, so this file goes back
  * to being fully generated instead of drifting from the spec.
  *
+ * ⚠️ MANUALLY PATCHED (transactions) — added origin / destination / route_id /
+ * payment_method / fee, vat, net fields to the transaction schemas. Port these
+ * into the OpenAPI spec too, otherwise `orval` will overwrite them.
+ *
  * OpenAPI spec version: 0.1.0
  */
 import * as zod from "zod";
@@ -170,6 +174,24 @@ export const ListTransactionsQueryParams = zod.object({
   status: zod.enum(["Success", "Failed", "Pending"]).optional(),
 });
 
+// ── Shared transaction fields (response side) ──────────────────────────────
+// Used by both the list response and the update response so they never drift.
+const transactionExtraResponseFields = {
+  payment_method: zod.string().nullable().optional(),
+
+  route_id: zod.coerce.number().nullable().optional(),
+
+  // ✅ BAGO: galing sa routes table (join via route_id)
+  origin: zod.string().nullable().optional(),
+  destination: zod.string().nullable().optional(),
+
+  // Top-up financial fields
+  // These must be NULL for Fare transactions.
+  fee_amount: zod.coerce.number().nullable().optional(),
+  vat_amount: zod.coerce.number().nullable().optional(),
+  net_amount: zod.coerce.number().nullable().optional(),
+};
+
 // ✅ FIXED: id is now string to support 13-digit BIGINT
 export const ListTransactionsResponseItem = zod.object({
   // BIGINT must stay as string so large PostgreSQL IDs are safe in JavaScript
@@ -186,15 +208,7 @@ export const ListTransactionsResponseItem = zod.object({
 
   status: zod.string(),
 
-  payment_method: zod.string().nullable().optional(),
-
-  route_id: zod.coerce.number().nullable().optional(),
-
-  // Top-up financial fields
-  // These must be NULL for Fare transactions.
-  fee_amount: zod.coerce.number().nullable().optional(),
-  vat_amount: zod.coerce.number().nullable().optional(),
-  net_amount: zod.coerce.number().nullable().optional(),
+  ...transactionExtraResponseFields,
 });
 
 export const ListTransactionsResponse = zod.array(ListTransactionsResponseItem);
@@ -204,6 +218,13 @@ export const CreateTransactionBody = zod.object({
   type: zod.enum(["Fare", "Top-up"]),
   amount: zod.number(),
   status: zod.enum(["Success", "Failed", "Pending"]),
+
+  // ✅ BAGO: dati natatanggal ang mga ito kaya hindi nase-save sa POST
+  route_id: zod.coerce.number().nullable().optional(),
+  payment_method: zod.string().nullable().optional(),
+  fee_amount: zod.coerce.number().nullable().optional(),
+  vat_amount: zod.coerce.number().nullable().optional(),
+  net_amount: zod.coerce.number().nullable().optional(),
 });
 
 // ✅ FIXED: id is now string to support 13-digit BIGINT
@@ -226,7 +247,9 @@ export const UpdateTransactionResponse = zod.object({
   type: zod.string(),
   amount: zod.number(),
   status: zod.string(),
-  payment_method: zod.string().nullable().optional(),
+
+  // ✅ BAGO: route_id, origin, destination, fee/vat/net
+  ...transactionExtraResponseFields,
 });
 
 // ✅ FIXED: id is now string to support 13-digit BIGINT
