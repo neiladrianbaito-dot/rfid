@@ -992,6 +992,9 @@ export default function FareMatrixPage() {
   const [resetRoute, setResetRoute] = useState<any>(null);
   const [isResetting, setIsResetting] = useState(false);
 
+  // 🔓 Distance Fare unlocks after a Reset (and locks again after a successful save)
+  const [resetUnlocked, setResetUnlocked] = useState(false);
+
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const [showDistance, setShowDistance] = useState(false);
@@ -1043,6 +1046,12 @@ export default function FareMatrixPage() {
     const hidden = new Set(hiddenIds);
     return routes.filter((r) => !hidden.has(String(r.id)));
   }, [routes, hiddenIds]);
+
+  // 🔒 Distance Fare is only usable when:
+  //   • there are no visible routes left in the frontend, OR
+  //   • the user just clicked Reset (resetUnlocked)
+  const noVisibleRoutes = !isLoading && visibleRoutes.length === 0;
+  const distanceFareEnabled = noVisibleRoutes || resetUnlocked;
 
   const activeRoutes = visibleRoutes.filter((r) => r.isActive);
 
@@ -1227,6 +1236,16 @@ export default function FareMatrixPage() {
   const handleDistanceSave = async (p: DistanceFareSavePayload) => {
     if (blockIfViewOnly()) return;
 
+    // 🔒 Safety guard — Distance Fare is locked until Reset / no routes
+    if (!distanceFareEnabled) {
+      toast({
+        title: "Distance Fare is locked",
+        description: "Click Reset on the current route first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setSavingDistance(true);
     try {
       const existing = Array.isArray(routes)
@@ -1251,6 +1270,7 @@ export default function FareMatrixPage() {
       queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
 
       setShowDistance(false);
+      setResetUnlocked(false); // 🔒 lock again — Reset is needed before adding another
       toast({
         title: <SuccessTitle text={`Route Saved — ₱${p.fareAmount.toFixed(2)}`} />,
       });
@@ -1370,6 +1390,7 @@ export default function FareMatrixPage() {
   //   using a route that is no longer visible.
   // - The route (and its return direction) is then hidden from this page.
   // - NOTHING is deleted from the database.
+  // - Unlocks the Distance Fare button.
   const confirmReset = async () => {
     if (blockIfViewOnly()) {
       setResetRoute(null);
@@ -1405,6 +1426,7 @@ export default function FareMatrixPage() {
     }
 
     hideRoutes(targets.map((r) => r.id));
+    setResetUnlocked(true); // 🔓 Distance Fare is now usable
     queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
     toast({ title: <SuccessTitle text="Route Reset — add a new origin & destination" /> });
 
@@ -1443,11 +1465,24 @@ export default function FareMatrixPage() {
             {loaded && canManage && (
               <Button
                 variant="outline"
-                onClick={() => setShowDistance(true)}
+                onClick={() => {
+                  if (!distanceFareEnabled) return;
+                  setShowDistance(true);
+                }}
+                disabled={!distanceFareEnabled}
+                title={
+                  distanceFareEnabled
+                    ? "Add a new route using distance-based fare"
+                    : "Click Reset on the current route first to add a new one"
+                }
                 data-testid="button-distance-fare"
-                className="font-semibold cursor-pointer shrink-0 whitespace-nowrap"
+                className="font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 shrink-0 whitespace-nowrap"
               >
-                <RouteIcon className="w-4 h-4 mr-2" />
+                {distanceFareEnabled ? (
+                  <RouteIcon className="w-4 h-4 mr-2" />
+                ) : (
+                  <Lock className="w-4 h-4 mr-2" />
+                )}
                 Distance Fare
               </Button>
             )}
@@ -1752,7 +1787,7 @@ export default function FareMatrixPage() {
 
       {/* 🗺️ Distance-based fare dialog (Leaflet + OSRM + LTFRB formula + PSGC places) */}
       <DistanceFareDialog
-        open={canManage && showDistance}
+        open={canManage && distanceFareEnabled && showDistance}
         onOpenChange={setShowDistance}
         isDark={isDark}
         saving={savingDistance}
