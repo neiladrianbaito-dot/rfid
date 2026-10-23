@@ -8,6 +8,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { routesTable } from "./routes"; // ✅ BAGO (i-adjust ang path)
 
 export const transactionsTable = pgTable("transactions", {
   id: serial("id").primaryKey(),
@@ -31,7 +32,12 @@ export const transactionsTable = pgTable("transactions", {
     .notNull()
     .default("Success"),
 
-  routeId: integer("route_id"),
+  // ✅ BAGO: foreign key papuntang routes.id
+  routeId: integer("route_id").references(() => routesTable.id),
+
+  // ✅ BAGO: snapshot ng origin at destination sa oras ng transaction
+  origin: text("origin"),
+  destination: text("destination"),
 
   payment_method: text("payment_method"),
 
