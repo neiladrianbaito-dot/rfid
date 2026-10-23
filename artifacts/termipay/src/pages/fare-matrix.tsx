@@ -521,14 +521,7 @@ function DistanceFareDialog({
             </Button>
           </div>
 
-          {/* ✅ CHANGED: the "Pins are locked..." label is removed. The tip only
-              shows before the pins are placed. */}
-          {!pinsLocked && (
-            <p className={`text-xs ${muted}`}>
-              Tip: use "Find on map" to place the pins — they lock in place right away. You can also click the map to drop the Origin pin, then the Destination pin.
-            </p>
-          )}
-
+    
           <div
             ref={setMapEl}
             className="w-full h-64 rounded-lg border overflow-hidden z-0"
