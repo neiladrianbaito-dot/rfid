@@ -574,7 +574,6 @@ function DistanceFareDialog({
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [isEstimate, setIsEstimate] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [busyLabel, setBusyLabel] = useState("Working...");
   const [error, setError] = useState<string | null>(null);
 
   // 🔒 Pins lock once "OK" places them (or both pins are clicked).
@@ -613,7 +612,6 @@ function DistanceFareDialog({
       setError(null);
       setPinsLocked(false);
       setBusy(false);
-      setBusyLabel("Working...");
       defaultedOrigin.current = false;
     }
   }, [open]);
@@ -736,6 +734,7 @@ function DistanceFareDialog({
   // 2) Immediately calculates the road distance + fare
   // If no places were picked but both pins were clicked on the map by hand,
   // it skips step 1 and just calculates.
+  // While running, ONLY the OK button shows a circular spinner (no extra text).
   const findAndCalculate = async () => {
     setError(null);
 
@@ -754,7 +753,6 @@ function DistanceFareDialog({
 
       if (hasPlaces) {
         // ── Step 1: find the places on the map ──
-        setBusyLabel("Finding places...");
         const oHit = await geocodePlace(originPlace!);
         await sleep(1100); // respect Nominatim rate limit
         const dHit = await geocodePlace(destPlace!);
@@ -776,7 +774,6 @@ function DistanceFareDialog({
       }
 
       // ── Step 2: calculate the road distance + fare ──
-      setBusyLabel("Calculating route...");
       const r = await roadRoute(o, d).catch(() => null);
       const map = mapRef.current;
 
@@ -810,7 +807,6 @@ function DistanceFareDialog({
       setError("Lookup failed. Check your connection or click the map to place pins.");
     } finally {
       setBusy(false);
-      setBusyLabel("Working...");
     }
   };
 
@@ -893,24 +889,13 @@ function DistanceFareDialog({
               size="sm"
               onClick={findAndCalculate}
               disabled={busy || !canPressOk}
+              aria-busy={busy}
+              aria-label={busy ? "Loading" : "OK"}
               data-testid="button-distance-ok"
-              className="min-w-[96px] bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed"
+              className="w-[96px] h-9 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed"
             >
-              {busy ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                  OK
-                </>
-              ) : (
-                "OK"
-              )}
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "OK"}
             </Button>
-            {busy && (
-              <span className={`text-xs flex items-center gap-1.5 ${muted}`}>
-                <Loader2 className="w-3 h-3 animate-spin" />
-                {busyLabel}
-              </span>
-            )}
           </div>
 
           <div
