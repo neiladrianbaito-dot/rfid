@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import PaymongoTopup from "@/pages/Paymongo-Topup";
 import PaymongoDashboardPage from "@/pages/user-dashboard";
+import DriverDashboardPage from "@/pages/driver-dashboard";
 import LoginPage from "@/pages/login";
 import SigninPage from "@/pages/signin";
 import SignupPage from "@/pages/signup";
@@ -29,6 +30,7 @@ import DisbursementPage from "@/pages/disbursement";
 import ExcelPage from "@/pages/excel";
 
 const USER_AUTH_TOKEN_KEY = "termipay_user_auth_token";
+const DRIVER_AUTH_TOKEN_KEY = "termipay_driver_auth_token";
 
 function normalizeApiBaseUrl(rawUrl?: string | null): string | null {
   if (!rawUrl) return null;
@@ -101,6 +103,17 @@ function PaymongoRoute() {
   return <PaymongoDashboardPage />;
 }
 
+function DriverRoute() {
+  const hasDriverToken =
+    typeof window !== "undefined" && !!window.localStorage.getItem(DRIVER_AUTH_TOKEN_KEY);
+
+  if (!hasDriverToken) {
+    return <Redirect to="/signin" />;
+  }
+
+  return <DriverDashboardPage />;
+}
+
 function AppRouter() {
   return (
     <Switch>
@@ -112,6 +125,7 @@ function AppRouter() {
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/paymongo-topup" component={PaymongoTopup} />
       <Route path="/user-dashboard" component={PaymongoRoute} />
+      <Route path="/driver-dashboard" component={DriverRoute} />
       <Route path="/reports/preview" component={ReportPreviewPage} />
       <Route path="/payment-success" component={GCashPaymentSuccessPage} />
 
