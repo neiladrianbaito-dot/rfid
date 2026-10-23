@@ -10,7 +10,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Eye, EyeOff, Loader2, Mail, Lock, Sun, Moon } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  Loader2,
+  Mail,
+  Lock,
+  Sun,
+  Moon,
+  User,
+  Bus,
+} from "lucide-react";
 import { buildApiUrl } from "@/lib/api-url";
 import { supabase } from "@/lib/supabase";
 import { useAuthTheme } from "@/lib/auth-theme";
@@ -23,11 +33,49 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const USER_AUTH_TOKEN_KEY = "termipay_user_auth_token";
+type Role = "commuter" | "driver";
+
+const AUTH_ROLE_KEY = "termipay_auth_role";
+
+/* Palitan dito kung iba ang endpoints/routes mo */
+const ROLE_CONFIG: Record<
+  Role,
+  {
+    label: string;
+    title: string;
+    description: string;
+    signinEndpoint: string;
+    forgotEndpoint: string;
+    tokenKey: string;
+    dashboard: string;
+  }
+> = {
+  commuter: {
+    label: "Commuter",
+    title: "ACCESS THE WALLET",
+    description: "Welcome back. Please authenticate to access your wallet.",
+    signinEndpoint: "/auth/user-signin",
+    forgotEndpoint: "/auth/user/forgot-password",
+    tokenKey: "termipay_user_auth_token",
+    dashboard: "/user-dashboard",
+  },
+  driver: {
+    label: "Driver",
+    title: "DRIVER ACCESS",
+    description: "Welcome back, driver. Sign in to manage your trips.",
+    signinEndpoint: "/auth/driver-signin",
+    forgotEndpoint: "/auth/driver/forgot-password",
+    tokenKey: "termipay_driver_auth_token",
+    dashboard: "/driver-dashboard",
+  },
+};
 
 export default function SigninPage() {
   const [, setLocation] = useLocation();
   const { theme, isDark, toggleTheme } = useAuthTheme();
+
+  const [role, setRole] = useState<Role>("commuter");
+  const config = ROLE_CONFIG[role];
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -64,15 +112,23 @@ export default function SigninPage() {
       : "bg-red-50 border-red-200 text-red-600"
   }`;
 
-  function redirectToPaymongoDashboard() {
+  function switchRole(next: Role) {
+    if (busy || next === role) return;
+    setRole(next);
+    setError("");
+    setPassword("");
+  }
+
+  function redirectToDashboard() {
     const basePath = (import.meta.env.BASE_URL || "").replace(/\/$/, "");
-    const target = `${basePath}/user-dashboard`;
+    const path = config.dashboard;
+    const target = `${basePath}${path}`;
 
     try {
-      setLocation("/user-dashboard");
+      setLocation(path);
 
       window.setTimeout(() => {
-        if (!window.location.pathname.endsWith("/user-dashboard")) {
+        if (!window.location.pathname.endsWith(path)) {
           window.location.assign(target);
         }
       }, 50);
@@ -93,7 +149,7 @@ export default function SigninPage() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(buildApiUrl("/auth/user-signin"), {
+      const response = await fetch(buildApiUrl(config.signinEndpoint), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), password }),
@@ -114,8 +170,9 @@ export default function SigninPage() {
         return;
       }
 
-      window.localStorage.setItem(USER_AUTH_TOKEN_KEY, data.token);
-      redirectToPaymongoDashboard();
+      window.localStorage.setItem(config.tokenKey, data.token);
+      window.localStorage.setItem(AUTH_ROLE_KEY, role);
+      redirectToDashboard();
     } catch {
       setError("Unable to connect to server. Please try again.");
     } finally {
@@ -128,10 +185,13 @@ export default function SigninPage() {
     setIsGoogleSubmitting(true);
 
     try {
+      // Save the role so /auth/callback knows where to send the user
+      window.localStorage.setItem(AUTH_ROLE_KEY, role);
+
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${window.location.origin}/auth/callback?role=${role}`,
         },
       });
 
@@ -164,7 +224,7 @@ export default function SigninPage() {
     setForgotBusy(true);
 
     try {
-      const response = await fetch(buildApiUrl("/auth/user/forgot-password"), {
+      const response = await fetch(buildApiUrl(config.forgotEndpoint), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: trimmed }),
@@ -182,10 +242,14 @@ export default function SigninPage() {
     }
   }
 
+  const tabs: { id: Role; icon: typeof User }[] = [
+    { id: "commuter", icon: User },
+    { id: "driver", icon: Bus },
+  ];
+
   return (
     <div
-     // BAGO NA
-className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-4 sm:p-6 relative overflow-x-hidden ${
+      className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-4 sm:p-6 relative overflow-x-hidden ${
         isDark ? "text-white" : "text-slate-900"
       }`}
     >
@@ -225,7 +289,7 @@ className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-
               isDark ? "text-white" : "text-slate-900"
             }`}
           >
-            ACCESS THE WALLET
+            {config.title}
           </h1>
 
           <p
@@ -247,18 +311,55 @@ className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-
         >
           <div className="h-1 w-full bg-gradient-to-r from-blue-500 via-emerald-500 to-blue-500" />
 
-          <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6 space-y-1">
-            <CardTitle
-              className={`text-base sm:text-xl ${
-                isDark ? "text-white" : "text-slate-900"
+          <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6 space-y-3">
+            {/* Role Tabs */}
+            <div
+              role="tablist"
+              aria-label="Account type"
+              className={`grid grid-cols-2 gap-1 p-1 rounded-xl border ${
+                isDark
+                  ? "bg-slate-900/60 border-slate-800"
+                  : "bg-slate-100 border-slate-200"
               }`}
             >
-              Sign In
-            </CardTitle>
+              {tabs.map(({ id, icon: Icon }) => {
+                const active = role === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    disabled={busy}
+                    onClick={() => switchRole(id)}
+                    className={`flex items-center justify-center gap-1.5 h-9 sm:h-10 rounded-lg text-[12px] sm:text-sm font-semibold transition-all duration-200 disabled:opacity-60 ${
+                      active
+                        ? "bg-blue-600 text-white shadow-md shadow-blue-900/20"
+                        : isDark
+                        ? "text-slate-400 hover:text-slate-200"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    {ROLE_CONFIG[id].label}
+                  </button>
+                );
+              })}
+            </div>
 
-            <CardDescription className="text-[11px] sm:text-xs text-slate-500">
-              Welcome back. Please authenticate to access your wallet.
-            </CardDescription>
+            <div className="space-y-1">
+              <CardTitle
+                className={`text-base sm:text-xl ${
+                  isDark ? "text-white" : "text-slate-900"
+                }`}
+              >
+                Sign In as {config.label}
+              </CardTitle>
+
+              <CardDescription className="text-[11px] sm:text-xs text-slate-500">
+                {config.description}
+              </CardDescription>
+            </div>
           </CardHeader>
 
           <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
@@ -418,7 +519,7 @@ className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-
                     Authenticating...
                   </span>
                 ) : (
-                  "Sign In"
+                  `Sign In as ${config.label}`
                 )}
               </Button>
             </form>
@@ -432,7 +533,7 @@ className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-
               <p className="text-xs sm:text-sm text-center text-slate-500">
                 No account yet?{" "}
                 <Link
-                  href="/signup"
+                  href={`/signup?role=${role}`}
                   className={`font-medium ${
                     isDark
                       ? "text-blue-400 hover:text-blue-300"
@@ -459,8 +560,7 @@ className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-
       {/* Forgot Password Dialog */}
       <Dialog open={forgotOpen} onOpenChange={setForgotOpen}>
         <DialogContent
-         // BAGO NA
-className={`auth-smooth w-[calc(100vw-2rem)] max-w-[340px] sm:max-w-sm mx-auto rounded-2xl
+          className={`auth-smooth w-[calc(100vw-2rem)] max-w-[340px] sm:max-w-sm mx-auto rounded-2xl ${
             isDark
               ? "bg-slate-950 border-slate-800 text-white"
               : "bg-white border-slate-200 text-slate-900"
@@ -480,8 +580,8 @@ className={`auth-smooth w-[calc(100vw-2rem)] max-w-[340px] sm:max-w-sm mx-auto r
                 isDark ? "text-slate-400" : "text-slate-500"
               }`}
             >
-              Enter your registered email and we'll send you a secure reset
-              link valid for 1 hour.
+              Enter your registered {config.label.toLowerCase()} email and
+              we'll send you a secure reset link valid for 1 hour.
             </DialogDescription>
           </DialogHeader>
 

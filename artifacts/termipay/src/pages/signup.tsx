@@ -20,23 +20,59 @@ import {
   CheckCircle2,
   Sun,
   Moon,
+  Bus,
 } from "lucide-react";
 import { buildApiUrl } from "@/lib/api-url";
 import { supabase } from "@/lib/supabase";
 import { useAuthTheme } from "@/lib/auth-theme";
 import AuthBackground from "@/components/auth-background";
 
+type Role = "commuter" | "driver";
+
+const AUTH_ROLE_KEY = "termipay_auth_role";
+
+/* Palitan dito kung iba ang endpoints mo */
+const ROLE_CONFIG: Record<
+  Role,
+  {
+    label: string;
+    title: string;
+    description: string;
+    signupEndpoint: string;
+    checkNameEndpoint: string;
+  }
+> = {
+  commuter: {
+    label: "Commuter",
+    title: "JOIN THE NETWORK",
+    description: "Enter your details to get started with your digital wallet.",
+    signupEndpoint: "/auth/signup",
+    checkNameEndpoint: "/auth/check-full-name",
+  },
+  driver: {
+    label: "Driver",
+    title: "DRIVE WITH US",
+    description: "Register as a driver to start collecting digital fares.",
+    signupEndpoint: "/auth/driver-signup",
+    checkNameEndpoint: "/auth/check-full-name?role=driver",
+  },
+};
+
 /* =========================================================
    FULL NAME CHECK
    ========================================================= */
 
-async function checkFullNameMatch(fullName: string): Promise<{
+async function checkFullNameMatch(
+  fullName: string,
+  endpoint: string
+): Promise<{
   fullName: string;
   status?: string;
 }> {
+  const separator = endpoint.includes("?") ? "&" : "?";
   const response = await fetch(
     buildApiUrl(
-      `/auth/check-full-name?fullName=${encodeURIComponent(fullName)}`
+      `${endpoint}${separator}fullName=${encodeURIComponent(fullName)}`
     )
   );
 
@@ -68,6 +104,16 @@ export default function SignupPage() {
   const [, setLocation] = useLocation();
   const { theme, isDark, toggleTheme } = useAuthTheme();
 
+  // Read ?role=driver from the URL (comes from the signin page link)
+  const initialRole: Role =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("role") === "driver"
+      ? "driver"
+      : "commuter";
+
+  const [role, setRole] = useState<Role>(initialRole);
+  const config = ROLE_CONFIG[role];
+
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -92,6 +138,13 @@ export default function SignupPage() {
   const iconClass = `absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 pointer-events-none ${
     isDark ? "text-slate-600" : "text-slate-400"
   }`;
+
+  function switchRole(next: Role) {
+    if (busy || next === role) return;
+    setRole(next);
+    setError("");
+    setSuccess("");
+  }
 
   /* =======================================================
      SIGN UP (email / password)
@@ -120,7 +173,7 @@ export default function SignupPage() {
 
     try {
       try {
-        await checkFullNameMatch(fullNameTrim);
+        await checkFullNameMatch(fullNameTrim, config.checkNameEndpoint);
       } catch (nameErr) {
         const msg =
           nameErr instanceof Error
@@ -130,7 +183,7 @@ export default function SignupPage() {
         return;
       }
 
-      const res = await fetch(buildApiUrl("/auth/signup"), {
+      const res = await fetch(buildApiUrl(config.signupEndpoint), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -172,10 +225,13 @@ export default function SignupPage() {
     setIsGoogleSubmitting(true);
 
     try {
+      // Save the role so /auth/callback knows where to send the user
+      window.localStorage.setItem(AUTH_ROLE_KEY, role);
+
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${window.location.origin}/auth/callback?role=${role}`,
         },
       });
 
@@ -193,14 +249,18 @@ export default function SignupPage() {
     }
   }
 
+  const tabs: { id: Role; icon: typeof User }[] = [
+    { id: "commuter", icon: User },
+    { id: "driver", icon: Bus },
+  ];
+
   /* =======================================================
      UI
      ======================================================= */
 
   return (
     <div
-      // BAGO NA
-className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-4 sm:p-6 relative overflow-x-hidden ${
+      className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-4 sm:p-6 relative overflow-x-hidden ${
         isDark ? "text-white" : "text-slate-900"
       }`}
     >
@@ -240,7 +300,7 @@ className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-
               isDark ? "text-white" : "text-slate-900"
             }`}
           >
-            JOIN THE NETWORK
+            {config.title}
           </h1>
 
           <p
@@ -262,18 +322,55 @@ className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-
         >
           <div className="h-1 w-full bg-gradient-to-r from-blue-500 via-emerald-500 to-blue-500" />
 
-          <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6 space-y-1">
-            <CardTitle
-              className={`text-base sm:text-xl ${
-                isDark ? "text-white" : "text-slate-900"
+          <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6 space-y-3">
+            {/* Role Tabs */}
+            <div
+              role="tablist"
+              aria-label="Account type"
+              className={`grid grid-cols-2 gap-1 p-1 rounded-xl border ${
+                isDark
+                  ? "bg-slate-900/60 border-slate-800"
+                  : "bg-slate-100 border-slate-200"
               }`}
             >
-              Create Account
-            </CardTitle>
+              {tabs.map(({ id, icon: Icon }) => {
+                const active = role === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    disabled={busy}
+                    onClick={() => switchRole(id)}
+                    className={`flex items-center justify-center gap-1.5 h-9 sm:h-10 rounded-lg text-[12px] sm:text-sm font-semibold transition-all duration-200 disabled:opacity-60 ${
+                      active
+                        ? "bg-blue-600 text-white shadow-md shadow-blue-900/20"
+                        : isDark
+                        ? "text-slate-400 hover:text-slate-200"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    {ROLE_CONFIG[id].label}
+                  </button>
+                );
+              })}
+            </div>
 
-            <CardDescription className="text-[11px] sm:text-xs text-slate-500">
-              Enter your details to get started with your digital wallet.
-            </CardDescription>
+            <div className="space-y-1">
+              <CardTitle
+                className={`text-base sm:text-xl ${
+                  isDark ? "text-white" : "text-slate-900"
+                }`}
+              >
+                Create {config.label} Account
+              </CardTitle>
+
+              <CardDescription className="text-[11px] sm:text-xs text-slate-500">
+                {config.description}
+              </CardDescription>
+            </div>
           </CardHeader>
 
           <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
@@ -458,7 +555,7 @@ className={`auth-smooth min-h-[100dvh] flex items-center justify-center px-3 py-
                     Initializing...
                   </span>
                 ) : (
-                  "Create Account"
+                  `Create ${config.label} Account`
                 )}
               </Button>
             </form>
