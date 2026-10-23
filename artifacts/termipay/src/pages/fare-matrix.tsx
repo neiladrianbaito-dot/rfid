@@ -1004,6 +1004,11 @@ export default function FareMatrixPage() {
   // 🔓 Distance Fare unlocks after a Reset (and locks again after a successful save)
   const [resetUnlocked, setResetUnlocked] = useState(false);
 
+  // 🔌 The reader device that the reset route was using.
+  // Reset clears device_id in the DB, so we remember it here and
+  // automatically re-use it when the next route is saved.
+  const [resetDeviceId, setResetDeviceId] = useState<string | null>(null);
+
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const [showDistance, setShowDistance] = useState(false);
@@ -1242,6 +1247,59 @@ export default function FareMatrixPage() {
         ) ?? null
       : null;
 
+  // ⚡ Activates a route (found by origin/destination in the DB) + its return
+  // direction using the given reader device.
+  // Returns "ok" | "failed" | "not-found".
+  const activateSavedRoute = async (
+    origin: string,
+    destination: string,
+    deviceId: string
+  ): Promise<"ok" | "failed" | "not-found"> => {
+    // Look up straight from the DB so we never depend on stale React state
+    const { data: main } = await supabase
+      .from("fare_routes") // 👈 adjust table name if different
+      .select("id")
+      .eq("origin", origin)
+      .eq("destination", destination)
+      .limit(1)
+      .maybeSingle();
+
+    if (!main?.id) return "not-found";
+
+    const { data: reverse } = await supabase
+      .from("fare_routes")
+      .select("id")
+      .eq("origin", destination)
+      .eq("destination", origin)
+      .limit(1)
+      .maybeSingle();
+
+    const { error } = await supabase.rpc("activate_route", {
+      p_route_id: main.id,
+      p_device_id: deviceId,
+      p_actor: actorUsername,
+    });
+
+    if (error) {
+      console.error("activate_route (after save) error:", error);
+      return "failed";
+    }
+
+    if (reverse?.id) {
+      const { error: reverseError } = await supabase.rpc("activate_route", {
+        p_route_id: reverse.id,
+        p_device_id: deviceId,
+        p_actor: actorUsername,
+      });
+      if (reverseError) {
+        console.error("activate_route (after save, reverse) error:", reverseError);
+        return "failed";
+      }
+    }
+
+    return "ok";
+  };
+
   const handleDistanceSave = async (p: DistanceFareSavePayload) => {
     if (blockIfViewOnly()) return;
 
@@ -1276,13 +1334,35 @@ export default function FareMatrixPage() {
         });
       }
 
+      // ⚡ AUTO-ACTIVATE: re-use the reader device from the route that was reset
+      let activateResult: "ok" | "failed" | "not-found" | "no-device" = "no-device";
+      if (resetDeviceId) {
+        activateResult = await activateSavedRoute(p.origin, p.destination, resetDeviceId);
+      }
+
       queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
+      refetchRoutes();
 
       setShowDistance(false);
       setResetUnlocked(false); // 🔒 lock again — Reset is needed before adding another
-      toast({
-        title: <SuccessTitle text={`Route Saved — ₱${p.fareAmount.toFixed(2)}`} />,
-      });
+      setResetDeviceId(null);
+
+      if (activateResult === "ok") {
+        toast({
+          title: <SuccessTitle text={`Route Saved & Activated — ₱${p.fareAmount.toFixed(2)}`} />,
+        });
+      } else if (activateResult === "no-device") {
+        toast({
+          title: <SuccessTitle text={`Route Saved — ₱${p.fareAmount.toFixed(2)}`} />,
+          description: "No reader device to re-use. Activate the route manually.",
+        });
+      } else {
+        toast({
+          title: "Route saved, but couldn't activate it",
+          description: "Please activate it manually and pick a reader device.",
+          variant: "destructive",
+        });
+      }
     } catch {
       toast({ title: "Failed to save route", variant: "destructive" });
     } finally {
@@ -1395,6 +1475,8 @@ export default function FareMatrixPage() {
   };
 
   // 🔄 RESET = soft delete in the UI only.
+  // - Remembers which reader device the route was using (deactivate clears it
+  //   in the DB), so the NEXT saved route can be auto-activated on that reader.
   // - If the route is active, it is deactivated first so the reader stops
   //   using a route that is no longer visible.
   // - The route (and its return direction) is then hidden from this page.
@@ -1411,6 +1493,21 @@ export default function FareMatrixPage() {
 
     const reverseRoute = findReverseRoute(resetRoute);
     const targets = [resetRoute, ...(reverseRoute ? [reverseRoute] : [])];
+
+    // 🔌 Grab the device BEFORE deactivating (deactivate_route sets device_id = null)
+    let deviceToReuse: string | null = null;
+    try {
+      const { data: devRows } = await supabase
+        .from("fare_routes") // 👈 adjust table name if different
+        .select("id, device_id")
+        .in(
+          "id",
+          targets.map((r) => r.id)
+        );
+      deviceToReuse = devRows?.find((r: any) => r.device_id)?.device_id ?? null;
+    } catch {
+      deviceToReuse = null;
+    }
 
     let deactivateFailed = false;
     for (const r of targets) {
@@ -1433,6 +1530,8 @@ export default function FareMatrixPage() {
       setIsResetting(false);
       return;
     }
+
+    if (deviceToReuse) setResetDeviceId(deviceToReuse); // 🔌 remembered for the next Save route
 
     hideRoutes(targets.map((r) => r.id));
     setResetUnlocked(true); // 🔓 Distance Fare is now usable
@@ -1919,7 +2018,8 @@ export default function FareMatrixPage() {
               )}
               This clears the route (and its return direction) from the Fare Matrix list so you can
               set a new origin and destination. If it is currently active, it will be deactivated
-              first. The route is only hidden from this page — it is not deleted from the database.
+              first, and the next route you save will be activated automatically on the same
+              reader. The route is only hidden from this page — it is not deleted from the database.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
