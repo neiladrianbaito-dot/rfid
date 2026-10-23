@@ -1577,13 +1577,21 @@ export default function TransactionsPage() {
     let cancelled = false;
 
     const loadExtraFields = async () => {
-      const ids = rawTransactionList
-        .map((tx: any) => tx?.id)
-        .filter((id: any) => id != null)
-        .map((id: any) => Number(id))
-        .filter((id: number) => Number.isFinite(id));
+      // Keep transaction IDs as strings. PostgreSQL BIGINT IDs must not be
+      // converted to JavaScript Number because large IDs can lose precision.
+      const ids = Array.from(
+        new Set(
+          rawTransactionList
+            .map((tx: any) => tx?.id)
+            .filter((id: any) => id !== null && id !== undefined && String(id).trim() !== "")
+            .map((id: any) => String(id)),
+        ),
+      );
 
-      if (ids.length === 0) return;
+      if (ids.length === 0) {
+        setExtraById({});
+        return;
+      }
 
       const { data, error } = await supabase
         .from("transactions")
@@ -1606,8 +1614,14 @@ export default function TransactionsPage() {
             fee_amount: row.fee_amount == null ? null : Number(row.fee_amount),
             vat_amount: row.vat_amount == null ? null : Number(row.vat_amount),
             net_amount: row.net_amount == null ? null : Number(row.net_amount),
-            origin: row.origin == null ? null : String(row.origin),
-            destination: row.destination == null ? null : String(row.destination),
+            origin:
+              row.origin == null || String(row.origin).trim() === ""
+                ? null
+                : String(row.origin).trim(),
+            destination:
+              row.destination == null || String(row.destination).trim() === ""
+                ? null
+                : String(row.destination).trim(),
           };
           const old = prev[key];
           if (
@@ -1696,15 +1710,25 @@ export default function TransactionsPage() {
       const passenger = uid ? passengerByCardUid[String(uid)] : undefined;
       const extra = extraById[String(rawTx?.id)];
 
-      const origin =
-        (extra?.origin && extra.origin.trim()) ||
-        (rawTx?.origin && String(rawTx.origin).trim()) ||
+      const rawOrigin =
+        extra?.origin ??
+        rawTx?.origin ??
+        rawTx?.fare_route?.origin ??
+        null;
+      const rawDestination =
+        extra?.destination ??
+        rawTx?.destination ??
+        rawTx?.fare_route?.destination ??
         null;
 
+      const origin =
+        rawOrigin == null || String(rawOrigin).trim() === ""
+          ? null
+          : String(rawOrigin).trim();
       const destination =
-        (extra?.destination && extra.destination.trim()) ||
-        (rawTx?.destination && String(rawTx.destination).trim()) ||
-        null;
+        rawDestination == null || String(rawDestination).trim() === ""
+          ? null
+          : String(rawDestination).trim();
 
       return {
         ...rawTx,
