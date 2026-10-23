@@ -39,11 +39,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
 import {
-  Plus,
   Pencil,
   Trash2,
   MapPin,
@@ -186,9 +184,9 @@ async function roadRoute(
   };
 }
 
-// ✅ CHANGED: markers now show the words "Origin" / "Destination" (a label
-// pill with a little pointer underneath) instead of the letters "A" / "B".
-// The bottom tip of the pointer sits exactly on the pin's coordinates.
+// Markers show the words "Origin" / "Destination" (a label pill with a little
+// pointer underneath). The bottom tip of the pointer sits exactly on the
+// pin's coordinates.
 const mapPin = (color: string, label: string) =>
   L.divIcon({
     className: "",
@@ -200,12 +198,11 @@ const mapPin = (color: string, label: string) =>
     iconAnchor: [50, 34],
   });
 
-// ✅ CHANGED: removed `activate` — the dialog now only saves the route.
+// ✅ CHANGED: removed `viceVersa` — the dialog now saves only the one route.
 type DistanceFareSavePayload = {
   origin: string;
   destination: string;
   fareAmount: number;
-  viceVersa: boolean;
 };
 
 type DistanceFareDialogProps = {
@@ -231,7 +228,6 @@ function DistanceFareDialog({
   const [baseFare, setBaseFare] = useState(String(DEFAULT_BASE_FARE));
   const [baseKm, setBaseKm] = useState(String(DEFAULT_BASE_KM));
   const [rate, setRate] = useState(String(DEFAULT_RATE));
-  const [viceVersa, setViceVersa] = useState(true);
 
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [isEstimate, setIsEstimate] = useState(false);
@@ -255,7 +251,6 @@ function DistanceFareDialog({
       setDistanceKm(null);
       setIsEstimate(false);
       setError(null);
-      setViceVersa(true);
     }
   }, [open]);
 
@@ -328,7 +323,6 @@ function DistanceFareDialog({
       }
     };
 
-    // ✅ CHANGED: labels are now "Origin" and "Destination" (was "A" / "B")
     sync(originMarker, originPt, "#2563eb", "Origin", setOriginPt);
     sync(destMarker, destPt, "#059669", "Destination", setDestPt);
   }, [originPt, destPt, mapEl]);
@@ -385,10 +379,8 @@ function DistanceFareDialog({
     }
   };
 
-  // ✅ FIXED: "Calculate" no longer calls map.fitBounds(). Before, it re-zoomed
-  // and re-panned the map after every calculation, which made the Origin and
-  // Destination pins look like they "moved". Now the map view and the pins stay
-  // exactly where they were — only the blue route line is drawn on top.
+  // "Calculate" does not call map.fitBounds(), so the map view and the pins
+  // stay exactly where they were — only the blue route line is drawn on top.
   const calculate = async () => {
     if (!originPt || !destPt) {
       setError("Set both pins first (search places or click the map).");
@@ -412,7 +404,6 @@ function DistanceFareDialog({
         setDistanceKm(r.km);
         setIsEstimate(false);
         if (map) {
-          // Draw the road route only — NO fitBounds, so the view/pins don't move.
           routeLine.current = L.polyline(r.coords, {
             color: "#2563eb",
             weight: 5,
@@ -423,7 +414,6 @@ function DistanceFareDialog({
         // Fallback: straight-line distance (underestimates road distance).
         setDistanceKm(haversineKm(o, d));
         setIsEstimate(true);
-        // Also NO fitBounds here — pins stay put.
       }
     } finally {
       setBusy(false);
@@ -432,14 +422,13 @@ function DistanceFareDialog({
 
   const canSave = fare != null && fare > 0 && originName.trim() && destName.trim();
 
-  // ✅ CHANGED: no more `activate` argument — just saves the route.
+  // ✅ CHANGED: no more viceVersa — just saves the one route.
   const submit = () => {
     if (!canSave || fare == null) return;
     onSave({
       origin: originName.trim(),
       destination: destName.trim(),
       fareAmount: fare,
-      viceVersa,
     });
   };
 
@@ -574,25 +563,9 @@ function DistanceFareDialog({
             </div>
           )}
 
-          <div
-            className={`flex items-center gap-3 p-3 border rounded-lg ${
-              isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"
-            }`}
-          >
-            <Checkbox
-              id="dist-vice-versa"
-              checked={viceVersa}
-              onCheckedChange={(v) => setViceVersa(!!v)}
-              className="cursor-pointer"
-            />
-            <Label htmlFor="dist-vice-versa" className="cursor-pointer flex items-center gap-1 font-medium">
-              <ArrowLeftRight className="w-3.5 h-3.5" /> Also create the return direction at the same fare
-            </Label>
-          </div>
+          {/* ✅ REMOVED: "Also create the return direction" (vice versa) checkbox */}
         </div>
 
-        {/* ✅ CHANGED: green "Save & Activate" button removed. "Save route" is
-            now the single (primary) save action. */}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button
             variant="ghost"
@@ -625,14 +598,8 @@ export default function FareMatrixPage() {
   // `loaded` = true kapag tapos na ma-load ang access info.
   const { canManage, loaded } = useAdminAccess();
 
-  const [showAdd, setShowAdd] = useState(false);
+  // ✅ REMOVED: showAdd + addForm state (Add Route feature removed)
   const [searchTerm, setSearchTerm] = useState("");
-  const [addForm, setAddForm] = useState({
-    origin: "",
-    destination: DEFAULT_DESTINATION,
-    fareAmount: "",
-    viceVersa: true,
-  });
   const [editRoute, setEditRoute] = useState<any>(null);
   const [deleteRoute, setDeleteRoute] = useState<any>(null);
   const [editForm, setEditForm] = useState({
@@ -670,7 +637,7 @@ export default function FareMatrixPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // 🔒 Safety guard helper — ginagamit sa lahat ng Add/Edit/Delete/Activate/
+  // 🔒 Safety guard helper — ginagamit sa lahat ng Edit/Delete/Activate/
   // Deactivate handlers. Kapag view_only, magpapakita ng toast at ibabalik
   // ang `true` para mag-early return ang caller. Proteksyon ito kahit
   // ma-bypass ang UI.
@@ -705,9 +672,7 @@ export default function FareMatrixPage() {
   // device_id (enforced by the activate_route RPC).
   const activeRoutes = Array.isArray(routes) ? routes.filter((r) => r.isActive) : [];
 
-  // ✅ TAB STATE for the "Active Routes" panel — instead of stacking every
-  // active route as its own row (which gets unwieldy once several readers
-  // are running at once), the panel now shows one tab per active route and
+  // ✅ TAB STATE for the "Active Routes" panel — one tab per active route and
   // a single detail card for whichever tab is selected. Falls back to the
   // first active route whenever the current selection no longer exists
   // (e.g. that route just got deactivated).
@@ -729,10 +694,9 @@ export default function FareMatrixPage() {
   const selectedActiveRoute =
     activeRoutes.find((r) => r.id === selectedActiveRouteId) ?? activeRoutes[0] ?? null;
 
-  // ✅ Fetches device info for ALL currently active routes in one go (instead
-  // of a single activeDeviceInfo), keyed by route id. We still go straight to
-  // the fare_routes table for device_id since the generated API client's
-  // route object doesn't reliably expose it.
+  // ✅ Fetches device info for ALL currently active routes in one go, keyed
+  // by route id. We still go straight to the fare_routes table for device_id
+  // since the generated API client's route object doesn't reliably expose it.
   const activeDeviceRouteIdsRef = useRef<string>("");
 
   const fetchActiveRoutesDevices = async (routeIds: (string | number)[]) => {
@@ -827,6 +791,7 @@ export default function FareMatrixPage() {
     return sorted;
   }, [routes, searchTerm]);
 
+  // Still needed: the Distance Fare dialog creates routes through this.
   const createMutation = useCreateRoute({
     mutation: {
       onSuccess: () => {
@@ -925,34 +890,27 @@ export default function FareMatrixPage() {
   };
 
   // ✅ CHANGED: Save a route computed by the distance-fare dialog. Creates the
-  // route (or updates its fare if it already exists), plus the return
-  // direction if requested. It no longer opens the activation modal —
-  // activation is done separately from the table's Activate button.
+  // route (or updates its fare if it already exists). It no longer creates a
+  // return direction — the vice versa option was removed.
   const handleDistanceSave = async (p: DistanceFareSavePayload) => {
     // 🔒 Guard
     if (blockIfViewOnly()) return;
 
     setSavingDistance(true);
     try {
-      const upsert = async (origin: string, destination: string) => {
-        const existing = Array.isArray(routes)
-          ? routes.find((r) => r.origin === origin && r.destination === destination)
-          : null;
-        if (existing) {
-          await updateMutation.mutateAsync({
-            id: existing.id,
-            data: { origin, destination, fareAmount: p.fareAmount },
-          });
-        } else {
-          await createMutation.mutateAsync({
-            data: { origin, destination, fareAmount: p.fareAmount },
-          });
-        }
-      };
+      const existing = Array.isArray(routes)
+        ? routes.find((r) => r.origin === p.origin && r.destination === p.destination)
+        : null;
 
-      await upsert(p.origin, p.destination);
-      if (p.viceVersa && p.origin !== p.destination) {
-        await upsert(p.destination, p.origin);
+      if (existing) {
+        await updateMutation.mutateAsync({
+          id: existing.id,
+          data: { origin: p.origin, destination: p.destination, fareAmount: p.fareAmount },
+        });
+      } else {
+        await createMutation.mutateAsync({
+          data: { origin: p.origin, destination: p.destination, fareAmount: p.fareAmount },
+        });
       }
 
       queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
@@ -968,17 +926,13 @@ export default function FareMatrixPage() {
     }
   };
 
-  // ✅ FIXED: activate now goes through a single SECURITY DEFINER Postgres
-  // RPC function (`activate_route`) instead of calling the toggle-route API
-  // and then separately writing device_id via the client. The old two-step
-  // approach could silently fail to persist device_id if RLS blocked the
-  // client-side update (no thrown error, just 0 rows updated) — the RPC
-  // approach runs at the DB level, bypasses RLS, and is atomic.
+  // ✅ Activate goes through a single SECURITY DEFINER Postgres RPC function
+  // (`activate_route`). It runs at the DB level, bypasses RLS, and is atomic.
   //
-  // ✅ VICE VERSA: one physical reader sits on one vehicle and taps riders in
-  // BOTH directions (e.g. Barangay A → Calbayog and Calbayog → Barangay A).
-  // So activating one direction also activates its reverse-direction
-  // counterpart route on the SAME device, if that reverse route exists.
+  // ✅ One physical reader sits on one vehicle and taps riders in BOTH
+  // directions. So activating one direction also activates its
+  // reverse-direction counterpart route on the SAME device, if that reverse
+  // route exists.
   const findReverseRoute = (route: any) =>
     Array.isArray(routes)
       ? routes.find(
@@ -1058,10 +1012,9 @@ export default function FareMatrixPage() {
     setPendingRouteId(null);
   };
 
-  // ✅ FIXED: deactivate now goes through a matching `deactivate_route` RPC
-  // function that also clears device_id, instead of the old toggle mutation.
-  // ✅ VICE VERSA: also deactivates the reverse-direction counterpart route
-  // (same reasoning as activate — one reader serves both directions).
+  // ✅ Deactivate goes through a matching `deactivate_route` RPC function that
+  // also clears device_id. Also deactivates the reverse-direction counterpart
+  // route (same reasoning as activate — one reader serves both directions).
   const handleDeactivate = async (routeId: string | number) => {
     // 🔒 Guard: bawal mag-deactivate kapag view_only
     if (blockIfViewOnly()) return;
@@ -1105,52 +1058,7 @@ export default function FareMatrixPage() {
     setPendingRouteId(null);
   };
 
-  const handleAdd = async () => {
-    // 🔒 Guard: bawal mag-add ng route kapag view_only
-    if (blockIfViewOnly()) return;
-
-    const origin = addForm.origin.trim();
-    const destination = addForm.destination.trim();
-    const fare = parseFloat(addForm.fareAmount) || 0;
-    if (!origin || !destination || fare <= 0) {
-      toast({ title: "Please fill in all fields", variant: "destructive" });
-      return;
-    }
-
-    try {
-      await createMutation.mutateAsync({
-        data: { origin, destination, fareAmount: fare },
-      });
-
-      if (addForm.viceVersa && origin !== destination) {
-        await createMutation.mutateAsync({
-          data: { origin: destination, destination: origin, fareAmount: fare },
-        });
-      }
-
-      setShowAdd(false);
-      setAddForm({
-        origin: "",
-        destination: DEFAULT_DESTINATION,
-        fareAmount: "",
-        viceVersa: true,
-      });
-
-      toast({
-        title: (
-          <SuccessTitle
-            text={
-              addForm.viceVersa
-                ? "Routes Added (Both Directions)"
-                : "Route Added Successfully"
-            }
-          />
-        ),
-      });
-    } catch (error) {
-      toast({ title: "Failed to add route", variant: "destructive" });
-    }
-  };
+  // ✅ REMOVED: handleAdd (Add Route feature removed)
 
   const confirmDelete = () => {
     // 🔒 Guard: bawal mag-delete kapag view_only
@@ -1212,7 +1120,7 @@ export default function FareMatrixPage() {
               <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-blue-400" : "text-blue-700"}`}>Live Telemetry Active</span>
             </div>
 
-            {/* 🗺️ NEW: Distance Fare button — makikita lang kapag may permission */}
+            {/* 🗺️ Distance Fare button — makikita lang kapag may permission */}
             {loaded && canManage && (
               <Button
                 variant="outline"
@@ -1225,17 +1133,7 @@ export default function FareMatrixPage() {
               </Button>
             )}
 
-            {/* 🔒 Add Route button — makikita lang kapag loaded na at may permission (hindi view_only) */}
-            {loaded && canManage && (
-              <Button
-                onClick={() => setShowAdd(true)}
-                data-testid="button-add-route"
-                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm cursor-pointer shrink-0 whitespace-nowrap"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Route
-              </Button>
-            )}
+            {/* ✅ REMOVED: "Add Route" button */}
           </div>
         </div>
       </div>
@@ -1278,9 +1176,7 @@ export default function FareMatrixPage() {
         </div>
 
         {/* ✅ TAB VIEW — one tab per active route instead of stacking every
-            active route as its own row. Keeps the panel compact and easy to
-            scan even when several readers are active at once; click a tab to
-            see that route's fare + assigned reader below. */}
+            active route as its own row. */}
         {activeRoutes.length > 0 && (
           <div className="flex flex-col gap-3">
             <div
@@ -1546,7 +1442,7 @@ export default function FareMatrixPage() {
         </CardContent>
       </Card>
 
-      {/* 🗺️ NEW: Distance-based fare dialog (Leaflet + OSRM + LTFRB formula)
+      {/* 🗺️ Distance-based fare dialog (Leaflet + OSRM + LTFRB formula)
           🔒 `open` naka-gate sa canManage */}
       <DistanceFareDialog
         open={canManage && showDistance}
@@ -1556,113 +1452,7 @@ export default function FareMatrixPage() {
         onSave={handleDistanceSave}
       />
 
-      {/* Add Route Dialog
-          🔒 `open` naka-gate sa canManage — hindi kailanman magbubukas kapag view_only */}
-      <Dialog
-        open={canManage && showAdd}
-        onOpenChange={(open) => {
-          setShowAdd(open);
-          if (!open)
-            setAddForm({ origin: "", destination: DEFAULT_DESTINATION, fareAmount: "", viceVersa: true });
-        }}
-      >
-        <DialogContent className={`[&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
-          <div className="absolute top-0 left-0 w-full h-[2px] bg-blue-600/60" />
-          <DialogHeader>
-            <DialogTitle className={`font-bold tracking-tight ${isDark ? "text-white" : "text-slate-900"}`}>
-              Add New Route
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Origin (Barangay)</Label>
-              <Input
-                data-testid="input-add-origin"
-                list="barangay-suggestions"
-                placeholder="Type or select barangay..."
-                value={addForm.origin}
-                onChange={(e) => setAddForm({ ...addForm, origin: e.target.value })}
-                className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Destination</Label>
-              <Input
-                data-testid="input-add-destination"
-                list="barangay-suggestions"
-                placeholder="Type or select destination..."
-                value={addForm.destination}
-                onChange={(e) => setAddForm({ ...addForm, destination: e.target.value })}
-                className={isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}
-              />
-            </div>
-            <datalist id="barangay-suggestions">
-              <option value={DEFAULT_DESTINATION} />
-              {CALBAYOG_BARANGAYS.map((b) => (
-                <option key={b} value={b} />
-              ))}
-            </datalist>
-            <div className="space-y-2">
-              <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Fare Amount (PHP)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-                className={`font-semibold focus-visible:ring-emerald-500 ${isDark ? "bg-slate-950 border-slate-800 text-emerald-400" : "bg-white border-slate-200 text-emerald-600"}`}
-                value={addForm.fareAmount}
-                onChange={(e) => setAddForm({ ...addForm, fareAmount: e.target.value })}
-                data-testid="input-add-fare"
-              />
-            </div>
-            <div className={`flex items-center gap-3 p-3 border rounded-lg ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-              <Checkbox
-                id="vice-versa"
-                checked={addForm.viceVersa}
-                onCheckedChange={(v) => setAddForm({ ...addForm, viceVersa: !!v })}
-                className="cursor-pointer"
-              />
-              <div>
-                <Label htmlFor="vice-versa" className={`font-medium cursor-pointer flex items-center gap-1 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                  <ArrowLeftRight className="w-3.5 h-3.5" />
-                  Add vice versa route
-                </Label>
-                <p className={`text-xs mt-0.5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                  Also creates the reverse direction at the same fare
-                </p>
-              </div>
-            </div>
-            {addForm.origin && addForm.destination && (
-              <div className={`text-sm border rounded-lg p-3 space-y-1 ${isDark ? "text-slate-300 bg-blue-950/30 border-blue-900" : "text-slate-700 bg-blue-50 border-blue-100"}`}>
-                <p className={`font-medium ${isDark ? "text-blue-400" : "text-blue-700"}`}>Routes to be created:</p>
-                <p>• {addForm.origin} → {addForm.destination} @ ₱{addForm.fareAmount || "0.00"}</p>
-                {addForm.viceVersa && addForm.origin !== addForm.destination && (
-                  <p>• {addForm.destination} → {addForm.origin} @ ₱{addForm.fareAmount || "0.00"}</p>
-                )}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setShowAdd(false)}
-              className={`cursor-pointer border-0 shadow-none bg-transparent hover:bg-transparent ${
-                isDark ? "text-slate-400 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleAdd}
-              disabled={createMutation.isPending}
-              data-testid="button-save-route"
-              className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:cursor-not-allowed"
-            >
-              {createMutation.isPending ? "Adding..." : "Add Route"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* ✅ REMOVED: Add Route Dialog */}
 
       {/* Edit Route Dialog — styled to match User Management's Edit User dialog
           🔒 `open` naka-gate sa canManage */}
