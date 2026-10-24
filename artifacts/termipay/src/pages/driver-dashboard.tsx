@@ -1457,10 +1457,6 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           )}
         </div>
 
-        {!distanceFareEnabled && (
-      
-        )}
-
         {placesError && <p className="text-[11px] text-red-500">{placesError}</p>}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
