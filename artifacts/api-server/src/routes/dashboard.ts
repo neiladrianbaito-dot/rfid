@@ -241,6 +241,114 @@ router.post("/dashboard/claim-device", async (req, res): Promise<void> => {
   }
 });
 
+/**
+ * REAL trips of the logged-in driver, built from the `transactions` table.
+ *
+ * A "trip" = a run of Fare taps on the SAME route (origin → destination) where
+ * no two taps are more than TRIP_GAP_MINUTES apart. A new trip starts when the
+ * route changes (e.g. the return direction) or after a long pause.
+ *
+ * Only taps of the reader device(s) the driver owns are included
+ * (same rule as /dashboard/stats).
+ *
+ * Query: ?days=1 (today, default) ... ?days=31
+ * Returns: { trips: [{ key, origin, destination, startedAt, endedAt, taps, fare }] }  newest first
+ */
+const TRIP_GAP_MINUTES = 30;
+
+router.get("/dashboard/my-trips", async (req, res): Promise<void> => {
+  try {
+    const driver = (req as any).driverUser as { id: string } | undefined;
+    if (!driver) {
+      res.json({ trips: [] });
+      return;
+    }
+    const me = String(driver.id);
+
+    const daysRaw = Number(req.query.days);
+    const days = Number.isFinite(daysRaw) ? Math.min(31, Math.max(1, Math.floor(daysRaw))) : 1;
+    const daysBack = days - 1;
+
+    const raw = await db.execute(sql`
+      with fares as (
+        select
+          t."timestamp" as ts,
+          t.status,
+          abs(t.amount) as amount,
+          t.origin,
+          t.destination,
+          coalesce(t.route_id::text, '') || '|' || coalesce(t.origin, '') || '|' || coalesce(t.destination, '') as route_key
+        from transactions t
+        where t.type = 'Fare'
+          and t."timestamp" >= (
+            (date_trunc('day', now() at time zone 'Asia/Manila') - (${daysBack}::int * interval '1 day'))
+            at time zone 'Asia/Manila'
+          )
+          and (
+            t.driver_id = ${me}
+            or (
+              t.driver_id is null
+              and t.device_id in (select d.device_id from devices d where d.driver_id = ${me})
+            )
+          )
+      ),
+      flagged as (
+        select
+          fares.*,
+          case
+            when lag(ts) over (order by ts) is null then 1
+            when ts - lag(ts) over (order by ts) > (${TRIP_GAP_MINUTES}::int * interval '1 minute') then 1
+            when route_key is distinct from lag(route_key) over (order by ts) then 1
+            else 0
+          end as is_new
+        from fares
+      ),
+      grouped as (
+        select
+          flagged.*,
+          sum(is_new) over (order by ts rows between unbounded preceding and current row) as trip_no
+        from flagged
+      )
+      select
+        trip_no,
+        min(ts) as started_at,
+        max(ts) as ended_at,
+        count(*)::int as taps,
+        coalesce(sum(case when status = 'Success' then amount else 0 end), 0) as fare,
+        max(origin) as origin,
+        max(destination) as destination
+      from grouped
+      group by trip_no
+      order by min(ts) desc
+    `);
+
+    const rows = extractRows<{
+      trip_no: string | number;
+      started_at: string | Date;
+      ended_at: string | Date;
+      taps: number;
+      fare: string | number;
+      origin: string | null;
+      destination: string | null;
+    }>(raw);
+
+    res.json({
+      trips: rows.map((r) => ({
+        key: `${days}-${String(r.trip_no)}`,
+        origin: r.origin ?? null,
+        destination: r.destination ?? null,
+        startedAt: new Date(r.started_at).toISOString(),
+        endedAt: new Date(r.ended_at).toISOString(),
+        taps: Number(r.taps) || 0,
+        fare: Math.abs(Number(r.fare)) || 0,
+      })),
+    });
+  } catch (error) {
+    console.error("my-trips error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/dashboard/revenue-trend", async (_req, res): Promise<void> => {
   const dateSeries = getLast7DatesInAppTz();
   const sevenDaysAgo = new Date(`${dateSeries[0]}T00:00:00`);

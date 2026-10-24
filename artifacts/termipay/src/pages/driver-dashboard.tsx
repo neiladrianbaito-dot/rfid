@@ -7,7 +7,7 @@ import {
   useGetDashboardStats,
   getListRoutesQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import L from "leaflet"; // npm i leaflet && npm i -D @types/leaflet
 import "leaflet/dist/leaflet.css";
 import { supabase } from "@/lib/supabase"; // 👈 adjust to your actual supabase client path
@@ -132,12 +132,110 @@ async function fetchMyActiveRouteIds(): Promise<string[] | null> {
 
 type Tab = "home" | "map" | "trips" | "profile";
 
-/* Sample data lang ito para sa testing. Palitan ng real API later. */
-const SAMPLE_TRIPS = [
-  { id: 1, route: "Terminal → Rawis", time: "7:42 AM", passengers: 14, fare: 168 },
-  { id: 2, route: "Rawis → Terminal", time: "8:25 AM", passengers: 11, fare: 132 },
-  { id: 3, route: "Terminal → Trinidad", time: "9:10 AM", passengers: 16, fare: 224 },
-];
+/* ═══════════════════════════════════════════════════════════════════════
+   🧾 REAL TRIPS — built on the server from the `transactions` table
+   (GET /api/dashboard/my-trips). One trip = consecutive Fare taps on the
+   same route (origin → destination) with no pause longer than 30 minutes.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+type Trip = {
+  key: string;
+  origin: string | null;
+  destination: string | null;
+  startedAt: string; // ISO
+  endedAt: string; // ISO
+  taps: number;
+  fare: number;
+};
+
+const MANILA_TZ = "Asia/Manila";
+
+const fmtTripTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: MANILA_TZ,
+  });
+
+const fmtTripDay = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: MANILA_TZ,
+  });
+
+function useMyTrips(days: number, enabled: boolean) {
+  const query = useQuery({
+    queryKey: ["driver-trips", days],
+    enabled,
+    refetchOnWindowFocus: true,
+    queryFn: async (): Promise<Trip[]> => {
+      const res = await fetch(`${API_BASE}/api/dashboard/my-trips?days=${days}`, {
+        headers: driverAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(`my-trips failed: ${res.status}`);
+      const data = await res.json();
+      return Array.isArray(data?.trips) ? (data.trips as Trip[]) : [];
+    },
+  });
+
+  // Realtime: a new tap changes the current trip → refetch right away
+  useRealtimeRefetch(["transactions"], () => {
+    if (enabled) query.refetch();
+  });
+
+  return query;
+}
+
+function TripCard({
+  trip,
+  isDark,
+  showDate,
+  compact,
+}: {
+  trip: Trip;
+  isDark: boolean;
+  showDate?: boolean;
+  compact?: boolean;
+}) {
+  const card = isDark ? "bg-slate-900/70 border-slate-800" : "bg-white border-slate-200 shadow-sm";
+  const muted = isDark ? "text-slate-400" : "text-slate-500";
+  const route =
+    trip.origin || trip.destination
+      ? `${trip.origin ?? "—"} → ${trip.destination ?? "—"}`
+      : "Unknown route";
+  const sameMinute = fmtTripTime(trip.startedAt) === fmtTripTime(trip.endedAt);
+  const timeText = sameMinute
+    ? fmtTripTime(trip.startedAt)
+    : `${fmtTripTime(trip.startedAt)} – ${fmtTripTime(trip.endedAt)}`;
+
+  return (
+    <div
+      className={`rounded-xl border flex items-center justify-between gap-3 ${
+        compact ? "p-3.5" : "p-4"
+      } ${card}`}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <div
+          className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${
+            isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
+          }`}
+        >
+          <Bus className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold truncate">{route}</p>
+          <p className={`text-[11px] mt-0.5 ${muted}`}>
+            {showDate ? `${fmtTripDay(trip.startedAt)} · ` : ""}
+            {timeText} · {trip.taps} {trip.taps === 1 ? "tap" : "taps"}
+          </p>
+        </div>
+      </div>
+      <p className="text-sm font-bold text-emerald-500 shrink-0">{formatPeso(trip.fare)}</p>
+    </div>
+  );
+}
 
 /* ═══════════════════════════════════════════════════════════════════════
    Shared helpers
@@ -1972,6 +2070,14 @@ export default function DriverDashboardPage() {
   // Map panel mounts on first visit, then stays mounted (keeps pins/inputs when switching tabs)
   const [mapVisited, setMapVisited] = useState(false);
 
+  // 🧾 Real trips from the database (today on Home, today / last 7 days on the Trips tab)
+  const [tripRange, setTripRange] = useState<"today" | "week">("today");
+  const tripDays = tab === "trips" && tripRange === "week" ? 7 : 1;
+  const tripsQuery = useMyTrips(tripDays, authorized);
+  const trips: Trip[] = tripsQuery.data ?? [];
+  const tripsTotalTaps = trips.reduce((sum, t) => sum + t.taps, 0);
+  const tripsTotalFare = trips.reduce((sum, t) => sum + t.fare, 0);
+
   /* Guard: kung walang driver token, balik sa signin */
   useEffect(() => {
     const token = window.localStorage.getItem(DRIVER_TOKEN_KEY);
@@ -1995,9 +2101,6 @@ export default function DriverDashboardPage() {
   }
 
   if (!authorized) return null;
-
-  const totalFare = SAMPLE_TRIPS.reduce((sum, t) => sum + t.fare, 0);
-  const totalPassengers = SAMPLE_TRIPS.reduce((sum, t) => sum + t.passengers, 0);
 
   const page = isDark ? "bg-slate-950 text-white" : "bg-slate-50 text-slate-900";
   const card = isDark ? "bg-slate-900/70 border-slate-800" : "bg-white border-slate-200 shadow-sm";
@@ -2197,7 +2300,17 @@ export default function DriverDashboardPage() {
                   >
                     <RouteIcon className="h-5 w-5" />
                   </div>
-                  <p className="text-3xl font-extrabold leading-none tracking-tight">{SAMPLE_TRIPS.length}</p>
+                  {tripsQuery.isLoading ? (
+                    <Skeleton className={`h-8 w-12 ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+                  ) : (
+                    <p
+                      key={trips.length}
+                      className="value-pop text-3xl font-extrabold leading-none tracking-tight"
+                      data-testid="text-trips-today"
+                    >
+                      {trips.length}
+                    </p>
+                  )}
                   <p className={`text-[11px] font-semibold uppercase tracking-wide mt-2 ${muted}`}>Trips</p>
                 </div>
                 <div className="absolute bottom-0 left-0 h-[3px] w-full bg-gradient-to-r from-purple-500 to-fuchsia-500" />
@@ -2232,29 +2345,37 @@ export default function DriverDashboardPage() {
                 </button>
               </div>
 
-              {SAMPLE_TRIPS.slice(0, 3).map((t) => (
-                <div
-                  key={t.id}
-                  className={`rounded-xl border p-3.5 flex items-center justify-between gap-3 ${card}`}
+              {tripsQuery.isLoading ? (
+                <>
+                  {[1, 2].map((i) => (
+                    <Skeleton
+                      key={i}
+                      className={`h-[62px] w-full rounded-xl ${isDark ? "bg-slate-800" : "bg-slate-100"}`}
+                    />
+                  ))}
+                </>
+              ) : tripsQuery.isError ? (
+                <button
+                  type="button"
+                  onClick={() => tripsQuery.refetch()}
+                  className={`w-full rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 ${
+                    isDark
+                      ? "border-red-900 text-red-400 bg-red-950/30"
+                      : "border-red-200 text-red-600 bg-red-50"
+                  }`}
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${
-                        isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      <Bus className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">{t.route}</p>
-                      <p className={`text-[11px] mt-0.5 ${muted}`}>
-                        {t.time} · {t.passengers} passengers
-                      </p>
-                    </div>
-                  </div>
-                  <p className="text-sm font-bold text-emerald-500 shrink-0">₱{t.fare}</p>
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  Couldn't load trips — tap to retry
+                </button>
+              ) : trips.length === 0 ? (
+                <div className={`rounded-xl border p-6 text-center text-xs ${card} ${muted}`}>
+                  No trips yet today. Trips appear here as passengers tap.
                 </div>
-              ))}
+              ) : (
+                trips.slice(0, 3).map((t) => (
+                  <TripCard key={t.key} trip={t} isDark={isDark} compact />
+                ))
+              )}
             </section>
           </>
         )}
@@ -2267,19 +2388,86 @@ export default function DriverDashboardPage() {
 
         {tab === "trips" && (
           <section className="space-y-3">
-            <h2 className="text-lg font-bold">Today's trips</h2>
-            {SAMPLE_TRIPS.map((t) => (
-              <div key={t.id} className={`rounded-xl border p-4 flex items-center justify-between ${card}`}>
-                <div>
-                  <p className="text-sm font-semibold">{t.route}</p>
-                  <p className={`text-xs mt-0.5 ${muted}`}>
-                    {t.time}, {t.passengers} passengers
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-bold">
+                {tripRange === "week" ? "Last 7 days" : "Today's trips"}
+              </h2>
+              <div
+                className={`inline-flex rounded-lg border p-0.5 text-[11px] font-semibold ${
+                  isDark ? "border-slate-800 bg-slate-900/70" : "border-slate-200 bg-white"
+                }`}
+              >
+                {(
+                  [
+                    { id: "today", label: "Today" },
+                    { id: "week", label: "7 days" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setTripRange(opt.id)}
+                    className={`px-3 py-1 rounded-md ${
+                      tripRange === opt.id ? "bg-blue-600 text-white" : muted
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Totals for the selected range */}
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: "Trips", value: String(trips.length) },
+                { label: "Taps", value: tripsTotalTaps.toLocaleString("en-US") },
+                { label: "Fare", value: formatPeso(tripsTotalFare) },
+              ].map((s) => (
+                <div key={s.label} className={`rounded-xl border p-3 text-center ${card}`}>
+                  <p className="text-sm font-extrabold truncate">
+                    {tripsQuery.isLoading ? "…" : s.value}
+                  </p>
+                  <p className={`text-[10px] font-semibold uppercase tracking-wide mt-0.5 ${muted}`}>
+                    {s.label}
                   </p>
                 </div>
-                <p className="text-sm font-bold text-emerald-500">₱{t.fare}</p>
+              ))}
+            </div>
+
+            {tripsQuery.isLoading ? (
+              [1, 2, 3].map((i) => (
+                <Skeleton
+                  key={i}
+                  className={`h-[70px] w-full rounded-xl ${isDark ? "bg-slate-800" : "bg-slate-100"}`}
+                />
+              ))
+            ) : tripsQuery.isError ? (
+              <button
+                type="button"
+                onClick={() => tripsQuery.refetch()}
+                className={`w-full rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 ${
+                  isDark
+                    ? "border-red-900 text-red-400 bg-red-950/30"
+                    : "border-red-200 text-red-600 bg-red-50"
+                }`}
+              >
+                <AlertCircle className="h-3.5 w-3.5" />
+                Couldn't load trips — tap to retry
+              </button>
+            ) : trips.length === 0 ? (
+              <div className={`rounded-xl border p-8 text-center text-xs ${card} ${muted}`}>
+                {tripRange === "week" ? "No trips in the last 7 days." : "No trips yet today."}
               </div>
-            ))}
-            <p className={`text-[11px] ${muted}`}>Sample data. Connect this list to your trips API.</p>
+            ) : (
+              trips.map((t) => (
+                <TripCard key={t.key} trip={t} isDark={isDark} showDate={tripRange === "week"} />
+              ))
+            )}
+
+            <p className={`text-[11px] ${muted}`}>
+              A trip is a group of fare taps on the same route with no pause longer than 30 minutes.
+            </p>
           </section>
         )}
 

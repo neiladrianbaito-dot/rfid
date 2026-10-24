@@ -26,6 +26,7 @@ function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
  *   PATCH /routes/:id/toggle
  *   GET   /dashboard/stats          (their own Earned today + Total taps)
  *   GET   /dashboard/my-routes      (which active routes belong to them)
+ *   GET   /dashboard/my-trips       (their real trips: route, time, taps, fare)
  *   POST  /dashboard/claim-device   (take ownership of a reader device)
  * Everything else stays admin-only.
  */
@@ -36,7 +37,7 @@ const DRIVER_RULES: { methods: Set<string>; path: RegExp }[] = [
   },
   {
     methods: new Set(["GET"]),
-    path: /\/dashboard\/(stats|my-routes)\/?$/,
+    path: /\/dashboard\/(stats|my-routes|my-trips)\/?$/,
   },
   {
     methods: new Set(["POST"]),
