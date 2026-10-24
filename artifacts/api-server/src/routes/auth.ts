@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { resolveAuthAvatar } from "../lib/auth-avatar";
 import { eq, sql } from "drizzle-orm";
 import { db, adminsTable } from "@workspace/db";
@@ -18,8 +18,29 @@ import {
 
 const router: IRouter = Router();
 let linkedCardColumnAvailable: boolean | null = null;
+let roleColumnEnsured = false;
 
-// ── Role helpers ───────────────────────────────────────────────────────────
+// ── Account role (commuter / driver) ─────────────────────────────────────────
+type AccountRole = "commuter" | "driver";
+
+function normalizeAccountRole(role: unknown): AccountRole {
+  return role === "driver" ? "driver" : "commuter";
+}
+
+function accountRoleLabel(role: AccountRole): "Commuter" | "Driver" {
+  return role === "driver" ? "Driver" : "Commuter";
+}
+
+async function ensureRoleColumn(): Promise<void> {
+  if (roleColumnEnsured) return;
+  await db.execute(sql`
+    alter table public.auth_users
+    add column if not exists role text not null default 'commuter'
+  `);
+  roleColumnEnsured = true;
+}
+
+// ── Admin role helpers ───────────────────────────────────────────────────────
 function normalizeRole(role: unknown): "staff" | "super_admin" {
   return role === "super_admin" ? "super_admin" : "staff";
 }
@@ -140,10 +161,55 @@ async function checkLinkedCardStatus(linkedCardUid: string | null | undefined): 
   return { blocked, status };
 }
 
-async function isNameAlreadyLinkedToAccount(fullName: string): Promise<boolean> {
+// ── Registered-name lookup (per role) ────────────────────────────────────────
+// Commuters are validated against the `users` table (card holders).
+// Drivers are validated against a `drivers` table if one exists. If you
+// don't have one, we fall back to `users` rows whose `type` is "Driver".
+// >>> If your drivers live somewhere else, change ONLY this function. <<<
+
+async function findRegisteredName(
+  role: AccountRole,
+  fullName: string
+): Promise<{ fullName: string; status?: string } | null> {
+  if (role === "driver") {
+    const tableCheck = await db.execute(sql`select to_regclass('public.drivers') as t`);
+    const hasDriversTable = !!extractRows<{ t: string | null }>(tableCheck)[0]?.t;
+
+    if (hasDriversTable) {
+      const raw = await db.execute(sql`
+        select full_name from drivers
+        where lower(trim(full_name)) = lower(trim(${fullName}))
+        limit 1
+      `);
+      const row = extractRows<{ full_name: string }>(raw)[0];
+      return row ? { fullName: row.full_name } : null;
+    }
+
+    const raw = await db.execute(sql`
+      select full_name, status from users
+      where lower(trim(full_name)) = lower(trim(${fullName}))
+        and lower(trim(type)) = 'driver'
+      limit 1
+    `);
+    const row = extractRows<{ full_name: string; status: string }>(raw)[0];
+    return row ? { fullName: row.full_name, status: row.status } : null;
+  }
+
+  const raw = await db.execute(sql`
+    select full_name, status from users
+    where lower(trim(full_name)) = lower(trim(${fullName}))
+    limit 1
+  `);
+  const row = extractRows<{ full_name: string; status: string }>(raw)[0];
+  return row ? { fullName: row.full_name, status: row.status } : null;
+}
+
+async function isNameAlreadyLinkedToAccount(fullName: string, role: AccountRole): Promise<boolean> {
+  await ensureRoleColumn();
   const result = await db.execute(sql`
     select id from auth_users
     where lower(trim(full_name)) = lower(trim(${fullName}))
+      and role = ${role}
     limit 1
   `);
   return extractRows<{ id: string }>(result).length > 0;
@@ -193,9 +259,9 @@ export async function unlinkCardFromAnyAccount(
   };
 }
 
-// ── SIGNUP ────────────────────────────────────────────────────────────────────
+// ── SIGNUP (shared by commuter + driver) ─────────────────────────────────────
 
-router.post("/auth/signup", async (req, res): Promise<void> => {
+async function handleSignup(role: AccountRole, req: Request, res: Response): Promise<void> {
   try {
     const body = req.body as { fullName?: string; email?: string; password?: string };
     const fullName = typeof body?.fullName === "string" ? body.fullName.trim() : "";
@@ -215,13 +281,10 @@ router.post("/auth/signup", async (req, res): Promise<void> => {
       return;
     }
 
-    const nameMatchRaw = await db.execute(sql`
-      select full_name from users
-      where lower(trim(full_name)) = lower(trim(${fullName}))
-      limit 1
-    `);
-    const nameMatchRows = extractRows<{ full_name: string }>(nameMatchRaw);
-    if (nameMatchRows.length === 0) {
+    await ensureRoleColumn();
+
+    const registered = await findRegisteredName(role, fullName);
+    if (!registered) {
       res.status(403).json({
         success: false,
         message: "This name is not registered in our system. Please contact your admin.",
@@ -229,7 +292,7 @@ router.post("/auth/signup", async (req, res): Promise<void> => {
       return;
     }
 
-    const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName);
+    const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName, role);
     if (nameAlreadyUsed) {
       res.status(409).json({
         success: false,
@@ -240,8 +303,8 @@ router.post("/auth/signup", async (req, res): Promise<void> => {
 
     const passwordHash = hashPassword(password);
     const insertResult = await db.execute(sql`
-      insert into auth_users (supabase_auth_id, full_name, email, password_hash)
-      values (gen_random_uuid(), ${fullName}, ${email}, ${passwordHash})
+      insert into auth_users (supabase_auth_id, full_name, email, password_hash, role)
+      values (gen_random_uuid(), ${fullName}, ${email}, ${passwordHash}, ${role})
       on conflict (email) do nothing
       returning id as uid
     `);
@@ -256,19 +319,22 @@ router.post("/auth/signup", async (req, res): Promise<void> => {
       user: email,
       action: "CREATE",
       entity: "User",
-      details: `${fullName} (${email}) signed up`,
+      details: `${fullName} (${email}) signed up as ${accountRoleLabel(role).toLowerCase()}`,
     });
 
     res.status(201).json({ success: true, message: "Signup successful. You can now sign in." });
   } catch (error) {
-    console.error("Signup error:", error);
+    console.error(`${role} signup error:`, error);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
-});
+}
 
-// ── USER SIGNIN ───────────────────────────────────────────────────────────────
+router.post("/auth/signup", (req, res) => handleSignup("commuter", req, res));
+router.post("/auth/driver-signup", (req, res) => handleSignup("driver", req, res));
 
-router.post("/auth/user-signin", async (req, res): Promise<void> => {
+// ── SIGNIN (shared by commuter + driver) ─────────────────────────────────────
+
+async function handleSignin(role: AccountRole, req: Request, res: Response): Promise<void> {
   try {
     const body = req.body as { email?: string; password?: string };
     const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
@@ -279,22 +345,26 @@ router.post("/auth/user-signin", async (req, res): Promise<void> => {
       return;
     }
 
+    await ensureRoleColumn();
+
     const canReadLinkedCard = await hasLinkedCardUidColumn();
-    const rawRecord = await db.execute(
-      canReadLinkedCard
-        ? sql`select id as uid, full_name, email, password_hash, linked_card_uid from auth_users where email = ${email} limit 1`
-        : sql`select id as uid, full_name, email, password_hash from auth_users where email = ${email} limit 1`
-    );
+    const selectUser = () =>
+      db.execute(
+        canReadLinkedCard
+          ? sql`select id as uid, full_name, email, password_hash, role, linked_card_uid from auth_users where email = ${email} limit 1`
+          : sql`select id as uid, full_name, email, password_hash, role from auth_users where email = ${email} limit 1`
+      );
 
     type UserRow = {
       uid: string;
       full_name: string;
       email: string;
       password_hash: string;
+      role: string;
       linked_card_uid?: string | null;
     };
 
-    let user = extractRows<UserRow>(rawRecord)[0];
+    let user = extractRows<UserRow>(await selectUser())[0];
     const hasLocalMatch = !!user && !!user.password_hash && verifyPassword(password, user.password_hash);
 
     if (!hasLocalMatch) {
@@ -319,9 +389,10 @@ router.post("/auth/user-signin", async (req, res): Promise<void> => {
 
       const nextPasswordHash = hashPassword(password);
 
+      // NOTE: role is only set on first insert. An existing row keeps its role.
       await db.execute(sql`
-        insert into auth_users (supabase_auth_id, full_name, email, password_hash)
-        values (${supabaseUser.id}::uuid, ${fullNameFromSupabase}, ${email}, ${nextPasswordHash})
+        insert into auth_users (supabase_auth_id, full_name, email, password_hash, role)
+        values (${supabaseUser.id}::uuid, ${fullNameFromSupabase}, ${email}, ${nextPasswordHash}, ${role})
         on conflict (email) do update
         set
           supabase_auth_id = excluded.supabase_auth_id,
@@ -330,12 +401,7 @@ router.post("/auth/user-signin", async (req, res): Promise<void> => {
           updated_at       = now()
       `);
 
-      const syncedRaw = await db.execute(
-        canReadLinkedCard
-          ? sql`select id as uid, full_name, email, password_hash, linked_card_uid from auth_users where email = ${email} limit 1`
-          : sql`select id as uid, full_name, email, password_hash from auth_users where email = ${email} limit 1`
-      );
-      user = extractRows<UserRow>(syncedRaw)[0];
+      user = extractRows<UserRow>(await selectUser())[0];
     } else if (user && !user.password_hash.includes(":")) {
       const upgradedHash = hashPassword(password);
       await db.execute(sql`
@@ -351,36 +417,50 @@ router.post("/auth/user-signin", async (req, res): Promise<void> => {
       return;
     }
 
+    // Role guard: password was correct, but this account belongs to the other role.
+    const actualRole = normalizeAccountRole(user.role);
+    if (actualRole !== role) {
+      res.status(403).json({
+        success: false,
+        role: actualRole,
+        message: `This account is registered as a ${accountRoleLabel(actualRole)}. Please switch to the ${accountRoleLabel(actualRole)} tab.`,
+      });
+      return;
+    }
+
     // Card status no longer blocks login — it's only informational now.
-    // A user can always sign in to their account; a blocked/inactive card
-    // just means restricted card-related features on the frontend.
     const { blocked: cardBlocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
 
     await logAudit({
       user: user.email,
       action: "LOGIN",
       entity: "User",
-      details: `${user.email} logged in`,
+      details: `${user.email} logged in as ${accountRoleLabel(actualRole).toLowerCase()}`,
     });
 
     res.json({
       success: true,
       message: "Sign in successful",
+      role: actualRole,
       token: createUserToken({ id: user.uid, email: user.email, fullName: user.full_name }),
       user: {
         id: user.uid,
         fullName: user.full_name,
         email: user.email,
+        role: actualRole,
         linkedCardUid: user.linked_card_uid ?? "",
         cardBlocked,
         cardStatus,
       },
     });
   } catch (error) {
-    console.error("User sign in error:", error);
+    console.error(`${role} sign in error:`, error);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
-});
+}
+
+router.post("/auth/user-signin", (req, res) => handleSignin("commuter", req, res));
+router.post("/auth/driver-signin", (req, res) => handleSignin("driver", req, res));
 
 // ── GOOGLE OAUTH SYNC ─────────────────────────────────────────────────────────
 // Called by the frontend right after Supabase finishes the Google OAuth
@@ -389,13 +469,18 @@ router.post("/auth/user-signin", async (req, res): Promise<void> => {
 // someone else. Instead we verify the Supabase access token server-side
 // and pull the email/name from that verified response only.
 //
-// Behavior: auto-create. First-time Google sign-in creates a new
-// auth_users row; a returning one just re-links/refreshes it.
+// Role: the client may send { role: "commuter" | "driver" }.
+//  - Existing account  -> its stored role must match (else 403).
+//  - New account       -> created with the requested role (default commuter).
+//                         New DRIVER accounts must match a registered driver name.
+//  - No role sent      -> existing accounts keep their role, new = commuter.
 
 router.post("/auth/oauth-sync", async (req, res): Promise<void> => {
   try {
-    const body = req.body as { accessToken?: string };
+    const body = req.body as { accessToken?: string; role?: string };
     const accessToken = typeof body?.accessToken === "string" ? body.accessToken : "";
+    const requestedRole: AccountRole | null =
+      body?.role === "driver" || body?.role === "commuter" ? body.role : null;
 
     if (!accessToken) {
       res.status(400).json({ success: false, message: "accessToken is required" });
@@ -420,30 +505,69 @@ router.post("/auth/oauth-sync", async (req, res): Promise<void> => {
       (typeof supabaseUser.user_metadata?.name === "string" && supabaseUser.user_metadata.name.trim()) ||
       email;
 
+    await ensureRoleColumn();
     const canReadLinkedCard = await hasLinkedCardUidColumn();
 
-    // auth_users.password_hash is required by the schema even for OAuth
-    // accounts — store an unusable random hash, since these accounts will
-    // only ever sign in through Google, never via /auth/user-signin
-    // password auth.
-    const placeholderHash = hashPassword(randomBytes(32).toString("hex"));
-
-    await db.execute(sql`
-      insert into auth_users (supabase_auth_id, full_name, email, password_hash)
-      values (${supabaseUser.id}::uuid, ${fullNameFromGoogle}, ${email}, ${placeholderHash})
-      on conflict (email) do update
-      set
-        supabase_auth_id = excluded.supabase_auth_id,
-        updated_at       = now()
+    const existingRaw = await db.execute(sql`
+      select id, role from auth_users where email = ${email} limit 1
     `);
+    const existing = extractRows<{ id: string; role: string }>(existingRaw)[0];
+
+    let finalRole: AccountRole;
+
+    if (existing) {
+      finalRole = normalizeAccountRole(existing.role);
+      if (requestedRole && requestedRole !== finalRole) {
+        res.status(403).json({
+          success: false,
+          role: finalRole,
+          message: `This Google account is registered as a ${accountRoleLabel(finalRole)}. Please use the ${accountRoleLabel(finalRole)} tab.`,
+        });
+        return;
+      }
+
+      await db.execute(sql`
+        update auth_users
+        set supabase_auth_id = ${supabaseUser.id}::uuid, updated_at = now()
+        where id = ${existing.id}
+      `);
+    } else {
+      finalRole = requestedRole ?? "commuter";
+
+      if (finalRole === "driver") {
+        const registered = await findRegisteredName("driver", fullNameFromGoogle);
+        if (!registered) {
+          res.status(403).json({
+            success: false,
+            message:
+              "This Google account's name is not registered as a driver. Please contact your admin or use email signup.",
+          });
+          return;
+        }
+      }
+
+      // auth_users.password_hash is required by the schema even for OAuth
+      // accounts — store an unusable random hash, since these accounts will
+      // only ever sign in through Google.
+      const placeholderHash = hashPassword(randomBytes(32).toString("hex"));
+
+      await db.execute(sql`
+        insert into auth_users (supabase_auth_id, full_name, email, password_hash, role)
+        values (${supabaseUser.id}::uuid, ${fullNameFromGoogle}, ${email}, ${placeholderHash}, ${finalRole})
+        on conflict (email) do update
+        set
+          supabase_auth_id = excluded.supabase_auth_id,
+          updated_at       = now()
+      `);
+    }
 
     const rawRecord = await db.execute(
       canReadLinkedCard
-        ? sql`select id as uid, full_name, email, linked_card_uid from auth_users where email = ${email} limit 1`
-        : sql`select id as uid, full_name, email from auth_users where email = ${email} limit 1`
+        ? sql`select id as uid, full_name, email, role, linked_card_uid from auth_users where email = ${email} limit 1`
+        : sql`select id as uid, full_name, email, role from auth_users where email = ${email} limit 1`
     );
 
-    type UserRow = { uid: string; full_name: string; email: string; linked_card_uid?: string | null };
+    type UserRow = { uid: string; full_name: string; email: string; role: string; linked_card_uid?: string | null };
     const user = extractRows<UserRow>(rawRecord)[0];
 
     if (!user) {
@@ -451,25 +575,28 @@ router.post("/auth/oauth-sync", async (req, res): Promise<void> => {
       return;
     }
 
-    // Same as the password-based signin route: card status is
-    // informational only, never blocks access to the account itself.
+    const userRole = normalizeAccountRole(user.role);
+
+    // Card status is informational only, never blocks access to the account itself.
     const { blocked: cardBlocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
 
     await logAudit({
       user: user.email,
       action: "LOGIN",
       entity: "User",
-      details: `${user.email} signed in with Google`,
+      details: `${user.email} signed in with Google as ${accountRoleLabel(userRole).toLowerCase()}`,
     });
 
     res.json({
       success: true,
       message: "Signed in with Google",
+      role: userRole,
       token: createUserToken({ id: user.uid, email: user.email, fullName: user.full_name }),
       user: {
         id: user.uid,
         fullName: user.full_name,
         email: user.email,
+        role: userRole,
         linkedCardUid: user.linked_card_uid ?? "",
         cardBlocked,
         cardStatus,
@@ -491,17 +618,20 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
       return;
     }
 
+    await ensureRoleColumn();
+
     const canReadLinkedCard = await hasLinkedCardUidColumn();
     const rawRecord = await db.execute(
       canReadLinkedCard
-        ? sql`select id as uid, full_name, email, linked_card_uid, supabase_auth_id from auth_users where id = ${currentUser.id} limit 1`
-        : sql`select id as uid, full_name, email, supabase_auth_id from auth_users where id = ${currentUser.id} limit 1`
+        ? sql`select id as uid, full_name, email, role, linked_card_uid, supabase_auth_id from auth_users where id = ${currentUser.id} limit 1`
+        : sql`select id as uid, full_name, email, role, supabase_auth_id from auth_users where id = ${currentUser.id} limit 1`
     );
 
     type UserRow = {
       uid: string;
       full_name: string;
       email: string;
+      role: string;
       linked_card_uid?: string | null;
       supabase_auth_id?: string | null;
     };
@@ -512,8 +642,6 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
       return;
     }
 
-    // Same as signin: card status is informational only, never blocks
-    // access to the account itself.
     const { blocked: cardBlocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
 
     // Best-effort avatar lookup — hindi dapat ito mag-fail ng buong request
@@ -534,6 +662,7 @@ router.get("/auth/user-me", async (req, res): Promise<void> => {
         id: user.uid,
         fullName: user.full_name,
         email: user.email,
+        role: normalizeAccountRole(user.role),
         linkedCardUid: user.linked_card_uid ?? "",
         cardBlocked,
         cardStatus,
@@ -660,26 +789,23 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
 });
 
 // ── CHECK FULL NAME ───────────────────────────────────────────────────────────
+// GET /auth/check-full-name?fullName=...            -> commuter
+// GET /auth/check-full-name?fullName=...&role=driver -> driver
 
 router.get("/auth/check-full-name", async (req, res): Promise<void> => {
   try {
     const fullName =
       typeof req.query.fullName === "string" ? req.query.fullName.trim() : "";
+    const role = normalizeAccountRole(req.query.role);
 
     if (!fullName) {
       res.status(400).json({ success: false, message: "fullName query param is required" });
       return;
     }
 
-    const userRaw = await db.execute(sql`
-      select full_name, status
-      from users
-      where lower(trim(full_name)) = lower(trim(${fullName}))
-      limit 1
-    `);
-    const userRows = extractRows<{ full_name: string; status: string }>(userRaw);
+    const matched = await findRegisteredName(role, fullName);
 
-    if (userRows.length === 0) {
+    if (!matched) {
       res.status(404).json({
         success: false,
         message: "We couldn't find this name in our records. Please check with your admin.",
@@ -687,7 +813,7 @@ router.get("/auth/check-full-name", async (req, res): Promise<void> => {
       return;
     }
 
-    const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName);
+    const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName, role);
     if (nameAlreadyUsed) {
       res.status(409).json({
         success: false,
@@ -696,11 +822,10 @@ router.get("/auth/check-full-name", async (req, res): Promise<void> => {
       return;
     }
 
-    const matched = userRows[0];
     res.json({
       success: true,
       user: {
-        fullName: matched.full_name,
+        fullName: matched.fullName,
         status: matched.status,
       },
     });
@@ -1375,7 +1500,7 @@ router.delete("/admin/staff/:id", requireSuperAdmin, async (req, res): Promise<v
 
     if (selfAdmin && selfAdmin.id === targetId) {
       res.status(400).json({ error: "You cannot remove your own account" });
-      return;Z
+      return;
     }
 
     const targetRaw = await db.execute(sql`
