@@ -51,7 +51,6 @@ import {
   Wallet,
   Users,
   Route as RouteIcon,
-  QrCode,
   Home,
   History,
   UserRound,
@@ -1867,7 +1866,6 @@ export default function DriverDashboardPage() {
   } = useTodayStats(); // 👈 realtime Earned today + Total taps today
 
   const [authorized, setAuthorized] = useState(false);
-  const [online, setOnline] = useState(false);
   const [tab, setTab] = useState<Tab>("home");
   // Map panel mounts on first visit, then stays mounted (keeps pins/inputs when switching tabs)
   const [mapVisited, setMapVisited] = useState(false);
@@ -1976,215 +1974,186 @@ export default function DriverDashboardPage() {
       >
         {tab === "home" && (
           <>
-            {/* Duty toggle */}
-            <section
-              className={`relative overflow-hidden rounded-2xl border p-4 ${card} ${
-                online
-                  ? isDark
-                    ? "border-emerald-900/70"
-                    : "border-emerald-200"
-                  : ""
-              }`}
-            >
-              <div
-                className={`pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full blur-3xl transition-opacity ${
-                  online ? "opacity-40 bg-emerald-500" : "opacity-0"
-                }`}
-              />
-              <div className="relative flex items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`h-2 w-2 rounded-full ${
-                        online ? "bg-emerald-500 live-dot" : isDark ? "bg-slate-600" : "bg-slate-300"
-                      }`}
-                    />
-                    <h1 className="text-lg font-bold">{online ? "You are on duty" : "You are off duty"}</h1>
-                  </div>
-                  <p className={`text-xs mt-0.5 ${muted}`}>
-                    {online ? "Commuters can pay your fare by QR." : "Go on duty to start collecting fares."}
-                  </p>
-                </div>
+            {/* ═════ Today header ═════ */}
+            <div className="flex items-end justify-between px-1">
+              <div>
+                <p className={`text-[11px] font-bold uppercase tracking-widest ${muted}`}>Today</p>
+                <h1 className="text-xl font-extrabold leading-tight">
+                  {new Date().toLocaleDateString("en-US", {
+                    weekday: "long",
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </h1>
+              </div>
 
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={online}
-                  aria-label="Toggle duty status"
-                  onClick={() => setOnline((v) => !v)}
-                  className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
-                    online ? "bg-emerald-500" : isDark ? "bg-slate-700" : "bg-slate-300"
+              <div className="flex flex-col items-end gap-1">
+                <span
+                  className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
+                    statsError
+                      ? isDark
+                        ? "text-red-400 bg-red-950/40 border-red-900"
+                        : "text-red-600 bg-red-50 border-red-100"
+                      : isDark
+                        ? "text-emerald-400 bg-emerald-950/40 border-emerald-900"
+                        : "text-emerald-600 bg-emerald-50 border-emerald-100"
                   }`}
                 >
                   <span
-                    className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow transition-transform ${
-                      online ? "translate-x-6" : ""
+                    className={`h-1.5 w-1.5 rounded-full inline-block ${
+                      statsError ? "bg-red-500" : "bg-emerald-500 live-dot"
                     }`}
                   />
-                </button>
-              </div>
-            </section>
-
-            {/* ═════ Realtime stats (Earned today + Total taps today) ═════ */}
-            <section className="space-y-3">
-              <div className="flex items-center justify-between px-1">
-                <h2 className={`text-[11px] font-bold uppercase tracking-widest ${muted}`}>Today</h2>
-                <div className="flex items-center gap-2">
-                  {lastUpdated && (
-                    <span className={`text-[10px] font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      {lastUpdated.toLocaleTimeString()}
-                    </span>
-                  )}
-                  <span
-                    className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
-                      statsError
-                        ? isDark
-                          ? "text-red-400 bg-red-950/40 border-red-900"
-                          : "text-red-600 bg-red-50 border-red-100"
-                        : isDark
-                          ? "text-emerald-400 bg-emerald-950/40 border-emerald-900"
-                          : "text-emerald-600 bg-emerald-50 border-emerald-100"
-                    }`}
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full inline-block ${
-                        statsError ? "bg-red-500" : "bg-emerald-500 live-dot"
-                      }`}
-                    />
-                    {statsError ? "OFFLINE" : "LIVE"}
+                  {statsError ? "OFFLINE" : "LIVE"}
+                </span>
+                {lastUpdated && (
+                  <span className={`text-[10px] font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    {lastUpdated.toLocaleTimeString()}
                   </span>
+                )}
+              </div>
+            </div>
+
+            {/* ═════ Earned today — hero card ═════ */}
+            <div
+              className={`relative overflow-hidden rounded-2xl p-5 text-white shadow-lg bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 ${
+                revenueFlash ? "stat-flash" : ""
+              }`}
+            >
+              <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/10" />
+              <div className="pointer-events-none absolute -right-2 bottom-[-3rem] h-28 w-28 rounded-full bg-white/10" />
+
+              <div className="relative flex items-start justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-emerald-100/90">
+                    Earned today
+                  </p>
+                  {statsLoading ? (
+                    <Skeleton className="mt-2 h-10 w-44 bg-white/20" />
+                  ) : (
+                    <p
+                      key={revenueToday}
+                      className="value-pop mt-1 text-4xl font-extrabold tracking-tight leading-none truncate"
+                      data-testid="text-earned-today"
+                    >
+                      {formatPeso(revenueToday)}
+                    </p>
+                  )}
+                </div>
+                <div className="h-11 w-11 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center shrink-0">
+                  <Wallet className="h-5 w-5" />
                 </div>
               </div>
 
-              {/* Earned today — hero card */}
+              <div className="relative mt-4 flex items-center gap-1.5 text-[11px] text-emerald-50/90">
+                <TrendingUp className="h-3.5 w-3.5" />
+                Updates instantly on every tap
+              </div>
+            </div>
+
+            {/* ═════ Total taps + Trips ═════ */}
+            <div className="grid grid-cols-2 gap-3">
               <div
-                className={`relative overflow-hidden rounded-2xl p-5 text-white shadow-lg bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 ${
-                  revenueFlash ? "stat-flash" : ""
+                className={`relative overflow-hidden rounded-2xl border p-4 ${card} ${
+                  tapsFlash ? "stat-flash-blue" : ""
                 }`}
               >
-                <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/10" />
-                <div className="pointer-events-none absolute -right-2 bottom-[-3rem] h-28 w-28 rounded-full bg-white/10" />
-
-                <div className="relative flex items-start justify-between">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-semibold uppercase tracking-widest text-emerald-100/90">
-                      Earned today
+                <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-blue-500/10" />
+                <div className="relative">
+                  <div
+                    className={`h-10 w-10 rounded-xl flex items-center justify-center mb-3 ${
+                      isDark ? "bg-blue-950/50 text-blue-400" : "bg-blue-50 text-blue-600"
+                    }`}
+                  >
+                    <Fingerprint className="h-5 w-5" />
+                  </div>
+                  {statsLoading ? (
+                    <Skeleton className={`h-8 w-16 ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+                  ) : (
+                    <p
+                      key={tapsToday}
+                      className="value-pop text-3xl font-extrabold leading-none tracking-tight"
+                      data-testid="text-taps-today"
+                    >
+                      {tapsToday.toLocaleString("en-US")}
                     </p>
-                    {statsLoading ? (
-                      <Skeleton className="mt-2 h-10 w-44 bg-white/20" />
-                    ) : (
-                      <p
-                        key={revenueToday}
-                        className="value-pop mt-1 text-4xl font-extrabold tracking-tight leading-none truncate"
-                        data-testid="text-earned-today"
-                      >
-                        {formatPeso(revenueToday)}
-                      </p>
-                    )}
-                  </div>
-                  <div className="h-11 w-11 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center shrink-0">
-                    <Wallet className="h-5 w-5" />
-                  </div>
+                  )}
+                  <p className={`text-[11px] font-semibold uppercase tracking-wide mt-2 ${muted}`}>
+                    Total taps today
+                  </p>
                 </div>
-
-                <div className="relative mt-4 flex items-center gap-1.5 text-[11px] text-emerald-50/90">
-                  <TrendingUp className="h-3.5 w-3.5" />
-                  Updates instantly on every tap
-                </div>
+                <div className="absolute bottom-0 left-0 h-[3px] w-full bg-gradient-to-r from-blue-500 to-indigo-500" />
               </div>
 
-              {/* Total taps + Trips */}
-              <div className="grid grid-cols-2 gap-3">
-                <div
-                  className={`relative overflow-hidden rounded-2xl border p-4 ${card} ${
-                    tapsFlash ? "stat-flash-blue" : ""
-                  }`}
-                >
-                  <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-blue-500/10" />
-                  <div className="relative">
-                    <div
-                      className={`h-10 w-10 rounded-xl flex items-center justify-center mb-3 ${
-                        isDark ? "bg-blue-950/50 text-blue-400" : "bg-blue-50 text-blue-600"
-                      }`}
-                    >
-                      <Fingerprint className="h-5 w-5" />
-                    </div>
-                    {statsLoading ? (
-                      <Skeleton className={`h-8 w-16 ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
-                    ) : (
-                      <p
-                        key={tapsToday}
-                        className="value-pop text-3xl font-extrabold leading-none tracking-tight"
-                        data-testid="text-taps-today"
-                      >
-                        {tapsToday.toLocaleString("en-US")}
-                      </p>
-                    )}
-                    <p className={`text-[11px] font-semibold uppercase tracking-wide mt-2 ${muted}`}>
-                      Total taps today
-                    </p>
+              <div className={`relative overflow-hidden rounded-2xl border p-4 ${card}`}>
+                <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-purple-500/10" />
+                <div className="relative">
+                  <div
+                    className={`h-10 w-10 rounded-xl flex items-center justify-center mb-3 ${
+                      isDark ? "bg-purple-950/50 text-purple-400" : "bg-purple-50 text-purple-600"
+                    }`}
+                  >
+                    <RouteIcon className="h-5 w-5" />
                   </div>
-                  <div className="absolute bottom-0 left-0 h-[3px] w-full bg-gradient-to-r from-blue-500 to-indigo-500" />
+                  <p className="text-3xl font-extrabold leading-none tracking-tight">{SAMPLE_TRIPS.length}</p>
+                  <p className={`text-[11px] font-semibold uppercase tracking-wide mt-2 ${muted}`}>Trips</p>
                 </div>
-
-                <div className={`relative overflow-hidden rounded-2xl border p-4 ${card}`}>
-                  <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-purple-500/10" />
-                  <div className="relative">
-                    <div
-                      className={`h-10 w-10 rounded-xl flex items-center justify-center mb-3 ${
-                        isDark ? "bg-purple-950/50 text-purple-400" : "bg-purple-50 text-purple-600"
-                      }`}
-                    >
-                      <RouteIcon className="h-5 w-5" />
-                    </div>
-                    <p className="text-3xl font-extrabold leading-none tracking-tight">{SAMPLE_TRIPS.length}</p>
-                    <p className={`text-[11px] font-semibold uppercase tracking-wide mt-2 ${muted}`}>Trips</p>
-                  </div>
-                  <div className="absolute bottom-0 left-0 h-[3px] w-full bg-gradient-to-r from-purple-500 to-fuchsia-500" />
-                </div>
+                <div className="absolute bottom-0 left-0 h-[3px] w-full bg-gradient-to-r from-purple-500 to-fuchsia-500" />
               </div>
+            </div>
 
-              {statsError && (
+            {statsError && (
+              <button
+                type="button"
+                onClick={() => refetchStats()}
+                className={`w-full rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 ${
+                  isDark
+                    ? "border-red-900 text-red-400 bg-red-950/30"
+                    : "border-red-200 text-red-600 bg-red-50"
+                }`}
+              >
+                <AlertCircle className="h-3.5 w-3.5" />
+                Couldn't load today's stats — tap to retry
+              </button>
+            )}
+
+            {/* ═════ Recent trips preview ═════ */}
+            <section className="space-y-2.5">
+              <div className="flex items-center justify-between px-1">
+                <h2 className={`text-[11px] font-bold uppercase tracking-widest ${muted}`}>Recent trips</h2>
                 <button
                   type="button"
-                  onClick={() => refetchStats()}
-                  className={`w-full rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 ${
-                    isDark
-                      ? "border-red-900 text-red-400 bg-red-950/30"
-                      : "border-red-200 text-red-600 bg-red-50"
-                  }`}
+                  onClick={() => changeTab("trips")}
+                  className="flex items-center gap-0.5 text-xs font-semibold text-blue-500"
                 >
-                  <AlertCircle className="h-3.5 w-3.5" />
-                  Couldn't load today's stats — tap to retry
+                  See all <ChevronRight className="h-3.5 w-3.5" />
                 </button>
-              )}
+              </div>
+
+              {SAMPLE_TRIPS.slice(0, 3).map((t) => (
+                <div
+                  key={t.id}
+                  className={`rounded-xl border p-3.5 flex items-center justify-between gap-3 ${card}`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${
+                        isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      <Bus className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{t.route}</p>
+                      <p className={`text-[11px] mt-0.5 ${muted}`}>
+                        {t.time} · {t.passengers} passengers
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-sm font-bold text-emerald-500 shrink-0">₱{t.fare}</p>
+                </div>
+              ))}
             </section>
-
-            {/* Set route shortcut */}
-            <button
-              type="button"
-              onClick={() => changeTab("map")}
-              className={`group w-full rounded-2xl border p-4 flex items-center gap-3 text-left transition active:scale-[0.99] ${card}`}
-            >
-              <div className="h-11 w-11 rounded-xl bg-blue-600/10 flex items-center justify-center shrink-0">
-                <MapIcon className="h-5 w-5 text-blue-500" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold">Set your route</p>
-                <p className={`text-xs ${muted}`}>Choose origin &amp; destination on the map and get the fare.</p>
-              </div>
-              <ChevronRight className={`h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5 ${muted}`} />
-            </button>
-
-            {/* Collect fare */}
-            <Button
-              type="button"
-              disabled={!online}
-              className="w-full h-12 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold gap-2 shadow-md disabled:shadow-none"
-            >
-              <QrCode className="h-5 w-5" />
-              Show my fare QR
-            </Button>
           </>
         )}
 
