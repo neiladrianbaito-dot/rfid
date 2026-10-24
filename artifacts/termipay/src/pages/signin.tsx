@@ -74,7 +74,14 @@ export default function SigninPage() {
   const [, setLocation] = useLocation();
   const { theme, isDark, toggleTheme } = useAuthTheme();
 
-  const [role, setRole] = useState<Role>("commuter");
+  // Read ?role=driver from the URL (comes from the signup page redirect/link)
+  const initialRole: Role =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("role") === "driver"
+      ? "driver"
+      : "commuter";
+
+  const [role, setRole] = useState<Role>(initialRole);
   const config = ROLE_CONFIG[role];
 
   const [email, setEmail] = useState("");
@@ -119,9 +126,9 @@ export default function SigninPage() {
     setPassword("");
   }
 
-  function redirectToDashboard() {
+  function redirectToDashboard(targetRole: Role) {
     const basePath = (import.meta.env.BASE_URL || "").replace(/\/$/, "");
-    const path = config.dashboard;
+    const path = ROLE_CONFIG[targetRole].dashboard;
     const target = `${basePath}${path}`;
 
     try {
@@ -152,12 +159,13 @@ export default function SigninPage() {
       const response = await fetch(buildApiUrl(config.signinEndpoint), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({ email: email.trim(), password, role }),
       });
 
       const data = (await response.json()) as {
         message?: string;
         token?: string;
+        role?: Role;
       };
 
       if (!response.ok) {
@@ -170,9 +178,20 @@ export default function SigninPage() {
         return;
       }
 
-      window.localStorage.setItem(config.tokenKey, data.token);
-      window.localStorage.setItem(AUTH_ROLE_KEY, role);
-      redirectToDashboard();
+      // Role guard: block a commuter account from the driver tab and vice versa
+      if (data.role && data.role !== role) {
+        const actual = ROLE_CONFIG[data.role]?.label ?? data.role;
+        setError(
+          `This account is registered as a ${actual}. Please switch to the ${actual} tab.`
+        );
+        return;
+      }
+
+      const finalRole: Role = data.role ?? role;
+
+      window.localStorage.setItem(ROLE_CONFIG[finalRole].tokenKey, data.token);
+      window.localStorage.setItem(AUTH_ROLE_KEY, finalRole);
+      redirectToDashboard(finalRole);
     } catch {
       setError("Unable to connect to server. Please try again.");
     } finally {

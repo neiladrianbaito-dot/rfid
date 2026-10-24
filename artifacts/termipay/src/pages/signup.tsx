@@ -190,6 +190,7 @@ export default function SignupPage() {
           fullName: fullNameTrim,
           email: emailTrim,
           password,
+          role,
         }),
       });
 
@@ -206,7 +207,7 @@ export default function SignupPage() {
       setSuccess("Account created! Redirecting to sign in...");
 
       window.setTimeout(() => {
-        setLocation("/signin");
+        setLocation(`/signin?role=${role}`);
       }, 1400);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -569,7 +570,7 @@ export default function SignupPage() {
               <p className="text-xs sm:text-sm text-center text-slate-500">
                 Already have an account?{" "}
                 <Link
-                  href="/signin"
+                  href={`/signin?role=${role}`}
                   className={`font-medium ${
                     isDark
                       ? "text-blue-400 hover:text-blue-300"
