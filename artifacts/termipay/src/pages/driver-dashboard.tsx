@@ -154,6 +154,39 @@ const fmtTripDay = (iso: string) =>
     timeZone: MANILA_TZ,
   });
 
+/* 🧩 ONE ROUTE = ONE TRIP (per day).
+   The server may return several trips for the same origin → destination
+   (e.g. after a pause, Reset, or re-adding the same route). Here they are
+   merged by route name, so the old trip is reused and only its taps and fare
+   go up. Nothing stacks up, and nothing in the database is changed. */
+function mergeTripsByRoute(list: Trip[]): Trip[] {
+  const norm = (s: string | null) => (s ?? "").trim().toLowerCase();
+  const map = new Map<string, Trip>();
+
+  for (const t of list) {
+    const key = `${fmtTripDay(t.startedAt)}|${norm(t.origin)}|${norm(t.destination)}`;
+    const prev = map.get(key);
+
+    if (!prev) {
+      map.set(key, { ...t, key });
+      continue;
+    }
+
+    map.set(key, {
+      ...prev,
+      startedAt: new Date(t.startedAt) < new Date(prev.startedAt) ? t.startedAt : prev.startedAt,
+      endedAt: new Date(t.endedAt) > new Date(prev.endedAt) ? t.endedAt : prev.endedAt,
+      taps: prev.taps + t.taps,
+      fare: prev.fare + t.fare,
+    });
+  }
+
+  // newest activity first
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.endedAt).getTime() - new Date(a.endedAt).getTime()
+  );
+}
+
 function useMyTrips(days: number, enabled: boolean) {
   const query = useQuery({
     queryKey: ["driver-trips", days],
@@ -165,7 +198,7 @@ function useMyTrips(days: number, enabled: boolean) {
       });
       if (!res.ok) throw new Error(`my-trips failed: ${res.status}`);
       const data = await res.json();
-      return Array.isArray(data?.trips) ? (data.trips as Trip[]) : [];
+      return Array.isArray(data?.trips) ? mergeTripsByRoute(data.trips as Trip[]) : [];
     },
   });
 
@@ -2788,7 +2821,7 @@ export default function DriverDashboardPage() {
             )}
 
             <p className={`text-[11px] ${muted}`}>
-              A trip is a group of fare taps on the same route with no pause longer than 30 minutes.
+              Each route is one trip per day. New taps on the same route are added to that trip.
             </p>
           </section>
         )}
