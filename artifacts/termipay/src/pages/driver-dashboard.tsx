@@ -585,7 +585,9 @@ function useDriverApiAuth() {
 type PanelProps = { isDark: boolean; visible: boolean };
 
 function FareMapPanel({ isDark, visible }: PanelProps) {
-  const { toast } = useToast();
+  const { toast: baseToast } = useToast();
+  // every toast on this page stays on screen for only 500 ms
+  const toast = (opts: Parameters<typeof baseToast>[0]) => baseToast({ duration: 500, ...opts });
   const queryClient = useQueryClient();
   const actorUsername =
     (typeof window !== "undefined" && window.localStorage.getItem(DRIVER_NAME_KEY)) || "driver";
