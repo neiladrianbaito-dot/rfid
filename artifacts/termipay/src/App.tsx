@@ -97,7 +97,7 @@ function PaymongoRoute() {
     typeof window !== "undefined" && !!window.localStorage.getItem(USER_AUTH_TOKEN_KEY);
 
   if (!hasUserToken) {
-    return <Redirect to="/signin" />;
+    return <Redirect to="/signin?role=commuter" />;
   }
 
   return <PaymongoDashboardPage />;
@@ -108,7 +108,7 @@ function DriverRoute() {
     typeof window !== "undefined" && !!window.localStorage.getItem(DRIVER_AUTH_TOKEN_KEY);
 
   if (!hasDriverToken) {
-    return <Redirect to="/signin" />;
+    return <Redirect to="/signin?role=driver" />;
   }
 
   return <DriverDashboardPage />;
