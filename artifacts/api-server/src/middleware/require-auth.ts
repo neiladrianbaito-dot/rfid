@@ -4,8 +4,6 @@ import { db } from "@workspace/db";
 import { verifyAdminToken } from "../lib/admin-token";
 import { verifyUserToken } from "../lib/user-token";
 
-// Replace the contents of your existing requireAuth file with this one.
-
 function getBearerToken(authorization?: string): string | null {
   if (!authorization) return null;
   const [scheme, token] = authorization.split(" ");
@@ -21,20 +19,29 @@ function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
 }
 
 /**
- * Drivers may ONLY use the fare-route endpoints:
+ * Drivers may ONLY use:
  *   GET   /routes
  *   POST  /routes
  *   PATCH /routes/:id
  *   PATCH /routes/:id/toggle
- * Everything else (users, transactions, audit logs, DELETE ...) stays admin-only.
+ *   GET   /dashboard/stats   (Earned today + Total taps today)
+ * Everything else (users, transactions list, audit logs, DELETE ...) stays admin-only.
  */
-const DRIVER_ALLOWED_METHODS = new Set(["GET", "POST", "PATCH"]);
-const DRIVER_ALLOWED_PATH = /\/routes(\/[^/]+)?(\/toggle)?\/?$/;
+const DRIVER_RULES: { methods: Set<string>; path: RegExp }[] = [
+  {
+    methods: new Set(["GET", "POST", "PATCH"]),
+    path: /\/routes(\/[^/]+)?(\/toggle)?\/?$/,
+  },
+  {
+    methods: new Set(["GET"]),
+    path: /\/dashboard\/stats\/?$/,
+  },
+];
 
 function driverMayAccess(req: Request): boolean {
-  if (!DRIVER_ALLOWED_METHODS.has(req.method.toUpperCase())) return false;
+  const method = req.method.toUpperCase();
   const path = req.originalUrl.split("?")[0];
-  return DRIVER_ALLOWED_PATH.test(path);
+  return DRIVER_RULES.some((rule) => rule.methods.has(method) && rule.path.test(path));
 }
 
 async function resolveDriver(token: string) {
@@ -65,7 +72,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  // 1) Admin token (unchanged behaviour)
+  // 1) Admin token (unchanged)
   const adminUser = verifyAdminToken(token);
   if (adminUser) {
     (req as any).adminUser = adminUser;
@@ -73,12 +80,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  // 2) Driver token — only for the fare-route endpoints
+  // 2) Driver token — only for allowed endpoints
   try {
     const driver = await resolveDriver(token);
     if (driver) {
       if (!driverMayAccess(req)) {
-        res.status(403).json({ error: "Drivers can only manage fare routes." });
+        res.status(403).json({ error: "Drivers can only access fare routes and today's stats." });
         return;
       }
       (req as any).driverUser = driver;
