@@ -387,7 +387,7 @@ function PlaceCombobox({
         onBlur={() => setOpen(false)}
         onKeyDown={onKeyDown}
         // text-base on mobile prevents iOS auto-zoom on focus
-        className={`h-11 text-base sm:text-sm ${className ?? ""}`}
+        className={`h-9 text-base sm:text-sm ${className ?? ""}`}
       />
 
       {open && !disabled && (
@@ -1439,41 +1439,41 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         )}
       </section>
 
-      {/* Distance-based fare form */}
+      {/* Distance-based fare form (compact) */}
       <section
         ref={formSectionRef}
-        className={`scroll-mt-20 rounded-xl border p-4 space-y-4 transition-shadow ${card} ${
+        className={`scroll-mt-20 rounded-lg border p-3 space-y-2.5 transition-shadow ${card} ${
           flashForm ? "ring-2 ring-blue-500" : ""
         }`}
       >
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
-            <RouteIcon size={16} /> Set route · Distance fare
+          <h2 className="text-xs font-bold flex items-center gap-1.5 text-blue-500">
+            <RouteIcon size={14} /> Set route · Distance fare
           </h2>
           {!distanceFareEnabled && (
-            <span className={`flex items-center gap-1 text-[11px] font-semibold ${muted}`}>
-              <Lock className="w-3.5 h-3.5" /> Locked
+            <span className={`flex items-center gap-1 text-[10px] font-semibold ${muted}`}>
+              <Lock className="w-3 h-3" /> Locked
             </span>
           )}
         </div>
 
         {!distanceFareEnabled && (
           <p
-            className={`text-xs rounded-lg border px-3 py-2 ${
+            className={`text-[11px] leading-snug rounded-md border px-2.5 py-1.5 ${
               isDark
                 ? "bg-amber-950/30 border-amber-900 text-amber-400"
                 : "bg-amber-50 border-amber-200 text-amber-700"
             }`}
           >
-            Tap <b>Reset</b> on your current route below first, then set a new origin and destination here.
+            Tap <b>Reset</b> on your route below first, then set a new origin and destination.
           </p>
         )}
 
-        {placesError && <p className="text-xs text-red-500">{placesError}</p>}
+        {placesError && <p className="text-[11px] text-red-500">{placesError}</p>}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label className={`text-xs font-semibold ${muted}`}>Origin</Label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className={`text-[10px] font-semibold ${muted}`}>Origin</Label>
             <PlaceCombobox
               value={originName}
               places={places}
@@ -1488,8 +1488,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
               }}
             />
           </div>
-          <div className="space-y-1.5">
-            <Label className={`text-xs font-semibold ${muted}`}>Destination</Label>
+          <div className="space-y-1">
+            <Label className={`text-[10px] font-semibold ${muted}`}>Destination</Label>
             <PlaceCombobox
               value={destName}
               places={places}
@@ -1513,7 +1513,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
             disabled={busy || !canPressOk}
             aria-busy={busy}
             aria-label={busy ? "Loading" : "OK"}
-            className="flex-1 sm:flex-none sm:w-28 h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:cursor-not-allowed"
+            className="flex-1 h-9 text-sm bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:cursor-not-allowed"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "OK"}
           </Button>
@@ -1522,27 +1522,27 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
             variant="outline"
             onClick={clearPins}
             disabled={!distanceFareEnabled || (!originPt && !destPt)}
-            className={`h-11 gap-1.5 ${
+            className={`h-9 px-3 gap-1 text-xs ${
               isDark ? "border-slate-700 text-slate-200 hover:bg-slate-800" : "border-slate-200 text-slate-700"
             }`}
           >
-            <Eraser className="w-4 h-4" />
+            <Eraser className="w-3.5 h-3.5" />
             Clear pins
           </Button>
         </div>
 
         <div
           ref={setMapEl}
-          className="relative z-0 w-full h-[42dvh] min-h-[260px] max-h-[420px] rounded-lg border overflow-hidden"
+          className="relative z-0 w-full h-[30dvh] min-h-[200px] max-h-[300px] rounded-md border overflow-hidden"
           style={{ borderColor: isDark ? "#1e293b" : "#e2e8f0", touchAction: "pan-x pan-y" }}
         />
-        <p className={`text-[11px] ${muted}`}>
-          Tip: you can also tap the map — 1st tap = Origin, 2nd tap = Destination. Drag a pin to adjust.
+        <p className={`text-[10px] leading-snug ${muted}`}>
+          Tip: tap the map — 1st = Origin, 2nd = Destination. Drag a pin to adjust.
         </p>
 
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
-          <div className="space-y-1.5">
-            <Label className={`text-[11px] font-semibold ${muted}`}>Base fare (₱)</Label>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="space-y-1">
+            <Label className={`text-[10px] font-semibold ${muted}`}>Base fare (₱)</Label>
             <Input
               type="number"
               inputMode="decimal"
@@ -1550,11 +1550,11 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
               min="0"
               value={baseFare}
               onChange={(e) => setBaseFare(e.target.value)}
-              className={`h-10 text-base sm:text-sm ${inputCls}`}
+              className={`h-9 px-2 text-base sm:text-sm ${inputCls}`}
             />
           </div>
-          <div className="space-y-1.5">
-            <Label className={`text-[11px] font-semibold ${muted}`}>Base km</Label>
+          <div className="space-y-1">
+            <Label className={`text-[10px] font-semibold ${muted}`}>Base km</Label>
             <Input
               type="number"
               inputMode="decimal"
@@ -1562,11 +1562,11 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
               min="0"
               value={baseKm}
               onChange={(e) => setBaseKm(e.target.value)}
-              className={`h-10 text-base sm:text-sm ${inputCls}`}
+              className={`h-9 px-2 text-base sm:text-sm ${inputCls}`}
             />
           </div>
-          <div className="space-y-1.5">
-            <Label className={`text-[11px] font-semibold ${muted}`}>₱ / extra km</Label>
+          <div className="space-y-1">
+            <Label className={`text-[10px] font-semibold ${muted}`}>₱ / extra km</Label>
             <Input
               type="number"
               inputMode="decimal"
@@ -1574,16 +1574,16 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
               min="0"
               value={rate}
               onChange={(e) => setRate(e.target.value)}
-              className={`h-10 text-base sm:text-sm ${inputCls}`}
+              className={`h-9 px-2 text-base sm:text-sm ${inputCls}`}
             />
           </div>
         </div>
 
-        {error && <p className="text-xs text-red-500">{error}</p>}
+        {error && <p className="text-[11px] text-red-500">{error}</p>}
 
         {distanceKm != null && fare != null && (
           <div
-            className={`rounded-lg border p-3 text-sm space-y-1 ${
+            className={`rounded-md border px-2.5 py-2 text-xs space-y-0.5 ${
               isDark ? "bg-blue-950/30 border-blue-900" : "bg-blue-50 border-blue-100"
             }`}
           >
@@ -1592,10 +1592,10 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
             </p>
             <p className={muted}>
               ₱{parseFloat(baseFare).toFixed(2)} + ({excessKm.toFixed(1)} km × ₱{parseFloat(rate).toFixed(2)}) ={" "}
-              <span className="font-bold text-emerald-500 text-base">₱{fare.toFixed(2)}</span>
+              <span className="font-bold text-emerald-500 text-sm">₱{fare.toFixed(2)}</span>
             </p>
             {isEstimate && (
-              <p className="text-xs text-amber-500">
+              <p className="text-[11px] text-amber-500">
                 Road routing was unavailable, so this uses straight-line distance and may be lower than the real
                 fare.
               </p>
@@ -1607,13 +1607,14 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           type="button"
           disabled={!canSave}
           onClick={handleSave}
-          className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:cursor-not-allowed"
+          className="w-full h-10 text-sm bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:cursor-not-allowed"
         >
           {saving ? "Saving..." : "Save route"}
         </Button>
       </section>
 
-      {/* Configured routes */}
+      
+{/* Configured routes */}
       <section className={`rounded-xl border p-4 space-y-3 ${card}`}>
         <div className="flex items-start justify-between gap-2">
           <div>
