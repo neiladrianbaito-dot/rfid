@@ -82,7 +82,11 @@ const DRIVER_NAME_KEY = "termipay_driver_username"; // optional, used as "actor"
 
 // Same base URL as your api-client. If the frontend and API share one domain, leave it empty.
 // If they are on different domains, set VITE_API_URL=https://rfid-exfz.onrender.com in the frontend env.
-const API_BASE = (import.meta as any).env?.VITE_API_URL ?? "";
+// Normalized: trailing "/" and a trailing "/api" are removed, so it never becomes /api/api/...
+const API_BASE = String((import.meta as any).env?.VITE_API_URL ?? "")
+  .trim()
+  .replace(/\/+$/, "")
+  .replace(/\/api$/i, "");
 
 function driverAuthHeaders(): Record<string, string> {
   const token = window.localStorage.getItem(DRIVER_TOKEN_KEY);
