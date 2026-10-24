@@ -63,6 +63,8 @@ import {
   Power,
   PowerOff,
   ArrowLeftRight,
+  ArrowRight,
+  Clock,
   Search,
   Zap,
   ShieldAlert,
@@ -200,39 +202,58 @@ function TripCard({
   compact?: boolean;
 }) {
   const card = isDark ? "bg-slate-900/70 border-slate-800" : "bg-white border-slate-200 shadow-sm";
-  const muted = isDark ? "text-slate-400" : "text-slate-500";
-  const route =
-    trip.origin || trip.destination
-      ? `${trip.origin ?? "—"} → ${trip.destination ?? "—"}`
-      : "Unknown route";
   const sameMinute = fmtTripTime(trip.startedAt) === fmtTripTime(trip.endedAt);
   const timeText = sameMinute
     ? fmtTripTime(trip.startedAt)
     : `${fmtTripTime(trip.startedAt)} – ${fmtTripTime(trip.endedAt)}`;
 
   return (
-    <div
-      className={`rounded-xl border flex items-center justify-between gap-3 ${
-        compact ? "p-3.5" : "p-4"
-      } ${card}`}
-    >
-      <div className="flex items-center gap-3 min-w-0">
-        <div
-          className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${
-            isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
+    <div className={`relative overflow-hidden rounded-2xl border ${compact ? "p-3.5" : "p-4"} ${card}`}>
+      <div className="absolute left-0 top-0 h-full w-1 bg-gradient-to-b from-blue-500 to-emerald-500" />
+      <div className="flex items-center justify-between gap-3 pl-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+            <Bus className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 space-y-1.5">
+            {trip.origin || trip.destination ? (
+              <div className="flex items-center gap-1.5 text-sm font-bold min-w-0">
+                <span className="truncate">{trip.origin ?? "—"}</span>
+                <ArrowRight className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                <span className="truncate">{trip.destination ?? "—"}</span>
+              </div>
+            ) : (
+              <p className="text-sm font-bold">Unknown route</p>
+            )}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  isDark ? "bg-blue-950/60 text-blue-300" : "bg-blue-50 text-blue-600"
+                }`}
+              >
+                <Clock className="h-3 w-3" />
+                {showDate ? `${fmtTripDay(trip.startedAt)} · ` : ""}
+                {timeText}
+              </span>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  isDark ? "bg-purple-950/60 text-purple-300" : "bg-purple-50 text-purple-600"
+                }`}
+              >
+                <Fingerprint className="h-3 w-3" />
+                {trip.taps} {trip.taps === 1 ? "tap" : "taps"}
+              </span>
+            </div>
+          </div>
+        </div>
+        <span
+          className={`shrink-0 rounded-xl px-2.5 py-1.5 text-sm font-extrabold ${
+            isDark ? "bg-emerald-950/50 text-emerald-400" : "bg-emerald-50 text-emerald-600"
           }`}
         >
-          <Bus className="h-4 w-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold truncate">{route}</p>
-          <p className={`text-[11px] mt-0.5 ${muted}`}>
-            {showDate ? `${fmtTripDay(trip.startedAt)} · ` : ""}
-            {timeText} · {trip.taps} {trip.taps === 1 ? "tap" : "taps"}
-          </p>
-        </div>
+          {formatPeso(trip.fare)}
+        </span>
       </div>
-      <p className="text-sm font-bold text-emerald-500 shrink-0">{formatPeso(trip.fare)}</p>
     </div>
   );
 }
@@ -584,13 +605,13 @@ function PlaceCombobox({
         }}
         onKeyDown={onKeyDown}
         // text-base on mobile prevents iOS auto-zoom on focus
-        className={`h-9 text-base sm:text-sm ${className ?? ""}`}
+        className={`h-10 text-base sm:text-sm ${className ?? ""}`}
       />
 
       {open && !disabled && (
         <div
           ref={listRef}
-          className={`absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-md border shadow-lg ${
+          className={`absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-xl border shadow-lg ${
             isDark ? "bg-slate-900 border-slate-700 text-slate-200" : "bg-white border-slate-200 text-slate-800"
           }`}
         >
@@ -890,7 +911,7 @@ function useDriverApiAuth() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   🧭 FareMapPanel — the "Map" tab (all Fare Matrix functions for the driver)
+   🧭 FareMapPanel — the "Route" tab (map + origin/destination + activate/reset)
    ═══════════════════════════════════════════════════════════════════════ */
 
 type PanelProps = { isDark: boolean; visible: boolean };
@@ -909,6 +930,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   const inputCls = isDark
     ? "bg-slate-950 border-slate-800 text-slate-200"
     : "bg-white border-slate-200 text-slate-800";
+  const rail = isDark ? "border-slate-600" : "border-slate-300";
 
   /* ---------- places + routes data ---------- */
   const { places, loading: placesLoading, error: placesError } = useSamarPlaces();
@@ -1278,8 +1300,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     // hide the reset route + its return AND every other route, so only the NEW route shows next
     hideRoutes([...targets.map((r: any) => r.id), ...visibleRoutes.map((r: any) => r.id)]);
     setResetUnlocked(true);
-    resetForm();            // clears pins / route line on the map, default origin comes back
-    goToDistanceFare();     // "presses" Distance Fare: unlock + scroll to the form
+    resetForm(); // clears pins / route line on the map, default origin comes back
+    goToDistanceFare(); // "presses" Distance Fare: unlock + scroll to the form
     queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
     toast({ title: <SuccessTitle text="Route Reset — set a new origin & destination" /> });
 
@@ -1308,7 +1330,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [pinsLocked, setPinsLocked] = useState(false);
+  // Pins are read-only: the map follows the places picked in the form
+  const [pinsLocked, setPinsLocked] = useState(true);
   const [formKey, setFormKey] = useState(0);
   const formSectionRef = useRef<HTMLElement | null>(null);
   const [flashForm, setFlashForm] = useState(false);
@@ -1342,7 +1365,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     setDistanceKm(null);
     setIsEstimate(false);
     setError(null);
-    setPinsLocked(false);
+    setPinsLocked(true);
     setBusy(false);
     routeLine.current?.remove();
     routeLine.current = null;
@@ -1387,26 +1410,6 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     const t = setTimeout(() => mapRef.current?.invalidateSize(), 150);
     return () => clearTimeout(t);
   }, [visible]);
-
-  // Tap on map: first = Origin, second = Destination (then locks)
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const onClick = (e: L.LeafletMouseEvent) => {
-      if (pinsLocked || !distanceFareEnabled) return;
-      const pt = { lat: e.latlng.lat, lng: e.latlng.lng };
-      if (!originPt) {
-        setOriginPt(pt);
-      } else {
-        setDestPt(pt);
-        setPinsLocked(true);
-      }
-    };
-    map.on("click", onClick);
-    return () => {
-      map.off("click", onClick);
-    };
-  }, [mapEl, originPt, pinsLocked, distanceFareEnabled]);
 
   // Keep markers in sync with state
   useEffect(() => {
@@ -1453,9 +1456,70 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   // Any point/place change invalidates the previous calculation
   useEffect(() => {
     setDistanceKm(null);
+  }, [originPt, destPt, originPlace, destPlace]);
+
+  // 🗺️ Show the picked places (or the current saved route) on the map and draw the real road line
+  const mapOrigin =
+    originPlace ?? (currentRoute ? places.find((p) => p.label === currentRoute.origin) ?? null : null);
+  const mapDest =
+    destPlace ?? (currentRoute ? places.find((p) => p.label === currentRoute.destination) ?? null : null);
+
+  useEffect(() => {
+    let cancelled = false;
     routeLine.current?.remove();
     routeLine.current = null;
-  }, [originPt, destPt, originPlace, destPlace]);
+
+    if (!mapOrigin) setOriginPt(null);
+    if (!mapDest) setDestPt(null);
+
+    if (mapOrigin) {
+      geocodePlaceCached(mapOrigin)
+        .then((pt) => {
+          if (cancelled || !pt) return;
+          setOriginPt(pt);
+          if (!mapDest) mapRef.current?.setView([pt.lat, pt.lng], 11);
+        })
+        .catch(() => {});
+    }
+    if (mapDest) {
+      geocodePlaceCached(mapDest)
+        .then((pt) => {
+          if (!cancelled && pt) setDestPt(pt);
+        })
+        .catch(() => {});
+    }
+
+    if (mapOrigin && mapDest) {
+      (async () => {
+        try {
+          const [o, d] = await Promise.all([geocodePlaceCached(mapOrigin), geocodePlaceCached(mapDest)]);
+          const map = mapRef.current;
+          if (!o || !d || !map || cancelled) return;
+          const r = await roadRoute(o, d).catch(() => null);
+          if (cancelled || !mapRef.current) return;
+          if (r) {
+            routeLine.current = L.polyline(r.coords, { color: "#2563eb", weight: 5, opacity: 0.9 }).addTo(map);
+            map.fitBounds(routeLine.current.getBounds(), { padding: [40, 40] });
+          } else {
+            map.fitBounds(
+              [
+                [o.lat, o.lng],
+                [d.lat, d.lng],
+              ],
+              { padding: [40, 40] }
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapOrigin?.code, mapDest?.code, mapEl]);
 
   const fare = useMemo(() => {
     if (distanceKm == null) return null;
@@ -1480,7 +1544,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     }
   }, [originPlace, destPlace, distanceFareEnabled]);
 
-  // ✅ ONE BUTTON: OK — find both places, get the road distance, compute the fare,
+  // ✅ ONE BUTTON: Set route — find both places, get the road distance, compute the fare,
   // SAVE the route and AUTO-ACTIVATE it (on the reader of the route that was reset).
   const canPressOk = distanceFareEnabled && !!originPlace && !!destPlace && !busy && !saving;
 
@@ -1569,8 +1633,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           res.reason === "locate"
             ? "Couldn't locate one of the places. Try a nearby city or municipality."
             : res.reason === "route"
-              ? "Couldn't get the road distance. Check your connection and tap OK again."
-              : "Lookup failed. Check your connection and tap OK again."
+              ? "Couldn't get the road distance. Check your connection and tap Set route again."
+              : "Lookup failed. Check your connection and tap Set route again."
         );
         setBusy(false);
         return;
@@ -1583,7 +1647,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         return;
       }
     } catch {
-      setError("Lookup failed. Check your connection and tap OK again.");
+      setError("Lookup failed. Check your connection and tap Set route again.");
       setBusy(false);
       return;
     }
@@ -1650,154 +1714,190 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   /* ═════════ render ═════════ */
 
   return (
-    <div className="space-y-3">
-      {/* Set route (compact, one-tap OK = calculate + save + activate) */}
+    <div className="space-y-0">
+      {/* Map (isolate keeps Leaflet's z-index panes under the header and bottom bar) */}
+      <div
+        className={`relative isolate z-0 h-64 overflow-hidden rounded-3xl border ${
+          isDark ? "border-slate-800" : "border-slate-200"
+        }`}
+      >
+        <div ref={setMapEl} className="h-full w-full" />
+        <span className="absolute left-3 top-3 z-[500] flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white backdrop-blur">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+          Samar &amp; Leyte
+        </span>
+      </div>
+
+      {/* Bottom-sheet: origin / destination */}
       <section
         ref={formSectionRef}
-        className={`scroll-mt-20 rounded-lg border p-3 space-y-2.5 transition-shadow ${card} ${
+        className={`relative z-10 -mt-6 scroll-mt-20 rounded-3xl border p-4 space-y-3 transition-shadow ${card} ${
           flashForm ? "ring-2 ring-blue-500" : ""
         }`}
       >
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-xs font-bold flex items-center gap-1.5 text-blue-500">
-            <RouteIcon size={14} /> Set route · Distance fare
+          <h2 className="flex items-center gap-2 text-sm font-extrabold">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
+              <RouteIcon size={14} />
+            </span>
+            Where to?
           </h2>
           {!distanceFareEnabled && (
-            <span className={`flex items-center gap-1 text-[10px] font-semibold ${muted}`}>
-              <Lock className="w-3 h-3" /> Locked
+            <span
+              className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                isDark ? "bg-slate-800 text-slate-400" : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              <Lock className="h-3 w-3" /> Reset to edit
             </span>
           )}
         </div>
 
         {placesError && <p className="text-[11px] text-red-500">{placesError}</p>}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <Label className={`text-[10px] font-semibold ${muted}`}>Origin</Label>
-            <PlaceCombobox
-              value={originName}
-              places={places}
-              loading={placesLoading}
-              isDark={isDark}
-              disabled={!distanceFareEnabled || busy || saving}
-              placeholder="Barangay / city / municipality"
-              className={inputCls}
-              onChange={(text, place) => {
-                setOriginName(text);
-                setOriginPlace(place);
-              }}
-            />
+        <div className="flex gap-3">
+          <div className="flex flex-col items-center pb-2 pt-6">
+            <span className="h-3 w-3 rounded-full border-[3px] border-blue-500 bg-transparent" />
+            <span className={`my-1 w-px flex-1 border-l-2 border-dashed ${rail}`} />
+            <span className="h-3 w-3 rounded-[3px] bg-emerald-500" />
           </div>
-          <div className="space-y-1">
-            <Label className={`text-[10px] font-semibold ${muted}`}>Destination</Label>
-            <PlaceCombobox
-              value={destName}
-              places={places}
-              loading={placesLoading}
-              isDark={isDark}
-              disabled={!distanceFareEnabled || busy || saving}
-              placeholder="Barangay / city / municipality"
-              className={inputCls}
-              onChange={(text, place) => {
-                setDestName(text);
-                setDestPlace(place);
-              }}
-            />
+          <div className="min-w-0 flex-1 space-y-2.5">
+            <div className="space-y-1">
+              <Label className={`text-[11px] font-semibold ${muted}`}>Origin</Label>
+              <PlaceCombobox
+                value={originName}
+                places={places}
+                loading={placesLoading}
+                isDark={isDark}
+                disabled={!distanceFareEnabled || busy || saving}
+                placeholder="Barangay / city / municipality"
+                className={`${inputCls} rounded-xl`}
+                onChange={(text, place) => {
+                  setOriginName(text);
+                  setOriginPlace(place);
+                }}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className={`text-[11px] font-semibold ${muted}`}>Destination</Label>
+              <PlaceCombobox
+                value={destName}
+                places={places}
+                loading={placesLoading}
+                isDark={isDark}
+                disabled={!distanceFareEnabled || busy || saving}
+                placeholder="Barangay / city / municipality"
+                className={`${inputCls} rounded-xl`}
+                onChange={(text, place) => {
+                  setDestName(text);
+                  setDestPlace(place);
+                }}
+              />
+            </div>
           </div>
         </div>
 
-        {error && <p className="text-[11px] text-red-500">{error}</p>}
+        {error && (
+          <p
+            className={`rounded-lg px-3 py-2 text-[11px] font-medium ${
+              isDark ? "bg-red-950/40 text-red-400" : "bg-red-50 text-red-600"
+            }`}
+          >
+            {error}
+          </p>
+        )}
 
         <Button
           type="button"
           onClick={handleOk}
           disabled={!canPressOk}
           aria-busy={busy || saving}
-          aria-label={busy || saving ? "Loading" : "OK"}
-          className="w-full h-10 text-sm bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:cursor-not-allowed"
+          aria-label={busy || saving ? "Loading" : "Set route"}
+          className="h-12 w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-sm font-bold text-white shadow-md hover:from-blue-700 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy || saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "OK"}
+          {busy || saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Set route"}
         </Button>
       </section>
 
-      {/* Configured routes */}
-      <section className={`rounded-xl border p-4 space-y-3 ${card}`}>
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-bold flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-blue-500" />
-              Your route
-            </h2>
-            <p className={`text-[11px] mt-0.5 ${muted}`}>
-              Only your current route is shown. Tap Reset to clear it — the Distance Fare form opens automatically.
-            </p>
-          </div>
+      {/* Current route */}
+      <section className="space-y-3 pt-4">
+        <div className="flex items-center justify-between px-1">
+          <h2 className={`text-[11px] font-bold uppercase tracking-widest ${muted}`}>Your route</h2>
           <span
-            className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 shrink-0 ${
+            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
               isDark
-                ? "text-emerald-400 bg-emerald-950/40 border-emerald-900"
-                : "text-emerald-600 bg-emerald-50 border-emerald-100"
+                ? "border-emerald-900 bg-emerald-950/40 text-emerald-400"
+                : "border-emerald-100 bg-emerald-50 text-emerald-600"
             }`}
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
             LIVE
           </span>
         </div>
 
         {isLoading || !myRoutesLoaded ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className={`h-20 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
-            ))}
-          </div>
+          <Skeleton className={`h-44 w-full rounded-2xl ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
         ) : filteredRoutes.length === 0 ? (
-          <div className={`flex flex-col items-center py-10 ${isDark ? "text-slate-700" : "text-slate-300"}`}>
-            <MapPin size={40} className="mb-2" />
-            <p className="text-xs font-semibold uppercase tracking-widest">
-              No route set
-            </p>
-            <p className="text-[11px] mt-1 text-center normal-case tracking-normal">
-              Set an origin and destination above to add your route.
-            </p>
+          <div
+            className={`flex flex-col items-center rounded-2xl border border-dashed py-10 ${
+              isDark ? "border-slate-800 text-slate-600" : "border-slate-300 text-slate-400"
+            }`}
+          >
+            <MapPin size={36} className="mb-2" />
+            <p className="text-sm font-bold">No route yet</p>
+            <p className="mt-1 text-center text-[11px]">Pick an origin and destination above, then tap Set route.</p>
           </div>
         ) : (
-          <div className="space-y-2.5">
-            {filteredRoutes.map((route: any) => (
+          filteredRoutes.map((route: any) => (
+            <div
+              key={route.id}
+              className={`overflow-hidden rounded-2xl border ${
+                route.isActive
+                  ? isDark
+                    ? "border-emerald-900 bg-emerald-950/20"
+                    : "border-emerald-200 bg-emerald-50/60"
+                  : card
+              }`}
+            >
               <div
-                key={route.id}
-                className={`rounded-lg border p-3 space-y-3 ${
+                className={`h-1.5 w-full ${
                   route.isActive
-                    ? isDark
-                      ? "bg-emerald-950/20 border-emerald-900"
-                      : "bg-emerald-50/60 border-emerald-200"
+                    ? "bg-gradient-to-r from-emerald-400 to-teal-500"
                     : isDark
-                      ? "bg-slate-950/40 border-slate-800"
-                      : "bg-slate-50 border-slate-200"
+                      ? "bg-slate-800"
+                      : "bg-slate-200"
                 }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 space-y-1">
-                    <p className="text-sm font-semibold flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                      <span className="break-words">{route.origin}</span>
-                    </p>
-                    <p className={`text-sm flex items-center gap-1.5 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                      <MapPin className={`w-3.5 h-3.5 shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                      <span className="break-words">{route.destination}</span>
-                    </p>
+              />
+              <div className="space-y-4 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 gap-3">
+                    <div className="flex flex-col items-center pb-1 pt-1.5">
+                      <span className="h-3 w-3 rounded-full border-[3px] border-blue-500" />
+                      <span className={`my-1 w-px flex-1 border-l-2 border-dashed ${rail}`} />
+                      <span className="h-3 w-3 rounded-[3px] bg-emerald-500" />
+                    </div>
+                    <div className="min-w-0 space-y-3">
+                      <div>
+                        <p className={`text-[10px] font-semibold ${muted}`}>From</p>
+                        <p className="break-words text-sm font-bold">{route.origin}</p>
+                      </div>
+                      <div>
+                        <p className={`text-[10px] font-semibold ${muted}`}>To</p>
+                        <p className="break-words text-sm font-bold">{route.destination}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-right shrink-0 space-y-1">
-                    <p className="text-base font-bold">₱{Number(route.fareAmount).toFixed(2)}</p>
+                  <div className="shrink-0 space-y-1.5 text-right">
+                    <p className="text-2xl font-extrabold leading-none">₱{Number(route.fareAmount).toFixed(2)}</p>
                     <Badge
-                      variant={route.isActive ? "default" : "secondary"}
                       className={
                         route.isActive
                           ? isDark
-                            ? "bg-emerald-950/40 text-emerald-400 border border-emerald-900"
-                            : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            ? "border border-emerald-900 bg-emerald-950/40 text-emerald-400"
+                            : "border border-emerald-200 bg-emerald-100 text-emerald-700"
                           : isDark
-                            ? "bg-slate-800 text-slate-400 border border-slate-700"
-                            : "bg-slate-100 text-slate-500 border border-slate-200"
+                            ? "border border-slate-700 bg-slate-800 text-slate-400"
+                            : "border border-slate-200 bg-slate-100 text-slate-500"
                       }
                     >
                       {route.isActive ? "Active" : "Inactive"}
@@ -1805,46 +1905,44 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2.5">
                   <Button
-                    size="sm"
-                    variant={route.isActive ? "destructive" : "default"}
-                    className={`h-10 ${
-                      route.isActive
-                        ? "bg-red-500 hover:bg-red-600 text-white"
-                        : "bg-emerald-600 hover:bg-emerald-700 text-white"
-                    } disabled:cursor-not-allowed`}
                     onClick={() => (route.isActive ? handleDeactivate(route.id) : openActivateModal(route))}
                     disabled={isTogglePending && pendingRouteId === route.id}
+                    className={`h-11 rounded-xl font-bold text-white shadow-sm disabled:cursor-not-allowed ${
+                      route.isActive
+                        ? "bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700"
+                        : "bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700"
+                    }`}
                   >
-                    {route.isActive ? (
+                    {isTogglePending && pendingRouteId === route.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : route.isActive ? (
                       <>
-                        <PowerOff className="w-3.5 h-3.5 mr-1" /> Deactivate
+                        <PowerOff className="mr-1.5 h-4 w-4" /> Deactivate
                       </>
                     ) : (
                       <>
-                        <Power className="w-3.5 h-3.5 mr-1" /> Activate
+                        <Power className="mr-1.5 h-4 w-4" /> Activate
                       </>
                     )}
                   </Button>
                   <Button
-                    size="sm"
                     variant="outline"
-                    className={`h-10 font-semibold ${
-                      isDark
-                        ? "border-amber-900 text-amber-400 hover:bg-amber-950/40"
-                        : "border-amber-200 text-amber-600 hover:bg-amber-50"
-                    }`}
                     onClick={() => confirmReset(route)}
                     disabled={isResetting}
+                    className={`h-11 rounded-xl font-bold ${
+                      isDark
+                        ? "border-amber-900 bg-amber-950/30 text-amber-400 hover:bg-amber-950/60"
+                        : "border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100"
+                    }`}
                   >
-                    <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                    Reset
+                    <RotateCcw className="mr-1.5 h-4 w-4" /> Reset
                   </Button>
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
+          ))
         )}
       </section>
 
@@ -1859,7 +1957,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         }}
       >
         <DialogContent
-          className={`w-[calc(100%-2rem)] max-w-md rounded-xl ${
+          className={`w-[calc(100%-2rem)] max-w-md rounded-2xl ${
             isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
           }`}
         >
@@ -1872,7 +1970,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           <div className="space-y-4 py-2">
             {activateRoute && (
               <div
-                className={`text-sm border rounded-lg p-3 ${
+                className={`text-sm border rounded-xl p-3 ${
                   isDark ? "text-slate-300 bg-slate-950/60 border-slate-800" : "text-slate-700 bg-slate-50 border-slate-200"
                 }`}
               >
@@ -1894,7 +1992,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                 Select Active Device (RFID Reader)
               </Label>
               <Select value={selectedDeviceId} onValueChange={setSelectedDeviceId} disabled={loadingDevices}>
-                <SelectTrigger className={`h-11 ${inputCls}`}>
+                <SelectTrigger className={`h-11 rounded-xl ${inputCls}`}>
                   <SelectValue placeholder={loadingDevices ? "Loading devices..." : "Choose a device"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -1940,7 +2038,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
             <Button
               onClick={confirmActivate}
               disabled={!selectedDeviceId || isTogglePending}
-              className="bg-blue-600 hover:bg-blue-700 text-white disabled:cursor-not-allowed"
+              className="rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-600 hover:to-teal-700 disabled:cursor-not-allowed"
             >
               {isTogglePending ? "Activating..." : "Activate"}
             </Button>
@@ -2067,7 +2165,7 @@ export default function DriverDashboardPage() {
 
   const [authorized, setAuthorized] = useState(false);
   const [tab, setTab] = useState<Tab>("home");
-  // Map panel mounts on first visit, then stays mounted (keeps pins/inputs when switching tabs)
+  // Route panel mounts on first visit, then stays mounted (keeps pins/inputs when switching tabs)
   const [mapVisited, setMapVisited] = useState(false);
 
   // 🧾 Real trips from the database (today on Home, today / last 7 days on the Trips tab)
@@ -2077,6 +2175,16 @@ export default function DriverDashboardPage() {
   const trips: Trip[] = tripsQuery.data ?? [];
   const tripsTotalTaps = trips.reduce((sum, t) => sum + t.taps, 0);
   const tripsTotalFare = trips.reduce((sum, t) => sum + t.fare, 0);
+
+  // Trips grouped by day (used by the 7-day view)
+  const tripGroups = (() => {
+    const m = new Map<string, Trip[]>();
+    trips.forEach((t) => {
+      const k = fmtTripDay(t.startedAt);
+      m.set(k, [...(m.get(k) ?? []), t]);
+    });
+    return Array.from(m.entries());
+  })();
 
   /* Guard: kung walang driver token, balik sa signin */
   useEffect(() => {
@@ -2108,7 +2216,7 @@ export default function DriverDashboardPage() {
 
   const navItems: { id: Tab; label: string; icon: typeof Home }[] = [
     { id: "home", label: "Home", icon: Home },
-    { id: "map", label: "Map", icon: MapIcon },
+    { id: "map", label: "Route", icon: RouteIcon },
     { id: "trips", label: "Trips", icon: History },
     { id: "profile", label: "Profile", icon: UserRound },
   ];
@@ -2350,7 +2458,7 @@ export default function DriverDashboardPage() {
                   {[1, 2].map((i) => (
                     <Skeleton
                       key={i}
-                      className={`h-[62px] w-full rounded-xl ${isDark ? "bg-slate-800" : "bg-slate-100"}`}
+                      className={`h-[70px] w-full rounded-2xl ${isDark ? "bg-slate-800" : "bg-slate-100"}`}
                     />
                   ))}
                 </>
@@ -2368,7 +2476,9 @@ export default function DriverDashboardPage() {
                   Couldn't load trips — tap to retry
                 </button>
               ) : trips.length === 0 ? (
-                <div className={`rounded-xl border p-6 text-center text-xs ${card} ${muted}`}>
+                <div className={`rounded-2xl border border-dashed p-6 text-center text-xs ${muted} ${
+                  isDark ? "border-slate-800" : "border-slate-300"
+                }`}>
                   No trips yet today. Trips appear here as passengers tap.
                 </div>
               ) : (
@@ -2387,13 +2497,11 @@ export default function DriverDashboardPage() {
         )}
 
         {tab === "trips" && (
-          <section className="space-y-3">
+          <section className="space-y-4">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-lg font-bold">
-                {tripRange === "week" ? "Last 7 days" : "Today's trips"}
-              </h2>
+              <h2 className="text-lg font-extrabold">Trips</h2>
               <div
-                className={`inline-flex rounded-lg border p-0.5 text-[11px] font-semibold ${
+                className={`inline-flex rounded-full border p-0.5 text-[11px] font-semibold ${
                   isDark ? "border-slate-800 bg-slate-900/70" : "border-slate-200 bg-white"
                 }`}
               >
@@ -2407,8 +2515,8 @@ export default function DriverDashboardPage() {
                     key={opt.id}
                     type="button"
                     onClick={() => setTripRange(opt.id)}
-                    className={`px-3 py-1 rounded-md ${
-                      tripRange === opt.id ? "bg-blue-600 text-white" : muted
+                    className={`rounded-full px-3.5 py-1.5 transition-colors ${
+                      tripRange === opt.id ? "bg-blue-600 text-white shadow" : muted
                     }`}
                   >
                     {opt.label}
@@ -2417,29 +2525,41 @@ export default function DriverDashboardPage() {
               </div>
             </div>
 
-            {/* Totals for the selected range */}
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { label: "Trips", value: String(trips.length) },
-                { label: "Taps", value: tripsTotalTaps.toLocaleString("en-US") },
-                { label: "Fare", value: formatPeso(tripsTotalFare) },
-              ].map((s) => (
-                <div key={s.label} className={`rounded-xl border p-3 text-center ${card}`}>
-                  <p className="text-sm font-extrabold truncate">
-                    {tripsQuery.isLoading ? "…" : s.value}
-                  </p>
-                  <p className={`text-[10px] font-semibold uppercase tracking-wide mt-0.5 ${muted}`}>
-                    {s.label}
-                  </p>
+            {/* Summary hero */}
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-700 p-5 text-white shadow-lg">
+              <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/10" />
+              <div className="pointer-events-none absolute -right-2 bottom-[-3rem] h-28 w-28 rounded-full bg-white/10" />
+              <p className="relative text-[11px] font-semibold uppercase tracking-widest text-blue-100/90">
+                {tripRange === "week" ? "Fare · last 7 days" : "Fare · today"}
+              </p>
+              <p className="relative mt-1 text-3xl font-extrabold tracking-tight">
+                {tripsQuery.isLoading ? "…" : formatPeso(tripsTotalFare)}
+              </p>
+              <div className="relative mt-4 grid grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 rounded-xl bg-white/15 px-3 py-2 backdrop-blur">
+                  <RouteIcon className="h-4 w-4" />
+                  <div className="leading-tight">
+                    <p className="text-sm font-extrabold">{tripsQuery.isLoading ? "…" : trips.length}</p>
+                    <p className="text-[10px] text-blue-100">Trips</p>
+                  </div>
                 </div>
-              ))}
+                <div className="flex items-center gap-2 rounded-xl bg-white/15 px-3 py-2 backdrop-blur">
+                  <Fingerprint className="h-4 w-4" />
+                  <div className="leading-tight">
+                    <p className="text-sm font-extrabold">
+                      {tripsQuery.isLoading ? "…" : tripsTotalTaps.toLocaleString("en-US")}
+                    </p>
+                    <p className="text-[10px] text-blue-100">Taps</p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {tripsQuery.isLoading ? (
               [1, 2, 3].map((i) => (
                 <Skeleton
                   key={i}
-                  className={`h-[70px] w-full rounded-xl ${isDark ? "bg-slate-800" : "bg-slate-100"}`}
+                  className={`h-[78px] w-full rounded-2xl ${isDark ? "bg-slate-800" : "bg-slate-100"}`}
                 />
               ))
             ) : tripsQuery.isError ? (
@@ -2456,12 +2576,28 @@ export default function DriverDashboardPage() {
                 Couldn't load trips — tap to retry
               </button>
             ) : trips.length === 0 ? (
-              <div className={`rounded-xl border p-8 text-center text-xs ${card} ${muted}`}>
+              <div
+                className={`rounded-2xl border border-dashed p-8 text-center text-xs ${muted} ${
+                  isDark ? "border-slate-800" : "border-slate-300"
+                }`}
+              >
                 {tripRange === "week" ? "No trips in the last 7 days." : "No trips yet today."}
               </div>
             ) : (
-              trips.map((t) => (
-                <TripCard key={t.key} trip={t} isDark={isDark} showDate={tripRange === "week"} />
+              tripGroups.map(([day, list]) => (
+                <div key={day} className="space-y-2.5">
+                  {tripRange === "week" && (
+                    <div className="flex items-center justify-between px-1">
+                      <p className="text-xs font-bold text-blue-500">{day}</p>
+                      <p className="text-xs font-bold text-emerald-500">
+                        {formatPeso(list.reduce((s, t) => s + t.fare, 0))}
+                      </p>
+                    </div>
+                  )}
+                  {list.map((t) => (
+                    <TripCard key={t.key} trip={t} isDark={isDark} />
+                  ))}
+                </div>
               ))
             )}
 
@@ -2472,7 +2608,7 @@ export default function DriverDashboardPage() {
         )}
 
         {tab === "profile" && (
-          <section className={`rounded-xl border p-4 space-y-4 ${card}`}>
+          <section className={`rounded-2xl border p-4 space-y-4 ${card}`}>
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center">
                 <UserRound className="h-6 w-6 text-white" />
@@ -2487,7 +2623,7 @@ export default function DriverDashboardPage() {
               type="button"
               variant="outline"
               onClick={handleSignOut}
-              className={`w-full h-11 gap-2 ${
+              className={`w-full h-11 gap-2 rounded-xl ${
                 isDark
                   ? "border-slate-700 text-slate-200 hover:bg-slate-800"
                   : "border-slate-200 text-slate-700 hover:bg-slate-100"
@@ -2516,12 +2652,16 @@ export default function DriverDashboardPage() {
                 type="button"
                 onClick={() => changeTab(id)}
                 aria-current={active ? "page" : undefined}
-                className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold ${
-                  active ? "text-blue-500" : muted
-                }`}
+                className="flex flex-col items-center gap-0.5 py-2 text-[11px] font-semibold"
               >
-                <Icon className="h-5 w-5" />
-                {label}
+                <span
+                  className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors ${
+                    active ? (isDark ? "bg-blue-500/20 text-blue-400" : "bg-blue-50 text-blue-600") : muted
+                  }`}
+                >
+                  <Icon className="h-5 w-5" />
+                </span>
+                <span className={active ? "text-blue-500" : muted}>{label}</span>
               </button>
             );
           })}
