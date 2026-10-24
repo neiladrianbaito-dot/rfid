@@ -161,40 +161,13 @@ async function checkLinkedCardStatus(linkedCardUid: string | null | undefined): 
   return { blocked, status };
 }
 
-// ── Registered-name lookup (per role) ────────────────────────────────────────
-// Commuters are validated against the `users` table (card holders).
-// Drivers are validated against a `drivers` table if one exists. If you
-// don't have one, we fall back to `users` rows whose `type` is "Driver".
-// >>> If your drivers live somewhere else, change ONLY this function. <<<
+// ── Registered-name lookup (COMMUTERS ONLY) ──────────────────────────────────
+// Commuters must match a card holder in the `users` table.
+// Drivers are NOT checked — they can sign up with any name.
 
 async function findRegisteredName(
-  role: AccountRole,
   fullName: string
 ): Promise<{ fullName: string; status?: string } | null> {
-  if (role === "driver") {
-    const tableCheck = await db.execute(sql`select to_regclass('public.drivers') as t`);
-    const hasDriversTable = !!extractRows<{ t: string | null }>(tableCheck)[0]?.t;
-
-    if (hasDriversTable) {
-      const raw = await db.execute(sql`
-        select full_name from drivers
-        where lower(trim(full_name)) = lower(trim(${fullName}))
-        limit 1
-      `);
-      const row = extractRows<{ full_name: string }>(raw)[0];
-      return row ? { fullName: row.full_name } : null;
-    }
-
-    const raw = await db.execute(sql`
-      select full_name, status from users
-      where lower(trim(full_name)) = lower(trim(${fullName}))
-        and lower(trim(type)) = 'driver'
-      limit 1
-    `);
-    const row = extractRows<{ full_name: string; status: string }>(raw)[0];
-    return row ? { fullName: row.full_name, status: row.status } : null;
-  }
-
   const raw = await db.execute(sql`
     select full_name, status from users
     where lower(trim(full_name)) = lower(trim(${fullName}))
@@ -283,22 +256,25 @@ async function handleSignup(role: AccountRole, req: Request, res: Response): Pro
 
     await ensureRoleColumn();
 
-    const registered = await findRegisteredName(role, fullName);
-    if (!registered) {
-      res.status(403).json({
-        success: false,
-        message: "This name is not registered in our system. Please contact your admin.",
-      });
-      return;
-    }
+    // Name checks apply to COMMUTERS only. Drivers can sign up freely.
+    if (role === "commuter") {
+      const registered = await findRegisteredName(fullName);
+      if (!registered) {
+        res.status(403).json({
+          success: false,
+          message: "This name is not registered in our system. Please contact your admin.",
+        });
+        return;
+      }
 
-    const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName, role);
-    if (nameAlreadyUsed) {
-      res.status(409).json({
-        success: false,
-        message: "This name is already linked to an existing account.",
-      });
-      return;
+      const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName, "commuter");
+      if (nameAlreadyUsed) {
+        res.status(409).json({
+          success: false,
+          message: "This name is already linked to an existing account.",
+        });
+        return;
+      }
     }
 
     const passwordHash = hashPassword(password);
@@ -472,7 +448,7 @@ router.post("/auth/driver-signin", (req, res) => handleSignin("driver", req, res
 // Role: the client may send { role: "commuter" | "driver" }.
 //  - Existing account  -> its stored role must match (else 403).
 //  - New account       -> created with the requested role (default commuter).
-//                         New DRIVER accounts must match a registered driver name.
+//                         No name check for drivers.
 //  - No role sent      -> existing accounts keep their role, new = commuter.
 
 router.post("/auth/oauth-sync", async (req, res): Promise<void> => {
@@ -533,18 +509,6 @@ router.post("/auth/oauth-sync", async (req, res): Promise<void> => {
       `);
     } else {
       finalRole = requestedRole ?? "commuter";
-
-      if (finalRole === "driver") {
-        const registered = await findRegisteredName("driver", fullNameFromGoogle);
-        if (!registered) {
-          res.status(403).json({
-            success: false,
-            message:
-              "This Google account's name is not registered as a driver. Please contact your admin or use email signup.",
-          });
-          return;
-        }
-      }
 
       // auth_users.password_hash is required by the schema even for OAuth
       // accounts — store an unusable random hash, since these accounts will
@@ -789,8 +753,8 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
 });
 
 // ── CHECK FULL NAME ───────────────────────────────────────────────────────────
-// GET /auth/check-full-name?fullName=...            -> commuter
-// GET /auth/check-full-name?fullName=...&role=driver -> driver
+// GET /auth/check-full-name?fullName=...             -> commuter (must be registered)
+// GET /auth/check-full-name?fullName=...&role=driver -> driver (always passes)
 
 router.get("/auth/check-full-name", async (req, res): Promise<void> => {
   try {
@@ -803,7 +767,13 @@ router.get("/auth/check-full-name", async (req, res): Promise<void> => {
       return;
     }
 
-    const matched = await findRegisteredName(role, fullName);
+    // Drivers don't need to be pre-registered, so always pass.
+    if (role === "driver") {
+      res.json({ success: true, user: { fullName } });
+      return;
+    }
+
+    const matched = await findRegisteredName(fullName);
 
     if (!matched) {
       res.status(404).json({
@@ -813,7 +783,7 @@ router.get("/auth/check-full-name", async (req, res): Promise<void> => {
       return;
     }
 
-    const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName, role);
+    const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName, "commuter");
     if (nameAlreadyUsed) {
       res.status(409).json({
         success: false,

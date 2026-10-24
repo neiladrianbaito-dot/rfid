@@ -59,7 +59,7 @@ const ROLE_CONFIG: Record<
 };
 
 /* =========================================================
-   FULL NAME CHECK
+   FULL NAME CHECK (commuters only)
    ========================================================= */
 
 async function checkFullNameMatch(
@@ -172,15 +172,18 @@ export default function SignupPage() {
     setIsSubmitting(true);
 
     try {
-      try {
-        await checkFullNameMatch(fullNameTrim, config.checkNameEndpoint);
-      } catch (nameErr) {
-        const msg =
-          nameErr instanceof Error
-            ? nameErr.message
-            : "We couldn't find this name in our records. Please check with your admin.";
-        setError(msg);
-        return;
+      // Name must exist in the system for COMMUTERS only. Drivers skip this.
+      if (role === "commuter") {
+        try {
+          await checkFullNameMatch(fullNameTrim, config.checkNameEndpoint);
+        } catch (nameErr) {
+          const msg =
+            nameErr instanceof Error
+              ? nameErr.message
+              : "We couldn't find this name in our records. Please check with your admin.";
+          setError(msg);
+          return;
+        }
       }
 
       const res = await fetch(buildApiUrl(config.signupEndpoint), {
