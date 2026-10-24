@@ -915,6 +915,45 @@ router.post("/admin/users/unlink-card", requireFullAccess, async (req, res): Pro
   }
 });
 
+// ── DRIVER: TODAY STATS (revenue + taps na na-collect niya) ──────────────────
+router.get("/driver/stats", async (req, res): Promise<void> => {
+  try {
+    const currentUser = getUserFromAuthHeader(req.headers.authorization);
+    if (!currentUser) {
+      res.status(401).json({ success: false, message: "Not authenticated" });
+      return;
+    }
+
+    await ensureRoleColumn();
+    const roleRaw = await db.execute(sql`
+      select role from auth_users where id = ${currentUser.id} limit 1
+    `);
+    const role = extractRows<{ role: string }>(roleRaw)[0]?.role;
+    if (normalizeAccountRole(role) !== "driver") {
+      res.status(403).json({ success: false, message: "Drivers only" });
+      return;
+    }
+
+    const statsRaw = await db.execute(sql`
+      select
+        coalesce(sum(abs(t.amount)), 0) as revenue,
+        count(*)::int as taps
+      from transactions t
+      where t.created_at >= (date_trunc('day', now() at time zone 'Asia/Manila') at time zone 'Asia/Manila')
+      -- 👇 DITO ANG FILTER PARA SA DRIVER NA ITO (tingnan sa baba)
+    `);
+    const row = extractRows<{ revenue: string | number; taps: number }>(statsRaw)[0];
+
+    res.json({
+      totalRevenueToday: Number(row?.revenue) || 0,
+      totalTapsToday: Number(row?.taps) || 0,
+    });
+  } catch (error) {
+    console.error("Driver stats error:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
 // ── CHANGE PASSWORD (User) ────────────────────────────────────────────────────
 
 const PASSWORD_CHANGE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
