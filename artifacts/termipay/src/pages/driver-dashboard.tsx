@@ -513,27 +513,93 @@ function haversineKm(a: LatLng, b: LatLng) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// Nominatim (OpenStreetMap) geocoder — free, keep usage light (1 req/sec).
-async function geocode(query: string): Promise<LatLng | null> {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(
-    query
-  )}`;
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (!Array.isArray(data) || data.length === 0) return null;
-  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+// Nominatim (OpenStreetMap) geocoder — free, max 1 request/second.
+// All requests go through ONE queue that only waits for the time that is really left,
+// instead of a fixed sleep before every request.
+let lastGeoAt = 0;
+let geoQueue: Promise<unknown> = Promise.resolve();
+
+function throttledGeo<T>(fn: () => Promise<T>): Promise<T> {
+  const run = geoQueue.then(async () => {
+    const wait = Math.max(0, 1100 - (Date.now() - lastGeoAt));
+    if (wait > 0) await sleep(wait);
+    try {
+      return await fn();
+    } finally {
+      lastGeoAt = Date.now();
+    }
+  });
+  geoQueue = run.catch(() => undefined);
+  return run;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function geocode(query: string): Promise<LatLng | null> {
+  return throttledGeo(async () => {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(
+      query
+    )}`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+  });
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function geocodePlace(p: Place): Promise<LatLng | null> {
   if (p.kind === "barangay" && p.barangay) {
     const hit = await geocode(`${p.barangay}, ${p.municipality}, ${p.province}, Philippines`);
     if (hit) return hit;
-    await sleep(1100);
   }
   return geocode(`${p.municipality}, ${p.province}, Philippines`);
+}
+
+/* ⚡ Coordinates are remembered (also after closing the app), so a place is looked up only ONCE. */
+const GEO_CACHE_KEY = "termipay_geo_cache_v1";
+
+function loadGeoCache(): Record<string, LatLng> {
+  try {
+    const raw = localStorage.getItem(GEO_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const geoCache: Record<string, LatLng> = loadGeoCache();
+const geoInflight = new Map<string, Promise<LatLng | null>>();
+
+function saveGeoCache() {
+  try {
+    localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function geocodePlaceCached(p: Place): Promise<LatLng | null> {
+  const hit = geoCache[p.code];
+  if (hit) return Promise.resolve(hit);
+
+  let pending = geoInflight.get(p.code);
+  if (!pending) {
+    pending = geocodePlace(p)
+      .then((r) => {
+        if (r) {
+          geoCache[p.code] = r;
+          saveGeoCache();
+        }
+        return r;
+      })
+      .finally(() => {
+        geoInflight.delete(p.code);
+      });
+    geoInflight.set(p.code, pending);
+  }
+  return pending;
 }
 
 // OSRM public demo server — real road distance + route geometry.
@@ -551,6 +617,54 @@ async function roadRoute(
     km: r.distance / 1000,
     coords: r.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]),
   };
+}
+
+// OSRM — distance only (overview=false = tiny response, much faster than full route geometry).
+async function roadKm(a: LatLng, b: LatLng): Promise<number | null> {
+  const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=false`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const meters = data?.routes?.[0]?.distance;
+        if (typeof meters === "number") return meters / 1000;
+      }
+    } catch {
+      /* retry once */
+    }
+    if (attempt === 0) await sleep(300);
+  }
+  return null;
+}
+
+type KmResult = { ok: true; km: number } | { ok: false; reason: "locate" | "route" | "network" };
+
+// Same origin → destination is calculated ONCE. It starts as soon as both places are picked
+// (in the background), so by the time OK is tapped the answer is usually already there.
+const roadKmCache = new Map<string, Promise<KmResult>>();
+
+function getRoadKm(a: Place, b: Place): Promise<KmResult> {
+  const key = `${a.code}|${b.code}`;
+  let pending = roadKmCache.get(key);
+  if (!pending) {
+    pending = (async (): Promise<KmResult> => {
+      try {
+        const [o, d] = await Promise.all([geocodePlaceCached(a), geocodePlaceCached(b)]);
+        if (!o || !d) return { ok: false, reason: "locate" };
+        const km = await roadKm(o, d);
+        if (km == null) return { ok: false, reason: "route" };
+        return { ok: true, km };
+      } catch {
+        return { ok: false, reason: "network" };
+      }
+    })().then((r) => {
+      if (!r.ok) roadKmCache.delete(key); // failed → allow a fresh try next time
+      return r;
+    });
+    roadKmCache.set(key, pending);
+  }
+  return pending;
 }
 
 const mapPin = (color: string, label: string) =>
@@ -1157,7 +1271,20 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
   const excessKm = distanceKm != null ? Math.max(0, distanceKm - (parseFloat(baseKm) || 0)) : 0;
 
-  // ✅ ONE BUTTON: OK — find both places, get the road distance, compute the fare,
+  // ⚡ Start finding the places + road distance in the background as soon as they are picked
+  useEffect(() => {
+    if (!distanceFareEnabled) return;
+    if (originPlace && destPlace) {
+      getRoadKm(originPlace, destPlace);
+    } else if (originPlace) {
+      geocodePlaceCached(originPlace).catch(() => {});
+    } else if (destPlace) {
+      geocodePlaceCached(destPlace).catch(() => {});
+    }
+  }, [originPlace, destPlace, distanceFareEnabled]);
+
+  
+// ✅ ONE BUTTON: OK — find both places, get the road distance, compute the fare,
 // SAVE the route and AUTO-ACTIVATE it (on the reader of the route that was reset).
   const canPressOk = distanceFareEnabled && !!originPlace && !!destPlace && !busy && !saving;
 
@@ -1167,50 +1294,45 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     destination: string,
     deviceId: string
   ): Promise<"ok" | "failed" | "not-found"> => {
-    const { data: main } = await supabase
-      .from("fare_routes")
-      .select("id")
-      .eq("origin", origin)
-      .eq("destination", destination)
-      .limit(1)
-      .maybeSingle();
+    // main + return direction are looked up at the same time
+    const [{ data: main }, { data: reverse }] = await Promise.all([
+      supabase
+        .from("fare_routes")
+        .select("id")
+        .eq("origin", origin)
+        .eq("destination", destination)
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("fare_routes")
+        .select("id")
+        .eq("origin", destination)
+        .eq("destination", origin)
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
     if (!main?.id) return "not-found";
 
-    const { data: reverse } = await supabase
-      .from("fare_routes")
-      .select("id")
-      .eq("origin", destination)
-      .eq("destination", origin)
-      .limit(1)
-      .maybeSingle();
-
-    const { error } = await supabase.rpc("activate_route", {
-      p_route_id: main.id,
-      p_device_id: deviceId,
-      p_actor: actorUsername,
-    });
-    if (error) {
-      console.error("activate_route (after save) error:", error);
-      return "failed";
-    }
-
-    if (reverse?.id) {
-      const { error: reverseError } = await supabase.rpc("activate_route", {
-        p_route_id: reverse.id,
+    // ...and both are activated at the same time
+    const calls = [main.id, ...(reverse?.id ? [reverse.id] : [])].map((id) =>
+      supabase.rpc("activate_route", {
+        p_route_id: id,
         p_device_id: deviceId,
         p_actor: actorUsername,
-      });
-      if (reverseError) {
-        console.error("activate_route (after save, reverse) error:", reverseError);
-        return "failed";
-      }
+      })
+    );
+    const results = await Promise.all(calls);
+    const failed = results.find((r) => r.error);
+    if (failed) {
+      console.error("activate_route (after save) error:", failed.error);
+      return "failed";
     }
-
     return "ok";
   };
 
-  const handleOk = async () => {
+  
+const handleOk = async () => {
     setError(null);
 
     if (!distanceFareEnabled) {
@@ -1237,27 +1359,24 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
     setBusy(true);
 
-    /* 1️⃣ locate both places + road distance → fare */
+    /* 1️⃣ distance → fare (usually already prepared in the background) */
     let fareAmount: number;
     try {
-      const oHit = await geocodePlace(originPlace);
-      await sleep(1100); // respect Nominatim rate limit
-      const dHit = await geocodePlace(destPlace);
+      const res = await getRoadKm(originPlace, destPlace);
 
-      if (!oHit || !dHit) {
-        setError("Couldn't locate one of the places. Try a nearby city or municipality.");
+      if (!res.ok) {
+        setError(
+          res.reason === "locate"
+            ? "Couldn't locate one of the places. Try a nearby city or municipality."
+            : res.reason === "route"
+              ? "Couldn't get the road distance. Check your connection and tap OK again."
+              : "Lookup failed. Check your connection and tap OK again."
+        );
         setBusy(false);
         return;
       }
 
-      const road = await roadRoute(oHit, dHit).catch(() => null);
-      if (!road) {
-        setError("Couldn't get the road distance. Check your connection and tap OK again.");
-        setBusy(false);
-        return;
-      }
-
-      fareAmount = computeLtfrbFare(road.km, bf, bk, rt);
+      fareAmount = computeLtfrbFare(res.km, bf, bk, rt);
       if (!(fareAmount > 0)) {
         setError("The computed fare is invalid.");
         setBusy(false);
@@ -1269,7 +1388,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       return;
     }
 
-    /* 2️⃣ save (create or update) + 3️⃣ auto-activate */
+    
+/* 2️⃣ save (create or update) + 3️⃣ auto-activate */
     setSaving(true);
     const p = { origin: originPlace.label, destination: destPlace.label, fareAmount };
 
@@ -1297,7 +1417,6 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       }
 
       queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
-      refetchRoutes();
 
       resetForm();
       setResetUnlocked(false); // 🔒 lock again — Reset is needed before adding another
