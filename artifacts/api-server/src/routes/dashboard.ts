@@ -40,10 +40,19 @@ function getLast7DatesInAppTz(): string[] {
   return dates;
 }
 
-router.get("/dashboard/stats", async (_req, res): Promise<void> => {
+/**
+ * Today's stats.
+ *  - Admin  -> totals for the whole system (unchanged).
+ *  - Driver -> ONLY transactions whose driver_id is that driver
+ *              (req.driverUser is set by requireAuth).
+ */
+router.get("/dashboard/stats", async (req, res): Promise<void> => {
   const { dateStr: todayDate } = getTodayInAppTz();
 
-  // Calculate total revenue today (only from Success Fares)
+  const driver = (req as any).driverUser as { id: string } | undefined;
+  const driverFilter = driver ? sql`driver_id = ${String(driver.id)}` : undefined;
+
+  // Total revenue today (only Success Fares)
   const [revenueResult] = await db
     .select({
       total: sql<string>`COALESCE(SUM(${transactionsTable.amount}), 0)`,
@@ -53,11 +62,12 @@ router.get("/dashboard/stats", async (_req, res): Promise<void> => {
       and(
         sql`TO_CHAR(${transactionsTable.timestamp} AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') = ${todayDate}`,
         eq(transactionsTable.type, "Fare"),
-        eq(transactionsTable.status, "Success")
+        eq(transactionsTable.status, "Success"),
+        driverFilter
       )
     );
 
-  // Calculate total taps today (only from Fare transactions)
+  // Total taps today (only Fare transactions)
   const [tapsResult] = await db
     .select({
       count: sql<number>`COUNT(*)::int`,
@@ -66,7 +76,8 @@ router.get("/dashboard/stats", async (_req, res): Promise<void> => {
     .where(
       and(
         sql`TO_CHAR(${transactionsTable.timestamp} AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') = ${todayDate}`,
-        eq(transactionsTable.type, "Fare")
+        eq(transactionsTable.type, "Fare"),
+        driverFilter
       )
     );
 
@@ -85,12 +96,52 @@ router.get("/dashboard/stats", async (_req, res): Promise<void> => {
 
   res.json(
     GetDashboardStatsResponse.parse({
-      totalRevenueToday: Number(revenueResult.total),
+      totalRevenueToday: Math.abs(Number(revenueResult.total)),
       totalTapsToday: tapsResult.count,
       registeredCards: cardsResult.count,
       activeRoutes: routesResult.count,
     })
   );
+});
+
+/**
+ * Driver claims a reader device after activating a route on it.
+ * From then on, every tap on that device is attributed to this driver.
+ * Body: { deviceId: string }
+ */
+router.post("/dashboard/claim-device", async (req, res): Promise<void> => {
+  try {
+    const driver = (req as any).driverUser as { id: string } | undefined;
+    if (!driver) {
+      res.status(403).json({ error: "Drivers only" });
+      return;
+    }
+
+    const deviceId =
+      typeof req.body?.deviceId === "string" ? req.body.deviceId.trim() : "";
+    if (!deviceId) {
+      res.status(400).json({ error: "deviceId is required" });
+      return;
+    }
+
+    const raw = await db.execute(sql`
+      update devices
+      set driver_id = ${String(driver.id)}
+      where device_id = ${deviceId}
+      returning device_id
+    `);
+    const rows = Array.isArray(raw) ? raw : ((raw as any)?.rows ?? []);
+
+    if (rows.length === 0) {
+      res.status(404).json({ error: "Device not found" });
+      return;
+    }
+
+    res.json({ success: true, deviceId });
+  } catch (error) {
+    console.error("claim-device error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 router.get("/dashboard/revenue-trend", async (_req, res): Promise<void> => {
@@ -157,7 +208,7 @@ router.get("/reports/summary", async (_req, res): Promise<void> => {
   const totalRevenue7Days = dailyBreakdown.reduce((sum, d) => sum + d.revenue, 0);
   const averageDailyRevenue = totalRevenue7Days / 7;
 
-  // Calculate total taps for 7 days (only from Fare transactions)
+  // Total taps for 7 days (only Fare transactions)
   const [tapsResult] = await db
     .select({
       count: sql<number>`COUNT(*)::int`,

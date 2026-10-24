@@ -24,8 +24,9 @@ function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
  *   POST  /routes
  *   PATCH /routes/:id
  *   PATCH /routes/:id/toggle
- *   GET   /dashboard/stats   (Earned today + Total taps today)
- * Everything else (users, transactions list, audit logs, DELETE ...) stays admin-only.
+ *   GET   /dashboard/stats          (their own Earned today + Total taps)
+ *   POST  /dashboard/claim-device   (link their reader device to themselves)
+ * Everything else stays admin-only.
  */
 const DRIVER_RULES: { methods: Set<string>; path: RegExp }[] = [
   {
@@ -35,6 +36,10 @@ const DRIVER_RULES: { methods: Set<string>; path: RegExp }[] = [
   {
     methods: new Set(["GET"]),
     path: /\/dashboard\/stats\/?$/,
+  },
+  {
+    methods: new Set(["POST"]),
+    path: /\/dashboard\/claim-device\/?$/,
   },
 ];
 
@@ -85,7 +90,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const driver = await resolveDriver(token);
     if (driver) {
       if (!driverMayAccess(req)) {
-        res.status(403).json({ error: "Drivers can only access fare routes and today's stats." });
+        res.status(403).json({ error: "Drivers can only access fare routes and their own stats." });
         return;
       }
       (req as any).driverUser = driver;
