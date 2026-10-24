@@ -1458,7 +1458,14 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         </div>
 
         {!distanceFareEnabled && (
-         
+          <p
+            className={`text-[11px] leading-snug rounded-md border px-2.5 py-1.5 ${
+              isDark
+                ? "bg-amber-950/30 border-amber-900 text-amber-400"
+                : "bg-amber-50 border-amber-200 text-amber-700"
+            }`}
+          >
+          </p>
         )}
 
         {placesError && <p className="text-[11px] text-red-500">{placesError}</p>}
