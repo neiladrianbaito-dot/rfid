@@ -30,16 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthTheme } from "@/lib/auth-theme";
 import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
@@ -49,14 +39,12 @@ import {
   Sun,
   Moon,
   Wallet,
-  Users,
   Route as RouteIcon,
   Home,
   History,
   UserRound,
   CheckCircle2,
   AlertCircle,
-  Map as MapIcon,
   MapPin,
   Lock,
   RotateCcw,
@@ -65,14 +53,10 @@ import {
   ArrowLeftRight,
   ArrowRight,
   Clock,
-  Search,
-  Zap,
-  ShieldAlert,
   Cpu,
   Wifi,
   WifiOff,
   Loader2,
-  Eraser,
   Fingerprint,
   TrendingUp,
   ChevronRight,
@@ -678,16 +662,7 @@ function computeLtfrbFare(distanceKm: number, baseFare: number, baseKm: number, 
   return Math.round((baseFare + excess * ratePerKm) * 100) / 100;
 }
 
-function haversineKm(a: LatLng, b: LatLng) {
-  const R = 6371;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // Nominatim (OpenStreetMap) geocoder — free, max 1 request/second.
 // All requests go through ONE queue that only waits for the time that is really left,
@@ -721,8 +696,6 @@ async function geocode(query: string): Promise<LatLng | null> {
     return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
   });
 }
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function geocodePlace(p: Place): Promise<LatLng | null> {
   if (p.kind === "barangay" && p.barangay) {
@@ -778,6 +751,22 @@ function geocodePlaceCached(p: Place): Promise<LatLng | null> {
   return pending;
 }
 
+// 📌 Turns a SAVED route label ("Calbayog City") into map coordinates.
+// Uses the PSGC place when it exists, otherwise looks the plain text up (and remembers it).
+async function resolveLabelPoint(label: string, places: Place[]): Promise<LatLng | null> {
+  const place = places.find((p) => p.label === label);
+  if (place) return geocodePlaceCached(place);
+
+  const key = `label:${label}`;
+  if (geoCache[key]) return geoCache[key];
+  const hit = await geocode(`${label}, Philippines`);
+  if (hit) {
+    geoCache[key] = hit;
+    saveGeoCache();
+  }
+  return hit;
+}
+
 // OSRM public demo server — real road distance + route geometry.
 async function roadRoute(
   a: LatLng,
@@ -817,7 +806,7 @@ async function roadKm(a: LatLng, b: LatLng): Promise<number | null> {
 type KmResult = { ok: true; km: number } | { ok: false; reason: "locate" | "route" | "network" };
 
 // Same origin → destination is calculated ONCE. It starts as soon as both places are picked
-// (in the background), so by the time OK is tapped the answer is usually already there.
+// (in the background), so by the time Set route is tapped the answer is usually already there.
 const roadKmCache = new Map<string, Promise<KmResult>>();
 
 function getRoadKm(a: Place, b: Place): Promise<KmResult> {
@@ -911,7 +900,11 @@ function useDriverApiAuth() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   🧭 FareMapPanel — the "Route" tab (map + origin/destination + activate/reset)
+   🧭 FareMapPanel — the "Route" tab
+   • Map is HIDDEN until a route is set. It slides DOWN when the route is saved
+     and slides UP (and is fully removed) on Reset.
+   • Pins + road line follow the SAVED route, so they stay for as long as the
+     route exists and go back to zero on Reset.
    ═══════════════════════════════════════════════════════════════════════ */
 
 type PanelProps = { isDark: boolean; visible: boolean };
@@ -995,7 +988,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   }, [visibleRoutes]);
   const shownRoutes = useMemo(() => (currentRoute ? [currentRoute] : []), [currentRoute]);
 
-  // 🔒 Distance Fare is usable only when no route is shown OR right after a Reset
+  // 🔒 The form is usable only when no route is shown OR right after a Reset
   const [resetUnlocked, setResetUnlocked] = useState(false);
   const noVisibleRoutes = !isLoading && myRoutesLoaded && !currentRoute;
   const distanceFareEnabled = noVisibleRoutes || resetUnlocked;
@@ -1017,9 +1010,6 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     if (!stillActive) setSelectedActiveRouteId(activeRoutes[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRouteIdsKey]);
-
-  const selectedActiveRoute =
-    activeRoutes.find((r: any) => r.id === selectedActiveRouteId) ?? activeRoutes[0] ?? null;
 
   /* ---------- reader devices of active routes ---------- */
   const [activeDeviceMap, setActiveDeviceMap] = useState<Record<string, Device | null>>({});
@@ -1297,11 +1287,12 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
     if (deviceToReuse) setResetDeviceId(deviceToReuse);
 
-    // hide the reset route + its return AND every other route, so only the NEW route shows next
+    // hide the reset route + its return AND every other route.
+    // → currentRoute becomes null → the map slides up and is removed (back to zero).
     hideRoutes([...targets.map((r: any) => r.id), ...visibleRoutes.map((r: any) => r.id)]);
     setResetUnlocked(true);
-    resetForm(); // clears pins / route line on the map, default origin comes back
-    goToDistanceFare(); // "presses" Distance Fare: unlock + scroll to the form
+    resetForm(); // default origin comes back, destination is empty
+    goToForm(); // scroll + highlight the form
     queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
     toast({ title: <SuccessTitle text="Route Reset — set a new origin & destination" /> });
 
@@ -1311,37 +1302,23 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   /* ---------- list (single route only) ---------- */
   const filteredRoutes = shownRoutes;
 
-  /* ═════════ Distance fare form (origin / destination / map) ═════════ */
+  /* ═════════ Set-route form (origin / destination) ═════════ */
 
   const [originName, setOriginName] = useState("");
   const [destName, setDestName] = useState("");
   const [originPlace, setOriginPlace] = useState<Place | null>(null);
   const [destPlace, setDestPlace] = useState<Place | null>(null);
 
-  const [originPt, setOriginPt] = useState<LatLng | null>(null);
-  const [destPt, setDestPt] = useState<LatLng | null>(null);
+  const [baseFare] = useState(String(DEFAULT_BASE_FARE));
+  const [baseKm] = useState(String(DEFAULT_BASE_KM));
+  const [rate] = useState(String(DEFAULT_RATE));
 
-  const [baseFare, setBaseFare] = useState(String(DEFAULT_BASE_FARE));
-  const [baseKm, setBaseKm] = useState(String(DEFAULT_BASE_KM));
-  const [rate, setRate] = useState(String(DEFAULT_RATE));
-
-  const [distanceKm, setDistanceKm] = useState<number | null>(null);
-  const [isEstimate, setIsEstimate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // Pins are read-only: the map follows the places picked in the form
-  const [pinsLocked, setPinsLocked] = useState(true);
   const [formKey, setFormKey] = useState(0);
   const formSectionRef = useRef<HTMLElement | null>(null);
   const [flashForm, setFlashForm] = useState(false);
-
-  // Leaflet plumbing
-  const [mapEl, setMapEl] = useState<HTMLDivElement | null>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const originMarker = useRef<L.Marker | null>(null);
-  const destMarker = useRef<L.Marker | null>(null);
-  const routeLine = useRef<L.Polyline | null>(null);
 
   // Default origin = Calbayog City (once the places list is loaded, and again after each form reset)
   const defaultedFor = useRef(-1);
@@ -1355,34 +1332,62 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     }
   }, [places, formKey]);
 
+  // NOTE: the map pins are NOT touched here — they belong to the saved route (see map effect below)
   const resetForm = () => {
     setOriginName("");
     setDestName("");
     setOriginPlace(null);
     setDestPlace(null);
-    setOriginPt(null);
-    setDestPt(null);
-    setDistanceKm(null);
-    setIsEstimate(false);
     setError(null);
-    setPinsLocked(true);
     setBusy(false);
-    routeLine.current?.remove();
-    routeLine.current = null;
     setFormKey((k) => k + 1);
   };
 
-  // Auto "press" Distance Fare after Reset: scroll the form into view and highlight it
-  const goToDistanceFare = () => {
+  // After Reset: scroll the form into view and highlight it briefly
+  const goToForm = () => {
     setFlashForm(true);
     setTimeout(() => {
       formSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      mapRef.current?.invalidateSize();
-    }, 200);
-    setTimeout(() => setFlashForm(false), 2000);
+    }, 450); // wait for the map to finish sliding up
+    setTimeout(() => setFlashForm(false), 2200);
   };
 
-  // Create the map once the container is mounted
+  /* ═════════ 🗺️ Map: only exists while a route is set ═════════ */
+
+  const hasRoute = !!currentRoute;
+  const savedOrigin: string | null = currentRoute?.origin ?? null;
+  const savedDest: string | null = currentRoute?.destination ?? null;
+
+  // mapMounted = Leaflet container exists in the DOM, mapOpen = expanded (drives the slide animation)
+  const [mapMounted, setMapMounted] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
+
+  useEffect(() => {
+    if (hasRoute) {
+      setMapMounted(true);
+      let id2 = 0;
+      const id1 = requestAnimationFrame(() => {
+        id2 = requestAnimationFrame(() => setMapOpen(true)); // next frame → CSS transition runs
+      });
+      return () => {
+        cancelAnimationFrame(id1);
+        cancelAnimationFrame(id2);
+      };
+    }
+    setMapOpen(false); // slide up…
+    const t = setTimeout(() => setMapMounted(false), 520); // …then remove the map completely
+    return () => clearTimeout(t);
+  }, [hasRoute]);
+
+  const [mapEl, setMapEl] = useState<HTMLDivElement | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const originMarker = useRef<L.Marker | null>(null);
+  const destMarker = useRef<L.Marker | null>(null);
+  const routeLine = useRef<L.Polyline | null>(null);
+  const [originPt, setOriginPt] = useState<LatLng | null>(null);
+  const [destPt, setDestPt] = useState<LatLng | null>(null);
+
+  // Create the Leaflet map when its container mounts, destroy it when the container is removed
   useEffect(() => {
     if (!mapEl) return;
     const map = L.map(mapEl, {
@@ -1404,14 +1409,19 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     };
   }, [mapEl]);
 
-  // Tab is hidden with CSS when not active → fix tile sizing when it becomes visible again
+  // After the slide-down finishes (or the tab becomes visible) → fix tile sizing and re-fit the route
   useEffect(() => {
-    if (!visible) return;
-    const t = setTimeout(() => mapRef.current?.invalidateSize(), 150);
+    if (!visible || !mapOpen) return;
+    const t = setTimeout(() => {
+      const map = mapRef.current;
+      if (!map) return;
+      map.invalidateSize();
+      if (routeLine.current) map.fitBounds(routeLine.current.getBounds(), { padding: [40, 40] });
+    }, 540);
     return () => clearTimeout(t);
-  }, [visible]);
+  }, [visible, mapOpen]);
 
-  // Keep markers in sync with state
+  // Keep the two pins in sync with the saved route's coordinates
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -1420,8 +1430,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       ref: React.MutableRefObject<L.Marker | null>,
       pt: LatLng | null,
       color: string,
-      label: string,
-      setPt: (p: LatLng) => void
+      label: string
     ) => {
       if (!pt) {
         ref.current?.remove();
@@ -1429,108 +1438,79 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         return;
       }
       if (!ref.current) {
-        const m = L.marker([pt.lat, pt.lng], {
+        ref.current = L.marker([pt.lat, pt.lng], {
           icon: mapPin(color, label),
-          draggable: !pinsLocked,
+          draggable: false,
+          interactive: false,
         }).addTo(map);
-        m.on("dragend", () => {
-          const p = m.getLatLng();
-          setPt({ lat: p.lat, lng: p.lng });
-        });
-        ref.current = m;
       } else {
         ref.current.setLatLng([pt.lat, pt.lng]);
       }
-
-      const marker = ref.current;
-      if (marker?.dragging) {
-        if (pinsLocked) marker.dragging.disable();
-        else marker.dragging.enable();
-      }
     };
 
-    sync(originMarker, originPt, "#2563eb", "Origin", setOriginPt);
-    sync(destMarker, destPt, "#059669", "Destination", setDestPt);
-  }, [originPt, destPt, mapEl, pinsLocked]);
+    sync(originMarker, originPt, "#2563eb", "Origin");
+    sync(destMarker, destPt, "#059669", "Destination");
+  }, [originPt, destPt, mapEl]);
 
-  // Any point/place change invalidates the previous calculation
-  useEffect(() => {
-    setDistanceKm(null);
-  }, [originPt, destPt, originPlace, destPlace]);
-
-  // 🗺️ Show the picked places (or the current saved route) on the map and draw the real road line
-  const mapOrigin =
-    originPlace ?? (currentRoute ? places.find((p) => p.label === currentRoute.origin) ?? null : null);
-  const mapDest =
-    destPlace ?? (currentRoute ? places.find((p) => p.label === currentRoute.destination) ?? null : null);
-
+  // 📌 Pins + road line come from the SAVED route. They stay while the route exists
+  // and go back to zero as soon as it is reset (savedOrigin/savedDest become null).
   useEffect(() => {
     let cancelled = false;
     routeLine.current?.remove();
     routeLine.current = null;
 
-    if (!mapOrigin) setOriginPt(null);
-    if (!mapDest) setDestPt(null);
-
-    if (mapOrigin) {
-      geocodePlaceCached(mapOrigin)
-        .then((pt) => {
-          if (cancelled || !pt) return;
-          setOriginPt(pt);
-          if (!mapDest) mapRef.current?.setView([pt.lat, pt.lng], 11);
-        })
-        .catch(() => {});
+    if (!savedOrigin || !savedDest) {
+      setOriginPt(null);
+      setDestPt(null);
+      return;
     }
-    if (mapDest) {
-      geocodePlaceCached(mapDest)
-        .then((pt) => {
-          if (!cancelled && pt) setDestPt(pt);
-        })
-        .catch(() => {});
-    }
+    if (!mapEl) return;
+    if (places.length === 0 && placesLoading) return; // wait for the places list
 
-    if (mapOrigin && mapDest) {
-      (async () => {
-        try {
-          const [o, d] = await Promise.all([geocodePlaceCached(mapOrigin), geocodePlaceCached(mapDest)]);
-          const map = mapRef.current;
-          if (!o || !d || !map || cancelled) return;
-          const r = await roadRoute(o, d).catch(() => null);
-          if (cancelled || !mapRef.current) return;
-          if (r) {
-            routeLine.current = L.polyline(r.coords, { color: "#2563eb", weight: 5, opacity: 0.9 }).addTo(map);
-            map.fitBounds(routeLine.current.getBounds(), { padding: [40, 40] });
-          } else {
-            map.fitBounds(
-              [
-                [o.lat, o.lng],
-                [d.lat, d.lng],
-              ],
-              { padding: [40, 40] }
-            );
+    (async () => {
+      try {
+        const [o, d] = await Promise.all([
+          resolveLabelPoint(savedOrigin, places),
+          resolveLabelPoint(savedDest, places),
+        ]);
+        if (cancelled) return;
+        setOriginPt(o);
+        setDestPt(d);
+
+        const map = mapRef.current;
+        if (!map || !o || !d) {
+          if (map && (o || d)) {
+            const p = (o ?? d)!;
+            map.setView([p.lat, p.lng], 11);
           }
-        } catch {
-          /* ignore */
+          return;
         }
-      })();
-    }
+
+        const r = await roadRoute(o, d).catch(() => null);
+        if (cancelled || !mapRef.current) return;
+        map.invalidateSize();
+        if (r) {
+          routeLine.current = L.polyline(r.coords, { color: "#2563eb", weight: 5, opacity: 0.9 }).addTo(map);
+          map.fitBounds(routeLine.current.getBounds(), { padding: [40, 40] });
+        } else {
+          map.fitBounds(
+            [
+              [o.lat, o.lng],
+              [d.lat, d.lng],
+            ],
+            { padding: [40, 40] }
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapOrigin?.code, mapDest?.code, mapEl]);
-
-  const fare = useMemo(() => {
-    if (distanceKm == null) return null;
-    const bf = parseFloat(baseFare);
-    const bk = parseFloat(baseKm);
-    const r = parseFloat(rate);
-    if ([bf, bk, r].some((n) => Number.isNaN(n) || n < 0)) return null;
-    return computeLtfrbFare(distanceKm, bf, bk, r);
-  }, [distanceKm, baseFare, baseKm, rate]);
-
-  const excessKm = distanceKm != null ? Math.max(0, distanceKm - (parseFloat(baseKm) || 0)) : 0;
+  }, [savedOrigin, savedDest, mapEl, places.length, placesLoading]);
 
   // ⚡ Start finding the places + road distance in the background as soon as they are picked
   useEffect(() => {
@@ -1601,7 +1581,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
     if (!distanceFareEnabled) {
       toast({
-        title: "Distance Fare is locked",
+        title: "Route form is locked",
         description: "Tap Reset on the current route first.",
         variant: "destructive",
       });
@@ -1715,23 +1695,36 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
   return (
     <div className="space-y-0">
-      {/* Map (isolate keeps Leaflet's z-index panes under the header and bottom bar) */}
+      {/* Map — slides DOWN once a route is set, slides UP and disappears on Reset */}
       <div
-        className={`relative isolate z-0 h-64 overflow-hidden rounded-3xl border ${
-          isDark ? "border-slate-800" : "border-slate-200"
+        className={`grid transition-[grid-template-rows,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          mapOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
         }`}
+        aria-hidden={!mapOpen}
       >
-        <div ref={setMapEl} className="h-full w-full" />
-        <span className="absolute left-3 top-3 z-[500] flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white backdrop-blur">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-          Samar &amp; Leyte
-        </span>
+        <div className="min-h-0 overflow-hidden">
+          <div className="pb-3">
+            {mapMounted && (
+              <div
+                className={`relative isolate z-0 h-64 overflow-hidden rounded-3xl border ${
+                  isDark ? "border-slate-800" : "border-slate-200"
+                }`}
+              >
+                <div ref={setMapEl} className="h-full w-full" />
+                <span className="absolute left-3 top-3 z-[500] flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white backdrop-blur">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                  Route map
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Bottom-sheet: origin / destination */}
+      {/* Set route form */}
       <section
         ref={formSectionRef}
-        className={`relative z-10 -mt-6 scroll-mt-20 rounded-3xl border p-4 space-y-3 transition-shadow ${card} ${
+        className={`relative z-10 scroll-mt-20 rounded-3xl border p-4 space-y-3 transition-shadow ${card} ${
           flashForm ? "ring-2 ring-blue-500" : ""
         }`}
       >
@@ -1845,7 +1838,9 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           >
             <MapPin size={36} className="mb-2" />
             <p className="text-sm font-bold">No route yet</p>
-            <p className="mt-1 text-center text-[11px]">Pick an origin and destination above, then tap Set route.</p>
+            <p className="mt-1 px-6 text-center text-[11px]">
+              Pick an origin and destination above, then tap Set route. The map appears once your route is set.
+            </p>
           </div>
         ) : (
           filteredRoutes.map((route: any) => (
@@ -1937,7 +1932,13 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                         : "border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100"
                     }`}
                   >
-                    <RotateCcw className="mr-1.5 h-4 w-4" /> Reset
+                    {isResetting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <>
+                        <RotateCcw className="mr-1.5 h-4 w-4" /> Reset
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>
@@ -2165,7 +2166,7 @@ export default function DriverDashboardPage() {
 
   const [authorized, setAuthorized] = useState(false);
   const [tab, setTab] = useState<Tab>("home");
-  // Route panel mounts on first visit, then stays mounted (keeps pins/inputs when switching tabs)
+  // Route panel mounts on first visit, then stays mounted (keeps the route/map state when switching tabs)
   const [mapVisited, setMapVisited] = useState(false);
 
   // 🧾 Real trips from the database (today on Home, today / last 7 days on the Trips tab)
@@ -2249,6 +2250,17 @@ export default function DriverDashboardPage() {
           100% { transform: translateY(0); opacity: 1; }
         }
         .value-pop { animation: value-pop 0.35s ease-out; }
+
+        /* smooth tab navigation: new tab glides up from below */
+        @keyframes tab-in {
+          0%   { opacity: 0; transform: translateY(10px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        .tab-in { animation: tab-in 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
+
+        @media (prefers-reduced-motion: reduce) {
+          .tab-in, .value-pop { animation: none; }
+        }
       `}</style>
 
       {/* Top bar */}
@@ -2286,7 +2298,7 @@ export default function DriverDashboardPage() {
         }`}
       >
         {tab === "home" && (
-          <>
+          <div key="home" className="tab-in space-y-4">
             {/* ═════ Today header ═════ */}
             <div className="flex items-end justify-between px-1">
               <div>
@@ -2476,9 +2488,11 @@ export default function DriverDashboardPage() {
                   Couldn't load trips — tap to retry
                 </button>
               ) : trips.length === 0 ? (
-                <div className={`rounded-2xl border border-dashed p-6 text-center text-xs ${muted} ${
-                  isDark ? "border-slate-800" : "border-slate-300"
-                }`}>
+                <div
+                  className={`rounded-2xl border border-dashed p-6 text-center text-xs ${muted} ${
+                    isDark ? "border-slate-800" : "border-slate-300"
+                  }`}
+                >
                   No trips yet today. Trips appear here as passengers tap.
                 </div>
               ) : (
@@ -2487,17 +2501,17 @@ export default function DriverDashboardPage() {
                 ))
               )}
             </section>
-          </>
+          </div>
         )}
 
         {mapVisited && (
-          <div className={tab === "map" ? "" : "hidden"}>
+          <div className={tab === "map" ? "tab-in" : "hidden"}>
             <FareMapPanel isDark={isDark} visible={tab === "map"} />
           </div>
         )}
 
         {tab === "trips" && (
-          <section className="space-y-4">
+          <section key="trips" className="tab-in space-y-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-lg font-extrabold">Trips</h2>
               <div
@@ -2608,7 +2622,7 @@ export default function DriverDashboardPage() {
         )}
 
         {tab === "profile" && (
-          <section className={`rounded-2xl border p-4 space-y-4 ${card}`}>
+          <section key="profile" className={`tab-in rounded-2xl border p-4 space-y-4 ${card}`}>
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center">
                 <UserRound className="h-6 w-6 text-white" />
