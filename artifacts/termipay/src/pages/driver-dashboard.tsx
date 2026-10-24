@@ -80,6 +80,52 @@ const DRIVER_TOKEN_KEY = "termipay_driver_auth_token";
 const AUTH_ROLE_KEY = "termipay_auth_role";
 const DRIVER_NAME_KEY = "termipay_driver_username"; // optional, used as "actor" in activate/deactivate
 
+// Same base URL as your api-client. If the frontend and API share one domain, leave it empty.
+// If they are on different domains, set VITE_API_URL=https://rfid-exfz.onrender.com in the frontend env.
+const API_BASE = (import.meta as any).env?.VITE_API_URL ?? "";
+
+function driverAuthHeaders(): Record<string, string> {
+  const token = window.localStorage.getItem(DRIVER_TOKEN_KEY);
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+// 🔗 Takes ownership of a reader device for the logged-in driver. ONE device = ONE driver.
+//   "ok"    -> device is now yours (taps are counted in YOUR revenue)
+//   "taken" -> another driver is using it with an active route
+//   "error" -> network / server problem
+async function claimDevice(deviceId: string): Promise<"ok" | "taken" | "error"> {
+  try {
+    const res = await fetch(`${API_BASE}/api/dashboard/claim-device`, {
+      method: "POST",
+      headers: driverAuthHeaders(),
+      body: JSON.stringify({ deviceId }),
+    });
+    if (res.ok) return "ok";
+    if (res.status === 409) return "taken";
+    return "error";
+  } catch (e) {
+    console.error("claimDevice failed:", e);
+    return "error";
+  }
+}
+
+// 🔎 IDs of the ACTIVE routes that belong to this driver (null = couldn't load)
+async function fetchMyActiveRouteIds(): Promise<string[] | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/dashboard/my-routes`, {
+      headers: driverAuthHeaders(),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data?.routeIds) ? data.routeIds.map(String) : null;
+  } catch {
+    return null;
+  }
+}
+
 type Tab = "home" | "map" | "trips" | "profile";
 
 /* Sample data lang ito para sa testing. Palitan ng real API later. */
@@ -785,11 +831,36 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     },
   });
 
+  // 🚌 Active routes that belong to THIS driver. Another driver's active route is never shown here,
+  // so two accounts can no longer see/fight over the same device.
+  const [myActiveRouteIds, setMyActiveRouteIds] = useState<string[] | null>(null);
+  const [myRoutesLoaded, setMyRoutesLoaded] = useState(false);
+
+  const loadMyRoutes = useCallback(async () => {
+    const ids = await fetchMyActiveRouteIds();
+    setMyActiveRouteIds(ids); // null = request failed → don't filter
+    setMyRoutesLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    loadMyRoutes();
+  }, [loadMyRoutes]);
+
+  useRealtimeRefetch(["fare_routes", "devices"], () => {
+    loadMyRoutes();
+  });
+
   const visibleRoutes = useMemo(() => {
     if (!Array.isArray(routes)) return [];
     const hidden = new Set(hiddenIds);
-    return routes.filter((r: any) => !hidden.has(String(r.id)));
-  }, [routes, hiddenIds]);
+    const mine = myActiveRouteIds ? new Set(myActiveRouteIds) : null;
+    return routes.filter((r: any) => {
+      if (hidden.has(String(r.id))) return false;
+      // active route of another driver → not mine, hide it
+      if (mine && r.isActive && !mine.has(String(r.id))) return false;
+      return true;
+    });
+  }, [routes, hiddenIds, myActiveRouteIds]);
 
   // 1️⃣ ONLY ONE ROUTE is displayed: the newest ACTIVE route, otherwise the newest route.
   // Every other route (including its return direction) stays hidden in this view.
@@ -802,7 +873,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
   // 🔒 Distance Fare is usable only when no route is shown OR right after a Reset
   const [resetUnlocked, setResetUnlocked] = useState(false);
-  const noVisibleRoutes = !isLoading && !currentRoute;
+  const noVisibleRoutes = !isLoading && myRoutesLoaded && !currentRoute;
   const distanceFareEnabled = noVisibleRoutes || resetUnlocked;
 
   // 🔌 reader device of the route that was reset → re-used for the next saved route
@@ -949,6 +1020,22 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
     const reverseRoute = findReverseRoute(activateRoute);
 
+    // 🔗 FIRST take ownership of the reader. One device = one driver.
+    const claim = await claimDevice(selectedDeviceId);
+    if (claim !== "ok") {
+      toast({
+        title:
+          claim === "taken"
+            ? "This device is already in use by another driver"
+            : "Couldn't link the device to your account. Try again.",
+        variant: "destructive",
+      });
+      setIsTogglePending(false);
+      setPendingRouteId(null);
+      fetchActiveDevices(activateRoute.id);
+      return;
+    }
+
     const { error } = await supabase.rpc("activate_route", {
       p_route_id: activateRoute.id,
       p_device_id: selectedDeviceId,
@@ -981,6 +1068,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     toast({ title: <SuccessTitle text="Route Status Updated" /> });
 
     queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
+    await loadMyRoutes();
     await fetchActiveRoutesDevices([
       ...shownRoutes
         .filter((r: any) => r.isActive && r.id !== activateRoute.id && r.id !== reverseRoute?.id)
@@ -1299,7 +1387,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     origin: string,
     destination: string,
     deviceId: string
-  ): Promise<"ok" | "failed" | "not-found"> => {
+  ): Promise<"ok" | "failed" | "not-found" | "taken"> => {
     // main + return direction are looked up at the same time
     const [{ data: main }, { data: reverse }] = await Promise.all([
       supabase
@@ -1319,6 +1407,11 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     ]);
 
     if (!main?.id) return "not-found";
+
+    // 🔗 take ownership of the reader first (one device = one driver)
+    const claim = await claimDevice(deviceId);
+    if (claim === "taken") return "taken";
+    if (claim !== "ok") return "failed";
 
     // ...and both are activated at the same time
     const calls = [main.id, ...(reverse?.id ? [reverse.id] : [])].map((id) =>
@@ -1415,12 +1508,13 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         });
       }
 
-      let activateResult: "ok" | "failed" | "not-found" | "no-device" = "no-device";
+      let activateResult: "ok" | "failed" | "not-found" | "taken" | "no-device" = "no-device";
       if (resetDeviceId) {
         activateResult = await activateSavedRoute(p.origin, p.destination, resetDeviceId);
       }
 
       queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
+      loadMyRoutes();
 
       resetForm();
       setResetUnlocked(false); // 🔒 lock again — Reset is needed before adding another
@@ -1436,7 +1530,10 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       } else {
         toast({
           title: "Route saved, but couldn't activate it",
-          description: "Please activate it manually and pick a reader device.",
+          description:
+            activateResult === "taken"
+              ? "That reader is now used by another driver. Pick another device."
+              : "Please activate it manually and pick a reader device.",
           variant: "destructive",
         });
       }
@@ -1545,7 +1642,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           </span>
         </div>
 
-        {isLoading ? (
+        {isLoading || !myRoutesLoaded ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
               <Skeleton key={i} className={`h-20 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
@@ -1797,8 +1894,9 @@ function useKeyboardLock() {
 
 /* ═══════════════════════════════════════════════════════════════════════
    📊 Realtime today stats (Earned today + Total taps today)
-   Same source as the admin dashboard (useGetDashboardStats), refetched
-   instantly whenever "transactions" changes — no polling interval.
+   Same endpoint as the admin dashboard (useGetDashboardStats). For a driver,
+   the server returns ONLY the taps/revenue of that driver's own reader device.
+   Refetched instantly whenever "transactions" changes — no polling interval.
    ═══════════════════════════════════════════════════════════════════════ */
 
 function useTodayStats() {
