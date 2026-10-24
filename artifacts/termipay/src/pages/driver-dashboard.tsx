@@ -1115,85 +1115,9 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
   const excessKm = distanceKm != null ? Math.max(0, distanceKm - (parseFloat(baseKm) || 0)) : 0;
 
-  // ✅ ONE BUTTON: OK — find both places on the map, then calculate road distance + fare
-  const findAndCalculate = async () => {
-    setError(null);
-
-    const hasPlaces = !!originPlace && !!destPlace;
-    const hasPins = !!originPt && !!destPt;
-
-    if (!hasPlaces && !hasPins) {
-      setError("Pick both the origin and the destination from the list (Samar & Leyte only).");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      let o: LatLng;
-      let d: LatLng;
-
-      if (hasPlaces) {
-        const oHit = await geocodePlace(originPlace!);
-        await sleep(1100); // respect Nominatim rate limit
-        const dHit = await geocodePlace(destPlace!);
-
-        if (!oHit || !dHit) {
-          setError("Couldn't locate one of the places on the map. Tap the map to place the pins manually.");
-          return;
-        }
-        o = oHit;
-        d = dHit;
-        setOriginPt(o);
-        setDestPt(d);
-        setPinsLocked(true);
-      } else {
-        o = { ...originPt! };
-        d = { ...destPt! };
-      }
-
-      const r = await roadRoute(o, d).catch(() => null);
-      const map = mapRef.current;
-
-      routeLine.current?.remove();
-      routeLine.current = null;
-
-      if (r) {
-        setDistanceKm(r.km);
-        setIsEstimate(false);
-        if (map) {
-          const line = L.polyline(r.coords, { color: "#2563eb", weight: 5, interactive: false }).addTo(map);
-          routeLine.current = line;
-          map.fitBounds(line.getBounds(), { padding: [30, 30] });
-        }
-      } else {
-        setDistanceKm(haversineKm(o, d));
-        setIsEstimate(true);
-        map?.fitBounds(
-          [
-            [o.lat, o.lng],
-            [d.lat, d.lng],
-          ],
-          { padding: [30, 30] }
-        );
-      }
-    } catch {
-      setError("Lookup failed. Check your connection or tap the map to place pins.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const clearPins = () => {
-    setOriginPt(null);
-    setDestPt(null);
-    setPinsLocked(false);
-    setDistanceKm(null);
-    setError(null);
-  };
-
-  const canPressOk = distanceFareEnabled && ((!!originPlace && !!destPlace) || (!!originPt && !!destPt));
-  const canSave =
-    distanceFareEnabled && fare != null && fare > 0 && !!originPlace && !!destPlace && !busy && !saving;
+  // ✅ ONE BUTTON: OK — find both places, get the road distance, compute the fare,
+// SAVE the route and AUTO-ACTIVATE it (on the reader of the route that was reset).
+  const canPressOk = distanceFareEnabled && !!originPlace && !!destPlace && !busy && !saving;
 
   // ⚡ Activates a saved route (+ its return direction) on the given reader device
   const activateSavedRoute = async (
@@ -1244,8 +1168,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     return "ok";
   };
 
-  const handleSave = async () => {
-    if (!canSave || fare == null || !originPlace || !destPlace) return;
+  const handleOk = async () => {
+    setError(null);
 
     if (!distanceFareEnabled) {
       toast({
@@ -1256,9 +1180,57 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       return;
     }
 
-    const p = { origin: originPlace.label, destination: destPlace.label, fareAmount: fare };
+    if (!originPlace || !destPlace) {
+      setError("Pick both the origin and the destination from the list (Samar & Leyte only).");
+      return;
+    }
 
+    const bf = parseFloat(baseFare);
+    const bk = parseFloat(baseKm);
+    const rt = parseFloat(rate);
+    if ([bf, bk, rt].some((n) => Number.isNaN(n) || n < 0)) {
+      setError("Fare settings are invalid.");
+      return;
+    }
+
+    setBusy(true);
+
+    /* 1️⃣ locate both places + road distance → fare */
+    let fareAmount: number;
+    try {
+      const oHit = await geocodePlace(originPlace);
+      await sleep(1100); // respect Nominatim rate limit
+      const dHit = await geocodePlace(destPlace);
+
+      if (!oHit || !dHit) {
+        setError("Couldn't locate one of the places. Try a nearby city or municipality.");
+        setBusy(false);
+        return;
+      }
+
+      const road = await roadRoute(oHit, dHit).catch(() => null);
+      if (!road) {
+        setError("Couldn't get the road distance. Check your connection and tap OK again.");
+        setBusy(false);
+        return;
+      }
+
+      fareAmount = computeLtfrbFare(road.km, bf, bk, rt);
+      if (!(fareAmount > 0)) {
+        setError("The computed fare is invalid.");
+        setBusy(false);
+        return;
+      }
+    } catch {
+      setError("Lookup failed. Check your connection and tap OK again.");
+      setBusy(false);
+      return;
+    }
+
+    /* 2️⃣ save (create or update) + 3️⃣ auto-activate */
     setSaving(true);
+    const p = { origin: originPlace.label, destination: destPlace.label, fareAmount };
+
     try {
       const existing = Array.isArray(routes)
         ? routes.find((r: any) => r.origin === p.origin && r.destination === p.destination)
@@ -1277,7 +1249,6 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         });
       }
 
-      // ⚡ AUTO-ACTIVATE on the reader of the route that was reset
       let activateResult: "ok" | "failed" | "not-found" | "no-device" = "no-device";
       if (resetDeviceId) {
         activateResult = await activateSavedRoute(p.origin, p.destination, resetDeviceId);
@@ -1308,10 +1279,12 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       toast({ title: "Failed to save route", variant: "destructive" });
     } finally {
       setSaving(false);
+      setBusy(false);
     }
   };
 
-  /* ═════════ render ═════════ */
+  
+/* ═════════ render ═════════ */
 
   return (
     <div className="space-y-3">
@@ -1439,7 +1412,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         )}
       </section>
 
-      {/* Distance-based fare form (compact) */}
+      {/* Set route (compact, one-tap OK = calculate + save + activate) */}
       <section
         ref={formSectionRef}
         className={`scroll-mt-20 rounded-lg border p-3 space-y-2.5 transition-shadow ${card} ${
@@ -1467,7 +1440,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
               places={places}
               loading={placesLoading}
               isDark={isDark}
-              disabled={!distanceFareEnabled}
+              disabled={!distanceFareEnabled || busy || saving}
               placeholder="Barangay / city / municipality"
               className={inputCls}
               onChange={(text, place) => {
@@ -1483,7 +1456,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
               places={places}
               loading={placesLoading}
               isDark={isDark}
-              disabled={!distanceFareEnabled}
+              disabled={!distanceFareEnabled || busy || saving}
               placeholder="Barangay / city / municipality"
               className={inputCls}
               onChange={(text, place) => {
@@ -1494,110 +1467,17 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            onClick={findAndCalculate}
-            disabled={busy || !canPressOk}
-            aria-busy={busy}
-            aria-label={busy ? "Loading" : "OK"}
-            className="flex-1 h-9 text-sm bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:cursor-not-allowed"
-          >
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "OK"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={clearPins}
-            disabled={!distanceFareEnabled || (!originPt && !destPt)}
-            className={`h-9 px-3 gap-1 text-xs ${
-              isDark ? "border-slate-700 text-slate-200 hover:bg-slate-800" : "border-slate-200 text-slate-700"
-            }`}
-          >
-            <Eraser className="w-3.5 h-3.5" />
-            Clear pins
-          </Button>
-        </div>
-
-        <div
-          ref={setMapEl}
-          className="relative z-0 w-full h-[30dvh] min-h-[200px] max-h-[300px] rounded-md border overflow-hidden"
-          style={{ borderColor: isDark ? "#1e293b" : "#e2e8f0", touchAction: "pan-x pan-y" }}
-        />
-        <p className={`text-[10px] leading-snug ${muted}`}>
-          Tip: tap the map — 1st = Origin, 2nd = Destination. Drag a pin to adjust.
-        </p>
-
-        <div className="grid grid-cols-3 gap-2">
-          <div className="space-y-1">
-            <Label className={`text-[10px] font-semibold ${muted}`}>Base fare (₱)</Label>
-            <Input
-              type="number"
-              inputMode="decimal"
-              step="0.01"
-              min="0"
-              value={baseFare}
-              onChange={(e) => setBaseFare(e.target.value)}
-              className={`h-9 px-2 text-base sm:text-sm ${inputCls}`}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className={`text-[10px] font-semibold ${muted}`}>Base km</Label>
-            <Input
-              type="number"
-              inputMode="decimal"
-              step="0.1"
-              min="0"
-              value={baseKm}
-              onChange={(e) => setBaseKm(e.target.value)}
-              className={`h-9 px-2 text-base sm:text-sm ${inputCls}`}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className={`text-[10px] font-semibold ${muted}`}>₱ / extra km</Label>
-            <Input
-              type="number"
-              inputMode="decimal"
-              step="0.01"
-              min="0"
-              value={rate}
-              onChange={(e) => setRate(e.target.value)}
-              className={`h-9 px-2 text-base sm:text-sm ${inputCls}`}
-            />
-          </div>
-        </div>
-
         {error && <p className="text-[11px] text-red-500">{error}</p>}
-
-        {distanceKm != null && fare != null && (
-          <div
-            className={`rounded-md border px-2.5 py-2 text-xs space-y-0.5 ${
-              isDark ? "bg-blue-950/30 border-blue-900" : "bg-blue-50 border-blue-100"
-            }`}
-          >
-            <p className="font-semibold break-words">
-              {originName} → {destName}: {distanceKm.toFixed(1)} km {isEstimate && "(straight-line estimate)"}
-            </p>
-            <p className={muted}>
-              ₱{parseFloat(baseFare).toFixed(2)} + ({excessKm.toFixed(1)} km × ₱{parseFloat(rate).toFixed(2)}) ={" "}
-              <span className="font-bold text-emerald-500 text-sm">₱{fare.toFixed(2)}</span>
-            </p>
-            {isEstimate && (
-              <p className="text-[11px] text-amber-500">
-                Road routing was unavailable, so this uses straight-line distance and may be lower than the real
-                fare.
-              </p>
-            )}
-          </div>
-        )}
 
         <Button
           type="button"
-          disabled={!canSave}
-          onClick={handleSave}
+          onClick={handleOk}
+          disabled={!canPressOk}
+          aria-busy={busy || saving}
+          aria-label={busy || saving ? "Loading" : "OK"}
           className="w-full h-10 text-sm bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:cursor-not-allowed"
         >
-          {saving ? "Saving..." : "Save route"}
+          {busy || saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "OK"}
         </Button>
       </section>
 
