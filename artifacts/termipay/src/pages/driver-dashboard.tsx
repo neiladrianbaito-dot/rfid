@@ -626,15 +626,24 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     return routes.filter((r: any) => !hidden.has(String(r.id)));
   }, [routes, hiddenIds]);
 
-  // 🔒 Distance Fare is usable only when no visible routes remain OR right after a Reset
+  // 1️⃣ ONLY ONE ROUTE is displayed: the newest ACTIVE route, otherwise the newest route.
+  // Every other route (including its return direction) stays hidden in this view.
+  const currentRoute = useMemo(() => {
+    if (visibleRoutes.length === 0) return null;
+    const byNewest = [...visibleRoutes].sort((a: any, b: any) => Number(b.id) - Number(a.id));
+    return byNewest.find((r: any) => r.isActive) ?? byNewest[0];
+  }, [visibleRoutes]);
+  const shownRoutes = useMemo(() => (currentRoute ? [currentRoute] : []), [currentRoute]);
+
+  // 🔒 Distance Fare is usable only when no route is shown OR right after a Reset
   const [resetUnlocked, setResetUnlocked] = useState(false);
-  const noVisibleRoutes = !isLoading && visibleRoutes.length === 0;
+  const noVisibleRoutes = !isLoading && !currentRoute;
   const distanceFareEnabled = noVisibleRoutes || resetUnlocked;
 
   // 🔌 reader device of the route that was reset → re-used for the next saved route
   const [resetDeviceId, setResetDeviceId] = useState<string | null>(null);
 
-  const activeRoutes = visibleRoutes.filter((r: any) => r.isActive);
+  const activeRoutes = shownRoutes.filter((r: any) => r.isActive);
   const activeRouteIdsKey = activeRoutes.map((r: any) => r.id).join(",");
 
   const [selectedActiveRouteId, setSelectedActiveRouteId] = useState<string | number | null>(null);
@@ -808,7 +817,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
     queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
     await fetchActiveRoutesDevices([
-      ...visibleRoutes
+      ...shownRoutes
         .filter((r: any) => r.isActive && r.id !== activateRoute.id && r.id !== reverseRoute?.id)
         .map((r: any) => r.id),
       activateRoute.id,
@@ -912,8 +921,11 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
     if (deviceToReuse) setResetDeviceId(deviceToReuse);
 
-    hideRoutes(targets.map((r: any) => r.id));
+    // hide the reset route + its return AND every other route, so only the NEW route shows next
+    hideRoutes([...targets.map((r: any) => r.id), ...visibleRoutes.map((r: any) => r.id)]);
     setResetUnlocked(true);
+    resetForm();            // clears pins / route line on the map, default origin comes back
+    goToDistanceFare();     // "presses" Distance Fare: unlock + scroll to the form
     queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
     toast({ title: <SuccessTitle text="Route Reset — set a new origin & destination" /> });
 
@@ -921,31 +933,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     setIsResetting(false);
   };
 
-  /* ---------- search list ---------- */
-  const [searchTerm, setSearchTerm] = useState("");
-  const sortOrderRef = useRef<(string | number)[]>([]);
-
-  const filteredRoutes = useMemo(() => {
-    const q = searchTerm.toLowerCase();
-    const filtered = visibleRoutes.filter(
-      (r: any) => r.origin.toLowerCase().includes(q) || r.destination.toLowerCase().includes(q)
-    );
-    const activeItems = filtered.filter((r: any) => r.isActive);
-    const inactiveItems = filtered.filter((r: any) => !r.isActive);
-
-    inactiveItems.sort((a: any, b: any) => {
-      const ai = sortOrderRef.current.indexOf(a.id);
-      const bi = sortOrderRef.current.indexOf(b.id);
-      if (ai === -1 && bi === -1) return 0;
-      if (ai === -1) return 1;
-      if (bi === -1) return -1;
-      return ai - bi;
-    });
-
-    const sorted = [...activeItems, ...inactiveItems];
-    sortOrderRef.current = sorted.map((r: any) => r.id);
-    return sorted;
-  }, [visibleRoutes, searchTerm]);
+  /* ---------- list (single route only) ---------- */
+  const filteredRoutes = shownRoutes;
 
   /* ═════════ Distance fare form (origin / destination / map) ═════════ */
 
@@ -968,6 +957,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   const [saving, setSaving] = useState(false);
   const [pinsLocked, setPinsLocked] = useState(false);
   const [formKey, setFormKey] = useState(0);
+  const formSectionRef = useRef<HTMLElement | null>(null);
+  const [flashForm, setFlashForm] = useState(false);
 
   // Leaflet plumbing
   const [mapEl, setMapEl] = useState<HTMLDivElement | null>(null);
@@ -1003,6 +994,16 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     routeLine.current?.remove();
     routeLine.current = null;
     setFormKey((k) => k + 1);
+  };
+
+  // Auto "press" Distance Fare after Reset: scroll the form into view and highlight it
+  const goToDistanceFare = () => {
+    setFlashForm(true);
+    setTimeout(() => {
+      formSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      mapRef.current?.invalidateSize();
+    }, 200);
+    setTimeout(() => setFlashForm(false), 2000);
   };
 
   // Create the map once the container is mounted
@@ -1449,7 +1450,12 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       </section>
 
       {/* Distance-based fare form */}
-      <section className={`rounded-xl border p-4 space-y-4 ${card}`}>
+      <section
+        ref={formSectionRef}
+        className={`scroll-mt-20 rounded-xl border p-4 space-y-4 transition-shadow ${card} ${
+          flashForm ? "ring-2 ring-blue-500" : ""
+        }`}
+      >
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-blue-500">
             <RouteIcon size={16} /> Set route · Distance fare
@@ -1623,10 +1629,10 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           <div>
             <h2 className="text-sm font-bold flex items-center gap-2">
               <MapPin className="w-4 h-4 text-blue-500" />
-              Configured routes
+              Your route
             </h2>
             <p className={`text-[11px] mt-0.5 ${muted}`}>
-              One active route per reader device. Use Reset to clear a route, then set a new one above.
+              Only your current route is shown. Tap Reset to clear it — the Distance Fare form opens automatically.
             </p>
           </div>
           <span
@@ -1641,16 +1647,6 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           </span>
         </div>
 
-        <div className="relative">
-          <Search className={`absolute left-2.5 top-3 h-4 w-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-          <Input
-            placeholder="Search origin or destination..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className={`pl-9 h-10 text-base sm:text-sm ${inputCls}`}
-          />
-        </div>
-
         {isLoading ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
@@ -1661,13 +1657,11 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           <div className={`flex flex-col items-center py-10 ${isDark ? "text-slate-700" : "text-slate-300"}`}>
             <MapPin size={40} className="mb-2" />
             <p className="text-xs font-semibold uppercase tracking-widest">
-              {searchTerm ? "No routes matched" : "No routes configured"}
+              No route set
             </p>
-            {!searchTerm && (
-              <p className="text-[11px] mt-1 text-center normal-case tracking-normal">
-                Set an origin and destination above to add your first route.
-              </p>
-            )}
+            <p className="text-[11px] mt-1 text-center normal-case tracking-normal">
+              Set an origin and destination above to add your route.
+            </p>
           </div>
         ) : (
           <div className="space-y-2.5">
