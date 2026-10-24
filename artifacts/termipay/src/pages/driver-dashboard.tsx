@@ -4,6 +4,7 @@ import {
   useListRoutes,
   useCreateRoute,
   useUpdateRoute,
+  useGetDashboardStats,
   getListRoutesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -71,6 +72,9 @@ import {
   WifiOff,
   Loader2,
   Eraser,
+  Fingerprint,
+  TrendingUp,
+  ChevronRight,
 } from "lucide-react";
 
 const DRIVER_TOKEN_KEY = "termipay_driver_auth_token";
@@ -89,6 +93,10 @@ const SAMPLE_TRIPS = [
 /* ═══════════════════════════════════════════════════════════════════════
    Shared helpers
    ═══════════════════════════════════════════════════════════════════════ */
+
+// Plain ₱ text character (same approach as the admin dashboard)
+const formatPeso = (value: number) =>
+  `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function SuccessTitle({ text }: { text: string }) {
   return (
@@ -1283,9 +1291,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     }
   }, [originPlace, destPlace, distanceFareEnabled]);
 
-  
-// ✅ ONE BUTTON: OK — find both places, get the road distance, compute the fare,
-// SAVE the route and AUTO-ACTIVATE it (on the reader of the route that was reset).
+  // ✅ ONE BUTTON: OK — find both places, get the road distance, compute the fare,
+  // SAVE the route and AUTO-ACTIVATE it (on the reader of the route that was reset).
   const canPressOk = distanceFareEnabled && !!originPlace && !!destPlace && !busy && !saving;
 
   // ⚡ Activates a saved route (+ its return direction) on the given reader device
@@ -1331,8 +1338,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     return "ok";
   };
 
-  
-const handleOk = async () => {
+  const handleOk = async () => {
     setError(null);
 
     if (!distanceFareEnabled) {
@@ -1388,8 +1394,7 @@ const handleOk = async () => {
       return;
     }
 
-    
-/* 2️⃣ save (create or update) + 3️⃣ auto-activate */
+    /* 2️⃣ save (create or update) + 3️⃣ auto-activate */
     setSaving(true);
     const p = { origin: originPlace.label, destination: destPlace.label, fareAmount };
 
@@ -1444,8 +1449,7 @@ const handleOk = async () => {
     }
   };
 
-  
-/* ═════════ render ═════════ */
+  /* ═════════ render ═════════ */
 
   return (
     <div className="space-y-3">
@@ -1518,8 +1522,7 @@ const handleOk = async () => {
         </Button>
       </section>
 
-      
-{/* Configured routes */}
+      {/* Configured routes */}
       <section className={`rounded-xl border p-4 space-y-3 ${card}`}>
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -1794,14 +1797,74 @@ function useKeyboardLock() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   📊 Realtime today stats (Earned today + Total taps today)
+   Same source as the admin dashboard (useGetDashboardStats), refetched
+   instantly whenever "transactions" changes — no polling interval.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function useTodayStats() {
+  const {
+    data: stats,
+    isLoading,
+    isError,
+    refetch,
+  } = useGetDashboardStats({
+    query: { refetchOnWindowFocus: true },
+  });
+
+  // Realtime: every new tap/transaction → refetch right away
+  useRealtimeRefetch(["transactions"], () => {
+    refetch();
+  });
+
+  const revenueToday = Math.abs(Number((stats as any)?.totalRevenueToday) || 0);
+  const tapsToday = Math.abs(Number((stats as any)?.totalTapsToday) || 0);
+
+  const prevRevenue = useRef<number | null>(null);
+  const prevTaps = useRef<number | null>(null);
+  const [revenueFlash, setRevenueFlash] = useState(false);
+  const [tapsFlash, setTapsFlash] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  useEffect(() => {
+    if (!stats) return;
+
+    if (prevRevenue.current !== null && prevRevenue.current !== revenueToday) {
+      setRevenueFlash(true);
+      setTimeout(() => setRevenueFlash(false), 900);
+    }
+    if (prevTaps.current !== null && prevTaps.current !== tapsToday) {
+      setTapsFlash(true);
+      setTimeout(() => setTapsFlash(false), 900);
+    }
+
+    prevRevenue.current = revenueToday;
+    prevTaps.current = tapsToday;
+    setLastUpdated(new Date());
+  }, [stats, revenueToday, tapsToday]);
+
+  return { isLoading, isError, revenueToday, tapsToday, revenueFlash, tapsFlash, lastUpdated, refetch };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    🚌 Driver Dashboard page
    ═══════════════════════════════════════════════════════════════════════ */
 
 export default function DriverDashboardPage() {
   const [, setLocation] = useLocation();
   const { isDark, toggleTheme } = useAuthTheme();
-  useDriverApiAuth(); // 👈 sends the driver token on /api/ requests
+  useDriverApiAuth(); // 👈 sends the driver token on /api/ requests (must stay ABOVE useTodayStats)
   const keyboardOpen = useKeyboardLock(); // 👈 bottom nav stays at the bottom when the keyboard opens
+  const {
+    isLoading: statsLoading,
+    isError: statsError,
+    revenueToday,
+    tapsToday,
+    revenueFlash,
+    tapsFlash,
+    lastUpdated,
+    refetch: refetchStats,
+  } = useTodayStats(); // 👈 realtime Earned today + Total taps today
 
   const [authorized, setAuthorized] = useState(false);
   const [online, setOnline] = useState(false);
@@ -1849,6 +1912,34 @@ export default function DriverDashboardPage() {
 
   return (
     <div className={`min-h-[100dvh] flex flex-col ${page}`}>
+      <style>{`
+        @keyframes stat-flash {
+          0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.0); transform: scale(1); }
+          40%  { box-shadow: 0 0 0 6px rgba(16,185,129,0.25); transform: scale(1.015); }
+          100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.0); transform: scale(1); }
+        }
+        .stat-flash { animation: stat-flash 0.9s ease-out; }
+
+        @keyframes stat-flash-blue {
+          0%   { box-shadow: 0 0 0 0 rgba(59,130,246,0.0); transform: scale(1); }
+          40%  { box-shadow: 0 0 0 6px rgba(59,130,246,0.25); transform: scale(1.015); }
+          100% { box-shadow: 0 0 0 0 rgba(59,130,246,0.0); transform: scale(1); }
+        }
+        .stat-flash-blue { animation: stat-flash-blue 0.9s ease-out; }
+
+        @keyframes live-dot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.25; transform: scale(0.8); }
+        }
+        .live-dot { animation: live-dot 1.2s ease-in-out infinite; }
+
+        @keyframes value-pop {
+          0%   { transform: translateY(4px); opacity: 0.4; }
+          100% { transform: translateY(0); opacity: 1; }
+        }
+        .value-pop { animation: value-pop 0.35s ease-out; }
+      `}</style>
+
       {/* Top bar */}
       <header
         className={`sticky top-0 z-30 flex items-center justify-between px-4 py-3 border-b backdrop-blur-md ${
@@ -1886,10 +1977,30 @@ export default function DriverDashboardPage() {
         {tab === "home" && (
           <>
             {/* Duty toggle */}
-            <section className={`rounded-xl border p-4 ${card}`}>
-              <div className="flex items-center justify-between gap-3">
+            <section
+              className={`relative overflow-hidden rounded-2xl border p-4 ${card} ${
+                online
+                  ? isDark
+                    ? "border-emerald-900/70"
+                    : "border-emerald-200"
+                  : ""
+              }`}
+            >
+              <div
+                className={`pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full blur-3xl transition-opacity ${
+                  online ? "opacity-40 bg-emerald-500" : "opacity-0"
+                }`}
+              />
+              <div className="relative flex items-center justify-between gap-3">
                 <div>
-                  <h1 className="text-lg font-bold">{online ? "You are on duty" : "You are off duty"}</h1>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        online ? "bg-emerald-500 live-dot" : isDark ? "bg-slate-600" : "bg-slate-300"
+                      }`}
+                    />
+                    <h1 className="text-lg font-bold">{online ? "You are on duty" : "You are off duty"}</h1>
+                  </div>
                   <p className={`text-xs mt-0.5 ${muted}`}>
                     {online ? "Commuters can pay your fare by QR." : "Go on duty to start collecting fares."}
                   </p>
@@ -1914,41 +2025,162 @@ export default function DriverDashboardPage() {
               </div>
             </section>
 
-            {/* Stats */}
-            <section className="grid grid-cols-3 gap-3">
-              {[
-                { label: "Earned today", value: `₱${totalFare}`, icon: Wallet },
-                { label: "Passengers", value: String(totalPassengers), icon: Users },
-                { label: "Trips", value: String(SAMPLE_TRIPS.length), icon: RouteIcon },
-              ].map(({ label, value, icon: Icon }) => (
-                <div key={label} className={`rounded-xl border p-3 ${card}`}>
-                  <Icon className="h-4 w-4 text-blue-500 mb-2" />
-                  <p className="text-lg font-bold leading-none">{value}</p>
-                  <p className={`text-[11px] mt-1 ${muted}`}>{label}</p>
+            {/* ═════ Realtime stats (Earned today + Total taps today) ═════ */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <h2 className={`text-[11px] font-bold uppercase tracking-widest ${muted}`}>Today</h2>
+                <div className="flex items-center gap-2">
+                  {lastUpdated && (
+                    <span className={`text-[10px] font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                      {lastUpdated.toLocaleTimeString()}
+                    </span>
+                  )}
+                  <span
+                    className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${
+                      statsError
+                        ? isDark
+                          ? "text-red-400 bg-red-950/40 border-red-900"
+                          : "text-red-600 bg-red-50 border-red-100"
+                        : isDark
+                          ? "text-emerald-400 bg-emerald-950/40 border-emerald-900"
+                          : "text-emerald-600 bg-emerald-50 border-emerald-100"
+                    }`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full inline-block ${
+                        statsError ? "bg-red-500" : "bg-emerald-500 live-dot"
+                      }`}
+                    />
+                    {statsError ? "OFFLINE" : "LIVE"}
+                  </span>
                 </div>
-              ))}
+              </div>
+
+              {/* Earned today — hero card */}
+              <div
+                className={`relative overflow-hidden rounded-2xl p-5 text-white shadow-lg bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 ${
+                  revenueFlash ? "stat-flash" : ""
+                }`}
+              >
+                <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/10" />
+                <div className="pointer-events-none absolute -right-2 bottom-[-3rem] h-28 w-28 rounded-full bg-white/10" />
+
+                <div className="relative flex items-start justify-between">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-widest text-emerald-100/90">
+                      Earned today
+                    </p>
+                    {statsLoading ? (
+                      <Skeleton className="mt-2 h-10 w-44 bg-white/20" />
+                    ) : (
+                      <p
+                        key={revenueToday}
+                        className="value-pop mt-1 text-4xl font-extrabold tracking-tight leading-none truncate"
+                        data-testid="text-earned-today"
+                      >
+                        {formatPeso(revenueToday)}
+                      </p>
+                    )}
+                  </div>
+                  <div className="h-11 w-11 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center shrink-0">
+                    <Wallet className="h-5 w-5" />
+                  </div>
+                </div>
+
+                <div className="relative mt-4 flex items-center gap-1.5 text-[11px] text-emerald-50/90">
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  Updates instantly on every tap
+                </div>
+              </div>
+
+              {/* Total taps + Trips */}
+              <div className="grid grid-cols-2 gap-3">
+                <div
+                  className={`relative overflow-hidden rounded-2xl border p-4 ${card} ${
+                    tapsFlash ? "stat-flash-blue" : ""
+                  }`}
+                >
+                  <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-blue-500/10" />
+                  <div className="relative">
+                    <div
+                      className={`h-10 w-10 rounded-xl flex items-center justify-center mb-3 ${
+                        isDark ? "bg-blue-950/50 text-blue-400" : "bg-blue-50 text-blue-600"
+                      }`}
+                    >
+                      <Fingerprint className="h-5 w-5" />
+                    </div>
+                    {statsLoading ? (
+                      <Skeleton className={`h-8 w-16 ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+                    ) : (
+                      <p
+                        key={tapsToday}
+                        className="value-pop text-3xl font-extrabold leading-none tracking-tight"
+                        data-testid="text-taps-today"
+                      >
+                        {tapsToday.toLocaleString("en-US")}
+                      </p>
+                    )}
+                    <p className={`text-[11px] font-semibold uppercase tracking-wide mt-2 ${muted}`}>
+                      Total taps today
+                    </p>
+                  </div>
+                  <div className="absolute bottom-0 left-0 h-[3px] w-full bg-gradient-to-r from-blue-500 to-indigo-500" />
+                </div>
+
+                <div className={`relative overflow-hidden rounded-2xl border p-4 ${card}`}>
+                  <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-purple-500/10" />
+                  <div className="relative">
+                    <div
+                      className={`h-10 w-10 rounded-xl flex items-center justify-center mb-3 ${
+                        isDark ? "bg-purple-950/50 text-purple-400" : "bg-purple-50 text-purple-600"
+                      }`}
+                    >
+                      <RouteIcon className="h-5 w-5" />
+                    </div>
+                    <p className="text-3xl font-extrabold leading-none tracking-tight">{SAMPLE_TRIPS.length}</p>
+                    <p className={`text-[11px] font-semibold uppercase tracking-wide mt-2 ${muted}`}>Trips</p>
+                  </div>
+                  <div className="absolute bottom-0 left-0 h-[3px] w-full bg-gradient-to-r from-purple-500 to-fuchsia-500" />
+                </div>
+              </div>
+
+              {statsError && (
+                <button
+                  type="button"
+                  onClick={() => refetchStats()}
+                  className={`w-full rounded-xl border px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 ${
+                    isDark
+                      ? "border-red-900 text-red-400 bg-red-950/30"
+                      : "border-red-200 text-red-600 bg-red-50"
+                  }`}
+                >
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  Couldn't load today's stats — tap to retry
+                </button>
+              )}
             </section>
 
             {/* Set route shortcut */}
             <button
               type="button"
               onClick={() => changeTab("map")}
-              className={`w-full rounded-xl border p-4 flex items-center gap-3 text-left ${card}`}
+              className={`group w-full rounded-2xl border p-4 flex items-center gap-3 text-left transition active:scale-[0.99] ${card}`}
             >
-              <div className="h-10 w-10 rounded-lg bg-blue-600/10 flex items-center justify-center shrink-0">
+              <div className="h-11 w-11 rounded-xl bg-blue-600/10 flex items-center justify-center shrink-0">
                 <MapIcon className="h-5 w-5 text-blue-500" />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold">Set your route</p>
                 <p className={`text-xs ${muted}`}>Choose origin &amp; destination on the map and get the fare.</p>
               </div>
+              <ChevronRight className={`h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5 ${muted}`} />
             </button>
 
             {/* Collect fare */}
             <Button
               type="button"
               disabled={!online}
-              className="w-full h-12 bg-blue-600 hover:bg-blue-500 text-white font-bold gap-2"
+              className="w-full h-12 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold gap-2 shadow-md disabled:shadow-none"
             >
               <QrCode className="h-5 w-5" />
               Show my fare QR
