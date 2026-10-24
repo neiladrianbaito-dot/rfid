@@ -320,6 +320,42 @@ function PlaceCombobox({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idleBlurRef = useRef(false);
+
+  const hideKeyboard = () => {
+    containerRef.current?.querySelector("input")?.blur();
+  };
+
+  // ⌨️ User stopped typing for 800 ms → close the keyboard (the result list stays open so they can tap one)
+  const scheduleIdleBlur = () => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => {
+      const input = containerRef.current?.querySelector("input");
+      if (input && document.activeElement === input) {
+        idleBlurRef.current = true; // blur without closing the list
+        input.blur();
+        idleBlurRef.current = false;
+      }
+    }, 800);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+    };
+  }, []);
+
+  // Tap outside → close the list
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
 
   const results = useMemo(() => {
     const q = value.trim().toLowerCase();
@@ -344,8 +380,10 @@ function PlaceCombobox({
   }, [active]);
 
   const pick = (p: Place) => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
     onChange(p.label, p);
     setOpen(false);
+    hideKeyboard();
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -366,6 +404,7 @@ function PlaceCombobox({
       }
     } else if (e.key === "Escape") {
       setOpen(false);
+      hideKeyboard();
     }
   };
 
@@ -373,7 +412,7 @@ function PlaceCombobox({
     k === "barangay" ? "Barangay" : k === "city" ? "City" : "Municipality";
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <Input
         value={value}
         placeholder={placeholder}
@@ -382,9 +421,12 @@ function PlaceCombobox({
         onChange={(e) => {
           onChange(e.target.value, null);
           setOpen(true);
+          scheduleIdleBlur();
         }}
         onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
+        onBlur={() => {
+          if (!idleBlurRef.current) setOpen(false);
+        }}
         onKeyDown={onKeyDown}
         // text-base on mobile prevents iOS auto-zoom on focus
         className={`h-9 text-base sm:text-sm ${className ?? ""}`}
@@ -1590,6 +1632,49 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   ⌨️ Keyboard handling — keep the bottom nav locked at the bottom
+   1) tell Chrome the keyboard should only overlay the page (not resize it)
+   2) fallback: if the page still shrinks, report "keyboard open" so the nav can tuck away
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function useKeyboardLock() {
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+
+  useEffect(() => {
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+    const original = meta?.getAttribute("content") ?? null;
+    if (meta && original && !/interactive-widget/.test(original)) {
+      meta.setAttribute("content", `${original}, interactive-widget=resizes-visual`);
+    }
+
+    const vv = window.visualViewport;
+    let fullHeight = Math.max(window.innerHeight, vv?.height ?? 0);
+    let lastWidth = window.innerWidth;
+
+    const check = () => {
+      if (window.innerWidth !== lastWidth) {
+        // rotation / real resize → recalibrate
+        lastWidth = window.innerWidth;
+        fullHeight = Math.max(window.innerHeight, vv?.height ?? 0);
+      }
+      fullHeight = Math.max(fullHeight, window.innerHeight);
+      const current = vv?.height ?? window.innerHeight;
+      setKeyboardOpen(current < fullHeight - 150);
+    };
+
+    vv?.addEventListener("resize", check);
+    window.addEventListener("resize", check);
+    return () => {
+      vv?.removeEventListener("resize", check);
+      window.removeEventListener("resize", check);
+      if (meta && original !== null) meta.setAttribute("content", original);
+    };
+  }, []);
+
+  return keyboardOpen;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    🚌 Driver Dashboard page
    ═══════════════════════════════════════════════════════════════════════ */
 
@@ -1597,6 +1682,7 @@ export default function DriverDashboardPage() {
   const [, setLocation] = useLocation();
   const { isDark, toggleTheme } = useAuthTheme();
   useDriverApiAuth(); // 👈 sends the driver token on /api/ requests
+  const keyboardOpen = useKeyboardLock(); // 👈 bottom nav stays at the bottom when the keyboard opens
 
   const [authorized, setAuthorized] = useState(false);
   const [online, setOnline] = useState(false);
@@ -1806,9 +1892,9 @@ export default function DriverDashboardPage() {
 
       {/* Bottom nav (app-style) */}
       <nav
-        className={`fixed bottom-0 inset-x-0 z-30 border-t backdrop-blur-md ${
-          isDark ? "bg-slate-950/90 border-slate-800" : "bg-white/90 border-slate-200"
-        }`}
+        className={`fixed bottom-0 inset-x-0 z-30 border-t backdrop-blur-md transition-transform duration-150 ${
+          keyboardOpen ? "translate-y-full pointer-events-none" : ""
+        } ${isDark ? "bg-slate-950/90 border-slate-800" : "bg-white/90 border-slate-200"}`}
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="max-w-2xl mx-auto grid grid-cols-4">
