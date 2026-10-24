@@ -872,15 +872,14 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   };
 
   /* ---------- Reset (UI-only soft delete) ---------- */
-  const [resetRoute, setResetRoute] = useState<any>(null);
   const [isResetting, setIsResetting] = useState(false);
 
-  const confirmReset = async () => {
-    if (!resetRoute) return;
+  const confirmReset = async (target: any) => {
+    if (!target || isResetting) return;
     setIsResetting(true);
 
-    const reverseRoute = findReverseRoute(resetRoute);
-    const targets = [resetRoute, ...(reverseRoute ? [reverseRoute] : [])];
+    const reverseRoute = findReverseRoute(target);
+    const targets = [target, ...(reverseRoute ? [reverseRoute] : [])];
 
     // 🔌 Grab the device BEFORE deactivating (deactivate_route sets device_id = null)
     let deviceToReuse: string | null = null;
@@ -929,7 +928,6 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
     toast({ title: <SuccessTitle text="Route Reset — set a new origin & destination" /> });
 
-    setResetRoute(null);
     setIsResetting(false);
   };
 
@@ -1473,7 +1471,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                         ? "border-amber-900 text-amber-400 hover:bg-amber-950/40"
                         : "border-amber-200 text-amber-600 hover:bg-amber-50"
                     }`}
-                    onClick={() => setResetRoute(route)}
+                    onClick={() => confirmReset(route)}
+                    disabled={isResetting}
                   >
                     <RotateCcw className="w-3.5 h-3.5 mr-1" />
                     Reset
@@ -1584,52 +1583,6 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Reset confirm (UI-only soft delete — database is untouched) */}
-      <AlertDialog open={!!resetRoute} onOpenChange={(open) => !open && !isResetting && setResetRoute(null)}>
-        <AlertDialogContent
-          className={`w-[calc(100%-2rem)] max-w-md rounded-xl ${
-            isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
-          }`}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle
-              className={`font-bold tracking-tight flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}
-            >
-              <ShieldAlert className="text-amber-500" size={18} /> Reset this route?
-            </AlertDialogTitle>
-            <AlertDialogDescription className={`text-sm leading-relaxed ${muted}`}>
-              {resetRoute && (
-                <span className="block font-semibold mb-2">
-                  {resetRoute.origin} → {resetRoute.destination}
-                </span>
-              )}
-              This clears the route (and its return direction) from your list so you can set a new origin and
-              destination. If it is active, it will be deactivated first, and the next route you save will be
-              activated automatically on the same reader. The route is only hidden — it is not deleted from the
-              database.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row justify-end gap-2">
-            <AlertDialogCancel
-              disabled={isResetting}
-              className={`mt-0 text-xs font-medium border-0 shadow-none bg-transparent hover:bg-transparent ${muted}`}
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                confirmReset();
-              }}
-              disabled={isResetting}
-              className="bg-amber-600 text-white hover:bg-amber-700 font-semibold text-xs disabled:cursor-not-allowed"
-            >
-              {isResetting ? "Resetting..." : "Confirm Reset"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
