@@ -1314,10 +1314,10 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   /* ═════════ render ═════════ */
 
   return (
-    <div className="space-y-4">
-      {/* Active route status */}
+    <div className="space-y-3">
+      {/* Active route status (compact) */}
       <section
-        className={`rounded-xl border p-3.5 space-y-3 ${
+        className={`rounded-lg border px-3 py-2 space-y-2 ${
           activeRoutes.length > 0
             ? isDark
               ? "border-emerald-900 bg-emerald-950/30"
@@ -1327,53 +1327,41 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
               : "border-amber-200 bg-amber-50"
         }`}
       >
-        <div className="flex items-start gap-3">
-          <div
-            className={`p-2 rounded-full shrink-0 ${
+        {/* Title row */}
+        <div className="flex items-center gap-2">
+          {activeRoutes.length > 0 ? (
+            <CheckCircle2 className={`w-4 h-4 shrink-0 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
+          ) : (
+            <AlertCircle className={`w-4 h-4 shrink-0 ${isDark ? "text-amber-400" : "text-amber-600"}`} />
+          )}
+          <p
+            className={`text-xs font-semibold leading-tight ${
               activeRoutes.length > 0
                 ? isDark
-                  ? "bg-emerald-900/50"
-                  : "bg-emerald-100"
+                  ? "text-emerald-400"
+                  : "text-emerald-700"
                 : isDark
-                  ? "bg-amber-900/50"
-                  : "bg-amber-100"
+                  ? "text-amber-400"
+                  : "text-amber-700"
             }`}
           >
-            {activeRoutes.length > 0 ? (
-              <CheckCircle2 className={`w-5 h-5 ${isDark ? "text-emerald-400" : "text-emerald-600"}`} />
-            ) : (
-              <AlertCircle className={`w-5 h-5 ${isDark ? "text-amber-400" : "text-amber-600"}`} />
-            )}
-          </div>
-          <div className="min-w-0">
-            <p
-              className={`font-semibold text-sm ${
-                activeRoutes.length > 0
-                  ? isDark
-                    ? "text-emerald-400"
-                    : "text-emerald-700"
-                  : isDark
-                    ? "text-amber-400"
-                    : "text-amber-700"
-              }`}
-            >
-              {activeRoutes.length > 0
-                ? `${activeRoutes.length} Active Route${activeRoutes.length > 1 ? "s" : ""} — RFID Ready`
-                : "No Active Route"}
-            </p>
-            {activeRoutes.length === 0 && (
-              <p className={`text-xs mt-0.5 ${isDark ? "text-amber-400" : "text-amber-700"}`}>
-                Activate a route below so the RFID reader can process fare deductions.
-              </p>
-            )}
-          </div>
+            {activeRoutes.length > 0
+              ? `${activeRoutes.length} Active Route${activeRoutes.length > 1 ? "s" : ""} — RFID Ready`
+              : "No Active Route"}
+          </p>
         </div>
 
+        {activeRoutes.length === 0 && (
+          <p className={`text-[11px] leading-snug ${isDark ? "text-amber-400/90" : "text-amber-700"}`}>
+            Activate a route below so the RFID reader can deduct fares.
+          </p>
+        )}
+
         {activeRoutes.length > 0 && (
-          <div className="space-y-2.5">
+          <div className="space-y-1.5">
             {activeRoutes.length > 1 && (
               <div
-                className={`flex items-center gap-1 overflow-x-auto rounded-lg border p-1 ${
+                className={`flex items-center gap-1 overflow-x-auto rounded-md border p-0.5 ${
                   isDark ? "bg-slate-900/60 border-slate-800" : "bg-white/70 border-emerald-200"
                 }`}
               >
@@ -1385,11 +1373,11 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                       key={route.id}
                       type="button"
                       onClick={() => setSelectedActiveRouteId(route.id)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
+                      className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold whitespace-nowrap shrink-0 transition-colors ${
                         isSelected
                           ? isDark
-                            ? "bg-slate-800 text-white shadow-sm"
-                            : "bg-emerald-600 text-white shadow-sm"
+                            ? "bg-slate-800 text-white"
+                            : "bg-emerald-600 text-white"
                           : isDark
                             ? "text-slate-400"
                             : "text-emerald-700/70"
@@ -1400,9 +1388,9 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                           device?.device_id ? "bg-emerald-400" : isSelected ? "bg-white/60" : "bg-slate-400"
                         }`}
                       />
-                      <span className="max-w-[80px] truncate">{route.origin}</span>
-                      <ArrowLeftRight className="w-3 h-3 opacity-60 shrink-0" />
-                      <span className="max-w-[80px] truncate">{route.destination}</span>
+                      <span className="max-w-[64px] truncate">{route.origin}</span>
+                      <ArrowLeftRight className="w-2.5 h-2.5 opacity-60 shrink-0" />
+                      <span className="max-w-[64px] truncate">{route.destination}</span>
                     </button>
                   );
                 })}
@@ -1411,36 +1399,38 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
             {selectedActiveRoute && (
               <div
-                className={`rounded-lg border p-3 space-y-2 ${
+                className={`rounded-md border px-2.5 py-1.5 ${
                   isDark ? "bg-slate-900/60 border-emerald-900" : "bg-white border-emerald-200"
                 }`}
               >
                 <p
-                  className={`text-sm font-bold flex items-center gap-1.5 flex-wrap ${
+                  className={`text-xs font-bold flex items-center gap-1 min-w-0 ${
                     isDark ? "text-white" : "text-slate-900"
                   }`}
                 >
-                  {selectedActiveRoute.origin}
-                  <ArrowLeftRight className={`w-3.5 h-3.5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                  {selectedActiveRoute.destination}
+                  <span className="truncate">{selectedActiveRoute.origin}</span>
+                  <ArrowLeftRight className={`w-3 h-3 shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+                  <span className="truncate">{selectedActiveRoute.destination}</span>
                 </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-bold text-emerald-500">
-                    ₱{Number(selectedActiveRoute.fareAmount).toFixed(2)} per tap
+                <div className="flex items-center justify-between gap-2 mt-1">
+                  <span className="text-xs font-bold text-emerald-500">
+                    ₱{Number(selectedActiveRoute.fareAmount).toFixed(2)} / tap
                   </span>
                   <span
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-semibold min-w-0 ${
                       isDark
                         ? "bg-slate-950/60 border-emerald-900 text-emerald-400"
                         : "bg-emerald-50 border-emerald-200 text-emerald-700"
                     }`}
                   >
-                    <Zap className="w-3.5 h-3.5" />
-                    {loadingActiveDevices
-                      ? "Reader: Loading..."
-                      : activeDeviceMap[String(selectedActiveRoute.id)]?.device_id
-                        ? `Reader: ${activeDeviceMap[String(selectedActiveRoute.id)]?.device_id}`
-                        : "Reader: Unassigned"}
+                    <Zap className="w-3 h-3 shrink-0" />
+                    <span className="truncate">
+                      {loadingActiveDevices
+                        ? "Loading..."
+                        : activeDeviceMap[String(selectedActiveRoute.id)]?.device_id
+                          ? activeDeviceMap[String(selectedActiveRoute.id)]?.device_id
+                          : "Unassigned"}
+                    </span>
                   </span>
                 </div>
               </div>
