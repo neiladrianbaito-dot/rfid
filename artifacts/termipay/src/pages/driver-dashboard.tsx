@@ -60,6 +60,9 @@ import {
   Fingerprint,
   TrendingUp,
   ChevronRight,
+  Eye,
+  EyeOff,
+  KeyRound,
 } from "lucide-react";
 
 const DRIVER_TOKEN_KEY = "termipay_driver_auth_token";
@@ -2145,6 +2148,166 @@ function useTodayStats() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   🔐 ChangePasswordCard — Profile tab
+   Uses POST /api/auth/user/change-password. Same auth_users table as the
+   commuter account (role-based), so the driver token works as-is.
+   Rules enforced by the server: min 8 chars, once every 24 hours.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function ChangePasswordCard({ isDark }: { isDark: boolean }) {
+  const { toast } = useToast();
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const muted = isDark ? "text-slate-400" : "text-slate-500";
+  const inputCls = isDark
+    ? "bg-slate-950 border-slate-800 text-slate-200"
+    : "bg-white border-slate-200 text-slate-800";
+
+  const canSubmit = !!current && !!next && !!confirm && !saving;
+
+  async function handleSubmit() {
+    setError(null);
+
+    if (next.length < 8) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
+    if (next !== confirm) {
+      setError("New password and confirmation do not match.");
+      return;
+    }
+    if (next === current) {
+      setError("New password must be different from the current password.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/user/change-password`, {
+        method: "POST",
+        headers: driverAuthHeaders(),
+        body: JSON.stringify({ currentPassword: current, newPassword: next }),
+      });
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        /* non-JSON response */
+      }
+
+      if (!res.ok || !data?.success) {
+        setError(data?.message ?? "Couldn't change your password. Please try again.");
+        return;
+      }
+
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setShow(false);
+      toast({ title: <SuccessTitle text="Password changed" /> });
+    } catch (e) {
+      console.error("change-password failed:", e);
+      setError("Network error. Check your connection and try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section
+      className={`rounded-2xl border p-4 space-y-3 ${
+        isDark ? "bg-slate-900/70 border-slate-800" : "bg-white border-slate-200 shadow-sm"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-extrabold">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
+            <KeyRound size={14} />
+          </span>
+          Change password
+        </h2>
+        <button
+          type="button"
+          onClick={() => setShow((s) => !s)}
+          aria-label={show ? "Hide passwords" : "Show passwords"}
+          className={`flex h-8 w-8 items-center justify-center rounded-full ${muted}`}
+        >
+          {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
+
+      <div className="space-y-1">
+        <Label className={`text-[11px] font-semibold ${muted}`}>Current password</Label>
+        <Input
+          type={show ? "text" : "password"}
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          autoComplete="current-password"
+          disabled={saving}
+          className={`h-10 rounded-xl text-base sm:text-sm ${inputCls}`}
+        />
+      </div>
+
+      <div className="space-y-1">
+        <Label className={`text-[11px] font-semibold ${muted}`}>New password</Label>
+        <Input
+          type={show ? "text" : "password"}
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          autoComplete="new-password"
+          disabled={saving}
+          placeholder="At least 8 characters"
+          className={`h-10 rounded-xl text-base sm:text-sm ${inputCls}`}
+        />
+      </div>
+
+      <div className="space-y-1">
+        <Label className={`text-[11px] font-semibold ${muted}`}>Confirm new password</Label>
+        <Input
+          type={show ? "text" : "password"}
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          autoComplete="new-password"
+          disabled={saving}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && canSubmit) handleSubmit();
+          }}
+          className={`h-10 rounded-xl text-base sm:text-sm ${inputCls}`}
+        />
+      </div>
+
+      {error && (
+        <p
+          className={`rounded-lg px-3 py-2 text-[11px] font-medium ${
+            isDark ? "bg-red-950/40 text-red-400" : "bg-red-50 text-red-600"
+          }`}
+        >
+          {error}
+        </p>
+      )}
+
+      <Button
+        type="button"
+        onClick={handleSubmit}
+        disabled={!canSubmit}
+        aria-busy={saving}
+        className="h-11 w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-sm font-bold text-white shadow-md hover:from-blue-700 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Update password"}
+      </Button>
+
+      <p className={`text-[11px] ${muted}`}>You can change your password once every 24 hours.</p>
+    </section>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    🚌 Driver Dashboard page
    ═══════════════════════════════════════════════════════════════════════ */
 
@@ -2204,8 +2367,17 @@ export default function DriverDashboardPage() {
   }
 
   function handleSignOut() {
+    const token = window.localStorage.getItem(DRIVER_TOKEN_KEY);
+    if (token) {
+      // fire-and-forget audit log; never block sign out
+      fetch(`${API_BASE}/api/auth/user/logout`, {
+        method: "POST",
+        headers: driverAuthHeaders(),
+      }).catch(() => {});
+    }
     window.localStorage.removeItem(DRIVER_TOKEN_KEY);
     window.localStorage.removeItem(AUTH_ROLE_KEY);
+    window.localStorage.removeItem(DRIVER_NAME_KEY);
     setLocation("/signin");
   }
 
@@ -2622,31 +2794,35 @@ export default function DriverDashboardPage() {
         )}
 
         {tab === "profile" && (
-          <section key="profile" className={`tab-in rounded-2xl border p-4 space-y-4 ${card}`}>
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center">
-                <UserRound className="h-6 w-6 text-white" />
+          <div key="profile" className="tab-in space-y-4">
+            <section className={`rounded-2xl border p-4 space-y-4 ${card}`}>
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center">
+                  <UserRound className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <p className="font-bold">Driver account</p>
+                  <p className={`text-xs ${muted}`}>Role: driver</p>
+                </div>
               </div>
-              <div>
-                <p className="font-bold">Driver account</p>
-                <p className={`text-xs ${muted}`}>Role: driver</p>
-              </div>
-            </div>
 
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleSignOut}
-              className={`w-full h-11 gap-2 rounded-xl ${
-                isDark
-                  ? "border-slate-700 text-slate-200 hover:bg-slate-800"
-                  : "border-slate-200 text-slate-700 hover:bg-slate-100"
-              }`}
-            >
-              <LogOut className="h-4 w-4" />
-              Sign out
-            </Button>
-          </section>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSignOut}
+                className={`w-full h-11 gap-2 rounded-xl ${
+                  isDark
+                    ? "border-slate-700 text-slate-200 hover:bg-slate-800"
+                    : "border-slate-200 text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <LogOut className="h-4 w-4" />
+                Sign out
+              </Button>
+            </section>
+
+            <ChangePasswordCard isDark={isDark} />
+          </div>
         )}
       </main>
 
