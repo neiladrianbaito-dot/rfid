@@ -534,11 +534,32 @@ function useDriverApiAuth() {
 
     window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
       const token = window.localStorage.getItem(DRIVER_TOKEN_KEY);
-      const url =
+      const rawUrl =
         typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 
-      // only touch our own API — never Supabase / PSGC / OSM / OSRM
-      if (!token || !url.includes("/api/")) return original(input, init);
+      if (!token) return original(input, init);
+
+      let parsed: URL;
+      try {
+        parsed = new URL(rawUrl, window.location.href);
+      } catch {
+        return original(input, init);
+      }
+
+      // Only OUR API (path starts with /api/). Third-party hosts must never get
+      // the Authorization header — it triggers a CORS preflight that they reject
+      // (this is what broke the PSGC places list: psgc.gitlab.io/api/...).
+      const host = parsed.hostname;
+      const isExternal =
+        host === "psgc.gitlab.io" ||
+        host.endsWith("openstreetmap.org") ||
+        host.endsWith("project-osrm.org") ||
+        host.endsWith("supabase.co") ||
+        host.endsWith("supabase.in");
+
+      if (isExternal || !parsed.pathname.startsWith("/api/")) {
+        return original(input, init);
+      }
 
       const headers = new Headers(
         init?.headers ?? (input instanceof Request ? input.headers : undefined)
