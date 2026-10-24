@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request } from "express";
 import { eq, ne } from "drizzle-orm";
 import { db, fareRoutesTable } from "@workspace/db";
 import {
@@ -13,6 +13,11 @@ import {
 } from "@workspace/api-zod";
 import { verifyAdminToken } from "../lib/admin-token";
 import { logAudit } from "../lib/audit-logger";
+import { requireAdmin, requireFullAccess } from "../middleware/permission-middleware";
+import {
+  requireAdminOrDriver,
+  requireAdminOrDriverWrite,
+} from "../middleware/driver-or-admin";
 
 const router: IRouter = Router();
 
@@ -24,8 +29,8 @@ function formatRoute(r: typeof fareRoutesTable.$inferSelect) {
 }
 
 // ── Who's making this request? ──────────────────────────────────────────────
-// Same pattern as users.ts — best-effort actor resolution for the audit
-// trail. Falls back to "unknown" rather than blocking the request.
+// The guards below set req.adminUser (admins, or "driver:<email>" for
+// drivers). Falls back to decoding an admin token, then "unknown".
 
 function getBearerToken(authorization?: string): string | null {
   if (!authorization) return null;
@@ -34,8 +39,9 @@ function getBearerToken(authorization?: string): string | null {
   return token;
 }
 
-function getActorFromRequest(authorization?: string): string {
-  const token = getBearerToken(authorization);
+function getActorFromRequest(req: Request): string {
+  if (req.adminUser?.username) return req.adminUser.username;
+  const token = getBearerToken(req.headers.authorization);
   if (!token) return "unknown";
   const adminUser = verifyAdminToken(token);
   return adminUser?.username ?? "unknown";
@@ -55,7 +61,8 @@ function isForeignKeyViolation(error: unknown): boolean {
   return false;
 }
 
-router.get("/routes", async (_req, res): Promise<void> => {
+// READ: admins (any permission) or drivers
+router.get("/routes", requireAdminOrDriver, async (_req, res): Promise<void> => {
   try {
     const routes = await db.select().from(fareRoutesTable);
     res.json(ListRoutesResponse.parse(routes.map(formatRoute)));
@@ -65,7 +72,8 @@ router.get("/routes", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/routes", async (req, res): Promise<void> => {
+// WRITE: drivers or admins with full access
+router.post("/routes", requireAdminOrDriverWrite, async (req, res): Promise<void> => {
   const parsed = CreateRouteBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -85,7 +93,7 @@ router.post("/routes", async (req, res): Promise<void> => {
 
     try {
       await logAudit({
-        user: getActorFromRequest(req.headers.authorization),
+        user: getActorFromRequest(req),
         action: "CREATE",
         entity: "Fare Route",
         details: `created route: ${route.origin} → ${route.destination} (₱${Number(route.fareAmount)})`,
@@ -101,10 +109,12 @@ router.post("/routes", async (req, res): Promise<void> => {
   }
 });
 
-// Public endpoint — no auth required
+// Public endpoint — no auth required (used by the ESP32 reader)
 router.get("/routes/active", async (_req, res): Promise<void> => {
   try {
-    const routes = await db.select().from(fareRoutesTable)
+    const routes = await db
+      .select()
+      .from(fareRoutesTable)
       .where(eq(fareRoutesTable.isActive, true));
     res.json(routes.map(formatRoute));
   } catch (error) {
@@ -113,16 +123,8 @@ router.get("/routes/active", async (_req, res): Promise<void> => {
   }
 });
 
-// =============================================================================
-// FIX: PATCH /routes/:id — audit log dapat mag-log ng ACTUAL changed values
-// (old -> new), hindi lang listahan ng column names.
-//
-// Paano gamitin: palitan mo yung buong `router.patch("/routes/:id", ...)`
-// block sa routes file mo ng version sa baba. Wala ibang binago —
-// same pa rin yung ibang routes (POST, GET, DELETE, toggle).
-// =============================================================================
-
-router.patch("/routes/:id", async (req, res): Promise<void> => {
+// PATCH /routes/:id — audit log records the ACTUAL changed values (old -> new)
+router.patch("/routes/:id", requireAdminOrDriverWrite, async (req, res): Promise<void> => {
   const params = UpdateRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -142,8 +144,6 @@ router.patch("/routes/:id", async (req, res): Promise<void> => {
   if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
 
   try {
-    // ── NEW: kunin muna yung CURRENT row bago i-update, para may old values
-    // tayong maicompare later. Drizzle na mismo yung nagbibigay ng typed row.
     const [beforeRoute] = await db
       .select()
       .from(fareRoutesTable)
@@ -165,9 +165,6 @@ router.patch("/routes/:id", async (req, res): Promise<void> => {
       return;
     }
 
-    // ── NEW: i-diff lang yung fields kung saan old !== new ──────────────────
-    // (String comparison para hindi maloko ng type mismatch, e.g.
-    // fareAmount na "45" vs "45.00" o boolean vs string).
     const changed = Object.entries(updateData).filter(([col, newVal]) => {
       const oldVal = (beforeRoute as Record<string, unknown>)[col];
       return String(oldVal ?? "") !== String(newVal ?? "");
@@ -177,15 +174,17 @@ router.patch("/routes/:id", async (req, res): Promise<void> => {
       const changesSummary = changed
         .map(([col, newVal]) => {
           const oldVal = (beforeRoute as Record<string, unknown>)[col];
-          const oldDisplay = oldVal === null || oldVal === undefined || oldVal === "" ? "—" : String(oldVal);
-          const newDisplay = newVal === null || newVal === undefined || newVal === "" ? "—" : String(newVal);
+          const oldDisplay =
+            oldVal === null || oldVal === undefined || oldVal === "" ? "—" : String(oldVal);
+          const newDisplay =
+            newVal === null || newVal === undefined || newVal === "" ? "—" : String(newVal);
           return `${col}: "${oldDisplay}" → "${newDisplay}"`;
         })
         .join("; ");
 
       try {
         await logAudit({
-          user: getActorFromRequest(req.headers.authorization),
+          user: getActorFromRequest(req),
           action: "UPDATE",
           entity: "Fare Route",
           details: `updated route: ${route.origin} → ${route.destination} — ${changesSummary}`,
@@ -194,9 +193,6 @@ router.patch("/routes/:id", async (req, res): Promise<void> => {
         console.error("[PATCH /routes/:id] audit log failed:", auditError);
       }
     }
-    // kung walang laman yung `changed` (walang talagang nagbagong value),
-    // WALANG audit log na isusulat — inaayos nito yung mga no-op UPDATE
-    // entries na paulit-ulit lumalabas sa audit table.
 
     res.json(UpdateRouteResponse.parse(formatRoute(route)));
   } catch (error) {
@@ -205,7 +201,8 @@ router.patch("/routes/:id", async (req, res): Promise<void> => {
   }
 });
 
-router.delete("/routes/:id", async (req, res): Promise<void> => {
+// DELETE: admins with full access only (drivers use Reset in the UI instead)
+router.delete("/routes/:id", requireAdmin, requireFullAccess, async (req, res): Promise<void> => {
   const params = DeleteRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -225,7 +222,7 @@ router.delete("/routes/:id", async (req, res): Promise<void> => {
 
     try {
       await logAudit({
-        user: getActorFromRequest(req.headers.authorization),
+        user: getActorFromRequest(req),
         action: "DELETE",
         entity: "Fare Route",
         details: `deleted route: ${route.origin} → ${route.destination} (₱${Number(route.fareAmount)})`,
@@ -250,22 +247,15 @@ router.delete("/routes/:id", async (req, res): Promise<void> => {
   }
 });
 
-router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
+router.patch("/routes/:id/toggle", requireAdminOrDriverWrite, async (req, res): Promise<void> => {
   const params = ToggleRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
 
-  // ✅ FIX: accept an optional deviceId from the request body so the linked
-  // RFID reader actually gets persisted when a route is activated. Before
-  // this, the toggle endpoint only ever flipped isActive and silently
-  // dropped any deviceId the frontend sent — that's why device_id stayed
-  // null in fare_routes no matter what was selected in the Activate modal.
-  //
-  // NOTE: if you have a Zod schema for this body (e.g. ToggleRouteBody),
-  // swap the manual read below for a proper `ToggleRouteBody.safeParse(req.body)`
-  // so it's validated the same way the other routes are.
+  // Accept an optional deviceId so the linked RFID reader gets persisted
+  // when a route is activated.
   const rawDeviceId = (req.body as Record<string, unknown> | undefined)?.deviceId;
   const deviceId =
     typeof rawDeviceId === "string" && rawDeviceId.trim().length > 0
@@ -286,8 +276,7 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
     const willBeActive = !existing.isActive;
 
     if (willBeActive) {
-      // Deactivate every other route, and clear their linked device too so
-      // an old reader assignment can't linger on a route that's no longer live.
+      // Deactivate every other route and clear their linked device too.
       await db
         .update(fareRoutesTable)
         .set({ isActive: false, deviceId: null })
@@ -296,11 +285,8 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
 
     const updateData: Record<string, any> = { isActive: willBeActive };
     if (willBeActive) {
-      // Only set deviceId when activating. If none was provided, fall back
-      // to null rather than leaving whatever stale value was there before.
       updateData.deviceId = deviceId ?? null;
     } else {
-      // Deactivating: clear the device link since it's no longer in use.
       updateData.deviceId = null;
     }
 
@@ -312,7 +298,7 @@ router.patch("/routes/:id/toggle", async (req, res): Promise<void> => {
 
     try {
       await logAudit({
-        user: getActorFromRequest(req.headers.authorization),
+        user: getActorFromRequest(req),
         action: "UPDATE",
         entity: "Fare Route",
         details: willBeActive

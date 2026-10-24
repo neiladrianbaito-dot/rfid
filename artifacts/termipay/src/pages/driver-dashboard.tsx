@@ -523,6 +523,41 @@ const mapPin = (color: string, label: string) =>
   });
 
 /* ═══════════════════════════════════════════════════════════════════════
+   🔑 Driver API auth — the generated api-client only knows the admin token,
+   so every request to our own /api/ gets the DRIVER token instead.
+   Restored automatically when the driver leaves this page.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function useDriverApiAuth() {
+  useEffect(() => {
+    const original = window.fetch;
+
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      const token = window.localStorage.getItem(DRIVER_TOKEN_KEY);
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+      // only touch our own API — never Supabase / PSGC / OSM / OSRM
+      if (!token || !url.includes("/api/")) return original(input, init);
+
+      const headers = new Headers(
+        init?.headers ?? (input instanceof Request ? input.headers : undefined)
+      );
+      headers.set("Authorization", `Bearer ${token}`);
+
+      if (input instanceof Request) {
+        return original(new Request(input, { ...init, headers }));
+      }
+      return original(input, { ...init, headers });
+    };
+
+    return () => {
+      window.fetch = original;
+    };
+  }, []);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    🧭 FareMapPanel — the "Map" tab (all Fare Matrix functions for the driver)
    ═══════════════════════════════════════════════════════════════════════ */
 
@@ -1856,6 +1891,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 export default function DriverDashboardPage() {
   const [, setLocation] = useLocation();
   const { isDark, toggleTheme } = useAuthTheme();
+  useDriverApiAuth(); // 👈 sends the driver token on /api/ requests
 
   const [authorized, setAuthorized] = useState(false);
   const [online, setOnline] = useState(false);
