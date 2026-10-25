@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from "react";
 import { useLocation } from "wouter";
 import {
   useListRoutes,
@@ -354,6 +354,8 @@ function useHiddenRoutes() {
 
 /* ═══════════════════════════════════════════════════════════════════════
    📍 PSGC PLACES — Samar Island + Leyte Island
+   ⚡ The list is saved on the device, so it opens instantly (no download
+   on every app start). It is refreshed in the background once a month.
    ═══════════════════════════════════════════════════════════════════════ */
 
 const PSGC = "https://psgc.gitlab.io/api";
@@ -365,6 +367,8 @@ type Place = {
   barangay?: string;
   municipality: string;
   province: string;
+  muniCode: string; // code of the city/municipality (used for coordinates + distance)
+  s?: string; // lower-cased search text, prepared once
 };
 
 async function getJson<T = any>(url: string): Promise<T> {
@@ -398,6 +402,7 @@ async function fetchSamarPlaces(): Promise<Place[]> {
           kind: isCityName(m.name) ? "city" : "municipality",
           municipality: name,
           province: provName,
+          muniCode: m.code,
         });
       });
 
@@ -417,6 +422,7 @@ async function fetchSamarPlaces(): Promise<Place[]> {
             barangay: b.name,
             municipality: muniName,
             province: provName,
+            muniCode,
           });
         });
       };
@@ -444,29 +450,132 @@ async function fetchSamarPlaces(): Promise<Place[]> {
   out.forEach((p) => {
     if ((counts.get(p.label) ?? 0) > 1) p.label = `${p.label}, ${p.province}`;
   });
+  out.forEach((p) => {
+    p.s = `${p.label} ${p.province}`.toLowerCase();
+  });
 
   return out.sort((a, b) => a.label.localeCompare(b.label));
 }
 
+/* ----- saved copy of the places list (compact, so it stays small) ----- */
+
+const PLACES_CACHE_KEY = "termipay_places_v2";
+const PLACES_TTL_MS = 30 * 24 * 60 * 60 * 1000; // refresh once a month
+
+// [code, label, kind(b/c/m), barangay, muniCode, municipality, province]
+type PlaceTuple = [string, string, string, string, string, string, string];
+
+function encodePlace(p: Place): PlaceTuple {
+  return [
+    p.code,
+    p.label,
+    p.kind === "barangay" ? "b" : p.kind === "city" ? "c" : "m",
+    p.barangay ?? "",
+    p.muniCode,
+    p.municipality,
+    p.province,
+  ];
+}
+
+function decodePlace(t: PlaceTuple): Place {
+  const p: Place = {
+    code: t[0],
+    label: t[1],
+    kind: t[2] === "b" ? "barangay" : t[2] === "c" ? "city" : "municipality",
+    municipality: t[5],
+    province: t[6],
+    muniCode: t[4],
+  };
+  if (t[3]) p.barangay = t[3];
+  p.s = `${p.label} ${p.province}`.toLowerCase();
+  return p;
+}
+
+function readPlacesCache(): { places: Place[]; fresh: boolean } | null {
+  try {
+    const raw = localStorage.getItem(PLACES_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items) || parsed.items.length === 0) return null;
+    const places = (parsed.items as PlaceTuple[]).map(decodePlace);
+    const fresh = Date.now() - Number(parsed.savedAt || 0) < PLACES_TTL_MS;
+    return { places, fresh };
+  } catch {
+    return null;
+  }
+}
+
+function savePlacesCache(list: Place[]) {
+  try {
+    localStorage.setItem(
+      PLACES_CACHE_KEY,
+      JSON.stringify({ savedAt: Date.now(), items: list.map(encodePlace) })
+    );
+  } catch {
+    /* storage full or unavailable — app still works, just downloads again next time */
+  }
+}
+
+// label → place (instant lookup instead of scanning thousands of items)
+let labelIndex = new Map<string, Place>();
+function indexPlaces(list: Place[]) {
+  const m = new Map<string, Place>();
+  for (const p of list) m.set(p.label, p);
+  labelIndex = m;
+}
+
+let placesMemo: Place[] | null = null;
 let placesPromise: Promise<Place[]> | null = null;
-function loadSamarPlaces() {
+
+// Synchronous: whatever is already known (memory, then saved copy). Lets the UI open with data at once.
+function peekPlaces(): Place[] {
+  if (placesMemo) return placesMemo;
+  const c = readPlacesCache();
+  if (c) {
+    placesMemo = c.places;
+    indexPlaces(c.places);
+  }
+  return placesMemo ?? [];
+}
+
+function loadSamarPlaces(): Promise<Place[]> {
   if (!placesPromise) {
-    placesPromise = fetchSamarPlaces().catch((e) => {
-      placesPromise = null;
-      throw e;
-    });
+    const cached = readPlacesCache();
+    if (cached && cached.fresh) {
+      placesMemo = cached.places;
+      indexPlaces(cached.places);
+      placesPromise = Promise.resolve(cached.places);
+    } else {
+      placesPromise = fetchSamarPlaces()
+        .then((list) => {
+          placesMemo = list;
+          indexPlaces(list);
+          savePlacesCache(list);
+          return list;
+        })
+        .catch((e) => {
+          // offline / PSGC down → keep using the old saved copy if there is one
+          if (cached) {
+            placesMemo = cached.places;
+            indexPlaces(cached.places);
+            return cached.places;
+          }
+          placesPromise = null;
+          throw e;
+        });
+    }
   }
   return placesPromise;
 }
 
 function useSamarPlaces() {
-  const [places, setPlaces] = useState<Place[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [places, setPlaces] = useState<Place[]>(() => peekPlaces());
+  const [loading, setLoading] = useState(() => peekPlaces().length === 0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    if (peekPlaces().length === 0) setLoading(true);
     loadSamarPlaces()
       .then((p) => {
         if (!cancelled) {
@@ -520,6 +629,9 @@ function PlaceCombobox({
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleBlurRef = useRef(false);
 
+  // typing stays smooth: the big list is filtered a moment later, never blocking the keyboard
+  const deferredValue = useDeferredValue(value);
+
   const hideKeyboard = () => {
     containerRef.current?.querySelector("input")?.blur();
   };
@@ -554,9 +666,14 @@ function PlaceCombobox({
   }, [open]);
 
   const results = useMemo(() => {
-    const q = value.trim().toLowerCase();
+    const q = deferredValue.trim().toLowerCase();
     if (!q) return places.filter((p) => p.kind !== "barangay").slice(0, 60);
-    const matches = places.filter((p) => `${p.label} ${p.province}`.toLowerCase().includes(q));
+
+    const matches: Place[] = [];
+    for (const p of places) {
+      const text = p.s ?? `${p.label} ${p.province}`.toLowerCase();
+      if (text.includes(q)) matches.push(p);
+    }
     matches.sort((a, b) => {
       const as = a.label.toLowerCase().startsWith(q) ? 0 : 1;
       const bs = b.label.toLowerCase().startsWith(q) ? 0 : 1;
@@ -564,11 +681,11 @@ function PlaceCombobox({
       return a.label.localeCompare(b.label);
     });
     return matches.slice(0, 60);
-  }, [value, places]);
+  }, [deferredValue, places]);
 
   useEffect(() => {
     setActive(0);
-  }, [value]);
+  }, [deferredValue]);
 
   useEffect(() => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`);
@@ -685,6 +802,16 @@ function PlaceCombobox({
 
 /* ═══════════════════════════════════════════════════════════════════════
    🗺️ DISTANCE-BASED FARE (LTFRB: Base Fare + Succeeding Distance)
+
+   ⚡ INSTANT LOOKUP ORDER (stops at the first hit):
+     1. this device (localStorage)        → 0 ms
+     2. shared Supabase cache              → ~100 ms, shared by ALL drivers
+     3. Nominatim / OSRM (only for a place or route nobody has used yet),
+        then the answer is saved to 1 and 2 for next time.
+
+   Coordinates are per CITY / MUNICIPALITY (a barangay uses the coordinates
+   of its municipality), so there are far fewer lookups and almost all of
+   them are already cached.
    ═══════════════════════════════════════════════════════════════════════ */
 
 const DEFAULT_BASE_FARE = 15;
@@ -700,9 +827,23 @@ function computeLtfrbFare(distanceKm: number, baseFare: number, baseKm: number, 
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// fetch + JSON with a timeout, never throws (returns null on any problem)
+async function fetchJsonSafe(url: string, timeoutMs = 8000): Promise<any | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Nominatim (OpenStreetMap) geocoder — free, max 1 request/second.
-// All requests go through ONE queue that only waits for the time that is really left,
-// instead of a fixed sleep before every request.
+// All requests go through ONE queue that only waits for the time that is really left.
 let lastGeoAt = 0;
 let geoQueue: Promise<unknown> = Promise.resolve();
 
@@ -725,24 +866,21 @@ async function geocode(query: string): Promise<LatLng | null> {
     const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(
       query
     )}`;
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
-    if (!res.ok) return null;
-    const data = await res.json();
+    const data = await fetchJsonSafe(url, 10000);
     if (!Array.isArray(data) || data.length === 0) return null;
     return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
   });
 }
 
-async function geocodePlace(p: Place): Promise<LatLng | null> {
-  if (p.kind === "barangay" && p.barangay) {
-    const hit = await geocode(`${p.barangay}, ${p.municipality}, ${p.province}, Philippines`);
-    if (hit) return hit;
-  }
-  return geocode(`${p.municipality}, ${p.province}, Philippines`);
+// City / municipality coordinates (a barangay uses its municipality)
+async function geocodeMuni(p: Place): Promise<LatLng | null> {
+  const hit = await geocode(`${p.municipality}, ${p.province}, Philippines`);
+  if (hit) return hit;
+  return geocode(`${p.municipality}, Philippines`);
 }
 
-/* ⚡ Coordinates are remembered (also after closing the app), so a place is looked up only ONCE. */
-const GEO_CACHE_KEY = "termipay_geo_cache_v1";
+/* ----- this device: coordinates ----- */
+const GEO_CACHE_KEY = "termipay_geo_cache_v2";
 
 function loadGeoCache(): Record<string, LatLng> {
   try {
@@ -765,24 +903,109 @@ function saveGeoCache() {
   }
 }
 
+/* ----- this device: distances ----- */
+const KM_CACHE_KEY = "termipay_km_cache_v1";
+
+function loadKmCache(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(KM_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const kmCache: Record<string, number> = loadKmCache();
+
+function saveKmCache() {
+  try {
+    localStorage.setItem(KM_CACHE_KEY, JSON.stringify(kmCache));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/* ----- shared cache in Supabase (optional: if the tables don't exist, it is silently skipped) -----
+   Tables: place_coords(code, label, lat, lng)  and  route_distances(key, km)  — SQL is given separately. */
+
+async function sharedGetCoord(code: string): Promise<LatLng | null> {
+  try {
+    const { data, error } = await supabase
+      .from("place_coords")
+      .select("lat, lng")
+      .eq("code", code)
+      .maybeSingle();
+    if (error || !data) return null;
+    const lat = Number((data as any).lat);
+    const lng = Number((data as any).lng);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  } catch {
+    return null;
+  }
+}
+
+function sharedSaveCoord(code: string, label: string, pt: LatLng) {
+  try {
+    Promise.resolve(supabase.from("place_coords").upsert({ code, label, lat: pt.lat, lng: pt.lng })).catch(
+      () => {}
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+async function sharedGetKm(key: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabase
+      .from("route_distances")
+      .select("km")
+      .eq("key", key)
+      .maybeSingle();
+    if (error || !data) return null;
+    const km = Number((data as any).km);
+    return Number.isFinite(km) ? km : null;
+  } catch {
+    return null;
+  }
+}
+
+function sharedSaveKm(key: string, km: number) {
+  try {
+    Promise.resolve(supabase.from("route_distances").upsert({ key, km })).catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
+/* ----- coordinates of a place (always at city / municipality level) ----- */
 function geocodePlaceCached(p: Place): Promise<LatLng | null> {
-  const hit = geoCache[p.code];
+  const key = p.muniCode;
+  const hit = geoCache[key];
   if (hit) return Promise.resolve(hit);
 
-  let pending = geoInflight.get(p.code);
+  let pending = geoInflight.get(key);
   if (!pending) {
-    pending = geocodePlace(p)
-      .then((r) => {
-        if (r) {
-          geoCache[p.code] = r;
-          saveGeoCache();
-        }
-        return r;
-      })
-      .finally(() => {
-        geoInflight.delete(p.code);
-      });
-    geoInflight.set(p.code, pending);
+    pending = (async () => {
+      // 2) shared cache (other drivers may have looked it up already)
+      const shared = await sharedGetCoord(key);
+      if (shared) {
+        geoCache[key] = shared;
+        saveGeoCache();
+        return shared;
+      }
+      // 3) really look it up (slow, but only once for everybody)
+      const found = await geocodeMuni(p);
+      if (found) {
+        geoCache[key] = found;
+        saveGeoCache();
+        sharedSaveCoord(key, p.municipality, found);
+      }
+      return found;
+    })().finally(() => {
+      geoInflight.delete(key);
+    });
+    geoInflight.set(key, pending);
   }
   return pending;
 }
@@ -790,7 +1013,7 @@ function geocodePlaceCached(p: Place): Promise<LatLng | null> {
 // 📌 Turns a SAVED route label ("Calbayog City") into map coordinates.
 // Uses the PSGC place when it exists, otherwise looks the plain text up (and remembers it).
 async function resolveLabelPoint(label: string, places: Place[]): Promise<LatLng | null> {
-  const place = places.find((p) => p.label === label);
+  const place = labelIndex.get(label) ?? places.find((p) => p.label === label);
   if (place) return geocodePlaceCached(place);
 
   const key = `label:${label}`;
@@ -803,15 +1026,13 @@ async function resolveLabelPoint(label: string, places: Place[]): Promise<LatLng
   return hit;
 }
 
-// OSRM public demo server — real road distance + route geometry.
+// OSRM public demo server — real road distance + route geometry (only used by the map).
 async function roadRoute(
   a: LatLng,
   b: LatLng
 ): Promise<{ km: number; coords: [number, number][] } | null> {
   const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const data = await res.json();
+  const data = await fetchJsonSafe(url, 12000);
   const r = data?.routes?.[0];
   if (!r) return null;
   return {
@@ -824,16 +1045,9 @@ async function roadRoute(
 async function roadKm(a: LatLng, b: LatLng): Promise<number | null> {
   const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=false`;
   for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        const meters = data?.routes?.[0]?.distance;
-        if (typeof meters === "number") return meters / 1000;
-      }
-    } catch {
-      /* retry once */
-    }
+    const data = await fetchJsonSafe(url, 8000);
+    const meters = data?.routes?.[0]?.distance;
+    if (typeof meters === "number") return meters / 1000;
     if (attempt === 0) await sleep(300);
   }
   return null;
@@ -841,25 +1055,53 @@ async function roadKm(a: LatLng, b: LatLng): Promise<number | null> {
 
 type KmResult = { ok: true; km: number } | { ok: false; reason: "locate" | "route" | "network" };
 
+// same pair in either direction shares ONE saved distance
+const pairKey = (a: Place, b: Place) =>
+  a.muniCode <= b.muniCode ? `${a.muniCode}|${b.muniCode}` : `${b.muniCode}|${a.muniCode}`;
+
+async function computeKm(a: Place, b: Place): Promise<KmResult> {
+  // same city/municipality → no road lookup needed (base fare applies)
+  if (a.muniCode === b.muniCode) return { ok: true, km: 0 };
+
+  const key = pairKey(a, b);
+
+  // 1) this device
+  const local = kmCache[key];
+  if (typeof local === "number") return { ok: true, km: local };
+
+  // 2) shared cache
+  const shared = await sharedGetKm(key);
+  if (shared != null) {
+    kmCache[key] = shared;
+    saveKmCache();
+    return { ok: true, km: shared };
+  }
+
+  // 3) look it up once, then save for everybody
+  try {
+    const [o, d] = await Promise.all([geocodePlaceCached(a), geocodePlaceCached(b)]);
+    if (!o || !d) return { ok: false, reason: "locate" };
+    const km = await roadKm(o, d);
+    if (km == null) return { ok: false, reason: "route" };
+    const rounded = Math.round(km * 1000) / 1000;
+    kmCache[key] = rounded;
+    saveKmCache();
+    sharedSaveKm(key, rounded);
+    return { ok: true, km: rounded };
+  } catch {
+    return { ok: false, reason: "network" };
+  }
+}
+
 // Same origin → destination is calculated ONCE. It starts as soon as both places are picked
 // (in the background), so by the time Set route is tapped the answer is usually already there.
 const roadKmCache = new Map<string, Promise<KmResult>>();
 
 function getRoadKm(a: Place, b: Place): Promise<KmResult> {
-  const key = `${a.code}|${b.code}`;
+  const key = pairKey(a, b);
   let pending = roadKmCache.get(key);
   if (!pending) {
-    pending = (async (): Promise<KmResult> => {
-      try {
-        const [o, d] = await Promise.all([geocodePlaceCached(a), geocodePlaceCached(b)]);
-        if (!o || !d) return { ok: false, reason: "locate" };
-        const km = await roadKm(o, d);
-        if (km == null) return { ok: false, reason: "route" };
-        return { ok: true, km };
-      } catch {
-        return { ok: false, reason: "network" };
-      }
-    })().then((r) => {
+    pending = computeKm(a, b).then((r) => {
       if (!r.ok) roadKmCache.delete(key); // failed → allow a fresh try next time
       return r;
     });
