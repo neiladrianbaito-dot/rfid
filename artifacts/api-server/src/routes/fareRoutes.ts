@@ -1,4 +1,4 @@
-import { Router, type IRouter, type Request } from "express";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { eq, ne } from "drizzle-orm";
 import { db, fareRoutesTable } from "@workspace/db";
 import {
@@ -7,17 +7,11 @@ import {
   UpdateRouteParams,
   UpdateRouteBody,
   UpdateRouteResponse,
-  DeleteRouteParams,
   ToggleRouteParams,
   ToggleRouteResponse,
 } from "@workspace/api-zod";
 import { verifyAdminToken } from "../lib/admin-token";
 import { logAudit } from "../lib/audit-logger";
-import { requireAdmin, requireFullAccess } from "../middleware/permission-middleware";
-import {
-  requireAdminOrDriver,
-  requireAdminOrDriverWrite,
-} from "../middleware/driver-or-admin";
 
 const router: IRouter = Router();
 
@@ -28,10 +22,19 @@ function formatRoute(r: typeof fareRoutesTable.$inferSelect) {
   };
 }
 
-// ── Who's making this request? ──────────────────────────────────────────────
-// The guards below set req.adminUser (admins, or "driver:<email>" for
-// drivers). Falls back to decoding an admin token, then "unknown".
+// ── DRIVER ONLY ─────────────────────────────────────────────────────────────
+// Fare routes are managed by drivers. Admin tokens have NO access here.
+// req.driverUser is set by the global requireAuth ONLY for valid driver tokens.
+function requireDriverOnly(req: Request, res: Response, next: NextFunction): void {
+  const driver = (req as any).driverUser as { id: string } | undefined;
+  if (!driver) {
+    res.status(403).json({ error: "Fare routes are managed by drivers only." });
+    return;
+  }
+  next();
+}
 
+// ── Who's making this request? ──────────────────────────────────────────────
 function getBearerToken(authorization?: string): string | null {
   if (!authorization) return null;
   const [scheme, token] = authorization.split(" ");
@@ -47,22 +50,8 @@ function getActorFromRequest(req: Request): string {
   return adminUser?.username ?? "unknown";
 }
 
-// ── Postgres foreign key violation helper ───────────────────────────────────
-function isForeignKeyViolation(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const err = error as Record<string, unknown>;
-  if (err.code === "23503") return true;
-  const cause = err.cause as Record<string, unknown> | undefined;
-  if (cause?.code === "23503") return true;
-  const message = String(err.message ?? "").toLowerCase();
-  if (message.includes("foreign key constraint")) return true;
-  const causeMessage = String(cause?.message ?? "").toLowerCase();
-  if (causeMessage.includes("foreign key constraint")) return true;
-  return false;
-}
-
-// READ: admins (any permission) or drivers
-router.get("/routes", requireAdminOrDriver, async (_req, res): Promise<void> => {
+// READ: drivers only
+router.get("/routes", requireDriverOnly, async (_req, res): Promise<void> => {
   try {
     const routes = await db.select().from(fareRoutesTable);
     res.json(ListRoutesResponse.parse(routes.map(formatRoute)));
@@ -72,8 +61,11 @@ router.get("/routes", requireAdminOrDriver, async (_req, res): Promise<void> => 
   }
 });
 
-// WRITE: drivers or admins with full access
-router.post("/routes", requireAdminOrDriverWrite, async (req, res): Promise<void> => {
+// WRITE: drivers only
+// NEW routes start INACTIVE. A route only becomes active when the driver
+// activates it on a reader device (activate_route sets device_id), so every
+// active route always has an owner and shows up on that driver's dashboard.
+router.post("/routes", requireDriverOnly, async (req, res): Promise<void> => {
   const parsed = CreateRouteBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -87,7 +79,7 @@ router.post("/routes", requireAdminOrDriverWrite, async (req, res): Promise<void
         origin: parsed.data.origin,
         destination: parsed.data.destination,
         fareAmount: String(parsed.data.fareAmount),
-        isActive: true,
+        isActive: false,
       })
       .returning();
 
@@ -123,8 +115,8 @@ router.get("/routes/active", async (_req, res): Promise<void> => {
   }
 });
 
-// PATCH /routes/:id — audit log records the ACTUAL changed values (old -> new)
-router.patch("/routes/:id", requireAdminOrDriverWrite, async (req, res): Promise<void> => {
+// PATCH /routes/:id — drivers only; audit log records the ACTUAL changed values (old -> new)
+router.patch("/routes/:id", requireDriverOnly, async (req, res): Promise<void> => {
   const params = UpdateRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -201,53 +193,10 @@ router.patch("/routes/:id", requireAdminOrDriverWrite, async (req, res): Promise
   }
 });
 
-// DELETE: admins with full access only (drivers use Reset in the UI instead)
-router.delete("/routes/:id", requireAdmin, requireFullAccess, async (req, res): Promise<void> => {
-  const params = DeleteRouteParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
+// NOTE: DELETE /routes/:id was removed. It was admin-only, and admins no longer
+// manage fare routes. Drivers use "Reset" in the UI (soft delete) instead.
 
-  try {
-    const [route] = await db
-      .delete(fareRoutesTable)
-      .where(eq(fareRoutesTable.id, params.data.id))
-      .returning();
-
-    if (!route) {
-      res.status(404).json({ error: "Route not found" });
-      return;
-    }
-
-    try {
-      await logAudit({
-        user: getActorFromRequest(req),
-        action: "DELETE",
-        entity: "Fare Route",
-        details: `deleted route: ${route.origin} → ${route.destination} (₱${Number(route.fareAmount)})`,
-      });
-    } catch (auditError) {
-      console.error("[DELETE /routes/:id] audit log failed:", auditError);
-    }
-
-    res.sendStatus(204);
-  } catch (error) {
-    console.error("[DELETE /routes/:id] delete failed:", error);
-
-    if (isForeignKeyViolation(error)) {
-      res.status(409).json({
-        error:
-          "Cannot delete this route — it is still referenced by existing transactions or records. Try deactivating it instead.",
-      });
-      return;
-    }
-
-    res.status(500).json({ error: "Failed to delete route" });
-  }
-});
-
-router.patch("/routes/:id/toggle", requireAdminOrDriverWrite, async (req, res): Promise<void> => {
+router.patch("/routes/:id/toggle", requireDriverOnly, async (req, res): Promise<void> => {
   const params = ToggleRouteParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
