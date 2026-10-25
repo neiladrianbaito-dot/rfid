@@ -1402,6 +1402,127 @@ const mapPin = (color: string, label: string) =>
   });
 
 /* ═══════════════════════════════════════════════════════════════════════
+   🎛️ MODERN MAP ZOOM CONTROL (+ / −)
+   • Leaflet's default white square buttons are removed.
+   • Small, transparent "glass" pill (blurred background) like a mobile map app.
+   • Icons are drawn with CSS (no text glyphs), so they stay crisp and centered.
+   • Light + dark theme (.tp-map-dark), disabled state at min/max zoom,
+     press feedback, and visible keyboard focus.
+   • Everything is scoped to .tp-map, so no other map/control is affected.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const MAP_ZOOM_CSS = `
+/* container: the glass pill */
+.tp-map .leaflet-control-zoom.leaflet-bar {
+  display: flex;
+  flex-direction: column;
+  margin: 0 10px 10px 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  -webkit-backdrop-filter: blur(14px) saturate(170%);
+  backdrop-filter: blur(14px) saturate(170%);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.2), 0 1px 2px rgba(15, 23, 42, 0.12) !important;
+}
+
+/* buttons: no default white square, no text glyph */
+.tp-map .leaflet-control-zoom.leaflet-bar a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px !important;
+  height: 30px !important;
+  line-height: 1;
+  font-size: 0 !important;
+  color: #0f172a;
+  background-color: transparent !important;
+  background-repeat: no-repeat;
+  background-position: center;
+  border: none !important;
+  border-radius: 0 !important;
+  outline: none;
+  text-indent: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+}
+
+/* "+" icon: two crossing lines */
+.tp-map .leaflet-control-zoom.leaflet-bar a.leaflet-control-zoom-in {
+  background-image:
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(currentColor, currentColor);
+  background-size: 12px 2px, 2px 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12) !important;
+}
+
+/* "−" icon: one line */
+.tp-map .leaflet-control-zoom.leaflet-bar a.leaflet-control-zoom-out {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 12px 2px;
+}
+
+/* hover only on devices that really hover (no sticky hover on phones) */
+@media (hover: hover) {
+  .tp-map .leaflet-control-zoom.leaflet-bar a:hover {
+    background-color: rgba(37, 99, 235, 0.16) !important;
+  }
+}
+
+/* press feedback */
+.tp-map .leaflet-control-zoom.leaflet-bar a:active {
+  background-color: rgba(37, 99, 235, 0.28) !important;
+  transform: scale(0.9);
+}
+
+/* keyboard focus */
+.tp-map .leaflet-control-zoom.leaflet-bar a:focus-visible {
+  box-shadow: inset 0 0 0 2px #3b82f6;
+}
+
+/* min / max zoom reached */
+.tp-map .leaflet-control-zoom.leaflet-bar a.leaflet-disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+  color: #0f172a;
+  background-color: transparent !important;
+}
+
+/* dark theme */
+.tp-map-dark .leaflet-control-zoom.leaflet-bar {
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  background: rgba(15, 23, 42, 0.5);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4) !important;
+}
+.tp-map-dark .leaflet-control-zoom.leaflet-bar a,
+.tp-map-dark .leaflet-control-zoom.leaflet-bar a.leaflet-disabled {
+  color: #e2e8f0;
+}
+.tp-map-dark .leaflet-control-zoom.leaflet-bar a.leaflet-control-zoom-in {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14) !important;
+}
+@media (hover: hover) {
+  .tp-map-dark .leaflet-control-zoom.leaflet-bar a:hover {
+    background-color: rgba(96, 165, 250, 0.22) !important;
+  }
+}
+.tp-map-dark .leaflet-control-zoom.leaflet-bar a:active {
+  background-color: rgba(96, 165, 250, 0.34) !important;
+}
+
+/* fallback when the browser can't blur the background: slightly more solid */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .tp-map .leaflet-control-zoom.leaflet-bar { background: rgba(255, 255, 255, 0.85); }
+  .tp-map-dark .leaflet-control-zoom.leaflet-bar { background: rgba(15, 23, 42, 0.85); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tp-map .leaflet-control-zoom.leaflet-bar a { transition: none; }
+}
+`;
+
+/* ═══════════════════════════════════════════════════════════════════════
    🔑 Driver API auth — the generated api-client only knows the admin token,
    so every request to our own /api/ gets the DRIVER token instead.
    Restored automatically when the driver leaves this page.
@@ -1955,8 +2076,13 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       center: [11.2, 124.9], // Samar + Leyte
       zoom: 7,
       attributionControl: false,
+      zoomControl: false, // 👈 default white +/- is removed; the modern glass control is added below
     });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+
+    // 🎛️ Modern, small, transparent zoom control (styled by MAP_ZOOM_CSS)
+    L.control.zoom({ position: "bottomright" }).addTo(map);
+
     mapRef.current = map;
     const t = setTimeout(() => map.invalidateSize(), 250);
 
@@ -2269,6 +2395,9 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
   return (
     <div className="space-y-0">
+      {/* Modern glass zoom control styles (scoped to .tp-map) */}
+      <style>{MAP_ZOOM_CSS}</style>
+
       {/* Map — slides DOWN once a route is set, slides UP and disappears on Reset */}
       <div
         className={`grid transition-[grid-template-rows,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
@@ -2280,7 +2409,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           <div className="pb-3">
             {mapMounted && (
               <div
-                className={`relative isolate z-0 h-64 overflow-hidden rounded-3xl border ${
+                className={`tp-map ${isDark ? "tp-map-dark" : ""} relative isolate z-0 h-64 overflow-hidden rounded-3xl border ${
                   isDark ? "border-slate-800" : "border-slate-200"
                 }`}
               >
