@@ -45,10 +45,41 @@ const DRIVER_RULES: { methods: Set<string>; path: RegExp }[] = [
   },
 ];
 
+/**
+ * Endpoints that belong to DRIVERS ONLY.
+ * Admin tokens get 403 here (admin no longer manages fare routes).
+ * NOTE: GET /dashboard/stats is NOT in this list, because the admin
+ * dashboard still uses it for system-wide totals.
+ */
+const DRIVER_ONLY_RULES: { methods: Set<string>; path: RegExp }[] = [
+  {
+    methods: new Set(["GET", "POST", "PATCH", "PUT", "DELETE"]),
+    path: /\/routes\/(?!active\/?$)[^/]+(\/toggle)?\/?$|\/routes\/?$/,
+  },
+  {
+    methods: new Set(["GET"]),
+    path: /\/dashboard\/(my-routes|my-trips)\/?$/,
+  },
+  {
+    methods: new Set(["POST"]),
+    path: /\/dashboard\/claim-device\/?$/,
+  },
+];
+
+function getPath(req: Request): string {
+  return req.originalUrl.split("?")[0];
+}
+
 function driverMayAccess(req: Request): boolean {
   const method = req.method.toUpperCase();
-  const path = req.originalUrl.split("?")[0];
+  const path = getPath(req);
   return DRIVER_RULES.some((rule) => rule.methods.has(method) && rule.path.test(path));
+}
+
+function isDriverOnlyEndpoint(req: Request): boolean {
+  const method = req.method.toUpperCase();
+  const path = getPath(req);
+  return DRIVER_ONLY_RULES.some((rule) => rule.methods.has(method) && rule.path.test(path));
 }
 
 async function resolveDriver(token: string) {
@@ -79,15 +110,19 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  // 1) Admin token (unchanged)
+  // 1) Admin token: NO access to driver-only endpoints (fare routes are managed by drivers)
   const adminUser = verifyAdminToken(token);
   if (adminUser) {
+    if (isDriverOnlyEndpoint(req)) {
+      res.status(403).json({ error: "Fare routes are managed by drivers only." });
+      return;
+    }
     (req as any).adminUser = adminUser;
     next();
     return;
   }
 
-  // 2) Driver token — only for allowed endpoints
+  // 2) Driver token: only for allowed endpoints
   try {
     const driver = await resolveDriver(token);
     if (driver) {
