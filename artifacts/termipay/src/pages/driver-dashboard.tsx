@@ -803,21 +803,32 @@ function PlaceCombobox({
 /* ═══════════════════════════════════════════════════════════════════════
    🗺️ DISTANCE-BASED FARE (LTFRB: Base Fare + Succeeding Distance)
 
-   🎯 ACCURATE + ⚡ FAST
-   • Every place (barangay, city, municipality) has its OWN coordinates.
-   • A barangay result is accepted only if it is inside Samar/Leyte AND within
-     35 km of its own city/municipality center (so a same-named barangay in
-     another province can never be picked).
-   • If the barangay can't be found on the map, the city/municipality center is
-     used and the driver is told the distance is approximate. That approximate
-     answer is NOT saved, so it is tried again next time.
-   • Exact answers are saved on this device and in Supabase (shared by ALL
-     drivers), so the same place or route is instant after the first lookup.
+   🎯 ACCURATE + ⚡ FAST + 🛠️ FIXED BARANGAY LOOKUP
+
+   WHY SOME BARANGAYS (e.g. Oquendo, Calbayog City) COULD NOT BE FOUND BEFORE:
+   1. PSGC names come with extras like "Oquendo (Pob.)" or "Sta. Rosa" — the old
+      search sent that text as-is, and OpenStreetMap could not match it.
+      → Now the name is cleaned and several spellings are tried
+        (without "(Pob.)", "Sta." → "Santa", without ñ/accents).
+   2. The long query "Barangay, Municipality, Province, Philippines" is too strict
+      for OpenStreetMap, which stores many barangays under a different parent.
+      → Now it first tries the short "Barangay, Municipality", then searches the
+        plain name inside a box around the municipality, then a second geocoder
+        (Photon), and only then falls back to the municipality center.
+   3. The old limit of 35 km from the city center rejected real barangays of
+      big cities (Calbayog City is huge).
+      → Now up to 80 km if the result text mentions the municipality, 20 km if not.
+   4. Poblacion barangays ("Poblacion", "Barangay 1", "Zone 2"...) cannot be found by
+      name on any map. They sit at the town center, so the center is used and the
+      distance is NOT marked approximate.
+   5. If the road service (OSRM) is down, a straight-line estimate × 1.35 is used
+      (marked approximate) instead of failing.
+   6. Caches were bumped (v4 / v3), so earlier WRONG matches are ignored.
 
    LOOKUP ORDER (stops at the first hit):
      1. this device (localStorage)  → 0 ms
      2. shared Supabase cache        → ~100 ms
-     3. Nominatim / OSRM             → only for places/routes nobody used yet
+     3. Nominatim / Photon / OSRM    → only for places/routes nobody used yet
    ═══════════════════════════════════════════════════════════════════════ */
 
 const DEFAULT_BASE_FARE = 15;
@@ -825,6 +836,8 @@ const DEFAULT_BASE_KM = 4;
 const DEFAULT_RATE = 2.2;
 
 type LatLng = { lat: number; lng: number };
+type GeoHit = LatLng & { text: string }; // text = display name returned by the geocoder
+type Box = { west: number; south: number; east: number; north: number };
 
 function computeLtfrbFare(distanceKm: number, baseFare: number, baseKm: number, ratePerKm: number) {
   const excess = Math.max(0, distanceKm - baseKm);
@@ -834,8 +847,12 @@ function computeLtfrbFare(distanceKm: number, baseFare: number, baseKm: number, 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // Samar + Leyte islands (west, south, east, north) — anything outside is rejected
-const AREA = { west: 124.0, south: 9.8, east: 126.3, north: 12.8 };
-const BARANGAY_MAX_KM_FROM_CENTER = 35;
+const AREA: Box = { west: 124.0, south: 9.8, east: 126.3, north: 12.8 };
+
+// how far a barangay result may be from its own city/municipality center
+const BARANGAY_MAX_KM_MATCHED = 80; // result text mentions the municipality → trusted
+const BARANGAY_MAX_KM_UNMATCHED = 20; // result text does NOT mention it → must be close
+const LOCAL_BOX_DEG = 0.5; // ±0.5° (~55 km) search box around the municipality center
 
 const insideArea = (p: LatLng) =>
   Number.isFinite(p.lat) &&
@@ -845,7 +862,7 @@ const insideArea = (p: LatLng) =>
   p.lng >= AREA.west &&
   p.lng <= AREA.east;
 
-// straight-line distance between two points (km) — only used to validate geocoder results
+// straight-line distance between two points (km)
 function haversineKm(a: LatLng, b: LatLng) {
   const R = 6371;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -858,6 +875,12 @@ function haversineKm(a: LatLng, b: LatLng) {
 
 // "Samar (Western Samar)" → "Samar"
 const cleanProvince = (name: string) => name.replace(/\s*\(.*?\)\s*/g, " ").trim();
+
+// remove accents / ñ
+const stripAccents = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+// lower-case, no accents, single spaces — used only to COMPARE texts
+const norm = (s: string) => stripAccents(s).toLowerCase().replace(/\s+/g, " ").trim();
 
 // fetch + JSON with a timeout, never throws (returns null on any problem)
 async function fetchJsonSafe(url: string, timeoutMs = 8000): Promise<any | null> {
@@ -893,58 +916,184 @@ function throttledGeo<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-// Up to 5 candidates, limited to the Samar + Leyte area (bounded viewbox), best match first
-async function geocodeSearch(query: string): Promise<LatLng[]> {
+// Up to 8 candidates inside the given box (default: whole Samar + Leyte), with their display text
+async function nominatimSearch(query: string, box: Box = AREA): Promise<GeoHit[]> {
   return throttledGeo(async () => {
-    const viewbox = `${AREA.west},${AREA.north},${AREA.east},${AREA.south}`;
+    const viewbox = `${box.west},${box.north},${box.east},${box.south}`;
     const url =
-      `https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=ph` +
+      `https://nominatim.openstreetmap.org/search?format=json&limit=8&countrycodes=ph` +
       `&viewbox=${viewbox}&bounded=1&q=${encodeURIComponent(query)}`;
     const data = await fetchJsonSafe(url, 10000);
     if (!Array.isArray(data)) return [];
     return data
-      .map((d: any) => ({ lat: parseFloat(d.lat), lng: parseFloat(d.lon) }))
+      .map((d: any) => ({
+        lat: parseFloat(d.lat),
+        lng: parseFloat(d.lon),
+        text: String(d.display_name ?? ""),
+      }))
       .filter(insideArea);
   });
 }
 
+// Photon (komoot) — second opinion when Nominatim has nothing. Free, CORS-enabled.
+async function photonSearch(query: string, near?: LatLng): Promise<GeoHit[]> {
+  const bias = near ? `&lat=${near.lat}&lon=${near.lng}` : "";
+  const url =
+    `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=8` +
+    `&bbox=${AREA.west},${AREA.south},${AREA.east},${AREA.north}${bias}`;
+  const data = await fetchJsonSafe(url, 10000);
+  const feats: any[] = Array.isArray(data?.features) ? data.features : [];
+  return feats
+    .map((f: any) => {
+      const c = f?.geometry?.coordinates;
+      const p = f?.properties ?? {};
+      return {
+        lat: Number(c?.[1]),
+        lng: Number(c?.[0]),
+        text: [p.name, p.district, p.locality, p.city, p.county, p.state].filter(Boolean).join(", "),
+      } as GeoHit;
+    })
+    .filter(insideArea);
+}
+
 async function geocode(query: string): Promise<LatLng | null> {
-  const list = await geocodeSearch(query);
-  return list[0] ?? null;
+  const list = await nominatimSearch(query);
+  return list[0] ? { lat: list[0].lat, lng: list[0].lng } : null;
 }
 
 // City / municipality center
 async function geocodeMuni(p: Place): Promise<LatLng | null> {
   const prov = cleanProvince(p.province);
   const plain = p.municipality.replace(/\s+city$/i, "").trim();
-  const attempts = [`${p.municipality}, ${prov}, Philippines`, `${plain}, ${prov}, Philippines`];
+  const plainN = norm(plain);
+  const attempts = [
+    `${p.municipality}, ${prov}, Philippines`,
+    `${plain}, ${prov}, Philippines`,
+    `${plain}, Philippines`,
+  ];
+
   for (const q of attempts) {
-    const hit = await geocode(q);
-    if (hit) return hit;
+    const list = await nominatimSearch(q);
+    const hit = list.find((h) => norm(h.text).includes(plainN)) ?? list[0];
+    if (hit) return { lat: hit.lat, lng: hit.lng };
   }
-  return null;
+
+  // last chance: second geocoder
+  const ph = await photonSearch(`${plain} ${prov}`);
+  const phHit = ph.find((h) => norm(h.text).includes(plainN)) ?? ph[0];
+  return phHit ? { lat: phHit.lat, lng: phHit.lng } : null;
 }
 
-// The barangay itself — must be near its own municipality center
+/* ----- barangay name cleaning ----- */
+
+// "Oquendo (Pob.)" → "Oquendo", "Barangay Sta. Rosa" → "Sta. Rosa"
+function barangayCore(raw: string): string {
+  return raw
+    .replace(/\(.*?\)/g, " ")
+    .replace(/\b(pob|poblacion|población)\b\.?/gi, " ")
+    .replace(/\b(barangay|brgy)\b\.?/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Poblacion / numbered / zone barangays have no real name on any map — they sit at the town center
+function isCenterLike(raw: string): boolean {
+  const core = barangayCore(raw);
+  if (!core) return true; // e.g. just "Poblacion"
+  if (/^(no\.?\s*)?\d+\s*[a-z]?$/i.test(core)) return true; // "1", "2-A", "No. 3"
+  if (/^(zone|purok|district)\s*(no\.?\s*)?\d+\s*[a-z]?$/i.test(core)) return true;
+  if (/^[ivxlc]+$/i.test(core)) return true; // roman numerals
+  return false;
+}
+
+// Several spellings of the same barangay (max 3, no duplicates)
+function barangayVariants(raw: string): string[] {
+  const core = barangayCore(raw);
+  if (!core) return [];
+  const expanded = core
+    .replace(/\bsta\.?\s+/gi, "Santa ")
+    .replace(/\bsto\.?\s+/gi, "Santo ")
+    .replace(/\bsn\.?\s+/gi, "San ");
+  const list = [core, expanded, stripAccents(core), stripAccents(expanded)];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of list) {
+    const k = v.trim();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(k);
+  }
+  return out.slice(0, 3);
+}
+
+// Picks the best candidate: its text must contain the barangay name, and it must be near the municipality
+function pickBarangayHit(
+  hits: GeoHit[],
+  variants: string[],
+  center: LatLng,
+  muniPlain: string
+): LatLng | null {
+  const vN = variants.map(norm);
+  const mN = norm(muniPlain);
+  let best: { pt: GeoHit; km: number; matched: boolean } | null = null;
+
+  for (const h of hits) {
+    const t = norm(h.text);
+    if (!vN.some((v) => t.includes(v))) continue; // not about this barangay
+
+    const km = haversineKm(h, center);
+    const matched = t.includes(mN);
+    if (km > (matched ? BARANGAY_MAX_KM_MATCHED : BARANGAY_MAX_KM_UNMATCHED)) continue;
+
+    if (
+      !best ||
+      (matched && !best.matched) ||
+      (matched === best.matched && km < best.km)
+    ) {
+      best = { pt: h, km, matched };
+    }
+  }
+  return best ? { lat: best.pt.lat, lng: best.pt.lng } : null;
+}
+
+// The barangay itself — tries the short query first, then a local box, then Photon, then the long query
 async function geocodeBarangay(p: Place, center: LatLng): Promise<LatLng | null> {
   const prov = cleanProvince(p.province);
-  const name = p.barangay ?? "";
-  if (!name) return null;
+  const plain = p.municipality.replace(/\s+city$/i, "").trim();
+  const variants = barangayVariants(p.barangay ?? "");
+  if (variants.length === 0) return null;
 
-  const attempts = [
-    `${name}, ${p.municipality}, ${prov}, Philippines`,
-    `Barangay ${name}, ${p.municipality}, ${prov}, Philippines`,
-  ];
-  for (const q of attempts) {
-    const list = await geocodeSearch(q);
-    const near = list.find((pt) => haversineKm(pt, center) <= BARANGAY_MAX_KM_FROM_CENTER);
-    if (near) return near;
+  const local: Box = {
+    west: center.lng - LOCAL_BOX_DEG,
+    east: center.lng + LOCAL_BOX_DEG,
+    south: center.lat - LOCAL_BOX_DEG,
+    north: center.lat + LOCAL_BOX_DEG,
+  };
+
+  for (const v of variants.slice(0, 2)) {
+    // 1) short query: "Oquendo, Calbayog"
+    let hits = await nominatimSearch(`${v}, ${plain}`);
+    let pt = pickBarangayHit(hits, variants, center, plain);
+    if (pt) return pt;
+
+    // 2) plain name only, but inside a box around the municipality
+    hits = await nominatimSearch(v, local);
+    pt = pickBarangayHit(hits, variants, center, plain);
+    if (pt) return pt;
   }
-  return null;
+
+  // 3) second geocoder (Photon), biased toward the municipality
+  const ph = await photonSearch(`${variants[0]} ${plain}`, center);
+  const phPt = pickBarangayHit(ph, variants, center, plain);
+  if (phPt) return phPt;
+
+  // 4) the old long query, as a last try
+  const hits = await nominatimSearch(`Barangay ${variants[0]}, ${p.municipality}, ${prov}, Philippines`);
+  return pickBarangayHit(hits, variants, center, plain);
 }
 
-/* ----- this device: coordinates (v3 = barangay level) ----- */
-const GEO_CACHE_KEY = "termipay_geo_cache_v3";
+/* ----- this device: coordinates (v4 = improved barangay lookup) ----- */
+const GEO_CACHE_KEY = "termipay_geo_cache_v4";
 
 function loadGeoCache(): Record<string, LatLng> {
   try {
@@ -970,8 +1119,8 @@ function saveGeoCache() {
   }
 }
 
-/* ----- this device: distances (v2 = place level) ----- */
-const KM_CACHE_KEY = "termipay_km_cache_v2";
+/* ----- this device: distances (v3 = improved lookup) ----- */
+const KM_CACHE_KEY = "termipay_km_cache_v3";
 
 function loadKmCache(): Record<string, number> {
   try {
@@ -995,9 +1144,9 @@ function saveKmCache() {
 
 /* ----- shared cache in Supabase (optional: if the tables don't exist, it is silently skipped) -----
    Tables: place_coords(code, label, lat, lng)  and  route_distances(key, km).
-   Keys start with "v2:" so the old, less accurate entries are ignored. */
+   Keys start with "v3:" so the old, less accurate entries are ignored. */
 
-const SHARED_PREFIX = "v2:";
+const SHARED_PREFIX = "v3:";
 
 async function sharedGetCoord(code: string): Promise<LatLng | null> {
   try {
@@ -1083,8 +1232,9 @@ function getMuniCoord(p: Place): Promise<LatLng | null> {
 
 /* ----- coordinates of ANY place (barangay-level when possible) ----- */
 function geocodePlaceCached(p: Place): Promise<LatLng | null> {
-  // cities and municipalities ARE their own center
-  if (p.kind !== "barangay") return getMuniCoord(p);
+  // cities and municipalities ARE their own center.
+  // Poblacion / numbered barangays also sit at the town center (they can't be found by name on a map).
+  if (p.kind !== "barangay" || isCenterLike(p.barangay ?? "")) return getMuniCoord(p);
 
   const key = p.code;
   const hit = geoCache[key];
@@ -1199,11 +1349,16 @@ async function computeKm(a: Place, b: Place): Promise<KmResult> {
     const [o, d] = await Promise.all([geocodePlaceCached(a), geocodePlaceCached(b)]);
     if (!o || !d) return { ok: false, reason: "locate" };
 
-    const km = await roadKm(o, d);
-    if (km == null) return { ok: false, reason: "route" };
+    let km = await roadKm(o, d);
+    let estimated = false;
+    if (km == null) {
+      // road service is down → straight line × 1.35 (typical road winding), marked approximate
+      km = haversineKm(o, d) * 1.35;
+      estimated = true;
+    }
 
     const rounded = Math.round(km * 100) / 100;
-    const approx = approxCodes.has(a.code) || approxCodes.has(b.code);
+    const approx = estimated || approxCodes.has(a.code) || approxCodes.has(b.code);
 
     // only EXACT answers are saved; approximate ones are tried again next time
     if (!approx) {
@@ -1250,11 +1405,23 @@ const mapPin = (color: string, label: string) =>
    🔑 Driver API auth — the generated api-client only knows the admin token,
    so every request to our own /api/ gets the DRIVER token instead.
    Restored automatically when the driver leaves this page.
+
+   ✅ FIXED: the token is now sent ONLY to our own origin (this site, or the
+   VITE_API_URL host). Before, a blocklist was used, so any new third-party
+   host with an /api/ path (like the Photon geocoder, photon.komoot.io/api/)
+   would have received the Authorization header and failed with CORS.
    ═══════════════════════════════════════════════════════════════════════ */
 
 function useDriverApiAuth() {
   useEffect(() => {
     const original = window.fetch;
+
+    const ownOrigins = new Set<string>([window.location.origin]);
+    try {
+      if (API_BASE) ownOrigins.add(new URL(API_BASE).origin);
+    } catch {
+      /* invalid VITE_API_URL — only same-origin requests get the token */
+    }
 
     window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
       const token = window.localStorage.getItem(DRIVER_TOKEN_KEY);
@@ -1270,18 +1437,9 @@ function useDriverApiAuth() {
         return original(input, init);
       }
 
-      // Only OUR API (path starts with /api/). Third-party hosts must never get
-      // the Authorization header — it triggers a CORS preflight that they reject
-      // (this is what broke the PSGC places list: psgc.gitlab.io/api/...).
-      const host = parsed.hostname;
-      const isExternal =
-        host === "psgc.gitlab.io" ||
-        host.endsWith("openstreetmap.org") ||
-        host.endsWith("project-osrm.org") ||
-        host.endsWith("supabase.co") ||
-        host.endsWith("supabase.in");
-
-      if (isExternal || !parsed.pathname.startsWith("/api/")) {
+      // Only OUR API (our origin AND path starts with /api/). Third-party hosts must never get
+      // the Authorization header — it triggers a CORS preflight that they reject.
+      if (!ownOrigins.has(parsed.origin) || !parsed.pathname.startsWith("/api/")) {
         return original(input, init);
       }
 
@@ -2038,7 +2196,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     }
 
     const approxNote = approxUsed
-      ? "One barangay isn't on the map, so the city/municipality center was used. The distance is approximate."
+      ? "A barangay isn't on the map (its city/municipality center was used) or the road service was unavailable. The distance is approximate."
       : undefined;
 
     /* 2️⃣ save (create or update) + 3️⃣ auto-activate */
