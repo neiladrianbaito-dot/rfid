@@ -367,7 +367,7 @@ type Place = {
   barangay?: string;
   municipality: string;
   province: string;
-  muniCode: string; // code of the city/municipality (used for coordinates + distance)
+  muniCode: string; // code of the city/municipality (used as the reference point of a barangay)
   s?: string; // lower-cased search text, prepared once
 };
 
@@ -803,15 +803,21 @@ function PlaceCombobox({
 /* ═══════════════════════════════════════════════════════════════════════
    🗺️ DISTANCE-BASED FARE (LTFRB: Base Fare + Succeeding Distance)
 
-   ⚡ INSTANT LOOKUP ORDER (stops at the first hit):
-     1. this device (localStorage)        → 0 ms
-     2. shared Supabase cache              → ~100 ms, shared by ALL drivers
-     3. Nominatim / OSRM (only for a place or route nobody has used yet),
-        then the answer is saved to 1 and 2 for next time.
+   🎯 ACCURATE + ⚡ FAST
+   • Every place (barangay, city, municipality) has its OWN coordinates.
+   • A barangay result is accepted only if it is inside Samar/Leyte AND within
+     35 km of its own city/municipality center (so a same-named barangay in
+     another province can never be picked).
+   • If the barangay can't be found on the map, the city/municipality center is
+     used and the driver is told the distance is approximate. That approximate
+     answer is NOT saved, so it is tried again next time.
+   • Exact answers are saved on this device and in Supabase (shared by ALL
+     drivers), so the same place or route is instant after the first lookup.
 
-   Coordinates are per CITY / MUNICIPALITY (a barangay uses the coordinates
-   of its municipality), so there are far fewer lookups and almost all of
-   them are already cached.
+   LOOKUP ORDER (stops at the first hit):
+     1. this device (localStorage)  → 0 ms
+     2. shared Supabase cache        → ~100 ms
+     3. Nominatim / OSRM             → only for places/routes nobody used yet
    ═══════════════════════════════════════════════════════════════════════ */
 
 const DEFAULT_BASE_FARE = 15;
@@ -826,6 +832,32 @@ function computeLtfrbFare(distanceKm: number, baseFare: number, baseKm: number, 
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Samar + Leyte islands (west, south, east, north) — anything outside is rejected
+const AREA = { west: 124.0, south: 9.8, east: 126.3, north: 12.8 };
+const BARANGAY_MAX_KM_FROM_CENTER = 35;
+
+const insideArea = (p: LatLng) =>
+  Number.isFinite(p.lat) &&
+  Number.isFinite(p.lng) &&
+  p.lat >= AREA.south &&
+  p.lat <= AREA.north &&
+  p.lng >= AREA.west &&
+  p.lng <= AREA.east;
+
+// straight-line distance between two points (km) — only used to validate geocoder results
+function haversineKm(a: LatLng, b: LatLng) {
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s =
+    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// "Samar (Western Samar)" → "Samar"
+const cleanProvince = (name: string) => name.replace(/\s*\(.*?\)\s*/g, " ").trim();
 
 // fetch + JSON with a timeout, never throws (returns null on any problem)
 async function fetchJsonSafe(url: string, timeoutMs = 8000): Promise<any | null> {
@@ -861,26 +893,58 @@ function throttledGeo<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-async function geocode(query: string): Promise<LatLng | null> {
+// Up to 5 candidates, limited to the Samar + Leyte area (bounded viewbox), best match first
+async function geocodeSearch(query: string): Promise<LatLng[]> {
   return throttledGeo(async () => {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(
-      query
-    )}`;
+    const viewbox = `${AREA.west},${AREA.north},${AREA.east},${AREA.south}`;
+    const url =
+      `https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=ph` +
+      `&viewbox=${viewbox}&bounded=1&q=${encodeURIComponent(query)}`;
     const data = await fetchJsonSafe(url, 10000);
-    if (!Array.isArray(data) || data.length === 0) return null;
-    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    if (!Array.isArray(data)) return [];
+    return data
+      .map((d: any) => ({ lat: parseFloat(d.lat), lng: parseFloat(d.lon) }))
+      .filter(insideArea);
   });
 }
 
-// City / municipality coordinates (a barangay uses its municipality)
-async function geocodeMuni(p: Place): Promise<LatLng | null> {
-  const hit = await geocode(`${p.municipality}, ${p.province}, Philippines`);
-  if (hit) return hit;
-  return geocode(`${p.municipality}, Philippines`);
+async function geocode(query: string): Promise<LatLng | null> {
+  const list = await geocodeSearch(query);
+  return list[0] ?? null;
 }
 
-/* ----- this device: coordinates ----- */
-const GEO_CACHE_KEY = "termipay_geo_cache_v2";
+// City / municipality center
+async function geocodeMuni(p: Place): Promise<LatLng | null> {
+  const prov = cleanProvince(p.province);
+  const plain = p.municipality.replace(/\s+city$/i, "").trim();
+  const attempts = [`${p.municipality}, ${prov}, Philippines`, `${plain}, ${prov}, Philippines`];
+  for (const q of attempts) {
+    const hit = await geocode(q);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+// The barangay itself — must be near its own municipality center
+async function geocodeBarangay(p: Place, center: LatLng): Promise<LatLng | null> {
+  const prov = cleanProvince(p.province);
+  const name = p.barangay ?? "";
+  if (!name) return null;
+
+  const attempts = [
+    `${name}, ${p.municipality}, ${prov}, Philippines`,
+    `Barangay ${name}, ${p.municipality}, ${prov}, Philippines`,
+  ];
+  for (const q of attempts) {
+    const list = await geocodeSearch(q);
+    const near = list.find((pt) => haversineKm(pt, center) <= BARANGAY_MAX_KM_FROM_CENTER);
+    if (near) return near;
+  }
+  return null;
+}
+
+/* ----- this device: coordinates (v3 = barangay level) ----- */
+const GEO_CACHE_KEY = "termipay_geo_cache_v3";
 
 function loadGeoCache(): Record<string, LatLng> {
   try {
@@ -895,6 +959,9 @@ function loadGeoCache(): Record<string, LatLng> {
 const geoCache: Record<string, LatLng> = loadGeoCache();
 const geoInflight = new Map<string, Promise<LatLng | null>>();
 
+// places whose own location couldn't be found → the city/municipality center was used instead
+const approxCodes = new Set<string>();
+
 function saveGeoCache() {
   try {
     localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache));
@@ -903,8 +970,8 @@ function saveGeoCache() {
   }
 }
 
-/* ----- this device: distances ----- */
-const KM_CACHE_KEY = "termipay_km_cache_v1";
+/* ----- this device: distances (v2 = place level) ----- */
+const KM_CACHE_KEY = "termipay_km_cache_v2";
 
 function loadKmCache(): Record<string, number> {
   try {
@@ -927,19 +994,21 @@ function saveKmCache() {
 }
 
 /* ----- shared cache in Supabase (optional: if the tables don't exist, it is silently skipped) -----
-   Tables: place_coords(code, label, lat, lng)  and  route_distances(key, km)  — SQL is given separately. */
+   Tables: place_coords(code, label, lat, lng)  and  route_distances(key, km).
+   Keys start with "v2:" so the old, less accurate entries are ignored. */
+
+const SHARED_PREFIX = "v2:";
 
 async function sharedGetCoord(code: string): Promise<LatLng | null> {
   try {
     const { data, error } = await supabase
       .from("place_coords")
       .select("lat, lng")
-      .eq("code", code)
+      .eq("code", SHARED_PREFIX + code)
       .maybeSingle();
     if (error || !data) return null;
-    const lat = Number((data as any).lat);
-    const lng = Number((data as any).lng);
-    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+    const pt = { lat: Number((data as any).lat), lng: Number((data as any).lng) };
+    return insideArea(pt) ? pt : null;
   } catch {
     return null;
   }
@@ -947,9 +1016,9 @@ async function sharedGetCoord(code: string): Promise<LatLng | null> {
 
 function sharedSaveCoord(code: string, label: string, pt: LatLng) {
   try {
-    Promise.resolve(supabase.from("place_coords").upsert({ code, label, lat: pt.lat, lng: pt.lng })).catch(
-      () => {}
-    );
+    Promise.resolve(
+      supabase.from("place_coords").upsert({ code: SHARED_PREFIX + code, label, lat: pt.lat, lng: pt.lng })
+    ).catch(() => {});
   } catch {
     /* ignore */
   }
@@ -960,7 +1029,7 @@ async function sharedGetKm(key: string): Promise<number | null> {
     const { data, error } = await supabase
       .from("route_distances")
       .select("km")
-      .eq("key", key)
+      .eq("key", SHARED_PREFIX + key)
       .maybeSingle();
     if (error || !data) return null;
     const km = Number((data as any).km);
@@ -972,29 +1041,31 @@ async function sharedGetKm(key: string): Promise<number | null> {
 
 function sharedSaveKm(key: string, km: number) {
   try {
-    Promise.resolve(supabase.from("route_distances").upsert({ key, km })).catch(() => {});
+    Promise.resolve(supabase.from("route_distances").upsert({ key: SHARED_PREFIX + key, km })).catch(
+      () => {}
+    );
   } catch {
     /* ignore */
   }
 }
 
-/* ----- coordinates of a place (always at city / municipality level) ----- */
-function geocodePlaceCached(p: Place): Promise<LatLng | null> {
+/* ----- city / municipality center (also the reference point of its barangays) ----- */
+const muniInflight = new Map<string, Promise<LatLng | null>>();
+
+function getMuniCoord(p: Place): Promise<LatLng | null> {
   const key = p.muniCode;
   const hit = geoCache[key];
   if (hit) return Promise.resolve(hit);
 
-  let pending = geoInflight.get(key);
+  let pending = muniInflight.get(key);
   if (!pending) {
     pending = (async () => {
-      // 2) shared cache (other drivers may have looked it up already)
       const shared = await sharedGetCoord(key);
       if (shared) {
         geoCache[key] = shared;
         saveGeoCache();
         return shared;
       }
-      // 3) really look it up (slow, but only once for everybody)
       const found = await geocodeMuni(p);
       if (found) {
         geoCache[key] = found;
@@ -1002,6 +1073,50 @@ function geocodePlaceCached(p: Place): Promise<LatLng | null> {
         sharedSaveCoord(key, p.municipality, found);
       }
       return found;
+    })().finally(() => {
+      muniInflight.delete(key);
+    });
+    muniInflight.set(key, pending);
+  }
+  return pending;
+}
+
+/* ----- coordinates of ANY place (barangay-level when possible) ----- */
+function geocodePlaceCached(p: Place): Promise<LatLng | null> {
+  // cities and municipalities ARE their own center
+  if (p.kind !== "barangay") return getMuniCoord(p);
+
+  const key = p.code;
+  const hit = geoCache[key];
+  if (hit) return Promise.resolve(hit);
+
+  let pending = geoInflight.get(key);
+  if (!pending) {
+    pending = (async () => {
+      // 2) shared cache (another driver may have looked this barangay up already)
+      const shared = await sharedGetCoord(key);
+      if (shared) {
+        geoCache[key] = shared;
+        saveGeoCache();
+        return shared;
+      }
+
+      // 3) really look it up, using the municipality center to validate the result
+      const center = await getMuniCoord(p);
+      if (!center) return null;
+
+      const found = await geocodeBarangay(p, center);
+      if (found) {
+        approxCodes.delete(key);
+        geoCache[key] = found;
+        saveGeoCache();
+        sharedSaveCoord(key, p.label, found);
+        return found;
+      }
+
+      // not on the map → use the municipality center, flag it, and do NOT save it
+      approxCodes.add(key);
+      return center;
     })().finally(() => {
       geoInflight.delete(key);
     });
@@ -1053,15 +1168,17 @@ async function roadKm(a: LatLng, b: LatLng): Promise<number | null> {
   return null;
 }
 
-type KmResult = { ok: true; km: number } | { ok: false; reason: "locate" | "route" | "network" };
+type KmResult =
+  | { ok: true; km: number; approx?: boolean }
+  | { ok: false; reason: "locate" | "route" | "network" };
 
-// same pair in either direction shares ONE saved distance
+// same pair in either direction shares ONE saved distance (place level, so barangays are exact)
 const pairKey = (a: Place, b: Place) =>
-  a.muniCode <= b.muniCode ? `${a.muniCode}|${b.muniCode}` : `${b.muniCode}|${a.muniCode}`;
+  a.code <= b.code ? `${a.code}|${b.code}` : `${b.code}|${a.code}`;
 
 async function computeKm(a: Place, b: Place): Promise<KmResult> {
-  // same city/municipality → no road lookup needed (base fare applies)
-  if (a.muniCode === b.muniCode) return { ok: true, km: 0 };
+  // exactly the same place → no distance
+  if (a.code === b.code) return { ok: true, km: 0 };
 
   const key = pairKey(a, b);
 
@@ -1081,13 +1198,20 @@ async function computeKm(a: Place, b: Place): Promise<KmResult> {
   try {
     const [o, d] = await Promise.all([geocodePlaceCached(a), geocodePlaceCached(b)]);
     if (!o || !d) return { ok: false, reason: "locate" };
+
     const km = await roadKm(o, d);
     if (km == null) return { ok: false, reason: "route" };
-    const rounded = Math.round(km * 1000) / 1000;
-    kmCache[key] = rounded;
-    saveKmCache();
-    sharedSaveKm(key, rounded);
-    return { ok: true, km: rounded };
+
+    const rounded = Math.round(km * 100) / 100;
+    const approx = approxCodes.has(a.code) || approxCodes.has(b.code);
+
+    // only EXACT answers are saved; approximate ones are tried again next time
+    if (!approx) {
+      kmCache[key] = rounded;
+      saveKmCache();
+      sharedSaveKm(key, rounded);
+    }
+    return { ok: true, km: rounded, approx };
   } catch {
     return { ok: false, reason: "network" };
   }
@@ -1102,7 +1226,8 @@ function getRoadKm(a: Place, b: Place): Promise<KmResult> {
   let pending = roadKmCache.get(key);
   if (!pending) {
     pending = computeKm(a, b).then((r) => {
-      if (!r.ok) roadKmCache.delete(key); // failed → allow a fresh try next time
+      // failed or approximate → allow a fresh try next time
+      if (!r.ok || r.approx) roadKmCache.delete(key);
       return r;
     });
     roadKmCache.set(key, pending);
@@ -1189,7 +1314,7 @@ type PanelProps = { isDark: boolean; visible: boolean };
 
 function FareMapPanel({ isDark, visible }: PanelProps) {
   const { toast: baseToast } = useToast();
-  // every toast on this page stays on screen for only 500 ms
+  // every toast on this page stays on screen for only 500 ms (unless a toast sets its own duration)
   const toast = (opts: Parameters<typeof baseToast>[0]) => baseToast({ duration: 500, ...opts });
   const queryClient = useQueryClient();
   const actorUsername =
@@ -1883,6 +2008,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
     /* 1️⃣ distance → fare (usually already prepared in the background) */
     let fareAmount: number;
+    let approxUsed = false;
     try {
       const res = await getRoadKm(originPlace, destPlace);
 
@@ -1898,6 +2024,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         return;
       }
 
+      approxUsed = !!res.approx;
       fareAmount = computeLtfrbFare(res.km, bf, bk, rt);
       if (!(fareAmount > 0)) {
         setError("The computed fare is invalid.");
@@ -1909,6 +2036,10 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       setBusy(false);
       return;
     }
+
+    const approxNote = approxUsed
+      ? "One barangay isn't on the map, so the city/municipality center was used. The distance is approximate."
+      : undefined;
 
     /* 2️⃣ save (create or update) + 3️⃣ auto-activate */
     setSaving(true);
@@ -1945,11 +2076,18 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       setResetDeviceId(null);
 
       if (activateResult === "ok") {
-        toast({ title: <SuccessTitle text={`Route Saved & Activated — ₱${p.fareAmount.toFixed(2)}`} /> });
+        toast({
+          title: <SuccessTitle text={`Route Saved & Activated — ₱${p.fareAmount.toFixed(2)}`} />,
+          description: approxNote,
+          ...(approxNote ? { duration: 5000 } : {}),
+        });
       } else if (activateResult === "no-device") {
         toast({
           title: <SuccessTitle text={`Route Saved — ₱${p.fareAmount.toFixed(2)}`} />,
-          description: "No reader device to re-use. Activate the route manually.",
+          description: approxNote
+            ? `No reader device to re-use. Activate the route manually. ${approxNote}`
+            : "No reader device to re-use. Activate the route manually.",
+          ...(approxNote ? { duration: 5000 } : {}),
         });
       } else {
         toast({
