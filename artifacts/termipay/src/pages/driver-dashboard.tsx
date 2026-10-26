@@ -65,6 +65,8 @@ import {
   KeyRound,
   Mail,
   ShieldCheck,
+  Satellite,
+  Map as MapIcon, // renamed so it never clashes with the JS built-in Map
 } from "lucide-react";
 
 const DRIVER_TOKEN_KEY = "termipay_driver_auth_token";
@@ -1733,6 +1735,44 @@ const mapPin = (color: string, label: string) =>
   });
 
 /* ═══════════════════════════════════════════════════════════════════════
+   🛰️ MAP TYPES — Default (Leaflet / OpenStreetMap) or Satellite (Esri imagery)
+   • The driver picks the type in the legend on the map (top-right).
+   • The choice is saved on this device, so it is remembered next time.
+   • Satellite also draws a transparent place-names layer on top, so towns and
+     roads can still be read. The route line turns yellow on satellite so it
+     stays visible on dark imagery.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+type MapStyle = "standard" | "satellite";
+
+const MAP_STYLE_KEY = "termipay_map_style_v1";
+
+const OSM_TILES = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const SAT_TILES =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+const SAT_LABEL_TILES =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}";
+
+const ROUTE_COLOR_STANDARD = "#2563eb";
+const ROUTE_COLOR_SATELLITE = "#facc15";
+
+function readMapStyle(): MapStyle {
+  try {
+    return localStorage.getItem(MAP_STYLE_KEY) === "satellite" ? "satellite" : "standard";
+  } catch {
+    return "standard";
+  }
+}
+
+function writeMapStyle(s: MapStyle) {
+  try {
+    localStorage.setItem(MAP_STYLE_KEY, s);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    🎛️ MODERN MAP ZOOM CONTROL (+ / −)
    • Leaflet's default white square buttons are removed.
    • Small, transparent "glass" pill (blurred background) like a mobile map app.
@@ -1848,8 +1888,28 @@ const MAP_ZOOM_CSS = `
   .tp-map-dark .leaflet-control-zoom.leaflet-bar { background: rgba(15, 23, 42, 0.85); }
 }
 
+/* on satellite the zoom pill sits on dark imagery → keep it light and readable */
+.tp-map-sat .leaflet-control-zoom.leaflet-bar {
+  background: rgba(255, 255, 255, 0.78);
+}
+.tp-map-sat .leaflet-control-zoom.leaflet-bar a,
+.tp-map-sat .leaflet-control-zoom.leaflet-bar a.leaflet-disabled {
+  color: #0f172a;
+}
+.tp-map-sat .leaflet-control-zoom.leaflet-bar a.leaflet-control-zoom-in {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12) !important;
+}
+
+/* map layer legend: smooth press feedback, no tap highlight on phones */
+.tp-legend button {
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+.tp-legend button:active { transform: scale(0.97); }
+
 @media (prefers-reduced-motion: reduce) {
   .tp-map .leaflet-control-zoom.leaflet-bar a { transition: none; }
+  .tp-legend button { transition: none; }
 }
 `;
 
@@ -1918,6 +1978,7 @@ function useDriverApiAuth() {
      and slides UP (and is fully removed) on Reset.
    • Pins + road line follow the SAVED route, so they stay for as long as the
      route exists and go back to zero on Reset.
+   • 🛰️ A legend on the map lets the driver switch between Default and Satellite.
    ═══════════════════════════════════════════════════════════════════════ */
 
 type PanelProps = { isDark: boolean; visible: boolean };
@@ -2400,6 +2461,18 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   const [originPt, setOriginPt] = useState<LatLng | null>(null);
   const [destPt, setDestPt] = useState<LatLng | null>(null);
 
+  // 🛰️ Map type chosen by the driver (Default / Satellite) — remembered on this device
+  const [mapStyle, setMapStyle] = useState<MapStyle>(() => readMapStyle());
+  const mapStyleRef = useRef<MapStyle>(mapStyle);
+  mapStyleRef.current = mapStyle; // always the latest value, for use inside async map code
+  const baseLayerRef = useRef<L.TileLayer | null>(null);
+  const labelLayerRef = useRef<L.TileLayer | null>(null);
+
+  const changeMapStyle = useCallback((next: MapStyle) => {
+    setMapStyle(next);
+    writeMapStyle(next);
+  }, []);
+
   // Create the Leaflet map when its container mounts, destroy it when the container is removed
   useEffect(() => {
     if (!mapEl) return;
@@ -2409,7 +2482,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       attributionControl: false,
       zoomControl: false, // 👈 default white +/- is removed; the modern glass control is added below
     });
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+    // NOTE: the tile layers are added by the "map type" effect below (Default or Satellite)
 
     // 🎛️ Modern, small, transparent zoom control (styled by MAP_ZOOM_CSS)
     L.control.zoom({ position: "bottomright" }).addTo(map);
@@ -2421,11 +2494,46 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       clearTimeout(t);
       map.remove();
       mapRef.current = null;
+      baseLayerRef.current = null;
+      labelLayerRef.current = null;
       originMarker.current = null;
       destMarker.current = null;
       routeLine.current = null;
     };
   }, [mapEl]);
+
+  // 🛰️ Swap the tiles whenever the driver picks Default or Satellite (also runs once when the map is created)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    baseLayerRef.current?.remove();
+    labelLayerRef.current?.remove();
+    baseLayerRef.current = null;
+    labelLayerRef.current = null;
+
+    if (mapStyle === "satellite") {
+      // maxNativeZoom 17: where imagery is not available closer up, tiles are scaled instead of going blank
+      const base = L.tileLayer(SAT_TILES, { maxZoom: 19, maxNativeZoom: 17 }).addTo(map);
+      base.bringToBack();
+      const labels = L.tileLayer(SAT_LABEL_TILES, {
+        maxZoom: 19,
+        maxNativeZoom: 17,
+        pane: "overlayPane", // above the imagery, below the route line and pins
+      }).addTo(map);
+      baseLayerRef.current = base;
+      labelLayerRef.current = labels;
+    } else {
+      const base = L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(map);
+      base.bringToBack();
+      baseLayerRef.current = base;
+    }
+
+    // the route line stays visible on both: blue on the default map, yellow on dark satellite imagery
+    routeLine.current?.setStyle({
+      color: mapStyle === "satellite" ? ROUTE_COLOR_SATELLITE : ROUTE_COLOR_STANDARD,
+    });
+  }, [mapStyle, mapEl]);
 
   // After the slide-down finishes (or the tab becomes visible) → fix tile sizing and re-fit the route
   useEffect(() => {
@@ -2508,7 +2616,11 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         if (cancelled || !mapRef.current) return;
         map.invalidateSize();
         if (r) {
-          routeLine.current = L.polyline(r.coords, { color: "#2563eb", weight: 5, opacity: 0.9 }).addTo(map);
+          routeLine.current = L.polyline(r.coords, {
+            color: mapStyleRef.current === "satellite" ? ROUTE_COLOR_SATELLITE : ROUTE_COLOR_STANDARD,
+            weight: 5,
+            opacity: 0.9,
+          }).addTo(map);
           map.fitBounds(routeLine.current.getBounds(), { padding: [40, 40] });
         } else {
           map.fitBounds(
@@ -2738,9 +2850,24 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
   /* ═════════ render ═════════ */
 
+  const isSat = mapStyle === "satellite";
+
+  // Legend styling: light glass on default map, dark glass when the app is dark, always readable on satellite
+  const legendPanel = isSat
+    ? "border-white/20 bg-slate-900/75 text-slate-100"
+    : isDark
+      ? "border-white/10 bg-slate-900/80 text-slate-100"
+      : "border-white/70 bg-white/85 text-slate-800";
+  const legendDivider = isSat || isDark ? "border-white/15" : "border-slate-200";
+
+  const mapTypeOptions = [
+    { id: "standard" as const, label: "Default", Icon: MapIcon },
+    { id: "satellite" as const, label: "Satellite", Icon: Satellite },
+  ];
+
   return (
     <div className="space-y-0">
-      {/* Modern glass zoom control styles (scoped to .tp-map) */}
+      {/* Modern glass zoom control + legend styles (scoped to .tp-map / .tp-legend) */}
       <style>{MAP_ZOOM_CSS}</style>
 
       {/* Map — slides DOWN once a route is set, slides UP and disappears on Reset */}
@@ -2754,14 +2881,94 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           <div className="pb-3">
             {mapMounted && (
               <div
-                className={`tp-map ${isDark ? "tp-map-dark" : ""} relative isolate z-0 h-64 overflow-hidden rounded-3xl border ${
+                className={`tp-map ${isDark ? "tp-map-dark" : ""} ${isSat ? "tp-map-sat" : ""} relative isolate z-0 h-72 sm:h-80 overflow-hidden rounded-3xl border ${
                   isDark ? "border-slate-800" : "border-slate-200"
                 }`}
               >
                 <div ref={setMapEl} className="h-full w-full" />
+
                 <span className="absolute left-3 top-3 z-[500] flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white backdrop-blur">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
                   Route map
+                </span>
+
+                {/* 🗺️ LEGEND — pick the map type + what the pins / line mean */}
+                <div
+                  className={`tp-legend absolute right-3 top-3 z-[500] w-[138px] rounded-2xl border p-1.5 shadow-lg backdrop-blur-md ${legendPanel}`}
+                  role="group"
+                  aria-label="Map legend"
+                >
+                  <p className="px-1.5 pb-1 pt-0.5 text-[9px] font-bold uppercase tracking-widest opacity-60">
+                    Map type
+                  </p>
+
+                  <div className="space-y-1">
+                    {mapTypeOptions.map(({ id, label, Icon }) => {
+                      const selected = mapStyle === id;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => changeMapStyle(id)}
+                          aria-pressed={selected}
+                          className={`flex w-full items-center gap-2 rounded-xl px-1.5 py-1.5 text-left text-[11px] font-semibold ${
+                            selected
+                              ? "bg-blue-600 text-white shadow"
+                              : isSat || isDark
+                                ? "hover:bg-white/10"
+                                : "hover:bg-slate-900/5"
+                          }`}
+                        >
+                          {/* little preview swatch of the map type */}
+                          <span
+                            aria-hidden="true"
+                            className={`relative flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md border ${
+                              selected ? "border-white/60" : "border-black/10"
+                            }`}
+                            style={{
+                              background:
+                                id === "satellite"
+                                  ? "linear-gradient(135deg,#14532d 0%,#365314 45%,#1e3a5f 100%)"
+                                  : "linear-gradient(135deg,#e8efe0 0%,#f7f3e8 55%,#bcd7f0 100%)",
+                            }}
+                          >
+                            <Icon
+                              className={`h-3.5 w-3.5 ${id === "satellite" ? "text-white" : "text-slate-700"}`}
+                            />
+                          </span>
+                          <span className="flex-1 leading-none">{label}</span>
+                          {selected && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className={`mt-1.5 space-y-1 border-t px-1.5 pb-0.5 pt-1.5 text-[10px] font-semibold ${legendDivider}`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-full border-2 border-white bg-blue-600 shadow" />
+                      Origin
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-600 shadow" />
+                      Destination
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className="h-1 w-2.5 rounded-full"
+                        style={{ background: isSat ? ROUTE_COLOR_SATELLITE : ROUTE_COLOR_STANDARD }}
+                      />
+                      Route
+                    </div>
+                  </div>
+                </div>
+
+                {/* attribution for the tile providers (small, bottom-left) */}
+                <span
+                  className={`pointer-events-none absolute bottom-1.5 left-2 z-[500] rounded px-1.5 py-0.5 text-[8px] font-medium backdrop-blur ${
+                    isSat ? "bg-black/50 text-white/80" : "bg-white/70 text-slate-600"
+                  }`}
+                >
+                  {isSat ? "Imagery © Esri" : "© OpenStreetMap"}
                 </span>
               </div>
             )}
