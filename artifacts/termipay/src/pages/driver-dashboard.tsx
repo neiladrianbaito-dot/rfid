@@ -63,11 +63,14 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  Mail,
+  ShieldCheck,
 } from "lucide-react";
 
 const DRIVER_TOKEN_KEY = "termipay_driver_auth_token";
 const AUTH_ROLE_KEY = "termipay_auth_role";
 const DRIVER_NAME_KEY = "termipay_driver_username"; // optional, used as "actor" in activate/deactivate
+const DRIVER_PROFILE_KEY = "termipay_driver_profile_v1"; // saved copy of the profile so it shows instantly
 
 // Same base URL as your api-client. If the frontend and API share one domain, leave it empty.
 // If they are on different domains, set VITE_API_URL=https://rfid-exfz.onrender.com in the frontend env.
@@ -120,6 +123,259 @@ async function fetchMyActiveRouteIds(): Promise<string[] | null> {
 }
 
 type Tab = "home" | "map" | "trips" | "profile";
+
+/* ═══════════════════════════════════════════════════════════════════════
+   👤 DRIVER PROFILE — real name, email and profile picture
+   Same idea as the user dashboard (authProfile.fullName / email / avatarUrl).
+
+   Where the data comes from (best source wins, empty values never overwrite):
+     1. saved copy on this device       → instant, no blinking
+     2. the driver token (JWT claims)   → email / name / picture, if the token has them
+     3. Supabase Auth session (Google)  → only used to FILL what is still missing
+     4. your backend                    → the real source of truth (tries a few common routes)
+
+   👉 If your backend profile route has a different name, add it to PROFILE_ENDPOINTS below.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+type DriverProfile = {
+  fullName: string;
+  email: string;
+  avatarUrl: string | null;
+  username: string;
+};
+
+const EMPTY_PROFILE: DriverProfile = { fullName: "", email: "", avatarUrl: null, username: "" };
+
+// 👈 Add / reorder your real "who am I" route here. The first one that answers OK is used.
+const PROFILE_ENDPOINTS = [
+  "/api/auth/user/me",
+  "/api/auth/user/profile",
+  "/api/auth/me",
+  "/api/dashboard/profile",
+  "/api/dashboard/me",
+];
+
+const clean = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// "juan.delacruz23@gmail.com" → "Juan Delacruz23" (only used when no real name exists)
+function deriveNameFromEmail(email?: string | null): string {
+  if (!email) return "";
+  const localPart = email.split("@")[0] || "";
+  if (!localPart.trim()) return "";
+  return localPart
+    .split(/[._\-+]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+    .trim();
+}
+
+function decodeJwtPayload(token: string | null): any | null {
+  if (!token) return null;
+  try {
+    const part = token.split(".")[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const json = decodeURIComponent(
+      atob(padded)
+        .split("")
+        .map((c) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0"))
+        .join("")
+    );
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+// Accepts many possible shapes: {user:{...}}, {profile:{...}}, {data:{...}}, or a flat object
+function pickProfile(raw: any): Partial<DriverProfile> {
+  if (!raw || typeof raw !== "object") return {};
+  const o = raw.user ?? raw.profile ?? raw.data ?? raw;
+  const meta = o?.user_metadata ?? o?.userMetadata ?? {};
+
+  const fullName =
+    clean(o.fullName) ||
+    clean(o.full_name) ||
+    clean(o.displayName) ||
+    clean(o.display_name) ||
+    clean(o.name) ||
+    clean(meta.full_name) ||
+    clean(meta.name);
+
+  const email = clean(o.email) || clean(meta.email);
+
+  const avatar =
+    clean(o.avatarUrl) ||
+    clean(o.avatar_url) ||
+    clean(o.picture) ||
+    clean(o.photoUrl) ||
+    clean(o.photo_url) ||
+    clean(o.profilePicture) ||
+    clean(o.image) ||
+    clean(meta.avatar_url) ||
+    clean(meta.picture);
+
+  const username = clean(o.username) || clean(o.userName) || clean(o.user_name);
+
+  const out: Partial<DriverProfile> = {};
+  if (fullName) out.fullName = fullName;
+  if (email) out.email = email;
+  if (avatar) out.avatarUrl = avatar;
+  if (username) out.username = username;
+  return out;
+}
+
+// merge: later arguments only fill what is still empty (earlier = higher priority)
+function mergeProfiles(...parts: Partial<DriverProfile>[]): DriverProfile {
+  const out: DriverProfile = { ...EMPTY_PROFILE };
+  for (const p of parts) {
+    if (!out.fullName && p.fullName) out.fullName = p.fullName;
+    if (!out.email && p.email) out.email = p.email;
+    if (!out.avatarUrl && p.avatarUrl) out.avatarUrl = p.avatarUrl;
+    if (!out.username && p.username) out.username = p.username;
+  }
+  return out;
+}
+
+function readSavedProfile(): Partial<DriverProfile> {
+  try {
+    const raw = localStorage.getItem(DRIVER_PROFILE_KEY);
+    return raw ? pickProfile(JSON.parse(raw)) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveProfile(p: DriverProfile) {
+  try {
+    localStorage.setItem(DRIVER_PROFILE_KEY, JSON.stringify(p));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+async function fetchProfileFromBackend(): Promise<Partial<DriverProfile>> {
+  for (const path of PROFILE_ENDPOINTS) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, { headers: driverAuthHeaders() });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const picked = pickProfile(data);
+      if (picked.fullName || picked.email || picked.avatarUrl) return picked;
+    } catch {
+      /* try the next route */
+    }
+  }
+  return {};
+}
+
+async function fetchProfileFromSupabase(): Promise<Partial<DriverProfile>> {
+  try {
+    const { data } = await supabase.auth.getUser();
+    const u: any = data?.user;
+    if (!u) return {};
+    return pickProfile({
+      email: u.email,
+      user_metadata: u.user_metadata,
+    });
+  } catch {
+    return {};
+  }
+}
+
+function useDriverProfile(enabled: boolean) {
+  const [profile, setProfile] = useState<DriverProfile>(() =>
+    mergeProfiles(readSavedProfile(), {
+      username: window.localStorage.getItem(DRIVER_NAME_KEY) ?? "",
+    })
+  );
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    const token = window.localStorage.getItem(DRIVER_TOKEN_KEY);
+    const claims = decodeJwtPayload(token);
+    const fromToken = pickProfile(claims ?? {});
+    const storedUsername = clean(window.localStorage.getItem(DRIVER_NAME_KEY));
+
+    // show what we already know right away (saved copy + token), then upgrade with the server answer
+    setProfile((prev) =>
+      mergeProfiles(prev, fromToken, storedUsername ? { username: storedUsername } : {})
+    );
+
+    const [backend, google] = await Promise.all([
+      fetchProfileFromBackend(),
+      fetchProfileFromSupabase(),
+    ]);
+
+    // backend = truth. Token next. Google session only fills what is still missing.
+    const next = mergeProfiles(
+      backend,
+      fromToken,
+      readSavedProfile(),
+      google,
+      storedUsername ? { username: storedUsername } : {}
+    );
+
+    setProfile((prev) => {
+      const same =
+        prev.fullName === next.fullName &&
+        prev.email === next.email &&
+        prev.avatarUrl === next.avatarUrl &&
+        prev.username === next.username;
+      return same ? prev : next;
+    });
+    saveProfile(next);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
+    load();
+  }, [enabled, load]);
+
+  return { profile, loading, reload: load };
+}
+
+// Real photo when there is one, otherwise the fallback (initials / icon). Also falls back if the image fails to load.
+function DriverAvatar({
+  url,
+  name,
+  fallback,
+}: {
+  url: string | null;
+  name: string;
+  fallback?: React.ReactNode;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [url]);
+
+  if (!url || failed) {
+    if (fallback) return <>{fallback}</>;
+    return <span className="text-base font-black tracking-tight">{getInitials(name || "?")}</span>;
+  }
+
+  return (
+    <img
+      src={url}
+      alt={name}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      className="h-full w-full rounded-full object-cover"
+    />
+  );
+}
 
 /* ═══════════════════════════════════════════════════════════════════════
    🧾 REAL TRIPS — built on the server from the `transactions` table
@@ -3125,6 +3381,15 @@ export default function DriverDashboardPage() {
   // Route panel mounts on first visit, then stays mounted (keeps the route/map state when switching tabs)
   const [mapVisited, setMapVisited] = useState(false);
 
+  // 👤 Real name / email / profile picture of the signed-in driver
+  const { profile: driverProfile, loading: profileLoading } = useDriverProfile(authorized);
+  const profileName =
+    driverProfile.fullName ||
+    deriveNameFromEmail(driverProfile.email) ||
+    driverProfile.username ||
+    "Driver account";
+  const profileEmail = driverProfile.email;
+
   // 🧾 Real trips from the database (today on Home, today / last 7 days on the Trips tab)
   const [tripRange, setTripRange] = useState<"today" | "week">("today");
   const tripDays = tab === "trips" && tripRange === "week" ? 7 : 1;
@@ -3178,6 +3443,7 @@ export default function DriverDashboardPage() {
     window.localStorage.removeItem(DRIVER_TOKEN_KEY);
     window.localStorage.removeItem(AUTH_ROLE_KEY);
     window.localStorage.removeItem(DRIVER_NAME_KEY);
+    window.localStorage.removeItem(DRIVER_PROFILE_KEY); // 👈 don't show this driver's profile to the next login
     setLocation("/signin");
   }
 
@@ -3596,13 +3862,53 @@ export default function DriverDashboardPage() {
         {tab === "profile" && (
           <div key="profile" className="tab-in space-y-4">
             <section className={`rounded-2xl border p-4 space-y-4 ${card}`}>
+              {/* 👤 Real avatar + name + email (same look as the user dashboard) */}
               <div className="flex items-center gap-3">
-                <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center">
-                  <UserRound className="h-6 w-6 text-white" />
+                <div className="h-14 w-14 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 overflow-hidden border-2 border-blue-500/30">
+                  {profileLoading && !driverProfile.avatarUrl && !driverProfile.fullName && !driverProfile.email ? (
+                    <Skeleton className="h-full w-full rounded-full bg-white/20" />
+                  ) : (
+                    <DriverAvatar
+                      url={driverProfile.avatarUrl}
+                      name={profileName}
+                      fallback={
+                        driverProfile.fullName || driverProfile.email ? (
+                          <span className="text-base font-black tracking-tight">
+                            {getInitials(profileName)}
+                          </span>
+                        ) : (
+                          <UserRound className="h-6 w-6 text-white" />
+                        )
+                      }
+                    />
+                  )}
                 </div>
-                <div>
-                  <p className="font-bold">Driver account</p>
-                  <p className={`text-xs ${muted}`}>Role: driver</p>
+
+                <div className="min-w-0 flex-1">
+                  {profileLoading && !driverProfile.fullName && !driverProfile.email ? (
+                    <div className="space-y-1.5">
+                      <Skeleton className={`h-4 w-32 ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+                      <Skeleton className={`h-3 w-44 ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
+                    </div>
+                  ) : (
+                    <>
+                      <p className="truncate font-bold leading-tight">{profileName}</p>
+                      <p className={`mt-0.5 flex items-center gap-1 truncate text-xs ${muted}`}>
+                        <Mail className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{profileEmail || "No email on file"}</span>
+                      </p>
+                    </>
+                  )}
+                  <span
+                    className={`mt-1.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                      isDark
+                        ? "border-emerald-900 bg-emerald-950/40 text-emerald-400"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    }`}
+                  >
+                    <ShieldCheck className="h-3 w-3" />
+                    Role: driver
+                  </span>
                 </div>
               </div>
 
