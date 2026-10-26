@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard, Download, FileText, Bus, AlertTriangle } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard, Download, FileText, Bus, AlertTriangle, Cpu, Unlink } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   AlertDialog,
@@ -64,6 +64,7 @@ interface DriverAccountRow {
   full_name: string | null;
   email: string | null;
   linked_card_uid: string | null;
+  device_id?: string | null; // 📟 naka-link na device ng driver
 }
 
 // 💸 Isang transaction row na may driver_id (para sa total fare collected)
@@ -1085,6 +1086,15 @@ export default function UserManagementPage() {
   const [transferReason, setTransferReason] = useState<(typeof TRANSFER_REASONS)[number]>("Lost Card");
   const [isTransferring, setIsTransferring] = useState(false);
 
+  // 📟 Link Device ID sa driver
+  const [deviceDriver, setDeviceDriver] = useState<{
+    accountId: string;
+    name: string;
+    deviceId: string | null;
+  } | null>(null);
+  const [deviceInput, setDeviceInput] = useState("");
+  const [isSavingDevice, setIsSavingDevice] = useState(false);
+
   const [editForm, setEditForm] = useState(EMPTY_EDIT_FORM);
   // Snapshot of the form's values at the moment Edit was opened — used to
   // detect whether the user has actually changed anything before allowing Save.
@@ -1157,7 +1167,7 @@ export default function UserManagementPage() {
       // Fallback: direktang select (kailangan ng SELECT policy / RLS off)
       const { data, error } = await supabase
         .from("auth_users")
-        .select("id, supabase_auth_id, full_name, email, linked_card_uid")
+        .select("id, supabase_auth_id, full_name, email, linked_card_uid, device_id")
         .ilike("role", "driver")
         .order("full_name", { ascending: true });
 
@@ -1319,8 +1329,10 @@ export default function UserManagementPage() {
 
       return {
         id: String(driver.id ?? driver.supabase_auth_id ?? ""),
+        accountId: driver.id ? String(driver.id) : (null as string | null),
         name: driver.full_name || "—",
         email: driver.email || "—",
+        deviceId: (driver.device_id ?? null) as string | null,
         totalFare: total,
         trips: count,
       };
@@ -1335,8 +1347,10 @@ export default function UserManagementPage() {
 
       rows.push({
         id: entry.rawId,
+        accountId: null,
         name: profile?.full_name || "Unlinked driver",
         email: profile?.email || "—",
+        deviceId: (profile?.device_id ?? null) as string | null,
         totalFare: entry.total,
         trips: entry.count,
       });
@@ -1387,6 +1401,7 @@ export default function UserManagementPage() {
       (d) =>
         d.name.toLowerCase().includes(q) ||
         d.email.toLowerCase().includes(q) ||
+        (d.deviceId ?? "").toLowerCase().includes(q) ||
         d.id.toLowerCase().includes(q)
     );
   }, [driverSummaries, search]);
@@ -2050,6 +2065,62 @@ export default function UserManagementPage() {
     );
   };
 
+  // 📟 Buksan ang Link Device dialog para sa isang driver
+  const openDeviceLink = (driver: { accountId: string | null; name: string; deviceId: string | null }) => {
+    if (blockIfViewOnly()) return;
+    if (!driver.accountId) return;
+    setDeviceDriver({ accountId: driver.accountId, name: driver.name, deviceId: driver.deviceId });
+    setDeviceInput(driver.deviceId ?? "");
+  };
+
+  // 📟 I-save (link/palitan) o i-unlink (walang laman) ang device ID ng driver
+  const saveDeviceLink = async (unlink = false) => {
+    if (blockIfViewOnly()) {
+      setDeviceDriver(null);
+      return;
+    }
+    if (!deviceDriver) return;
+
+    const value = unlink ? "" : deviceInput.trim();
+
+    if (!unlink && !value) {
+      toast({
+        title: "Device ID required",
+        description: "Enter the device ID to link, or use Unlink to remove it.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSavingDevice(true);
+
+    const { error } = await supabase.rpc("link_driver_device", {
+      p_driver_id: deviceDriver.accountId,
+      p_device_id: value,
+    });
+
+    setIsSavingDevice(false);
+
+    if (error) {
+      console.error("Link device error:", error);
+      const duplicate = /duplicate|unique/i.test(error.message || "");
+      toast({
+        title: unlink ? "Failed to unlink device" : "Failed to link device",
+        description: duplicate
+          ? "This device ID is already linked to another driver."
+          : error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    await refetchAuthRoles();
+    setDeviceDriver(null);
+    toast({
+      title: <SuccessTitle text={unlink ? "Device Unlinked" : "Device Linked Successfully"} />,
+    });
+  };
+
   // ✅ Opens the renewal confirmation dialog for a given user.
   // 🚫➕ GUARD: if the card hasn't expired yet, renewal is blocked here too
   // (on top of the disabled buttons) — the dialog simply won't open, and the
@@ -2492,7 +2563,7 @@ export default function UserManagementPage() {
               <div className="relative w-full sm:w-80">
                 <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
                 <Input
-                  placeholder={isDriverTab ? "Search driver name, email or ID..." : "Search UID or name..."}
+                  placeholder={isDriverTab ? "Search driver name, email, ID or device..." : "Search UID or name..."}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className={`pl-10 font-medium text-sm h-10 focus-visible:ring-blue-500 ${
@@ -2615,6 +2686,9 @@ export default function UserManagementPage() {
                           <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-blue-500">
                             <span className="flex items-center gap-1"><Mail size={10} /> Email</span>
                           </TableHead>
+                          <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-cyan-500">
+                            <span className="flex items-center gap-1"><Cpu size={10} /> Device ID</span>
+                          </TableHead>
                           <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-emerald-500" : "text-emerald-600"}`}>
                             Today's Fare Collected
                           </TableHead>
@@ -2646,6 +2720,43 @@ export default function UserManagementPage() {
                                 </span>
                               </TableCell>
 
+                              {/* 📟 Naka-link na Device ID + Link/Edit button */}
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  {driver.deviceId ? (
+                                    <span
+                                      className={`inline-flex items-center gap-1 text-[11px] font-mono font-semibold px-2 py-0.5 rounded border max-w-[180px] ${
+                                        isDark ? "text-cyan-400 bg-cyan-950/40 border-cyan-900" : "text-cyan-700 bg-cyan-50 border-cyan-200"
+                                      }`}
+                                      title={driver.deviceId}
+                                    >
+                                      <Cpu className="w-3 h-3 flex-shrink-0" />
+                                      <span className="truncate">{driver.deviceId}</span>
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border ${
+                                        isDark ? "text-slate-500 bg-slate-800 border-slate-700" : "text-slate-400 bg-slate-100 border-slate-200"
+                                      }`}
+                                    >
+                                      <Cpu size={9} /> Not linked
+                                    </span>
+                                  )}
+
+                                  {canManage && driver.accountId && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => openDeviceLink(driver)}
+                                      className={`h-7 w-7 cursor-pointer ${isDark ? "text-cyan-400 hover:bg-cyan-950/40" : "text-cyan-600 hover:bg-cyan-50"}`}
+                                      title={driver.deviceId ? "Change / unlink device" : "Link device"}
+                                    >
+                                      {driver.deviceId ? <Pencil className="w-3 h-3" /> : <LinkIcon className="w-3 h-3" />}
+                                    </Button>
+                                  )}
+                                </div>
+                              </TableCell>
+
                               <TableCell className="text-right">
                                 <div className="flex flex-col items-end gap-0.5">
                                   <span
@@ -2666,7 +2777,7 @@ export default function UserManagementPage() {
                         ) : (
                           <TableRow>
                             <TableCell
-                              colSpan={4}
+                              colSpan={5}
                               className={`text-center py-20 uppercase font-semibold tracking-widest text-xs ${isDark ? "text-slate-700" : "text-slate-300"}`}
                             >
                               No drivers found
@@ -3574,6 +3685,80 @@ export default function UserManagementPage() {
               {isTransferring ? "Transferring..." : "Confirm Transfer"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 📟 Link Device ID Dialog (Drivers)
+          🔒 `open` naka-gate sa canManage */}
+      <Dialog open={canManage && !!deviceDriver} onOpenChange={(open) => { if (!open && !isSavingDevice) setDeviceDriver(null); }}>
+        <DialogContent className={`sm:max-w-md [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold uppercase tracking-wide flex items-center gap-2 text-cyan-500">
+              <Cpu size={18} /> Link Device
+            </DialogTitle>
+          </DialogHeader>
+
+          {deviceDriver && (
+            <form
+              onSubmit={(e) => { e.preventDefault(); saveDeviceLink(false); }}
+              className="space-y-4 py-2"
+            >
+              <div className={`rounded-lg border p-3 text-sm ${isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                <span className={`text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Driver</span>
+                <div className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>{deviceDriver.name}</div>
+                <div className="font-mono text-[11px] text-violet-500 truncate">{deviceDriver.accountId}</div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Device ID</Label>
+                <Input
+                  autoFocus
+                  value={deviceInput}
+                  onChange={(e) => setDeviceInput(e.target.value)}
+                  placeholder="e.g. TERMINAL-001"
+                  disabled={isSavingDevice}
+                  className={`font-mono text-sm ${isDark ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600" : "bg-white border-slate-200"}`}
+                />
+                <p className={`text-[11px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                  One device can be linked to one driver only.
+                </p>
+              </div>
+
+              <DialogFooter className="gap-2 sm:justify-between">
+                {deviceDriver.deviceId ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => saveDeviceLink(true)}
+                    disabled={isSavingDevice}
+                    className={`text-xs font-medium cursor-pointer gap-1.5 ${isDark ? "text-red-400 hover:bg-red-950/40" : "text-red-600 hover:bg-red-50"}`}
+                  >
+                    <Unlink className="w-3.5 h-3.5" /> Unlink
+                  </Button>
+                ) : <span />}
+
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setDeviceDriver(null)}
+                    disabled={isSavingDevice}
+                    className="text-xs cursor-pointer"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isSavingDevice || !deviceInput.trim() || deviceInput.trim() === (deviceDriver.deviceId ?? "")}
+                    className="bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold cursor-pointer gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isSavingDevice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LinkIcon className="w-3.5 h-3.5" />}
+                    {isSavingDevice ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
 
