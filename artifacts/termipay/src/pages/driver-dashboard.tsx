@@ -148,11 +148,7 @@ const EMPTY_PROFILE: DriverProfile = { fullName: "", email: "", avatarUrl: null,
 
 // 👈 Add / reorder your real "who am I" route here. The first one that answers OK is used.
 const PROFILE_ENDPOINTS = [
-  "/api/auth/user/me",
-  "/api/auth/user/profile",
-  "/api/auth/me",
-  "/api/dashboard/profile",
-  "/api/dashboard/me",
+  "/api/auth/user-me", // ✅ real route in your backend (returns fullName, email, avatarUrl)
 ];
 
 const clean = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
