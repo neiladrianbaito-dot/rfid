@@ -1193,6 +1193,50 @@ export default function UserManagementPage() {
     retry: false,
   });
 
+  /*
+   * 🔎 PANGALAN / EMAIL NG MGA driver_id SA TRANSACTIONS
+   * Hinahanap ang bawat driver_id sa BUONG auth_users (kahit anong role),
+   * sa pamamagitan ng supabase_auth_id at id. Para kahit hindi naka-set ang
+   * role = 'driver', lalabas pa rin ang tamang pangalan at email.
+   */
+  const fareDriverIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (fareRows ?? [])
+            .map((r) => String(r.driver_id ?? "").trim())
+            .filter(Boolean)
+        )
+      ).sort(),
+    [fareRows]
+  );
+
+  const { data: fareDriverProfiles } = useQuery({
+    queryKey: ["fare-driver-profiles", fareDriverIds],
+    enabled: fareDriverIds.length > 0,
+    queryFn: async (): Promise<DriverAccountRow[]> => {
+      const found: DriverAccountRow[] = [];
+      const cols = "id, supabase_auth_id, full_name, email, linked_card_uid";
+
+      for (const column of ["supabase_auth_id", "id"] as const) {
+        const { data, error } = await supabase
+          .from("auth_users")
+          .select(cols)
+          .in(column, fareDriverIds);
+
+        if (error) {
+          // Hal. kung integer ang `id`, mag-e-error ang uuid — laktawan lang.
+          console.warn(`[Drivers] lookup by ${column} failed:`, error.message);
+          continue;
+        }
+        found.push(...((data ?? []) as DriverAccountRow[]));
+      }
+
+      return found;
+    },
+    retry: false,
+  });
+
   // Lookup sets: normalized card UIDs and lowercase emails ng mga driver
   const driverLookup = useMemo(() => {
     const uids = new Set<string>();
@@ -1261,6 +1305,16 @@ export default function UserManagementPage() {
   const driverSummaries = useMemo(() => {
     const usedKeys = new Set<string>();
 
+    // Lookup ng profile (pangalan/email) kada key — galing sa role=driver rows
+    // at sa buong auth_users lookup ng mga driver_id sa transactions.
+    const profileByKey = new Map<string, DriverAccountRow>();
+    [...(driverRows ?? []), ...(fareDriverProfiles ?? [])].forEach((row) => {
+      [row.id, row.supabase_auth_id, row.linked_card_uid, row.email].forEach((k) => {
+        const key = normalizeKey(k);
+        if (key && !profileByKey.has(key)) profileByKey.set(key, row);
+      });
+    });
+
     const rows = (driverRows ?? []).map((driver) => {
       const keys = new Set(
         [driver.id, driver.supabase_auth_id, driver.linked_card_uid, driver.email]
@@ -1289,20 +1343,24 @@ export default function UserManagementPage() {
       };
     });
 
-    // 🔎 driver_id na walang katugmang account sa auth_users (role = driver)
+    // driver_id sa transactions na wala sa role=driver list: hanapin ang
+    // pangalan/email sa auth_users; kung wala talaga, "Unlinked driver".
     fareTotals.forEach((entry, key) => {
       if (usedKeys.has(key)) return;
+
+      const profile = profileByKey.get(key);
+
       rows.push({
         id: entry.rawId,
-        name: "Unlinked driver",
-        email: "—",
+        name: profile?.full_name || "Unlinked driver",
+        email: profile?.email || "—",
         totalFare: entry.total,
         trips: entry.count,
       });
     });
 
     return rows;
-  }, [driverRows, fareTotals]);
+  }, [driverRows, fareTotals, fareDriverProfiles]);
 
   // 🧪 DEBUG: tingnan sa browser console (F12) kung ano ang dumarating.
   // Burahin ang useEffect na ito kapag gumana na.
