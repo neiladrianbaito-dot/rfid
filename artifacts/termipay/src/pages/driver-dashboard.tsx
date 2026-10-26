@@ -2912,14 +2912,14 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                 <div ref={setMapEl} className="h-full w-full" />
 
                 {/* 📏 Approximate distance of the route */}
-<span
-  className="absolute left-3 top-3 z-[500] flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur"
-  aria-live="polite"
->
-  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-  <span className="font-medium text-white/70">Approximate distance:</span>
-  <span>{routeKm != null ? formatApproxKm(routeKm) : "Calculating…"}</span>
-</span>
+               <span
+           className="absolute left-3 top-3 z-[500] flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur"
+             aria-live="polite"
+              >
+             
+             <span className="font-medium text-white/70">Approximate distance:</span>
+                <span>{routeKm != null ? formatApproxKm(routeKm) : "Calculating…"}</span>
+              </span>
 
                 {/* 🗺️ LEGEND — closed by default; driver opens/closes it with the layers button / X */}
                 {legendOpen ? (
