@@ -1134,6 +1134,17 @@ export default function UserManagementPage() {
   } = useQuery({
     queryKey: ["auth-users-drivers"],
     queryFn: async (): Promise<DriverAccountRow[]> => {
+      // ✅ Una: RPC (security definer) — safe, kasi mga driver column lang
+      // ang inilalabas at hindi na kailangan ng RLS policy sa auth_users.
+      const rpc = await supabase.rpc("get_driver_accounts");
+
+      if (!rpc.error) {
+        return (rpc.data ?? []) as DriverAccountRow[];
+      }
+
+      console.warn("get_driver_accounts RPC failed, trying direct select:", rpc.error.message);
+
+      // Fallback: direktang select (kailangan ng SELECT policy / RLS off)
       const { data, error } = await supabase
         .from("auth_users")
         .select("id, supabase_auth_id, full_name, email, linked_card_uid")
@@ -1190,50 +1201,6 @@ export default function UserManagementPage() {
       return all;
     },
     refetchOnWindowFocus: true,
-    retry: false,
-  });
-
-  /*
-   * 🔎 PANGALAN / EMAIL NG MGA driver_id SA TRANSACTIONS
-   * Hinahanap ang bawat driver_id sa BUONG auth_users (kahit anong role),
-   * sa pamamagitan ng supabase_auth_id at id. Para kahit hindi naka-set ang
-   * role = 'driver', lalabas pa rin ang tamang pangalan at email.
-   */
-  const fareDriverIds = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          (fareRows ?? [])
-            .map((r) => String(r.driver_id ?? "").trim())
-            .filter(Boolean)
-        )
-      ).sort(),
-    [fareRows]
-  );
-
-  const { data: fareDriverProfiles } = useQuery({
-    queryKey: ["fare-driver-profiles", fareDriverIds],
-    enabled: fareDriverIds.length > 0,
-    queryFn: async (): Promise<DriverAccountRow[]> => {
-      const found: DriverAccountRow[] = [];
-      const cols = "id, supabase_auth_id, full_name, email, linked_card_uid";
-
-      for (const column of ["supabase_auth_id", "id"] as const) {
-        const { data, error } = await supabase
-          .from("auth_users")
-          .select(cols)
-          .in(column, fareDriverIds);
-
-        if (error) {
-          // Hal. kung integer ang `id`, mag-e-error ang uuid — laktawan lang.
-          console.warn(`[Drivers] lookup by ${column} failed:`, error.message);
-          continue;
-        }
-        found.push(...((data ?? []) as DriverAccountRow[]));
-      }
-
-      return found;
-    },
     retry: false,
   });
 
@@ -1308,7 +1275,7 @@ export default function UserManagementPage() {
     // Lookup ng profile (pangalan/email) kada key — galing sa role=driver rows
     // at sa buong auth_users lookup ng mga driver_id sa transactions.
     const profileByKey = new Map<string, DriverAccountRow>();
-    [...(driverRows ?? []), ...(fareDriverProfiles ?? [])].forEach((row) => {
+    [...(driverRows ?? [])].forEach((row) => {
       [row.id, row.supabase_auth_id, row.linked_card_uid, row.email].forEach((k) => {
         const key = normalizeKey(k);
         if (key && !profileByKey.has(key)) profileByKey.set(key, row);
@@ -1360,7 +1327,11 @@ export default function UserManagementPage() {
     });
 
     return rows;
-  }, [driverRows, fareTotals, fareDriverProfiles]);
+  }, [driverRows, fareTotals]);
+
+  // ⚠️ Walang driver account na nabasa pero may fare rows → RLS ang dahilan
+  const driversBlockedByRls =
+    !driversLoading && !rolesError && (driverRows ?? []).length === 0 && (fareRows ?? []).length > 0;
 
   // 🧪 DEBUG: tingnan sa browser console (F12) kung ano ang dumarating.
   // Burahin ang useEffect na ito kapag gumana na.
@@ -2451,7 +2422,21 @@ export default function UserManagementPage() {
             }`}
           >
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            Couldn't read driver accounts from auth_users — all cards are shown as Commuters. Check the SELECT policy (RLS) on public.auth_users.
+            Couldn't read driver accounts from auth_users — all cards are shown as Commuters. Run the get_driver_accounts() SQL function (or add a SELECT policy on public.auth_users).
+          </div>
+        )}
+
+        {/* ⚠️ Walang nabasang driver account (karaniwang RLS — walang error pero walang laman) */}
+        {driversBlockedByRls && (
+          <div
+            className={`flex-none flex items-center gap-2 px-6 py-2 text-xs font-medium border-b ${
+              isDark
+                ? "bg-orange-950/30 border-orange-900 text-orange-400"
+                : "bg-orange-50 border-orange-200 text-orange-700"
+            }`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            No driver accounts could be read, so names and emails can't be shown. Create the get_driver_accounts() SQL function.
           </div>
         )}
 
