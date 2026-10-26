@@ -542,6 +542,10 @@ function TripCard({
 const formatPeso = (value: number) =>
   `₱${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// 📏 "≈ 175 km" — whole km for long distances, one decimal under 10 km
+const formatApproxKm = (km: number) =>
+  `≈ ${km >= 10 ? Math.round(km).toLocaleString("en-US") : km.toFixed(1)} km`;
+
 function SuccessTitle({ text }: { text: string }) {
   return (
     <span className="flex items-center gap-2">
@@ -1984,6 +1988,8 @@ function useDriverApiAuth() {
      route exists and go back to zero on Reset.
    • 🛰️ A legend on the map lets the driver switch between Default and Satellite.
      It is CLOSED by default; the driver opens/closes it with the layers button.
+   • 📏 The label at the top-left of the map shows the approximate distance of
+     the saved route (example: ≈ 175 km).
    ═══════════════════════════════════════════════════════════════════════ */
 
 type PanelProps = { isDark: boolean; visible: boolean };
@@ -2466,6 +2472,10 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   const [originPt, setOriginPt] = useState<LatLng | null>(null);
   const [destPt, setDestPt] = useState<LatLng | null>(null);
 
+  // 📏 Approximate distance of the saved route (km) — shown in the label at the top-left of the map.
+  // Starts as a quick straight-line estimate, then is replaced by the real road distance.
+  const [routeKm, setRouteKm] = useState<number | null>(null);
+
   // 🛰️ Map type chosen by the driver (Default / Satellite) — remembered on this device
   const [mapStyle, setMapStyle] = useState<MapStyle>(() => readMapStyle());
   const mapStyleRef = useRef<MapStyle>(mapStyle);
@@ -2597,6 +2607,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     if (!savedOrigin || !savedDest) {
       setOriginPt(null);
       setDestPt(null);
+      setRouteKm(null);
       return;
     }
     if (!mapEl) return;
@@ -2612,6 +2623,9 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         setOriginPt(o);
         setDestPt(d);
 
+        // 📏 quick estimate first (straight line × 1.35), replaced below by the real road distance
+        setRouteKm(o && d ? haversineKm(o, d) * 1.35 : null);
+
         const map = mapRef.current;
         if (!map || !o || !d) {
           if (map && (o || d)) {
@@ -2625,6 +2639,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         if (cancelled || !mapRef.current) return;
         map.invalidateSize();
         if (r) {
+          setRouteKm(r.km); // 📏 real road distance
           routeLine.current = L.polyline(r.coords, {
             color: mapStyleRef.current === "satellite" ? ROUTE_COLOR_SATELLITE : ROUTE_COLOR_STANDARD,
             weight: 5,
@@ -2896,9 +2911,13 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
               >
                 <div ref={setMapEl} className="h-full w-full" />
 
-                <span className="absolute left-3 top-3 z-[500] flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white backdrop-blur">
+                {/* 📏 Approximate distance of the route (replaces the old "Route map" label) */}
+                <span
+                  className="absolute left-3 top-3 z-[500] flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur"
+                  aria-live="polite"
+                >
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-                  Route map
+                  {routeKm != null ? formatApproxKm(routeKm) : "Calculating…"}
                 </span>
 
                 {/* 🗺️ LEGEND — closed by default; driver opens/closes it with the layers button / X */}
