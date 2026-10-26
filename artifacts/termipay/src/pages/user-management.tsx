@@ -5,7 +5,7 @@ import {
   useDeleteUser,
   getListUsersQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard, Download, FileText } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard, Download, FileText, Bus } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   AlertDialog,
@@ -49,6 +49,18 @@ const TYPE_FILTERS = ["All", "Regular", "Student", "Senior", "PWD"] as const;
 // from the card's expirationDate via isCardExpired(), so it can catch cards
 // that are technically still "Active" in the status column but past their date.
 const STATUS_FILTERS = ["All", "Active", "Inactive", "Blocked", "Expired"] as const;
+
+// 🧑‍🤝‍🧑 ROLE TABS — based on public.auth_users.role ('commuter' | 'driver').
+// Cards with no linked account have no role, so they only show under "All".
+const ROLE_TABS = ["All", "Commuter", "Driver"] as const;
+type RoleTab = (typeof ROLE_TABS)[number];
+type AuthRole = "commuter" | "driver";
+
+interface AuthRoleRow {
+  email: string | null;
+  linked_card_uid: string | null;
+  role: string | null;
+}
 
 // ➕ Reasons a card would need a balance transfer (lost/stolen/damaged replacement)
 const TRANSFER_REASONS = ["Lost Card", "Stolen Card", "Damaged Card", "Other"] as const;
@@ -574,6 +586,18 @@ function getStatusDotColor(status: string) {
   }
 }
 
+// 🎨 Role badge style (Commuter = cyan, Driver = violet)
+function getRoleBadgeStyle(role: AuthRole, isDark: boolean) {
+  if (role === "driver") {
+    return isDark
+      ? "text-violet-400 bg-violet-950/40 border-violet-900"
+      : "text-violet-600 bg-violet-50 border-violet-200";
+  }
+  return isDark
+    ? "text-cyan-400 bg-cyan-950/40 border-cyan-900"
+    : "text-cyan-600 bg-cyan-50 border-cyan-200";
+}
+
 // 🪪 Card preview theming — accent color + label color per type, matching the physical card design
 // 🔵 Regular = default navy/blue card (white text)
 // ⚪ Discounted types (Student/Senior/PWD) = concessionary-style WHITE card (dark text)
@@ -986,6 +1010,8 @@ export default function UserManagementPage() {
   const { canManage, loaded } = useAdminAccess();
 
   const [search, setSearch] = useState("");
+  // 🧑‍🤝‍🧑 Role tab state (All / Commuter / Driver)
+  const [roleTab, setRoleTab] = useState<RoleTab>("All");
   const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>("All");
   // ➕ Status filter state (Active / Inactive / Blocked / Expired)
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>("All");
@@ -1054,6 +1080,63 @@ export default function UserManagementPage() {
   };
 
   const editInputCls = `h-9 text-sm ${isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"}`;
+
+  /*
+   * 🧑‍🤝‍🧑 ROLES FROM public.auth_users
+   * Kinukuha ang (email, linked_card_uid, role) ng lahat ng accounts para
+   * malaman kung commuter o driver ang may-ari ng bawat card.
+   */
+  const { data: authRoleRows, refetch: refetchAuthRoles } = useQuery({
+    queryKey: ["auth-users-roles"],
+    queryFn: async (): Promise<AuthRoleRow[]> => {
+      const { data, error } = await supabase
+        .from("auth_users")
+        .select("email, linked_card_uid, role");
+
+      if (error) {
+        console.error("Failed to load auth_users roles:", error);
+        throw error;
+      }
+
+      return (data ?? []) as AuthRoleRow[];
+    },
+    refetchOnWindowFocus: true,
+  });
+
+  // Lookup maps: card UID -> role, and email -> role (fallback)
+  const roleLookup = useMemo(() => {
+    const byCardUid = new Map<string, AuthRole>();
+    const byEmail = new Map<string, AuthRole>();
+
+    (authRoleRows ?? []).forEach((row) => {
+      const role = String(row.role || "").toLowerCase();
+      if (role !== "commuter" && role !== "driver") return;
+
+      if (row.linked_card_uid) {
+        byCardUid.set(String(row.linked_card_uid).trim().toLowerCase(), role);
+      }
+      if (row.email) {
+        byEmail.set(String(row.email).trim().toLowerCase(), role);
+      }
+    });
+
+    return { byCardUid, byEmail };
+  }, [authRoleRows]);
+
+  // Returns "commuter" | "driver" | null (null = card has no linked account)
+  const getUserRole = (user: any): AuthRole | null => {
+    const uid = String(user?.cardUid ?? "").trim().toLowerCase();
+    if (uid && roleLookup.byCardUid.has(uid)) {
+      return roleLookup.byCardUid.get(uid) as AuthRole;
+    }
+
+    const email = normalizeEmail(user?.email)?.toLowerCase();
+    if (email && roleLookup.byEmail.has(email)) {
+      return roleLookup.byEmail.get(email) as AuthRole;
+    }
+
+    return null;
+  };
 
   /*
    * LOAD ADDRESS DATA (once, the first time the Edit dialog opens)
@@ -1254,7 +1337,7 @@ export default function UserManagementPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, typeFilter, statusFilter]);
+  }, [search, typeFilter, statusFilter, roleTab]);
 
   const { data: users, isLoading, refetch: refetchUsers } = useListUsers(
     search ? { search } : undefined,
@@ -1269,13 +1352,31 @@ export default function UserManagementPage() {
     refetchUsers();
   });
 
+  // 🧑‍🤝‍🧑 Refresh roles live when auth_users changes (link/unlink/role change)
+  useRealtimeRefetch(["auth_users"], () => {
+    refetchAuthRoles();
+  });
+
   const userList = Array.isArray(users) ? users : [];
 
-  // Apply the type filter on top of whatever the search endpoint returned
+  // 🧑‍🤝‍🧑 Tab counts (based on the current search results)
+  const roleCounts = {
+    All: userList.length,
+    Commuter: userList.filter((u: any) => getUserRole(u) === "commuter").length,
+    Driver: userList.filter((u: any) => getUserRole(u) === "driver").length,
+  };
+
+  // 🧑‍🤝‍🧑 Apply the role tab first
+  const roleFilteredList =
+    roleTab === "All"
+      ? userList
+      : userList.filter((u: any) => getUserRole(u) === roleTab.toLowerCase());
+
+  // Apply the type filter on top of the role tab
   const typeFilteredList =
     typeFilter === "All"
-      ? userList
-      : userList.filter(
+      ? roleFilteredList
+      : roleFilteredList.filter(
           (u: any) => (u.type || "Regular").toLowerCase() === typeFilter.toLowerCase()
         );
 
@@ -1321,6 +1422,7 @@ export default function UserManagementPage() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+        queryClient.invalidateQueries({ queryKey: ["auth-users-roles"] });
         toast({ title: <SuccessTitle text="User Deleted Successfully" /> });
       },
     },
@@ -2010,6 +2112,54 @@ export default function UserManagementPage() {
       <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
 
+        {/* 🧑‍🤝‍🧑 ROLE TABS — All / Commuters / Drivers */}
+        <div
+          className={`flex-none flex items-center gap-1 px-6 pt-5 pb-0 border-b overflow-x-auto ${
+            isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"
+          }`}
+          role="tablist"
+          aria-label="Filter by account role"
+        >
+          {ROLE_TABS.map((tab) => {
+            const active = roleTab === tab;
+            const Icon = tab === "All" ? Users : tab === "Commuter" ? UserRound : Bus;
+            const label = tab === "All" ? "All" : tab === "Commuter" ? "Commuters" : "Drivers";
+
+            return (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setRoleTab(tab)}
+                className={`relative flex items-center gap-2 whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide border-b-2 -mb-px transition-colors cursor-pointer ${
+                  active
+                    ? "border-blue-500 text-blue-500"
+                    : isDark
+                      ? "border-transparent text-slate-500 hover:text-slate-300"
+                      : "border-transparent text-slate-400 hover:text-slate-700"
+                }`}
+              >
+                <Icon size={14} />
+                {label}
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
+                    active
+                      ? isDark
+                        ? "bg-blue-950/60 text-blue-400"
+                        : "bg-blue-100 text-blue-600"
+                      : isDark
+                        ? "bg-slate-800 text-slate-400"
+                        : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {roleCounts[tab]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
         <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
           <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
             <div className="flex items-center gap-3">
@@ -2020,7 +2170,11 @@ export default function UserManagementPage() {
                 LIVE
               </span>
               <CardTitle className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                Authorized Card Holders
+                {roleTab === "Commuter"
+                  ? "Commuter Card Holders"
+                  : roleTab === "Driver"
+                    ? "Driver Card Holders"
+                    : "Authorized Card Holders"}
               </CardTitle>
             </div>
 
@@ -2137,6 +2291,7 @@ export default function UserManagementPage() {
                       paginatedList.map((user) => {
                         const linkedEmail = normalizeEmail(user.email);
                         const expired = isCardExpired(user.expirationDate);
+                        const userRole = getUserRole(user);
                         return (
                           <TableRow
                             key={user.id}
@@ -2166,11 +2321,20 @@ export default function UserManagementPage() {
                             <TableCell>
                               {linkedEmail ? (
                                 <div className="flex flex-col gap-0.5">
-                                  <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${
-                                    isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
-                                  }`}>
-                                    <LinkIcon size={8} /> Linked
-                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${
+                                      isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+                                    }`}>
+                                      <LinkIcon size={8} /> Linked
+                                    </span>
+                                    {/* 🧑‍🤝‍🧑 Role badge (Commuter / Driver) from auth_users */}
+                                    {userRole && (
+                                      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${getRoleBadgeStyle(userRole, isDark)}`}>
+                                        {userRole === "driver" ? <Bus size={8} /> : <UserRound size={8} />}
+                                        {userRole}
+                                      </span>
+                                    )}
+                                  </div>
                                   <span className="flex items-center gap-1 text-xs text-blue-500 font-mono">
                                     <Mail className="w-3 h-3 flex-shrink-0" />
                                     {linkedEmail}
@@ -2178,11 +2342,19 @@ export default function UserManagementPage() {
                                 </div>
                               ) : (
                                 <div className="flex flex-col gap-0.5">
-                                  <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${
-                                    isDark ? "text-slate-500 bg-slate-800 border-slate-700" : "text-slate-400 bg-slate-100 border-slate-200"
-                                  }`}>
-                                    <LinkIcon size={8} /> Not Linked
-                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${
+                                      isDark ? "text-slate-500 bg-slate-800 border-slate-700" : "text-slate-400 bg-slate-100 border-slate-200"
+                                    }`}>
+                                      <LinkIcon size={8} /> Not Linked
+                                    </span>
+                                    {userRole && (
+                                      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${getRoleBadgeStyle(userRole, isDark)}`}>
+                                        {userRole === "driver" ? <Bus size={8} /> : <UserRound size={8} />}
+                                        {userRole}
+                                      </span>
+                                    )}
+                                  </div>
                                   <span className={`text-[11px] italic font-mono ${isDark ? "text-slate-600" : "text-slate-400"}`}>
                                     No account registered
                                   </span>
@@ -2300,7 +2472,11 @@ export default function UserManagementPage() {
                           colSpan={9}
                           className={`text-center py-20 uppercase font-semibold tracking-widest text-xs ${isDark ? "text-slate-700" : "text-slate-300"}`}
                         >
-                          No users found
+                          {roleTab === "Commuter"
+                            ? "No commuters found"
+                            : roleTab === "Driver"
+                              ? "No drivers found"
+                              : "No users found"}
                         </TableCell>
                       </TableRow>
                     )}
@@ -2429,6 +2605,20 @@ export default function UserManagementPage() {
                         ? isDark ? "text-blue-400" : "text-blue-600"
                         : isDark ? "text-slate-500 italic" : "text-slate-400 italic"
                     }`,
+                  },
+                  {
+                    label: "Account Role",
+                    value: getUserRole(previewUser)
+                      ? getUserRole(previewUser) === "driver"
+                        ? "Driver"
+                        : "Commuter"
+                      : "N/A",
+                    cls:
+                      getUserRole(previewUser) === "driver"
+                        ? isDark ? "text-violet-400" : "text-violet-600"
+                        : getUserRole(previewUser) === "commuter"
+                          ? isDark ? "text-cyan-400" : "text-cyan-600"
+                          : isDark ? "text-slate-500 italic" : "text-slate-400 italic",
                   },
                 ].map((item) => (
                   <div
