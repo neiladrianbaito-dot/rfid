@@ -57,10 +57,27 @@ const ROLE_TABS = ["All", "Commuter", "Driver"] as const;
 type RoleTab = (typeof ROLE_TABS)[number];
 type AuthRole = "commuter" | "driver";
 
+// 🚌 Driver account (public.auth_users, role = 'driver')
 interface DriverAccountRow {
+  id: string | null;
+  supabase_auth_id: string | null;
+  full_name: string | null;
   email: string | null;
   linked_card_uid: string | null;
 }
+
+// 💸 Isang transaction row na may driver_id (para sa total fare collected)
+interface DriverFareRow {
+  id: number | string | null;
+  driver_id: string | null;
+  amount: number | string | null;
+  type: string | null;
+  status: string | null;
+}
+
+// 💸 Mga transaction type na HINDI fare (hindi kasama sa total fare collected).
+// Kung iba ang tawag mo sa fare type, ayusin dito.
+const NON_FARE_TYPE_REGEX = /top.?up|refund|reversal|cash.?in/i;
 
 // 🔑 Normalizes a card UID so "04:A3:1F", "04a31f", "04-A3-1F" all match.
 function normalizeCardUid(value: string | null | undefined): string {
@@ -1019,6 +1036,7 @@ export default function UserManagementPage() {
   const [search, setSearch] = useState("");
   // 🧑‍🤝‍🧑 Role tab state (All / Commuter / Driver)
   const [roleTab, setRoleTab] = useState<RoleTab>("All");
+  const isDriverTab = roleTab === "Driver";
   const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>("All");
   // ➕ Status filter state (Active / Inactive / Blocked / Expired)
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>("All");
@@ -1090,21 +1108,23 @@ export default function UserManagementPage() {
 
   /*
    * 🧑‍🤝‍🧑 DRIVER ACCOUNTS FROM public.auth_users
-   * Kinukuha lang ang mga account na role = 'driver'. Ang card sa
-   * public.users ay DRIVER kapag ang card_uid niya = linked_card_uid ng
-   * driver account (o kapag tugma ang email). Lahat ng iba = COMMUTER.
+   * Kinukuha ang mga account na role = 'driver' (id, name, email, linked card).
+   * Ginagamit ito para sa Drivers tab AT para malaman kung aling card sa
+   * public.users ay driver (card_uid = linked_card_uid, o tugma ang email).
    */
   const {
     data: driverRows,
     refetch: refetchAuthRoles,
     isError: rolesError,
+    isLoading: driversLoading,
   } = useQuery({
     queryKey: ["auth-users-drivers"],
     queryFn: async (): Promise<DriverAccountRow[]> => {
       const { data, error } = await supabase
         .from("auth_users")
-        .select("email, linked_card_uid")
-        .eq("role", "driver");
+        .select("id, supabase_auth_id, full_name, email, linked_card_uid")
+        .eq("role", "driver")
+        .order("full_name", { ascending: true });
 
       if (error) {
         console.error("Failed to load driver accounts from auth_users:", error);
@@ -1112,6 +1132,48 @@ export default function UserManagementPage() {
       }
 
       return (data ?? []) as DriverAccountRow[];
+    },
+    refetchOnWindowFocus: true,
+    retry: false,
+  });
+
+  /*
+   * 💸 FARE TRANSACTIONS NG MGA DRIVER (public.transactions)
+   * Kinukuha ang lahat ng transaction na may driver_id (paged by 1000 para
+   * hindi maputol ng Supabase row limit). Ang top-up/refund ay hindi
+   * isasama sa total — tingnan ang NON_FARE_TYPE_REGEX sa taas.
+   */
+  const {
+    data: fareRows,
+    refetch: refetchFares,
+    isError: faresError,
+    isLoading: faresLoading,
+  } = useQuery({
+    queryKey: ["driver-fare-transactions"],
+    queryFn: async (): Promise<DriverFareRow[]> => {
+      const pageSize = 1000;
+      const all: DriverFareRow[] = [];
+
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabase
+          .from("transactions")
+          .select("id, driver_id, amount, type, status")
+          .not("driver_id", "is", null)
+          .order("id", { ascending: true })
+          .range(from, from + pageSize - 1);
+
+        if (error) {
+          console.error("Failed to load driver transactions:", error);
+          throw error;
+        }
+
+        const batch = (data ?? []) as DriverFareRow[];
+        all.push(...batch);
+
+        if (batch.length < pageSize) break;
+      }
+
+      return all;
     },
     refetchOnWindowFocus: true,
     retry: false,
@@ -1143,6 +1205,73 @@ export default function UserManagementPage() {
 
     return "commuter";
   };
+
+  // 💸 Total fare + bilang ng trips kada driver_id (lowercase key)
+  const fareTotals = useMemo(() => {
+    const totals = new Map<string, { total: number; count: number }>();
+
+    (fareRows ?? []).forEach((row) => {
+      const key = String(row.driver_id ?? "").trim().toLowerCase();
+      if (!key) return;
+
+      if (String(row.status ?? "").trim().toLowerCase() !== "success") return;
+      if (NON_FARE_TYPE_REGEX.test(String(row.type ?? ""))) return;
+
+      const amount = Number(row.amount);
+      if (!Number.isFinite(amount)) return;
+
+      const current = totals.get(key) ?? { total: 0, count: 0 };
+      current.total += amount;
+      current.count += 1;
+      totals.set(key, current);
+    });
+
+    return totals;
+  }, [fareRows]);
+
+  // 🚌 Isang row kada driver: ID, Name, Email, Total Fare Collected
+  // Tinatanggap ang driver_id kung tugma sa auth_users.id O supabase_auth_id.
+  const driverSummaries = useMemo(() => {
+    return (driverRows ?? []).map((driver) => {
+      const keys = [driver.id, driver.supabase_auth_id]
+        .map((k) => String(k ?? "").trim().toLowerCase())
+        .filter(Boolean);
+
+      let total = 0;
+      let count = 0;
+
+      keys.forEach((key) => {
+        const entry = fareTotals.get(key);
+        if (entry) {
+          total += entry.total;
+          count += entry.count;
+        }
+      });
+
+      return {
+        id: String(driver.id ?? driver.supabase_auth_id ?? ""),
+        name: driver.full_name || "—",
+        email: driver.email || "—",
+        totalFare: total,
+        trips: count,
+      };
+    });
+  }, [driverRows, fareTotals]);
+
+  // 🔎 Search sa Drivers tab: name / email / driver ID
+  const driverFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return driverSummaries;
+
+    return driverSummaries.filter(
+      (d) =>
+        d.name.toLowerCase().includes(q) ||
+        d.email.toLowerCase().includes(q) ||
+        d.id.toLowerCase().includes(q)
+    );
+  }, [driverSummaries, search]);
+
+  const driversTotalFare = driverFiltered.reduce((sum, d) => sum + d.totalFare, 0);
 
   /*
    * LOAD ADDRESS DATA (once, the first time the Edit dialog opens)
@@ -1345,8 +1474,9 @@ export default function UserManagementPage() {
     setPage(1);
   }, [search, typeFilter, statusFilter, roleTab]);
 
+  // 🔎 Sa Drivers tab, client-side ang search (hindi na ipinapasa sa users API)
   const { data: users, isLoading, refetch: refetchUsers } = useListUsers(
-    search ? { search } : undefined,
+    search && !isDriverTab ? { search } : undefined,
     {
       query: {
         refetchOnWindowFocus: true,
@@ -1363,17 +1493,23 @@ export default function UserManagementPage() {
     refetchAuthRoles();
   });
 
+  // 💸 Refresh total fare live kapag may bagong transaction
+  useRealtimeRefetch(["transactions"], () => {
+    refetchFares();
+  });
+
   const userList = Array.isArray(users) ? users : [];
 
-  // 🧑‍🤝‍🧑 Tab counts (based on the current search results)
-  const driverCount = userList.filter((u: any) => getUserRole(u) === "driver").length;
+  // 🧑‍🤝‍🧑 Tab counts
+  // Commuter = cards na hindi naka-link sa driver, Driver = bilang ng driver accounts
+  const driverCardCount = userList.filter((u: any) => getUserRole(u) === "driver").length;
   const roleCounts = {
     All: userList.length,
-    Commuter: userList.length - driverCount,
-    Driver: driverCount,
+    Commuter: userList.length - driverCardCount,
+    Driver: (driverRows ?? []).length,
   };
 
-  // 🧑‍🤝‍🧑 Apply the role tab first
+  // 🧑‍🤝‍🧑 Apply the role tab first (para sa All / Commuter)
   const roleFilteredList =
     roleTab === "All"
       ? userList
@@ -1397,10 +1533,15 @@ export default function UserManagementPage() {
       ? typeFilteredList.filter((u: any) => isCardExpired(u.expirationDate))
       : typeFilteredList.filter((u: any) => u.status === statusFilter);
 
-  const totalPages = Math.max(1, Math.ceil(filteredList.length / PAGE_SIZE));
+  // 📄 Pagination — gumagana para sa cards (All/Commuter) at drivers (Driver tab)
+  const activeCount = isDriverTab ? driverFiltered.length : filteredList.length;
+  const totalPages = Math.max(1, Math.ceil(activeCount / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const startIndex = (safePage - 1) * PAGE_SIZE;
   const paginatedList = filteredList.slice(startIndex, startIndex + PAGE_SIZE);
+  const paginatedDrivers = driverFiltered.slice(startIndex, startIndex + PAGE_SIZE);
+
+  const tableLoading = isDriverTab ? driversLoading : isLoading;
 
   useEffect(() => {
     if (userList.length === 0) return;
@@ -2181,6 +2322,20 @@ export default function UserManagementPage() {
           </div>
         )}
 
+        {/* ⚠️ Shows only in the Drivers tab if transactions couldn't be read */}
+        {isDriverTab && faresError && (
+          <div
+            className={`flex-none flex items-center gap-2 px-6 py-2 text-xs font-medium border-b ${
+              isDark
+                ? "bg-orange-950/30 border-orange-900 text-orange-400"
+                : "bg-orange-50 border-orange-200 text-orange-700"
+            }`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            Couldn't read public.transactions — Total Fare Collected will show ₱0.00. Check the SELECT policy (RLS) on public.transactions.
+          </div>
+        )}
+
         <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
           <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
             <div className="flex items-center gap-3">
@@ -2194,7 +2349,7 @@ export default function UserManagementPage() {
                 {roleTab === "Commuter"
                   ? "Commuter Card Holders"
                   : roleTab === "Driver"
-                    ? "Driver Card Holders"
+                    ? "Drivers"
                     : "Authorized Card Holders"}
               </CardTitle>
             </div>
@@ -2203,7 +2358,7 @@ export default function UserManagementPage() {
               <div className="relative w-full sm:w-80">
                 <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
                 <Input
-                  placeholder="Search UID or name..."
+                  placeholder={isDriverTab ? "Search driver name, email or ID..." : "Search UID or name..."}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className={`pl-10 font-medium text-sm h-10 focus-visible:ring-blue-500 ${
@@ -2214,67 +2369,72 @@ export default function UserManagementPage() {
                 />
               </div>
 
-              {/* Type filter */}
-              <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as (typeof TYPE_FILTERS)[number])}>
-                <SelectTrigger
-                  className={`h-10 w-full sm:w-40 text-sm font-medium cursor-pointer ${
-                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    {typeFilter !== "All" && (
-                      <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(typeFilter)}`} />
-                    )}
-                    <SelectValue />
-                  </span>
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                  {TYPE_FILTERS.map((t) => (
-                    <SelectItem key={t} value={t} className="cursor-pointer">
+              {/* Type + Status filters — para sa cards lang (hindi sa Drivers tab) */}
+              {!isDriverTab && (
+                <>
+                  {/* Type filter */}
+                  <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as (typeof TYPE_FILTERS)[number])}>
+                    <SelectTrigger
+                      className={`h-10 w-full sm:w-40 text-sm font-medium cursor-pointer ${
+                        isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
+                      }`}
+                    >
                       <span className="flex items-center gap-2">
-                        {t !== "All" && (
-                          <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(t)}`} />
+                        {typeFilter !== "All" && (
+                          <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(typeFilter)}`} />
                         )}
-                        {t}
+                        <SelectValue />
                       </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    </SelectTrigger>
+                    <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+                      {TYPE_FILTERS.map((t) => (
+                        <SelectItem key={t} value={t} className="cursor-pointer">
+                          <span className="flex items-center gap-2">
+                            {t !== "All" && (
+                              <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(t)}`} />
+                            )}
+                            {t}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-              {/* ➕ Status filter — Active / Inactive / Blocked / Expired */}
-              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as (typeof STATUS_FILTERS)[number])}>
-                <SelectTrigger
-                  className={`h-10 w-full sm:w-40 text-sm font-medium cursor-pointer ${
-                    isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    {statusFilter !== "All" && (
-                      <span className={`w-2 h-2 rounded-full inline-block ${getStatusDotColor(statusFilter)}`} />
-                    )}
-                    <SelectValue />
-                  </span>
-                </SelectTrigger>
-                <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                  {STATUS_FILTERS.map((s) => (
-                    <SelectItem key={s} value={s} className="cursor-pointer">
+                  {/* ➕ Status filter — Active / Inactive / Blocked / Expired */}
+                  <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as (typeof STATUS_FILTERS)[number])}>
+                    <SelectTrigger
+                      className={`h-10 w-full sm:w-40 text-sm font-medium cursor-pointer ${
+                        isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
+                      }`}
+                    >
                       <span className="flex items-center gap-2">
-                        {s !== "All" && (
-                          <span className={`w-2 h-2 rounded-full inline-block ${getStatusDotColor(s)}`} />
+                        {statusFilter !== "All" && (
+                          <span className={`w-2 h-2 rounded-full inline-block ${getStatusDotColor(statusFilter)}`} />
                         )}
-                        {s}
+                        <SelectValue />
                       </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    </SelectTrigger>
+                    <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+                      {STATUS_FILTERS.map((s) => (
+                        <SelectItem key={s} value={s} className="cursor-pointer">
+                          <span className="flex items-center gap-2">
+                            {s !== "All" && (
+                              <span className={`w-2 h-2 rounded-full inline-block ${getStatusDotColor(s)}`} />
+                            )}
+                            {s}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
             </div>
           </div>
         </CardHeader>
 
         <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4 mt-6 flex flex-col overflow-hidden">
-          {isLoading ? (
+          {tableLoading ? (
             <div className="space-y-4 pt-4">
               {Array.from({ length: PAGE_SIZE }).map((_, i) => (
                 <Skeleton key={i} className={`h-16 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
@@ -2283,6 +2443,106 @@ export default function UserManagementPage() {
           ) : (
             <>
               <div className="flex-1 min-h-0 overflow-auto">
+                {isDriverTab ? (
+                  <>
+                    {/* 💸 Summary strip — total fare ng lahat ng drivers na nakikita */}
+                    <div
+                      className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
+                        isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Bus className="h-4 w-4 text-violet-500" />
+                        <span className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {driverFiltered.length} {driverFiltered.length === 1 ? "driver" : "drivers"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          Total Fare Collected
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 font-bold px-2.5 py-1 rounded border text-sm ${
+                            isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+                          }`}
+                        >
+                          <Wallet className="w-3.5 h-3.5" />
+                          {faresLoading ? "Loading..." : formatPeso(driversTotalFare)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 🚌 DRIVERS TABLE — Driver ID, Name, Email, Total Fare Collected */}
+                    <Table>
+                      <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+                        <TableRow className="border-none hover:bg-transparent">
+                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Driver ID</TableHead>
+                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Driver Name</TableHead>
+                          <TableHead className="text-[11px] font-semibold uppercase tracking-wide text-blue-500">
+                            <span className="flex items-center gap-1"><Mail size={10} /> Email</span>
+                          </TableHead>
+                          <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-emerald-500" : "text-emerald-600"}`}>
+                            Total Fare Collected
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedDrivers.length > 0 ? (
+                          paginatedDrivers.map((driver) => (
+                            <TableRow
+                              key={driver.id || driver.email}
+                              className={`transition-colors ${isDark ? "border-slate-800 hover:bg-slate-800/50" : "border-slate-100 hover:bg-slate-50"}`}
+                            >
+                              <TableCell className="font-mono text-xs text-violet-500 font-semibold">
+                                <span className="block max-w-[260px] truncate" title={driver.id}>
+                                  {driver.id || "—"}
+                                </span>
+                              </TableCell>
+
+                              <TableCell>
+                                <span className={`text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                                  {driver.name}
+                                </span>
+                              </TableCell>
+
+                              <TableCell>
+                                <span className="flex items-center gap-1 text-xs text-blue-500 font-mono">
+                                  <Mail className="w-3 h-3 flex-shrink-0" />
+                                  {driver.email}
+                                </span>
+                              </TableCell>
+
+                              <TableCell className="text-right">
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <span
+                                    className={`inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded border text-xs ${
+                                      isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+                                    }`}
+                                  >
+                                    <Wallet className="w-3 h-3" />
+                                    {formatPeso(driver.totalFare)}
+                                  </span>
+                                  <span className={`text-[10px] font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                                    {driver.trips} {driver.trips === 1 ? "fare" : "fares"}
+                                  </span>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        ) : (
+                          <TableRow>
+                            <TableCell
+                              colSpan={4}
+                              className={`text-center py-20 uppercase font-semibold tracking-widest text-xs ${isDark ? "text-slate-700" : "text-slate-300"}`}
+                            >
+                              No drivers found
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </>
+                ) : (
                 <Table>
                   <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
                     <TableRow className="border-none hover:bg-transparent">
@@ -2489,16 +2749,13 @@ export default function UserManagementPage() {
                           colSpan={9}
                           className={`text-center py-20 uppercase font-semibold tracking-widest text-xs ${isDark ? "text-slate-700" : "text-slate-300"}`}
                         >
-                          {roleTab === "Commuter"
-                            ? "No commuters found"
-                            : roleTab === "Driver"
-                              ? "No drivers found"
-                              : "No users found"}
+                          {roleTab === "Commuter" ? "No commuters found" : "No users found"}
                         </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
                 </Table>
+                )}
               </div>
 
               {/* Pagination Footer */}
@@ -2506,11 +2763,11 @@ export default function UserManagementPage() {
                 <span className={`text-xs font-mono uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                   Showing{" "}
                   <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                    {filteredList.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, filteredList.length)}
+                    {activeCount === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, activeCount)}
                   </span>{" "}
                   of{" "}
-                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{filteredList.length}</span>{" "}
-                  users
+                  <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>{activeCount}</span>{" "}
+                  {isDriverTab ? "drivers" : "users"}
                 </span>
                 <div className="flex items-center gap-2">
                   <Button
