@@ -544,7 +544,7 @@ const formatPeso = (value: number) =>
 
 // 📏 "≈ 175 km" — whole km for long distances, one decimal under 10 km
 const formatApproxKm = (km: number) =>
-  `≈ ${km >= 10 ? Math.round(km).toLocaleString("en-US") : km.toFixed(1)} km`;
+  ` ${km >= 10 ? Math.round(km).toLocaleString("en-US") : km.toFixed(1)} km`;
 
 function SuccessTitle({ text }: { text: string }) {
   return (
