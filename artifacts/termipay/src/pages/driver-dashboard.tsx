@@ -1739,6 +1739,8 @@ const mapPin = (color: string, label: string) =>
 /* ═══════════════════════════════════════════════════════════════════════
    🛰️ MAP TYPES — Default (Leaflet / OpenStreetMap) or Satellite (Esri imagery)
    • The driver picks the type in the legend on the map (top-right).
+   • The legend is CLOSED by default — the driver opens / closes it with the
+     small layers button (top-right) whenever they want.
    • The choice is saved on this device, so it is remembered next time.
    • Satellite also draws a transparent place-names layer on top, so towns and
      roads can still be read. The route line turns yellow on satellite so it
@@ -1981,6 +1983,7 @@ function useDriverApiAuth() {
    • Pins + road line follow the SAVED route, so they stay for as long as the
      route exists and go back to zero on Reset.
    • 🛰️ A legend on the map lets the driver switch between Default and Satellite.
+     It is CLOSED by default; the driver opens/closes it with the layers button.
    ═══════════════════════════════════════════════════════════════════════ */
 
 type PanelProps = { isDark: boolean; visible: boolean };
@@ -2475,8 +2478,9 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     writeMapStyle(next);
   }, []);
 
-  // 🗺️ Legend can be closed (hidden) and re-opened with the small layers button
-  const [legendOpen, setLegendOpen] = useState(true);
+  // 🗺️ Legend is CLOSED by default. The driver opens it with the small layers button
+  // and closes it again with the X — it never opens by itself.
+  const [legendOpen, setLegendOpen] = useState(false);
 
   // Create the Leaflet map when its container mounts, destroy it when the container is removed
   useEffect(() => {
@@ -2897,7 +2901,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                   Route map
                 </span>
 
-                {/* 🗺️ LEGEND — pick the map type + what the pins / line mean */}
+                {/* 🗺️ LEGEND — closed by default; driver opens/closes it with the layers button / X */}
                 {legendOpen ? (
                 <div
                   className={`tp-legend absolute right-3 top-3 z-[500] w-[138px] rounded-2xl border p-1.5 shadow-lg backdrop-blur-md ${legendPanel}`}
