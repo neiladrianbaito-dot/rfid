@@ -76,6 +76,15 @@ interface DriverFareRow {
   status: string | null;
 }
 
+// 📟 Device row (public.devices) — driver_id ang nagsasabi kung sino ang nag-activate
+interface DeviceRow {
+  device_id: string | null;
+  name: string | null;
+  status: string | null;
+  driver_id: string | null;
+  last_ping: string | null;
+}
+
 // 💸 Mga transaction type na HINDI fare (hindi kasama sa total fare collected).
 // Kung iba ang tawag mo sa fare type, ayusin dito.
 const NON_FARE_TYPE_REGEX = /top.?up|refund|reversal|cash.?in/i;
@@ -1230,6 +1239,33 @@ export default function UserManagementPage() {
     retry: false,
   });
 
+  /*
+   * 📟 DEVICES NA MAY driver_id (public.devices)
+   * Kapag in-activate ng driver ang device, na-se-set ang devices.driver_id.
+   * Dito awtomatikong kinukuha ang Device ID para sa Drivers table —
+   * hindi na kailangang mag-link nang manual.
+   */
+  const { data: deviceRows, refetch: refetchDevices } = useQuery({
+    queryKey: ["driver-devices"],
+    queryFn: async (): Promise<DeviceRow[]> => {
+      const { data, error } = await supabase
+        .from("devices")
+        .select("device_id, name, status, driver_id, last_ping")
+        .not("driver_id", "is", null)
+        .order("last_ping", { ascending: false });
+
+      if (error) {
+        console.error("Failed to load devices:", error);
+        throw error;
+      }
+
+      return (data ?? []) as DeviceRow[];
+    },
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+    retry: false,
+  });
+
   // Lookup sets: normalized card UIDs and lowercase emails ng mga driver
   const driverLookup = useMemo(() => {
     const uids = new Set<string>();
@@ -1290,13 +1326,22 @@ export default function UserManagementPage() {
     return totals;
   }, [fareRows]);
 
-  // 🚌 Isang row kada driver: ID, Name, Email, Today's Fare Collected
+  // 🚌 Isang row kada driver: ID, Name, Email, Device ID, Today's Fare Collected
   // Tinatanggap ang driver_id kung tugma sa id, supabase_auth_id,
   // linked_card_uid, o email ng driver.
+  // 📟 Ang Device ID ay AUTOMATIC galing sa public.devices (devices.driver_id);
+  // fallback lang ang auth_users.device_id kung walang nahanap sa devices.
   // ➕ Kapag may driver_id sa transactions na walang katugmang driver account,
   // lalabas pa rin ito bilang "Unlinked driver" row para hindi mawala ang data.
   const driverSummaries = useMemo(() => {
     const usedKeys = new Set<string>();
+
+    // 📟 key (driver_id) -> pinakabagong device (sorted na by last_ping desc)
+    const deviceByKey = new Map<string, DeviceRow>();
+    (deviceRows ?? []).forEach((d) => {
+      const key = normalizeKey(d.driver_id);
+      if (key && !deviceByKey.has(key)) deviceByKey.set(key, d);
+    });
 
     // Lookup ng profile (pangalan/email) kada key — galing sa role=driver rows
     // at sa buong auth_users lookup ng mga driver_id sa transactions.
@@ -1317,6 +1362,7 @@ export default function UserManagementPage() {
 
       let total = 0;
       let count = 0;
+      let autoDevice: DeviceRow | undefined;
 
       keys.forEach((key) => {
         const entry = fareTotals.get(key);
@@ -1325,6 +1371,16 @@ export default function UserManagementPage() {
           count += entry.count;
           usedKeys.add(key);
         }
+
+        const dev = deviceByKey.get(key);
+        if (
+          dev &&
+          (!autoDevice ||
+            new Date(dev.last_ping ?? 0).getTime() >
+              new Date(autoDevice.last_ping ?? 0).getTime())
+        ) {
+          autoDevice = dev;
+        }
       });
 
       return {
@@ -1332,7 +1388,11 @@ export default function UserManagementPage() {
         accountId: driver.id ? String(driver.id) : (null as string | null),
         name: driver.full_name || "—",
         email: driver.email || "—",
-        deviceId: (driver.device_id ?? null) as string | null,
+        // ✅ Auto galing sa devices table; fallback sa auth_users.device_id
+        deviceId: ((autoDevice as DeviceRow | undefined)?.device_id ?? driver.device_id ?? null) as string | null,
+        deviceOnline:
+          String((autoDevice as DeviceRow | undefined)?.status ?? "").toUpperCase() === "ONLINE",
+        deviceAuto: !!autoDevice,
         totalFare: total,
         trips: count,
       };
@@ -1344,20 +1404,23 @@ export default function UserManagementPage() {
       if (usedKeys.has(key)) return;
 
       const profile = profileByKey.get(key);
+      const dev = deviceByKey.get(key);
 
       rows.push({
         id: entry.rawId,
         accountId: null,
         name: profile?.full_name || "Unlinked driver",
         email: profile?.email || "—",
-        deviceId: (profile?.device_id ?? null) as string | null,
+        deviceId: (dev?.device_id ?? profile?.device_id ?? null) as string | null,
+        deviceOnline: String(dev?.status ?? "").toUpperCase() === "ONLINE",
+        deviceAuto: !!dev,
         totalFare: entry.total,
         trips: entry.count,
       });
     });
 
     return rows;
-  }, [driverRows, fareTotals]);
+  }, [driverRows, fareTotals, deviceRows]);
 
   // ⚠️ Walang driver account na nabasa pero may fare rows → RLS ang dahilan
   const driversBlockedByRls =
@@ -1369,6 +1432,7 @@ export default function UserManagementPage() {
     if (!driverRows || !fareRows) return;
     console.log("[Drivers] driver accounts:", driverRows);
     console.log("[Drivers] fare rows with driver_id:", fareRows.length, fareRows.slice(0, 5));
+    console.log("[Drivers] devices with driver_id:", deviceRows);
 
     const known = new Set<string>();
     driverRows.forEach((d) =>
@@ -1390,7 +1454,17 @@ export default function UserManagementPage() {
         Array.from(unmatched)
       );
     }
-  }, [driverRows, fareRows]);
+
+    const unmatchedDevices = (deviceRows ?? []).filter(
+      (d) => !known.has(normalizeKey(d.driver_id))
+    );
+    if (unmatchedDevices.length > 0) {
+      console.warn(
+        "[Drivers] devices.driver_id values that match NO driver account:",
+        unmatchedDevices.map((d) => ({ device_id: d.device_id, driver_id: d.driver_id }))
+      );
+    }
+  }, [driverRows, fareRows, deviceRows]);
 
   // 🔎 Search sa Drivers tab: name / email / driver ID
   const driverFiltered = useMemo(() => {
@@ -1631,6 +1705,11 @@ export default function UserManagementPage() {
   // 💸 Refresh total fare live kapag may bagong transaction
   useRealtimeRefetch(["transactions"], () => {
     refetchFares();
+  });
+
+  // 📟 Live update ng Device ID kapag may nag-activate/nag-deactivate na device
+  useRealtimeRefetch(["devices"], () => {
+    refetchDevices();
   });
 
   const userList = Array.isArray(users) ? users : [];
@@ -2114,7 +2193,7 @@ export default function UserManagementPage() {
       return;
     }
 
-    await refetchAuthRoles();
+    await Promise.all([refetchAuthRoles(), refetchDevices()]);
     setDeviceDriver(null);
     toast({
       title: <SuccessTitle text={unlink ? "Device Unlinked" : "Device Linked Successfully"} />,
@@ -2677,7 +2756,7 @@ export default function UserManagementPage() {
                       </div>
                     </div>
 
-                    {/* 🚌 DRIVERS TABLE — Driver ID, Name, Email, Today's Fare Collected */}
+                    {/* 🚌 DRIVERS TABLE — Driver ID, Name, Email, Device ID, Today's Fare Collected */}
                     <Table>
                       <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
                         <TableRow className="border-none hover:bg-transparent">
@@ -2720,17 +2799,25 @@ export default function UserManagementPage() {
                                 </span>
                               </TableCell>
 
-                              {/* 📟 Naka-link na Device ID + Link/Edit button */}
+                              {/* 📟 Device ID — awtomatiko galing sa devices table kapag na-activate ng driver */}
                               <TableCell>
                                 <div className="flex items-center gap-2">
                                   {driver.deviceId ? (
                                     <span
-                                      className={`inline-flex items-center gap-1 text-[11px] font-mono font-semibold px-2 py-0.5 rounded border max-w-[180px] ${
+                                      className={`inline-flex items-center gap-1.5 text-[11px] font-mono font-semibold px-2 py-0.5 rounded border max-w-[180px] ${
                                         isDark ? "text-cyan-400 bg-cyan-950/40 border-cyan-900" : "text-cyan-700 bg-cyan-50 border-cyan-200"
                                       }`}
-                                      title={driver.deviceId}
+                                      title={`${driver.deviceId}${driver.deviceAuto ? (driver.deviceOnline ? " • Online" : " • Offline") : ""}`}
                                     >
-                                      <Cpu className="w-3 h-3 flex-shrink-0" />
+                                      {driver.deviceAuto ? (
+                                        <span
+                                          className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${
+                                            driver.deviceOnline ? "bg-emerald-500 realtime-dot" : "bg-slate-400"
+                                          }`}
+                                        />
+                                      ) : (
+                                        <Cpu className="w-3 h-3 flex-shrink-0" />
+                                      )}
                                       <span className="truncate">{driver.deviceId}</span>
                                     </span>
                                   ) : (
@@ -2743,7 +2830,8 @@ export default function UserManagementPage() {
                                     </span>
                                   )}
 
-                                  {canManage && driver.accountId && (
+                                  {/* Manual link/edit: para lang kung WALANG auto-detected device */}
+                                  {canManage && driver.accountId && !driver.deviceAuto && (
                                     <Button
                                       variant="ghost"
                                       size="icon"
@@ -3688,7 +3776,8 @@ export default function UserManagementPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 📟 Link Device ID Dialog (Drivers)
+      {/* 📟 Link Device ID Dialog (Drivers) — manual fallback lang, para sa
+          driver na WALANG auto-detected device sa public.devices
           🔒 `open` naka-gate sa canManage */}
       <Dialog open={canManage && !!deviceDriver} onOpenChange={(open) => { if (!open && !isSavingDevice) setDeviceDriver(null); }}>
         <DialogContent className={`sm:max-w-md [&>button]:cursor-pointer ${isDark ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"}`}>
