@@ -99,6 +99,16 @@ function normalizeKey(value: unknown): string {
     .replace(/[^a-z0-9@.]/g, "");
 }
 
+// 📅 Range ng "ngayong araw" sa oras ng Pilipinas (Asia/Manila, UTC+8):
+// 12:00 AM ngayon hanggang 12:00 AM bukas. Ginagamit para ang nakukuha lang
+// na fare ay ang nakolekta TODAY.
+function getManilaDayRange() {
+  const ymd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" }); // YYYY-MM-DD
+  const start = new Date(`${ymd}T00:00:00+08:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { key: ymd, startISO: start.toISOString(), endISO: end.toISOString() };
+}
+
 // ➕ Reasons a card would need a balance transfer (lost/stolen/damaged replacement)
 const TRANSFER_REASONS = ["Lost Card", "Stolen Card", "Damaged Card", "Other"] as const;
 
@@ -1162,6 +1172,9 @@ export default function UserManagementPage() {
     retry: false,
   });
 
+  // 📅 Ngayong araw (Asia/Manila) — nire-recompute kada render
+  const dayRange = getManilaDayRange();
+
   /*
    * 💸 FARE TRANSACTIONS NG MGA DRIVER (public.transactions)
    * Kinukuha ang lahat ng transaction na may driver_id (paged by 1000 para
@@ -1174,7 +1187,7 @@ export default function UserManagementPage() {
     isError: faresError,
     isLoading: faresLoading,
   } = useQuery({
-    queryKey: ["driver-fare-transactions"],
+    queryKey: ["driver-fare-transactions", dayRange.key],
     queryFn: async (): Promise<DriverFareRow[]> => {
       const pageSize = 1000;
       const all: DriverFareRow[] = [];
@@ -1184,6 +1197,8 @@ export default function UserManagementPage() {
           .from("transactions")
           .select("id, driver_id, amount, type, status")
           .not("driver_id", "is", null)
+          .gte("timestamp", dayRange.startISO)
+          .lt("timestamp", dayRange.endISO)
           .order("id", { ascending: true })
           .range(from, from + pageSize - 1);
 
@@ -1200,6 +1215,7 @@ export default function UserManagementPage() {
 
       return all;
     },
+    refetchInterval: 60_000,
     refetchOnWindowFocus: true,
     retry: false,
   });
@@ -1264,7 +1280,7 @@ export default function UserManagementPage() {
     return totals;
   }, [fareRows]);
 
-  // 🚌 Isang row kada driver: ID, Name, Email, Total Fare Collected
+  // 🚌 Isang row kada driver: ID, Name, Email, Today's Fare Collected
   // Tinatanggap ang driver_id kung tugma sa id, supabase_auth_id,
   // linked_card_uid, o email ng driver.
   // ➕ Kapag may driver_id sa transactions na walang katugmang driver account,
@@ -2450,7 +2466,7 @@ export default function UserManagementPage() {
             }`}
           >
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            Couldn't read public.transactions — Total Fare Collected will show ₱0.00. Check the SELECT policy (RLS) on public.transactions.
+            Couldn't read public.transactions — Today's Fare Collected will show ₱0.00. Check the SELECT policy (RLS) on public.transactions.
           </div>
         )}
 
@@ -2577,7 +2593,7 @@ export default function UserManagementPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          Total Fare Collected
+                          Today's Fare Collected
                         </span>
                         <span
                           className={`inline-flex items-center gap-1 font-bold px-2.5 py-1 rounded border text-sm ${
@@ -2590,7 +2606,7 @@ export default function UserManagementPage() {
                       </div>
                     </div>
 
-                    {/* 🚌 DRIVERS TABLE — Driver ID, Name, Email, Total Fare Collected */}
+                    {/* 🚌 DRIVERS TABLE — Driver ID, Name, Email, Today's Fare Collected */}
                     <Table>
                       <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
                         <TableRow className="border-none hover:bg-transparent">
@@ -2600,7 +2616,7 @@ export default function UserManagementPage() {
                             <span className="flex items-center gap-1"><Mail size={10} /> Email</span>
                           </TableHead>
                           <TableHead className={`text-[11px] font-semibold uppercase tracking-wide text-right ${isDark ? "text-emerald-500" : "text-emerald-600"}`}>
-                            Total Fare Collected
+                            Today's Fare Collected
                           </TableHead>
                         </TableRow>
                       </TableHeader>
@@ -2641,7 +2657,7 @@ export default function UserManagementPage() {
                                     {formatPeso(driver.totalFare)}
                                   </span>
                                   <span className={`text-[10px] font-mono ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                                    {driver.trips} {driver.trips === 1 ? "fare" : "fares"}
+                                    {driver.trips} {driver.trips === 1 ? "fare" : "fares"} today
                                   </span>
                                 </div>
                               </TableCell>
