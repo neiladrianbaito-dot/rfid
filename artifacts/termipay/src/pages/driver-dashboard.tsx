@@ -803,7 +803,26 @@ function PlaceCombobox({
 /* ═══════════════════════════════════════════════════════════════════════
    🗺️ DISTANCE-BASED FARE (LTFRB: Base Fare + Succeeding Distance)
 
-   🎯 ACCURATE + ⚡ FAST + 🛠️ FIXED BARANGAY LOOKUP
+   🎯 ACCURATE + ⚡ INSTANT + 🛠️ FIXED BARANGAY LOOKUP
+
+   ⚡ WHAT MAKES "SET ROUTE" INSTANT NOW (v5):
+   1. Everything is PARALLEL. Before, lookups ran one after another and the
+      geocoder (1 request/second) was a queue: Nominatim attempt 1 → 2 → 3 →
+      Photon → … Now Photon (no rate limit) and Nominatim are RACED together
+      and the first valid answer wins (raceFirst).
+   2. Shared Supabase cache is asked for the distance AND the coordinates at the
+      same time, so a route that ANY driver used before is answered in ~100 ms.
+   3. The work starts the moment a place is picked (while the driver is still
+      typing the destination), so when Set route is tapped the answer is
+      already in memory. handleOk now reads it SYNCHRONOUSLY (peekKm) → no
+      await, no spinner, no waiting.
+   4. After the fare is known, the device claim runs IN PARALLEL with saving the
+      route (they don't depend on each other), and the route + reverse-route
+      lookups run in parallel with the claim.
+   5. The shared cache upsert now uses onConflict, so results are really saved
+      (run supabase_fare_cache.sql once) → every route is computed only ONCE
+      for ALL drivers. Second driver = instant.
+   6. OSRM timeout lowered (4.5 s) with a quick retry.
 
    WHY SOME BARANGAYS (e.g. Oquendo, Calbayog City) COULD NOT BE FOUND BEFORE:
    1. PSGC names come with extras like "Oquendo (Pob.)" or "Sta. Rosa" — the old
@@ -828,7 +847,7 @@ function PlaceCombobox({
    LOOKUP ORDER (stops at the first hit):
      1. this device (localStorage)  → 0 ms
      2. shared Supabase cache        → ~100 ms
-     3. Nominatim / Photon / OSRM    → only for places/routes nobody used yet
+     3. Photon + Nominatim (raced) / OSRM → only for places/routes nobody used yet
    ═══════════════════════════════════════════════════════════════════════ */
 
 const DEFAULT_BASE_FARE = 15;
@@ -845,6 +864,28 @@ function computeLtfrbFare(distanceKm: number, baseFare: number, baseKm: number, 
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// ⚡ Runs several lookups AT THE SAME TIME and returns the first one that is not null.
+// If all of them come back empty (or fail) → null. Never throws.
+function raceFirst<T>(tasks: Promise<T | null>[]): Promise<T | null> {
+  return new Promise((resolve) => {
+    let left = tasks.length;
+    if (left === 0) {
+      resolve(null);
+      return;
+    }
+    tasks.forEach((t) => {
+      t.then((v) => {
+        if (v != null) resolve(v);
+      })
+        .catch(() => {})
+        .finally(() => {
+          left -= 1;
+          if (left === 0) resolve(null);
+        });
+    });
+  });
+}
 
 // Samar + Leyte islands (west, south, east, north) — anything outside is rejected
 const AREA: Box = { west: 124.0, south: 9.8, east: 126.3, north: 12.8 };
@@ -923,7 +964,7 @@ async function nominatimSearch(query: string, box: Box = AREA): Promise<GeoHit[]
     const url =
       `https://nominatim.openstreetmap.org/search?format=json&limit=8&countrycodes=ph` +
       `&viewbox=${viewbox}&bounded=1&q=${encodeURIComponent(query)}`;
-    const data = await fetchJsonSafe(url, 10000);
+    const data = await fetchJsonSafe(url, 8000);
     if (!Array.isArray(data)) return [];
     return data
       .map((d: any) => ({
@@ -935,13 +976,13 @@ async function nominatimSearch(query: string, box: Box = AREA): Promise<GeoHit[]
   });
 }
 
-// Photon (komoot) — second opinion when Nominatim has nothing. Free, CORS-enabled.
+// Photon (komoot) — NO 1-per-second queue, so it is the fast one. Free, CORS-enabled.
 async function photonSearch(query: string, near?: LatLng): Promise<GeoHit[]> {
   const bias = near ? `&lat=${near.lat}&lon=${near.lng}` : "";
   const url =
     `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=8` +
     `&bbox=${AREA.west},${AREA.south},${AREA.east},${AREA.north}${bias}`;
-  const data = await fetchJsonSafe(url, 10000);
+  const data = await fetchJsonSafe(url, 6000);
   const feats: any[] = Array.isArray(data?.features) ? data.features : [];
   return feats
     .map((f: any) => {
@@ -961,24 +1002,39 @@ async function geocode(query: string): Promise<LatLng | null> {
   return list[0] ? { lat: list[0].lat, lng: list[0].lng } : null;
 }
 
-// City / municipality center
+// City / municipality center — Photon and Nominatim are raced, the first good answer wins
 async function geocodeMuni(p: Place): Promise<LatLng | null> {
   const prov = cleanProvince(p.province);
   const plain = p.municipality.replace(/\s+city$/i, "").trim();
   const plainN = norm(plain);
-  const attempts = [
-    `${p.municipality}, ${prov}, Philippines`,
-    `${plain}, ${prov}, Philippines`,
-    `${plain}, Philippines`,
-  ];
 
-  for (const q of attempts) {
+  const viaNominatim = async (q: string): Promise<LatLng | null> => {
     const list = await nominatimSearch(q);
     const hit = list.find((h) => norm(h.text).includes(plainN)) ?? list[0];
-    if (hit) return { lat: hit.lat, lng: hit.lng };
+    return hit ? { lat: hit.lat, lng: hit.lng } : null;
+  };
+
+  // strict Photon: the result text must really mention the municipality
+  const viaPhotonStrict = async (): Promise<LatLng | null> => {
+    const list = await photonSearch(`${plain} ${prov}`);
+    const hit = list.find((h) => norm(h.text).includes(plainN));
+    return hit ? { lat: hit.lat, lng: hit.lng } : null;
+  };
+
+  // ⚡ both at once
+  const fast = await raceFirst<LatLng>([
+    viaPhotonStrict(),
+    viaNominatim(`${p.municipality}, ${prov}, Philippines`),
+  ]);
+  if (fast) return fast;
+
+  // slower fallbacks (only when the fast pair found nothing)
+  for (const q of [`${plain}, ${prov}, Philippines`, `${plain}, Philippines`]) {
+    const hit = await viaNominatim(q);
+    if (hit) return hit;
   }
 
-  // last chance: second geocoder
+  // last chance: Photon without the strict text check
   const ph = await photonSearch(`${plain} ${prov}`);
   const phHit = ph.find((h) => norm(h.text).includes(plainN)) ?? ph[0];
   return phHit ? { lat: phHit.lat, lng: phHit.lng } : null;
@@ -1056,7 +1112,8 @@ function pickBarangayHit(
   return best ? { lat: best.pt.lat, lng: best.pt.lng } : null;
 }
 
-// The barangay itself — tries the short query first, then a local box, then Photon, then the long query
+// The barangay itself — Photon + short query + local box run AT THE SAME TIME (first valid hit wins),
+// then the old long query only if all of them found nothing.
 async function geocodeBarangay(p: Place, center: LatLng): Promise<LatLng | null> {
   const prov = cleanProvince(p.province);
   const plain = p.municipality.replace(/\s+city$/i, "").trim();
@@ -1070,25 +1127,30 @@ async function geocodeBarangay(p: Place, center: LatLng): Promise<LatLng | null>
     north: center.lat + LOCAL_BOX_DEG,
   };
 
-  for (const v of variants.slice(0, 2)) {
-    // 1) short query: "Oquendo, Calbayog"
-    let hits = await nominatimSearch(`${v}, ${plain}`);
-    let pt = pickBarangayHit(hits, variants, center, plain);
-    if (pt) return pt;
+  const v0 = variants[0];
 
-    // 2) plain name only, but inside a box around the municipality
-    hits = await nominatimSearch(v, local);
-    pt = pickBarangayHit(hits, variants, center, plain);
-    if (pt) return pt;
+  const fast = await raceFirst<LatLng>([
+    // Photon: not rate-limited → usually the first one to answer
+    photonSearch(`${v0} ${plain}`, center).then((h) => pickBarangayHit(h, variants, center, plain)),
+    // Nominatim short query: "Oquendo, Calbayog"
+    nominatimSearch(`${v0}, ${plain}`).then((h) => pickBarangayHit(h, variants, center, plain)),
+    // Nominatim plain name inside a box around the municipality
+    nominatimSearch(v0, local).then((h) => pickBarangayHit(h, variants, center, plain)),
+  ]);
+  if (fast) return fast;
+
+  // other spellings (e.g. "Sta." → "Santa") — only when the first spelling found nothing
+  if (variants[1]) {
+    const v1 = variants[1];
+    const second = await raceFirst<LatLng>([
+      photonSearch(`${v1} ${plain}`, center).then((h) => pickBarangayHit(h, variants, center, plain)),
+      nominatimSearch(`${v1}, ${plain}`).then((h) => pickBarangayHit(h, variants, center, plain)),
+    ]);
+    if (second) return second;
   }
 
-  // 3) second geocoder (Photon), biased toward the municipality
-  const ph = await photonSearch(`${variants[0]} ${plain}`, center);
-  const phPt = pickBarangayHit(ph, variants, center, plain);
-  if (phPt) return phPt;
-
-  // 4) the old long query, as a last try
-  const hits = await nominatimSearch(`Barangay ${variants[0]}, ${p.municipality}, ${prov}, Philippines`);
+  // the old long query, as a last try
+  const hits = await nominatimSearch(`Barangay ${v0}, ${p.municipality}, ${prov}, Philippines`);
   return pickBarangayHit(hits, variants, center, plain);
 }
 
@@ -1144,6 +1206,8 @@ function saveKmCache() {
 
 /* ----- shared cache in Supabase (optional: if the tables don't exist, it is silently skipped) -----
    Tables: place_coords(code, label, lat, lng)  and  route_distances(key, km).
+   ⚠️ Run supabase_fare_cache.sql ONCE — the tables need a PRIMARY KEY / UNIQUE on code / key,
+   otherwise the upsert below fails silently and nothing is ever shared.
    Keys start with "v3:" so the old, less accurate entries are ignored. */
 
 const SHARED_PREFIX = "v3:";
@@ -1166,7 +1230,9 @@ async function sharedGetCoord(code: string): Promise<LatLng | null> {
 function sharedSaveCoord(code: string, label: string, pt: LatLng) {
   try {
     Promise.resolve(
-      supabase.from("place_coords").upsert({ code: SHARED_PREFIX + code, label, lat: pt.lat, lng: pt.lng })
+      supabase
+        .from("place_coords")
+        .upsert({ code: SHARED_PREFIX + code, label, lat: pt.lat, lng: pt.lng }, { onConflict: "code" })
     ).catch(() => {});
   } catch {
     /* ignore */
@@ -1190,9 +1256,9 @@ async function sharedGetKm(key: string): Promise<number | null> {
 
 function sharedSaveKm(key: string, km: number) {
   try {
-    Promise.resolve(supabase.from("route_distances").upsert({ key: SHARED_PREFIX + key, km })).catch(
-      () => {}
-    );
+    Promise.resolve(
+      supabase.from("route_distances").upsert({ key: SHARED_PREFIX + key, km }, { onConflict: "key" })
+    ).catch(() => {});
   } catch {
     /* ignore */
   }
@@ -1243,8 +1309,10 @@ function geocodePlaceCached(p: Place): Promise<LatLng | null> {
   let pending = geoInflight.get(key);
   if (!pending) {
     pending = (async () => {
+      // ⚡ shared cache AND municipality center are asked at the same time
+      const [shared, center] = await Promise.all([sharedGetCoord(key), getMuniCoord(p)]);
+
       // 2) shared cache (another driver may have looked this barangay up already)
-      const shared = await sharedGetCoord(key);
       if (shared) {
         geoCache[key] = shared;
         saveGeoCache();
@@ -1252,7 +1320,6 @@ function geocodePlaceCached(p: Place): Promise<LatLng | null> {
       }
 
       // 3) really look it up, using the municipality center to validate the result
-      const center = await getMuniCoord(p);
       if (!center) return null;
 
       const found = await geocodeBarangay(p, center);
@@ -1310,10 +1377,10 @@ async function roadRoute(
 async function roadKm(a: LatLng, b: LatLng): Promise<number | null> {
   const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=false`;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const data = await fetchJsonSafe(url, 8000);
+    const data = await fetchJsonSafe(url, 4500);
     const meters = data?.routes?.[0]?.distance;
     if (typeof meters === "number") return meters / 1000;
-    if (attempt === 0) await sleep(300);
+    if (attempt === 0) await sleep(150);
   }
   return null;
 }
@@ -1326,6 +1393,14 @@ type KmResult =
 const pairKey = (a: Place, b: Place) =>
   a.code <= b.code ? `${a.code}|${b.code}` : `${b.code}|${a.code}`;
 
+// ⚡ SYNCHRONOUS answer — no await, no network. Returns the distance only when it is already
+// known on this device (exact result). Used by "Set route" so a prepared route needs ZERO waiting.
+function peekKm(a: Place, b: Place): KmResult | null {
+  if (a.code === b.code) return { ok: true, km: 0 };
+  const v = kmCache[pairKey(a, b)];
+  return typeof v === "number" ? { ok: true, km: v } : null;
+}
+
 async function computeKm(a: Place, b: Place): Promise<KmResult> {
   // exactly the same place → no distance
   if (a.code === b.code) return { ok: true, km: 0 };
@@ -1336,7 +1411,11 @@ async function computeKm(a: Place, b: Place): Promise<KmResult> {
   const local = kmCache[key];
   if (typeof local === "number") return { ok: true, km: local };
 
-  // 2) shared cache
+  // ⚡ start locating BOTH places right now (in parallel with the shared-cache question below)
+  const coordsPromise = Promise.all([geocodePlaceCached(a), geocodePlaceCached(b)]);
+  coordsPromise.catch(() => {});
+
+  // 2) shared cache — if any driver already computed this route, we're done in ~100 ms
   const shared = await sharedGetKm(key);
   if (shared != null) {
     kmCache[key] = shared;
@@ -1346,7 +1425,7 @@ async function computeKm(a: Place, b: Place): Promise<KmResult> {
 
   // 3) look it up once, then save for everybody
   try {
-    const [o, d] = await Promise.all([geocodePlaceCached(a), geocodePlaceCached(b)]);
+    const [o, d] = await coordsPromise;
     if (!o || !d) return { ok: false, reason: "locate" };
 
     let km = await roadKm(o, d);
@@ -2199,7 +2278,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedOrigin, savedDest, mapEl, places.length, placesLoading]);
 
-  // ⚡ Start finding the places + road distance in the background as soon as they are picked
+  // ⚡ Start finding the places + road distance in the background as soon as they are picked.
+  // (The default origin — Calbayog City — starts warming up the moment the form opens.)
   useEffect(() => {
     if (!distanceFareEnabled) return;
     if (originPlace && destPlace) {
@@ -2211,18 +2291,20 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     }
   }, [originPlace, destPlace, distanceFareEnabled]);
 
-  // ✅ ONE BUTTON: Set route — find both places, get the road distance, compute the fare,
+  // ✅ ONE BUTTON: Set route — get the road distance (usually ALREADY known), compute the fare,
   // SAVE the route and AUTO-ACTIVATE it (on the reader of the route that was reset).
   const canPressOk = distanceFareEnabled && !!originPlace && !!destPlace && !busy && !saving;
 
-  // ⚡ Activates a saved route (+ its return direction) on the given reader device
+  // ⚡ Activates a saved route (+ its return direction) on the given reader device.
+  // The device claim was already STARTED earlier (in parallel with saving), so here it is only awaited.
   const activateSavedRoute = async (
     origin: string,
     destination: string,
-    deviceId: string
+    deviceId: string,
+    claimPromise: Promise<"ok" | "taken" | "error">
   ): Promise<"ok" | "failed" | "not-found" | "taken"> => {
-    // main + return direction are looked up at the same time
-    const [{ data: main }, { data: reverse }] = await Promise.all([
+    // main + return direction + device claim are all done at the same time
+    const [{ data: main }, { data: reverse }, claim] = await Promise.all([
       supabase
         .from("fare_routes")
         .select("id")
@@ -2237,16 +2319,16 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
         .eq("destination", origin)
         .limit(1)
         .maybeSingle(),
+      claimPromise,
     ]);
 
     if (!main?.id) return "not-found";
 
-    // 🔗 take ownership of the reader first (one device = one driver)
-    const claim = await claimDevice(deviceId);
+    // 🔗 reader ownership (one device = one driver)
     if (claim === "taken") return "taken";
     if (claim !== "ok") return "failed";
 
-    // ...and both are activated at the same time
+    // ...and both routes are activated at the same time
     const calls = [main.id, ...(reverse?.id ? [reverse.id] : [])].map((id) =>
       supabase.rpc("activate_route", {
         p_route_id: id,
@@ -2288,13 +2370,19 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       return;
     }
 
-    setBusy(true);
-
-    /* 1️⃣ distance → fare (usually already prepared in the background) */
+    /* 1️⃣ distance → fare.
+       ⚡ INSTANT PATH: when the distance was already prepared (device cache / shared cache /
+       background lookup that finished while the driver was typing), it is read synchronously —
+       no await, no spinner. Only a brand-new, never-used route has to wait for the lookup. */
     let fareAmount: number;
     let approxUsed = false;
     try {
-      const res = await getRoadKm(originPlace, destPlace);
+      let res: KmResult | null = peekKm(originPlace, destPlace);
+
+      if (!res) {
+        setBusy(true); // only now — the answer was not ready yet
+        res = await getRoadKm(originPlace, destPlace);
+      }
 
       if (!res.ok) {
         setError(
@@ -2329,6 +2417,11 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     setSaving(true);
     const p = { origin: originPlace.label, destination: destPlace.label, fareAmount };
 
+    // ⚡ the reader claim does NOT depend on the route being saved → start it NOW, in parallel
+    const claimPromise: Promise<"ok" | "taken" | "error"> | null = resetDeviceId
+      ? claimDevice(resetDeviceId)
+      : null;
+
     try {
       const existing = Array.isArray(routes)
         ? routes.find((r: any) => r.origin === p.origin && r.destination === p.destination)
@@ -2348,8 +2441,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       }
 
       let activateResult: "ok" | "failed" | "not-found" | "taken" | "no-device" = "no-device";
-      if (resetDeviceId) {
-        activateResult = await activateSavedRoute(p.origin, p.destination, resetDeviceId);
+      if (resetDeviceId && claimPromise) {
+        activateResult = await activateSavedRoute(p.origin, p.destination, resetDeviceId, claimPromise);
       }
 
       queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
@@ -3059,6 +3152,13 @@ export default function DriverDashboardPage() {
     }
     setAuthorized(true);
   }, [setLocation]);
+
+  // ⚡ Warm up the Route tab in the background right after sign-in:
+  // the places list is loaded (from the saved copy → instant) so the Route tab opens with data.
+  useEffect(() => {
+    if (!authorized) return;
+    loadSamarPlaces().catch(() => {});
+  }, [authorized]);
 
   function changeTab(next: Tab) {
     setTab(next);
