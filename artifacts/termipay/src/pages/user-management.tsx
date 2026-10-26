@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
-import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard, Download, FileText, Bus } from "lucide-react";
+import { Search, Pencil, Trash2, Wallet, Users, Zap, ShieldAlert, Mail, LinkIcon, ChevronLeft, ChevronRight, Phone, CheckCircle2, Eye, CreditCard, RotateCw, RefreshCw, CalendarClock, ArrowRightLeft, Upload, X, Loader2, ChevronsUpDown, Check, MapPin, UserRound, IdCard, Download, FileText, Bus, AlertTriangle } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   AlertDialog,
@@ -50,16 +50,23 @@ const TYPE_FILTERS = ["All", "Regular", "Student", "Senior", "PWD"] as const;
 // that are technically still "Active" in the status column but past their date.
 const STATUS_FILTERS = ["All", "Active", "Inactive", "Blocked", "Expired"] as const;
 
-// 🧑‍🤝‍🧑 ROLE TABS — based on public.auth_users.role ('commuter' | 'driver').
-// Cards with no linked account have no role, so they only show under "All".
+// 🧑‍🤝‍🧑 ROLE TABS
+//   Driver   = card na naka-link (card_uid = linked_card_uid) sa auth_users na role = 'driver'
+//   Commuter = lahat ng ibang card sa public.users
 const ROLE_TABS = ["All", "Commuter", "Driver"] as const;
 type RoleTab = (typeof ROLE_TABS)[number];
 type AuthRole = "commuter" | "driver";
 
-interface AuthRoleRow {
+interface DriverAccountRow {
   email: string | null;
   linked_card_uid: string | null;
-  role: string | null;
+}
+
+// 🔑 Normalizes a card UID so "04:A3:1F", "04a31f", "04-A3-1F" all match.
+function normalizeCardUid(value: string | null | undefined): string {
+  return String(value ?? "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase();
 }
 
 // ➕ Reasons a card would need a balance transfer (lost/stolen/damaged replacement)
@@ -1082,60 +1089,59 @@ export default function UserManagementPage() {
   const editInputCls = `h-9 text-sm ${isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-600" : "bg-white border-slate-200"}`;
 
   /*
-   * 🧑‍🤝‍🧑 ROLES FROM public.auth_users
-   * Kinukuha ang (email, linked_card_uid, role) ng lahat ng accounts para
-   * malaman kung commuter o driver ang may-ari ng bawat card.
+   * 🧑‍🤝‍🧑 DRIVER ACCOUNTS FROM public.auth_users
+   * Kinukuha lang ang mga account na role = 'driver'. Ang card sa
+   * public.users ay DRIVER kapag ang card_uid niya = linked_card_uid ng
+   * driver account (o kapag tugma ang email). Lahat ng iba = COMMUTER.
    */
-  const { data: authRoleRows, refetch: refetchAuthRoles } = useQuery({
-    queryKey: ["auth-users-roles"],
-    queryFn: async (): Promise<AuthRoleRow[]> => {
+  const {
+    data: driverRows,
+    refetch: refetchAuthRoles,
+    isError: rolesError,
+  } = useQuery({
+    queryKey: ["auth-users-drivers"],
+    queryFn: async (): Promise<DriverAccountRow[]> => {
       const { data, error } = await supabase
         .from("auth_users")
-        .select("email, linked_card_uid, role");
+        .select("email, linked_card_uid")
+        .eq("role", "driver");
 
       if (error) {
-        console.error("Failed to load auth_users roles:", error);
+        console.error("Failed to load driver accounts from auth_users:", error);
         throw error;
       }
 
-      return (data ?? []) as AuthRoleRow[];
+      return (data ?? []) as DriverAccountRow[];
     },
     refetchOnWindowFocus: true,
+    retry: false,
   });
 
-  // Lookup maps: card UID -> role, and email -> role (fallback)
-  const roleLookup = useMemo(() => {
-    const byCardUid = new Map<string, AuthRole>();
-    const byEmail = new Map<string, AuthRole>();
+  // Lookup sets: normalized card UIDs and lowercase emails ng mga driver
+  const driverLookup = useMemo(() => {
+    const uids = new Set<string>();
+    const emails = new Set<string>();
 
-    (authRoleRows ?? []).forEach((row) => {
-      const role = String(row.role || "").toLowerCase();
-      if (role !== "commuter" && role !== "driver") return;
+    (driverRows ?? []).forEach((row) => {
+      const uid = normalizeCardUid(row.linked_card_uid);
+      if (uid) uids.add(uid);
 
-      if (row.linked_card_uid) {
-        byCardUid.set(String(row.linked_card_uid).trim().toLowerCase(), role);
-      }
-      if (row.email) {
-        byEmail.set(String(row.email).trim().toLowerCase(), role);
-      }
+      const email = String(row.email ?? "").trim().toLowerCase();
+      if (email) emails.add(email);
     });
 
-    return { byCardUid, byEmail };
-  }, [authRoleRows]);
+    return { uids, emails };
+  }, [driverRows]);
 
-  // Returns "commuter" | "driver" | null (null = card has no linked account)
-  const getUserRole = (user: any): AuthRole | null => {
-    const uid = String(user?.cardUid ?? "").trim().toLowerCase();
-    if (uid && roleLookup.byCardUid.has(uid)) {
-      return roleLookup.byCardUid.get(uid) as AuthRole;
-    }
+  // Returns "driver" kapag naka-link sa driver account, kung hindi "commuter"
+  const getUserRole = (user: any): AuthRole => {
+    const uid = normalizeCardUid(user?.cardUid);
+    if (uid && driverLookup.uids.has(uid)) return "driver";
 
     const email = normalizeEmail(user?.email)?.toLowerCase();
-    if (email && roleLookup.byEmail.has(email)) {
-      return roleLookup.byEmail.get(email) as AuthRole;
-    }
+    if (email && driverLookup.emails.has(email)) return "driver";
 
-    return null;
+    return "commuter";
   };
 
   /*
@@ -1360,10 +1366,11 @@ export default function UserManagementPage() {
   const userList = Array.isArray(users) ? users : [];
 
   // 🧑‍🤝‍🧑 Tab counts (based on the current search results)
+  const driverCount = userList.filter((u: any) => getUserRole(u) === "driver").length;
   const roleCounts = {
     All: userList.length,
-    Commuter: userList.filter((u: any) => getUserRole(u) === "commuter").length,
-    Driver: userList.filter((u: any) => getUserRole(u) === "driver").length,
+    Commuter: userList.length - driverCount,
+    Driver: driverCount,
   };
 
   // 🧑‍🤝‍🧑 Apply the role tab first
@@ -1422,7 +1429,7 @@ export default function UserManagementPage() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
-        queryClient.invalidateQueries({ queryKey: ["auth-users-roles"] });
+        queryClient.invalidateQueries({ queryKey: ["auth-users-drivers"] });
         toast({ title: <SuccessTitle text="User Deleted Successfully" /> });
       },
     },
@@ -2160,6 +2167,20 @@ export default function UserManagementPage() {
           })}
         </div>
 
+        {/* ⚠️ Shows only if the driver accounts couldn't be read from auth_users (RLS / permissions) */}
+        {rolesError && (
+          <div
+            className={`flex-none flex items-center gap-2 px-6 py-2 text-xs font-medium border-b ${
+              isDark
+                ? "bg-orange-950/30 border-orange-900 text-orange-400"
+                : "bg-orange-50 border-orange-200 text-orange-700"
+            }`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            Couldn't read driver accounts from auth_users — all cards are shown as Commuters. Check the SELECT policy (RLS) on public.auth_users.
+          </div>
+        )}
+
         <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
           <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
             <div className="flex items-center gap-3">
@@ -2327,13 +2348,11 @@ export default function UserManagementPage() {
                                     }`}>
                                       <LinkIcon size={8} /> Linked
                                     </span>
-                                    {/* 🧑‍🤝‍🧑 Role badge (Commuter / Driver) from auth_users */}
-                                    {userRole && (
-                                      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${getRoleBadgeStyle(userRole, isDark)}`}>
-                                        {userRole === "driver" ? <Bus size={8} /> : <UserRound size={8} />}
-                                        {userRole}
-                                      </span>
-                                    )}
+                                    {/* 🧑‍🤝‍🧑 Role badge (Commuter / Driver) */}
+                                    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${getRoleBadgeStyle(userRole, isDark)}`}>
+                                      {userRole === "driver" ? <Bus size={8} /> : <UserRound size={8} />}
+                                      {userRole}
+                                    </span>
                                   </div>
                                   <span className="flex items-center gap-1 text-xs text-blue-500 font-mono">
                                     <Mail className="w-3 h-3 flex-shrink-0" />
@@ -2348,12 +2367,10 @@ export default function UserManagementPage() {
                                     }`}>
                                       <LinkIcon size={8} /> Not Linked
                                     </span>
-                                    {userRole && (
-                                      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${getRoleBadgeStyle(userRole, isDark)}`}>
-                                        {userRole === "driver" ? <Bus size={8} /> : <UserRound size={8} />}
-                                        {userRole}
-                                      </span>
-                                    )}
+                                    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded w-fit border ${getRoleBadgeStyle(userRole, isDark)}`}>
+                                      {userRole === "driver" ? <Bus size={8} /> : <UserRound size={8} />}
+                                      {userRole}
+                                    </span>
                                   </div>
                                   <span className={`text-[11px] italic font-mono ${isDark ? "text-slate-600" : "text-slate-400"}`}>
                                     No account registered
@@ -2608,17 +2625,11 @@ export default function UserManagementPage() {
                   },
                   {
                     label: "Account Role",
-                    value: getUserRole(previewUser)
-                      ? getUserRole(previewUser) === "driver"
-                        ? "Driver"
-                        : "Commuter"
-                      : "N/A",
+                    value: getUserRole(previewUser) === "driver" ? "Driver" : "Commuter",
                     cls:
                       getUserRole(previewUser) === "driver"
                         ? isDark ? "text-violet-400" : "text-violet-600"
-                        : getUserRole(previewUser) === "commuter"
-                          ? isDark ? "text-cyan-400" : "text-cyan-600"
-                          : isDark ? "text-slate-500 italic" : "text-slate-400 italic",
+                        : isDark ? "text-cyan-400" : "text-cyan-600",
                   },
                 ].map((item) => (
                   <div
