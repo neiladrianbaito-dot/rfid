@@ -79,11 +79,24 @@ interface DriverFareRow {
 // Kung iba ang tawag mo sa fare type, ayusin dito.
 const NON_FARE_TYPE_REGEX = /top.?up|refund|reversal|cash.?in/i;
 
+// ✅ Mga status na itinuturing na successful na transaction
+const SUCCESS_STATUSES = ["success", "successful", "completed", "complete", "paid"];
+
 // 🔑 Normalizes a card UID so "04:A3:1F", "04a31f", "04-A3-1F" all match.
 function normalizeCardUid(value: string | null | undefined): string {
   return String(value ?? "")
     .replace(/[^a-zA-Z0-9]/g, "")
     .toUpperCase();
+}
+
+// 🔑 Normalizes any ID / email / UID para laging magtugma ang driver_id sa
+// transactions at ang id/supabase_auth_id/linked_card_uid/email ng driver
+// ("ABC-123" == "abc123", UUID na may dash o wala, etc.)
+function normalizeKey(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9@.]/g, "");
 }
 
 // ➕ Reasons a card would need a balance transfer (lost/stolen/damaged replacement)
@@ -1109,6 +1122,7 @@ export default function UserManagementPage() {
   /*
    * 🧑‍🤝‍🧑 DRIVER ACCOUNTS FROM public.auth_users
    * Kinukuha ang mga account na role = 'driver' (id, name, email, linked card).
+   * Gumagamit ng ilike para tanggapin ang "driver", "Driver", "DRIVER".
    * Ginagamit ito para sa Drivers tab AT para malaman kung aling card sa
    * public.users ay driver (card_uid = linked_card_uid, o tugma ang email).
    */
@@ -1123,7 +1137,7 @@ export default function UserManagementPage() {
       const { data, error } = await supabase
         .from("auth_users")
         .select("id, supabase_auth_id, full_name, email, linked_card_uid")
-        .eq("role", "driver")
+        .ilike("role", "driver")
         .order("full_name", { ascending: true });
 
       if (error) {
@@ -1206,21 +1220,31 @@ export default function UserManagementPage() {
     return "commuter";
   };
 
-  // 💸 Total fare + bilang ng trips kada driver_id (lowercase key)
+  // 💸 Total fare + bilang ng trips kada driver_id (normalized key)
+  // ⚠️ Negative ang amount sa transactions (bawas sa commuter), kaya
+  // Math.abs() ang ginagamit para positive ang total na nakolekta ng driver.
   const fareTotals = useMemo(() => {
-    const totals = new Map<string, { total: number; count: number }>();
+    const totals = new Map<string, { total: number; count: number; rawId: string }>();
 
     (fareRows ?? []).forEach((row) => {
-      const key = String(row.driver_id ?? "").trim().toLowerCase();
+      const key = normalizeKey(row.driver_id);
       if (!key) return;
 
-      if (String(row.status ?? "").trim().toLowerCase() !== "success") return;
+      // Tanggapin ang iba't ibang success status (Success / Completed / Paid)
+      const status = String(row.status ?? "").trim().toLowerCase();
+      if (!SUCCESS_STATUSES.includes(status)) return;
+
+      // Huwag isama ang top-up / refund / cash-in
       if (NON_FARE_TYPE_REGEX.test(String(row.type ?? ""))) return;
 
-      const amount = Number(row.amount);
+      const amount = Math.abs(Number(row.amount));
       if (!Number.isFinite(amount)) return;
 
-      const current = totals.get(key) ?? { total: 0, count: 0 };
+      const current = totals.get(key) ?? {
+        total: 0,
+        count: 0,
+        rawId: String(row.driver_id ?? ""),
+      };
       current.total += amount;
       current.count += 1;
       totals.set(key, current);
@@ -1230,12 +1254,19 @@ export default function UserManagementPage() {
   }, [fareRows]);
 
   // 🚌 Isang row kada driver: ID, Name, Email, Total Fare Collected
-  // Tinatanggap ang driver_id kung tugma sa auth_users.id O supabase_auth_id.
+  // Tinatanggap ang driver_id kung tugma sa id, supabase_auth_id,
+  // linked_card_uid, o email ng driver.
+  // ➕ Kapag may driver_id sa transactions na walang katugmang driver account,
+  // lalabas pa rin ito bilang "Unlinked driver" row para hindi mawala ang data.
   const driverSummaries = useMemo(() => {
-    return (driverRows ?? []).map((driver) => {
-      const keys = [driver.id, driver.supabase_auth_id]
-        .map((k) => String(k ?? "").trim().toLowerCase())
-        .filter(Boolean);
+    const usedKeys = new Set<string>();
+
+    const rows = (driverRows ?? []).map((driver) => {
+      const keys = new Set(
+        [driver.id, driver.supabase_auth_id, driver.linked_card_uid, driver.email]
+          .map((k) => normalizeKey(k))
+          .filter(Boolean)
+      );
 
       let total = 0;
       let count = 0;
@@ -1245,6 +1276,7 @@ export default function UserManagementPage() {
         if (entry) {
           total += entry.total;
           count += entry.count;
+          usedKeys.add(key);
         }
       });
 
@@ -1256,7 +1288,50 @@ export default function UserManagementPage() {
         trips: count,
       };
     });
+
+    // 🔎 driver_id na walang katugmang account sa auth_users (role = driver)
+    fareTotals.forEach((entry, key) => {
+      if (usedKeys.has(key)) return;
+      rows.push({
+        id: entry.rawId,
+        name: "Unlinked driver",
+        email: "—",
+        totalFare: entry.total,
+        trips: entry.count,
+      });
+    });
+
+    return rows;
   }, [driverRows, fareTotals]);
+
+  // 🧪 DEBUG: tingnan sa browser console (F12) kung ano ang dumarating.
+  // Burahin ang useEffect na ito kapag gumana na.
+  useEffect(() => {
+    if (!driverRows || !fareRows) return;
+    console.log("[Drivers] driver accounts:", driverRows);
+    console.log("[Drivers] fare rows with driver_id:", fareRows.length, fareRows.slice(0, 5));
+
+    const known = new Set<string>();
+    driverRows.forEach((d) =>
+      [d.id, d.supabase_auth_id, d.linked_card_uid, d.email].forEach((k) => {
+        const n = normalizeKey(k);
+        if (n) known.add(n);
+      })
+    );
+
+    const unmatched = new Set<string>();
+    fareRows.forEach((r) => {
+      const n = normalizeKey(r.driver_id);
+      if (n && !known.has(n)) unmatched.add(String(r.driver_id));
+    });
+
+    if (unmatched.size > 0) {
+      console.warn(
+        "[Drivers] driver_id values that match NO driver account (role = driver) in auth_users:",
+        Array.from(unmatched)
+      );
+    }
+  }, [driverRows, fareRows]);
 
   // 🔎 Search sa Drivers tab: name / email / driver ID
   const driverFiltered = useMemo(() => {
@@ -1501,12 +1576,12 @@ export default function UserManagementPage() {
   const userList = Array.isArray(users) ? users : [];
 
   // 🧑‍🤝‍🧑 Tab counts
-  // Commuter = cards na hindi naka-link sa driver, Driver = bilang ng driver accounts
+  // Commuter = cards na hindi naka-link sa driver, Driver = bilang ng driver rows
   const driverCardCount = userList.filter((u: any) => getUserRole(u) === "driver").length;
   const roleCounts = {
     All: userList.length,
     Commuter: userList.length - driverCardCount,
-    Driver: (driverRows ?? []).length,
+    Driver: driverSummaries.length,
   };
 
   // 🧑‍🤝‍🧑 Apply the role tab first (para sa All / Commuter)
