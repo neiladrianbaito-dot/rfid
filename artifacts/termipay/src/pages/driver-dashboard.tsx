@@ -67,6 +67,8 @@ import {
   ShieldCheck,
   Satellite,
   Map as MapIcon, // renamed so it never clashes with the JS built-in Map
+  Layers,
+  X,
 } from "lucide-react";
 
 const DRIVER_TOKEN_KEY = "termipay_driver_auth_token";
@@ -2473,6 +2475,9 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     writeMapStyle(next);
   }, []);
 
+  // 🗺️ Legend can be closed (hidden) and re-opened with the small layers button
+  const [legendOpen, setLegendOpen] = useState(true);
+
   // Create the Leaflet map when its container mounts, destroy it when the container is removed
   useEffect(() => {
     if (!mapEl) return;
@@ -2893,14 +2898,25 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                 </span>
 
                 {/* 🗺️ LEGEND — pick the map type + what the pins / line mean */}
+                {legendOpen ? (
                 <div
                   className={`tp-legend absolute right-3 top-3 z-[500] w-[138px] rounded-2xl border p-1.5 shadow-lg backdrop-blur-md ${legendPanel}`}
                   role="group"
                   aria-label="Map legend"
                 >
-                  <p className="px-1.5 pb-1 pt-0.5 text-[9px] font-bold uppercase tracking-widest opacity-60">
-                    Map type
-                  </p>
+                  <div className="flex items-center justify-between pb-1 pl-1.5 pt-0.5">
+                    <p className="text-[9px] font-bold uppercase tracking-widest opacity-60">Map type</p>
+                    <button
+                      type="button"
+                      onClick={() => setLegendOpen(false)}
+                      aria-label="Hide map legend"
+                      className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                        isSat || isDark ? "hover:bg-white/15" : "hover:bg-slate-900/10"
+                      }`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
 
                   <div className="space-y-1">
                     {mapTypeOptions.map(({ id, label, Icon }) => {
@@ -2961,6 +2977,16 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                     </div>
                   </div>
                 </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setLegendOpen(true)}
+                    aria-label="Show map legend"
+                    className={`tp-legend absolute right-3 top-3 z-[500] flex h-9 w-9 items-center justify-center rounded-full border shadow-lg backdrop-blur-md ${legendPanel}`}
+                  >
+                    <Layers className="h-4 w-4" />
+                  </button>
+                )}
 
                 {/* attribution for the tile providers (small, bottom-left) */}
                 <span
