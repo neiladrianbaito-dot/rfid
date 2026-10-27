@@ -3036,7 +3036,7 @@ export default function UserManagementPage() {
             User Management
           </h2>
           <p className={`text-sm mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Manage cardholder credentials and wallet balances
+            Manage commuter and driver accounts
           </p>
         </div>
 
