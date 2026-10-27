@@ -6,7 +6,7 @@ import {
   getListUsersQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { LucideIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -50,10 +50,10 @@ const TYPE_FILTERS = ["All", "Regular", "Student", "Senior", "PWD"] as const;
 // that are technically still "Active" in the status column but past their date.
 const STATUS_FILTERS = ["All", "Active", "Inactive", "Blocked", "Expired"] as const;
 
-// 🧑‍🤝‍🧑 ROLE TABS
+// 🧑‍🤝‍🧑 ROLE TABS — DALAWA NA LANG (walang "All")
 //   Driver   = card na naka-link (card_uid = linked_card_uid) sa auth_users na role = 'driver'
 //   Commuter = lahat ng ibang card sa public.users
-const ROLE_TABS = ["All", "Commuter", "Driver"] as const;
+const ROLE_TABS = ["Commuter", "Driver"] as const;
 type RoleTab = (typeof ROLE_TABS)[number];
 type AuthRole = "commuter" | "driver";
 
@@ -146,6 +146,446 @@ function normalizePhContactDigits(raw: string): string {
   }
 
   return digits.slice(0, 10);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// PAGE STYLES — same folder-tab master container as the Reports page
+// (single-file build, copied from REPORTS_CSS). Only the rules this page
+// actually uses are included.
+// ══════════════════════════════════════════════════════════════════════
+const USERS_PANEL_CSS = `
+/* 1. TOKENS */
+.rp {
+  --rp-bg: #ffffff;
+  --rp-strip: #ffffff;
+  --rp-tile: #ffffff;
+  --rp-border: #e4e4e7;
+  --rp-divider: #ececee;
+  --rp-text: #27272a;
+  --rp-muted: #71717a;
+  --rp-accent: #2563eb;
+  --rp-radius: 18px;
+  --rp-shadow:
+    0 1px 2px rgba(24, 24, 27, 0.06),
+    0 10px 24px -6px rgba(24, 24, 27, 0.14),
+    0 28px 56px -16px rgba(24, 24, 27, 0.16);
+}
+
+.rp[data-theme="dark"] {
+  --rp-bg: #18181b;
+  --rp-strip: #101012;
+  --rp-tile: #202024;
+  --rp-border: #2c2c31;
+  --rp-divider: #26262b;
+  --rp-text: #e4e4e7;
+  --rp-muted: #a1a1aa;
+  --rp-accent: #60a5fa;
+  --rp-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 12px 28px -8px rgba(0, 0, 0, 0.55),
+    0 32px 64px -20px rgba(0, 0, 0, 0.6);
+}
+
+/* 2. PAGE-LEVEL (scoped with :has so it only applies while this page is mounted) */
+html:has(.rp-page) {
+  overflow-x: hidden !important;
+  overflow-y: scroll !important;
+  scrollbar-gutter: stable;
+  scrollbar-width: none;
+}
+html:has(.rp-page)::-webkit-scrollbar,
+body:has(.rp-page)::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+body:has(.rp-page) {
+  overflow-x: hidden !important;
+  overflow-y: scroll !important;
+  scrollbar-width: none;
+  scrollbar-gutter: stable;
+}
+#root:has(.rp-page) {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+.rp-page {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: visible;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.rp-page::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* 3. MASTER CONTAINER */
+.rp {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  background: transparent;
+}
+
+/* 4. TAB STRIP */
+.rp-tabs {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: none;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.rp-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 10px 14px;
+  margin: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--rp-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  box-shadow: none;
+  outline: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.rp-tab:hover {
+  color: var(--rp-text);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.rp-tab[aria-selected="true"],
+.rp-tab[aria-selected="true"]:hover {
+  color: var(--rp-accent);
+  background: var(--rp-bg);
+  border-color: var(--rp-border);
+  box-shadow: none;
+  margin-bottom: -1px;
+  padding-bottom: 11px;
+  z-index: 3;
+}
+
+.rp-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 3px;
+  background: var(--rp-bg);
+  pointer-events: none;
+}
+
+.rp-tab svg { width: 14px; height: 14px; flex: none; }
+.rp-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* count pill inside each tab */
+.rp-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  color: var(--rp-muted);
+  background: var(--rp-divider);
+  border-radius: 9999px;
+}
+.rp-tab[aria-selected="true"] .rp-count {
+  color: var(--rp-accent);
+  background: color-mix(in srgb, var(--rp-accent) 14%, transparent);
+}
+
+/* 5. CONTENT AREA */
+.rp-body {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  padding: 24px;
+  background: var(--rp-bg);
+  border: 1px solid var(--rp-border);
+  border-radius: 0 var(--rp-radius) var(--rp-radius) var(--rp-radius);
+  box-shadow: var(--rp-shadow);
+}
+
+.rp-section { min-width: 0; }
+
+.rp-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--rp-divider);
+}
+.rp-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--rp-text);
+}
+.rp-section-title small {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--rp-muted);
+}
+.rp-section-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--rp-muted);
+}
+.rp-section-lead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* 6. INNER ELEMENTS */
+.rp-well {
+  padding: 16px;
+  background: var(--rp-tile);
+  border: 1px solid var(--rp-border);
+  border-radius: 12px;
+}
+
+/* sticky table header that matches the panel background */
+.rp .rp-sticky-head,
+.rp .rp-sticky-head tr {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--rp-bg);
+}
+
+/* 7. MOTION + A11Y */
+@keyframes rp-swap {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.rp-body-enter { animation: rp-swap 0.16s ease-out; }
+
+.rp-tab:focus-visible {
+  outline: 2px solid var(--rp-accent);
+  outline-offset: 2px;
+}
+
+.rp[data-first="false"] .rp-body {
+  border-top-left-radius: var(--rp-radius);
+}
+
+@media (max-width: 1100px) {
+  .rp-tab { padding: 10px 10px; gap: 6px; }
+}
+
+@media (max-width: 760px) {
+  .rp-body { padding: 16px; }
+  .rp { --rp-radius: 14px; }
+  .rp-tabs { gap: 2px; }
+  .rp-tab {
+    flex: 1 1 0;
+    padding: 9px 6px;
+    border-radius: 10px 10px 0 0;
+  }
+  .rp-tab[aria-selected="true"],
+  .rp-tab[aria-selected="true"]:hover {
+    flex: 0 0 auto;
+    padding: 9px 12px 10px;
+  }
+  .rp-tab[aria-selected="false"] .rp-label { display: none; }
+  .rp-tab[aria-selected="false"] .rp-count { display: none; }
+  .rp-tab svg { width: 16px; height: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rp-body-enter { animation: none; }
+  .rp-tab { transition: none; }
+}
+`;
+
+/* ==========================================================================
+   ReportsPanel — the single master container (same component structure as
+   the Reports page).
+
+   <ReportsPanel>           one bordered, shadowed panel
+     tab strip              the top edge of the "folder"
+     body                   whichever tab is active renders in here
+   </ReportsPanel>
+   ========================================================================== */
+
+type PanelTab<K extends string = string> = {
+  key: K;
+  label: string;
+  icon: LucideIcon;
+  count?: number;
+};
+
+type ReportsPanelProps<K extends string> = {
+  tabs: PanelTab<K>[];
+  active: K;
+  onChange: (key: K) => void;
+  isDark: boolean;
+  children: React.ReactNode;
+};
+
+function ReportsPanel<K extends string>({
+  tabs,
+  active,
+  onChange,
+  isDark,
+  children,
+}: ReportsPanelProps<K>) {
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  // Arrow-key / Home / End navigation, per the WAI-ARIA tabs pattern.
+  const handleKeyDown = (e: React.KeyboardEvent, index: number) => {
+    let next = index;
+    if (e.key === "ArrowRight") next = (index + 1) % tabs.length;
+    else if (e.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    else return;
+    e.preventDefault();
+    onChange(tabs[next].key);
+    tabRefs.current[tabs[next].key]?.focus();
+  };
+
+  return (
+    <div
+      className="rp"
+      data-theme={isDark ? "dark" : "light"}
+      data-first={active === tabs[0]?.key ? "true" : "false"}
+      data-testid="users-panel"
+    >
+      <div className="rp-tabs" role="tablist" aria-label="Account roles">
+        {tabs.map(({ key, label, icon: Icon, count }, i) => (
+          <button
+            key={key}
+            type="button"
+            ref={(el) => { tabRefs.current[key] = el; }}
+            role="tab"
+            id={`rp-tab-${key}`}
+            aria-selected={active === key}
+            aria-controls={`rp-panel-${key}`}
+            aria-label={label}
+            title={label}
+            tabIndex={active === key ? 0 : -1}
+            className="rp-tab"
+            data-testid={`button-tab-${key}`}
+            onClick={() => onChange(key)}
+            onKeyDown={(e) => handleKeyDown(e, i)}
+          >
+            <Icon aria-hidden="true" />
+            <span className="rp-label">{label}</span>
+            {typeof count === "number" && <span className="rp-count">{count}</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* key={active} replays the short fade when the tab changes. The
+          container itself is never remounted. */}
+      <div
+        key={active}
+        className="rp-body rp-body-enter"
+        role="tabpanel"
+        id={`rp-panel-${active}`}
+        aria-labelledby={`rp-tab-${active}`}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   ReportSection — plain header row (title, filter/search bar, right-side
+   meta) with a divider, instead of a nested card.
+   -------------------------------------------------------------------------- */
+type ReportSectionProps = {
+  title: string;
+  icon: LucideIcon;
+  iconClassName?: string;
+  filterLabel?: string;
+  filterBar?: React.ReactNode;
+  meta?: React.ReactNode;
+  children: React.ReactNode;
+};
+
+function ReportSection({
+  title,
+  icon: Icon,
+  iconClassName = "text-blue-500",
+  filterLabel,
+  filterBar,
+  meta,
+  children,
+}: ReportSectionProps) {
+  return (
+    <section className="rp-section">
+      <header className="rp-section-head">
+        <div className="rp-section-lead">
+          <h3 className="rp-section-title">
+            <Icon size={14} className={iconClassName} aria-hidden="true" />
+            {title}
+            {filterLabel ? <small>— {filterLabel}</small> : null}
+          </h3>
+          {filterBar}
+        </div>
+        {meta ? <div className="rp-section-meta">{meta}</div> : null}
+      </header>
+      {children}
+    </section>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1067,8 +1507,8 @@ export default function UserManagementPage() {
   const { canManage, loaded } = useAdminAccess();
 
   const [search, setSearch] = useState("");
-  // 🧑‍🤝‍🧑 Role tab state (All / Commuter / Driver)
-  const [roleTab, setRoleTab] = useState<RoleTab>("All");
+  // 🧑‍🤝‍🧑 Role tab state (Commuter / Driver) — default ay Commuter
+  const [roleTab, setRoleTab] = useState<RoleTab>("Commuter");
   const isDriverTab = roleTab === "Driver";
   const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>("All");
   // ➕ Status filter state (Active / Inactive / Blocked / Expired)
@@ -1717,17 +2157,13 @@ export default function UserManagementPage() {
   // 🧑‍🤝‍🧑 Tab counts
   // Commuter = cards na hindi naka-link sa driver, Driver = bilang ng driver rows
   const driverCardCount = userList.filter((u: any) => getUserRole(u) === "driver").length;
-  const roleCounts = {
-    All: userList.length,
+  const roleCounts: Record<RoleTab, number> = {
     Commuter: userList.length - driverCardCount,
     Driver: driverSummaries.length,
   };
 
-  // 🧑‍🤝‍🧑 Apply the role tab first (para sa All / Commuter)
-  const roleFilteredList =
-    roleTab === "All"
-      ? userList
-      : userList.filter((u: any) => getUserRole(u) === roleTab.toLowerCase());
+  // 🧑‍🤝‍🧑 Apply the role tab first — Commuter tab = cards na HINDI driver
+  const roleFilteredList = userList.filter((u: any) => getUserRole(u) === "commuter");
 
   // Apply the type filter on top of the role tab
   const typeFilteredList =
@@ -1747,7 +2183,7 @@ export default function UserManagementPage() {
       ? typeFilteredList.filter((u: any) => isCardExpired(u.expirationDate))
       : typeFilteredList.filter((u: any) => u.status === statusFilter);
 
-  // 📄 Pagination — gumagana para sa cards (All/Commuter) at drivers (Driver tab)
+  // 📄 Pagination — gumagana para sa cards (Commuter) at drivers (Driver tab)
   const activeCount = isDriverTab ? driverFiltered.length : filteredList.length;
   const totalPages = Math.max(1, Math.ceil(activeCount / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -1756,6 +2192,12 @@ export default function UserManagementPage() {
   const paginatedDrivers = driverFiltered.slice(startIndex, startIndex + PAGE_SIZE);
 
   const tableLoading = isDriverTab ? driversLoading : isLoading;
+
+  // 🗂️ Tab strip definition (dalawang tab lang)
+  const USER_TABS: PanelTab<RoleTab>[] = [
+    { key: "Commuter", label: "Commuters", icon: UserRound, count: roleCounts.Commuter },
+    { key: "Driver", label: "Drivers", icon: Bus, count: roleCounts.Driver },
+  ];
 
   useEffect(() => {
     if (userList.length === 0) return;
@@ -2416,8 +2858,93 @@ export default function UserManagementPage() {
     }
   };
 
+  // ══════════════════════════════════════════════════════════════════════
+  // SEARCH + FILTER BAR — rendered inside the section header, next to the
+  // title (same spot the Year/Month/Day filter sits on the Reports page).
+  // Type + Status filters are for the Commuters tab only.
+  // ══════════════════════════════════════════════════════════════════════
+  const renderFilterBar = () => (
+    <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full sm:w-auto items-stretch sm:items-center">
+      <div className="relative w-full sm:w-72">
+        <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+        <Input
+          placeholder={isDriverTab ? "Search driver name, email, ID or device..." : "Search UID or name..."}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className={`pl-10 font-medium text-sm h-10 focus-visible:ring-blue-500 ${
+            isDark
+              ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
+              : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
+          }`}
+        />
+      </div>
+
+      {/* Type + Status filters — para sa cards lang (hindi sa Drivers tab) */}
+      {!isDriverTab && (
+        <>
+          {/* Type filter */}
+          <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as (typeof TYPE_FILTERS)[number])}>
+            <SelectTrigger
+              className={`h-10 w-full sm:w-40 text-sm font-medium cursor-pointer ${
+                isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                {typeFilter !== "All" && (
+                  <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(typeFilter)}`} />
+                )}
+                <SelectValue />
+              </span>
+            </SelectTrigger>
+            <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+              {TYPE_FILTERS.map((t) => (
+                <SelectItem key={t} value={t} className="cursor-pointer">
+                  <span className="flex items-center gap-2">
+                    {t !== "All" && (
+                      <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(t)}`} />
+                    )}
+                    {t}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* ➕ Status filter — Active / Inactive / Blocked / Expired */}
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as (typeof STATUS_FILTERS)[number])}>
+            <SelectTrigger
+              className={`h-10 w-full sm:w-40 text-sm font-medium cursor-pointer ${
+                isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                {statusFilter !== "All" && (
+                  <span className={`w-2 h-2 rounded-full inline-block ${getStatusDotColor(statusFilter)}`} />
+                )}
+                <SelectValue />
+              </span>
+            </SelectTrigger>
+            <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
+              {STATUS_FILTERS.map((s) => (
+                <SelectItem key={s} value={s} className="cursor-pointer">
+                  <span className="flex items-center gap-2">
+                    {s !== "All" && (
+                      <span className={`w-2 h-2 rounded-full inline-block ${getStatusDotColor(s)}`} />
+                    )}
+                    {s}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </>
+      )}
+    </div>
+  );
+
   return (
-    <div className={`space-y-8 h-full min-h-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`} data-testid="users-page">
+    <div className={`rp-page space-y-8 h-full min-w-0 flex flex-col ${isDark ? "text-slate-200" : "text-slate-800"}`} data-testid="users-page">
+      <style>{USERS_PANEL_CSS}</style>
       <style>{`
         @keyframes row-pulse {
           0% { background-color: transparent; }
@@ -2526,62 +3053,16 @@ export default function UserManagementPage() {
         </div>
       </div>
 
-      {/* Table Card */}
-      <Card className={`shadow-sm flex flex-col overflow-hidden relative ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-transparent" />
-
-        {/* 🧑‍🤝‍🧑 ROLE TABS — All / Commuters / Drivers */}
-        <div
-          className={`flex-none flex items-center gap-1 px-6 pt-5 pb-0 border-b overflow-x-auto ${
-            isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"
-          }`}
-          role="tablist"
-          aria-label="Filter by account role"
-        >
-          {ROLE_TABS.map((tab) => {
-            const active = roleTab === tab;
-            const Icon = tab === "All" ? Users : tab === "Commuter" ? UserRound : Bus;
-            const label = tab === "All" ? "All" : tab === "Commuter" ? "Commuters" : "Drivers";
-
-            return (
-              <button
-                key={tab}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setRoleTab(tab)}
-                className={`relative flex items-center gap-2 whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide border-b-2 -mb-px transition-colors cursor-pointer ${
-                  active
-                    ? "border-blue-500 text-blue-500"
-                    : isDark
-                      ? "border-transparent text-slate-500 hover:text-slate-300"
-                      : "border-transparent text-slate-400 hover:text-slate-700"
-                }`}
-              >
-                <Icon size={14} />
-                {label}
-                <span
-                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
-                    active
-                      ? isDark
-                        ? "bg-blue-950/60 text-blue-400"
-                        : "bg-blue-100 text-blue-600"
-                      : isDark
-                        ? "bg-slate-800 text-slate-400"
-                        : "bg-slate-100 text-slate-500"
-                  }`}
-                >
-                  {roleCounts[tab]}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+      {/* ══ ONE MASTER CONTAINER ══
+          Tab strip (Commuters / Drivers) + body live inside a single
+          shadowed panel — same structure as the Reports page. Switching
+          tabs only swaps what's inside the body. */}
+      <ReportsPanel tabs={USER_TABS} active={roleTab} onChange={setRoleTab} isDark={isDark}>
 
         {/* ⚠️ Shows only if the driver accounts couldn't be read from auth_users (RLS / permissions) */}
         {rolesError && (
           <div
-            className={`flex-none flex items-center gap-2 px-6 py-2 text-xs font-medium border-b ${
+            className={`mb-4 flex items-center gap-2 rounded-lg border px-4 py-2 text-xs font-medium ${
               isDark
                 ? "bg-orange-950/30 border-orange-900 text-orange-400"
                 : "bg-orange-50 border-orange-200 text-orange-700"
@@ -2595,7 +3076,7 @@ export default function UserManagementPage() {
         {/* ⚠️ Walang nabasang driver account (karaniwang RLS — walang error pero walang laman) */}
         {driversBlockedByRls && (
           <div
-            className={`flex-none flex items-center gap-2 px-6 py-2 text-xs font-medium border-b ${
+            className={`mb-4 flex items-center gap-2 rounded-lg border px-4 py-2 text-xs font-medium ${
               isDark
                 ? "bg-orange-950/30 border-orange-900 text-orange-400"
                 : "bg-orange-50 border-orange-200 text-orange-700"
@@ -2609,7 +3090,7 @@ export default function UserManagementPage() {
         {/* ⚠️ Shows only in the Drivers tab if transactions couldn't be read */}
         {isDriverTab && faresError && (
           <div
-            className={`flex-none flex items-center gap-2 px-6 py-2 text-xs font-medium border-b ${
+            className={`mb-4 flex items-center gap-2 rounded-lg border px-4 py-2 text-xs font-medium ${
               isDark
                 ? "bg-orange-950/30 border-orange-900 text-orange-400"
                 : "bg-orange-50 border-orange-200 text-orange-700"
@@ -2620,121 +3101,33 @@ export default function UserManagementPage() {
           </div>
         )}
 
-        <CardHeader className={`flex-none pb-4 border-b ${isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/60 border-slate-100"}`}>
-          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 shrink-0 ${
-                isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
-              }`}>
-                <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
-                LIVE
-              </span>
-              <CardTitle className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                {roleTab === "Commuter"
-                  ? "Commuter Card Holders"
-                  : roleTab === "Driver"
-                    ? "Drivers"
-                    : "Authorized Card Holders"}
-              </CardTitle>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto items-stretch sm:items-center">
-              <div className="relative w-full sm:w-80">
-                <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                <Input
-                  placeholder={isDriverTab ? "Search driver name, email, ID or device..." : "Search UID or name..."}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className={`pl-10 font-medium text-sm h-10 focus-visible:ring-blue-500 ${
-                    isDark
-                      ? "bg-slate-950 border-slate-800 text-slate-200 placeholder:text-slate-600"
-                      : "bg-white border-slate-200 text-slate-800 placeholder:text-slate-400"
-                  }`}
-                />
-              </div>
-
-              {/* Type + Status filters — para sa cards lang (hindi sa Drivers tab) */}
-              {!isDriverTab && (
-                <>
-                  {/* Type filter */}
-                  <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as (typeof TYPE_FILTERS)[number])}>
-                    <SelectTrigger
-                      className={`h-10 w-full sm:w-40 text-sm font-medium cursor-pointer ${
-                        isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        {typeFilter !== "All" && (
-                          <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(typeFilter)}`} />
-                        )}
-                        <SelectValue />
-                      </span>
-                    </SelectTrigger>
-                    <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                      {TYPE_FILTERS.map((t) => (
-                        <SelectItem key={t} value={t} className="cursor-pointer">
-                          <span className="flex items-center gap-2">
-                            {t !== "All" && (
-                              <span className={`w-2 h-2 rounded-full inline-block ${getTypeDotColor(t)}`} />
-                            )}
-                            {t}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  {/* ➕ Status filter — Active / Inactive / Blocked / Expired */}
-                  <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as (typeof STATUS_FILTERS)[number])}>
-                    <SelectTrigger
-                      className={`h-10 w-full sm:w-40 text-sm font-medium cursor-pointer ${
-                        isDark ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-white border-slate-200"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        {statusFilter !== "All" && (
-                          <span className={`w-2 h-2 rounded-full inline-block ${getStatusDotColor(statusFilter)}`} />
-                        )}
-                        <SelectValue />
-                      </span>
-                    </SelectTrigger>
-                    <SelectContent className={isDark ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"}>
-                      {STATUS_FILTERS.map((s) => (
-                        <SelectItem key={s} value={s} className="cursor-pointer">
-                          <span className="flex items-center gap-2">
-                            {s !== "All" && (
-                              <span className={`w-2 h-2 rounded-full inline-block ${getStatusDotColor(s)}`} />
-                            )}
-                            {s}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </>
-              )}
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4 mt-6 flex flex-col overflow-hidden">
+        <ReportSection
+          title={isDriverTab ? "Drivers" : "Commuter Card Holders"}
+          icon={isDriverTab ? Bus : UserRound}
+          iconClassName={isDriverTab ? "text-violet-500" : "text-cyan-500"}
+          filterBar={renderFilterBar()}
+          meta={
+            <span className={`flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 shrink-0 ${
+              isDark ? "text-emerald-400 bg-emerald-950/40 border-emerald-900" : "text-emerald-600 bg-emerald-50 border-emerald-100"
+            }`}>
+              <span className="realtime-dot h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+              LIVE
+            </span>
+          }
+        >
           {tableLoading ? (
-            <div className="space-y-4 pt-4">
+            <div className="space-y-4">
               {Array.from({ length: PAGE_SIZE }).map((_, i) => (
                 <Skeleton key={i} className={`h-16 w-full rounded-lg ${isDark ? "bg-slate-800" : "bg-slate-100"}`} />
               ))}
             </div>
           ) : (
             <>
-              <div className="flex-1 min-h-0 overflow-auto">
+              <div style={{ maxHeight: 560, overflow: "auto" }}>
                 {isDriverTab ? (
                   <>
                     {/* 💸 Summary strip — total fare ng lahat ng drivers na nakikita */}
-                    <div
-                      className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
-                        isDark ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"
-                      }`}
-                    >
+                    <div className="rp-well mb-4 flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
                         <Bus className="h-4 w-4 text-violet-500" />
                         <span className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -2758,7 +3151,7 @@ export default function UserManagementPage() {
 
                     {/* 🚌 DRIVERS TABLE — Driver ID, Name, Email, Device ID, Today's Fare Collected */}
                     <Table>
-                      <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+                      <TableHeader className={`rp-sticky-head border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
                         <TableRow className="border-none hover:bg-transparent">
                           <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Driver ID</TableHead>
                           <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Driver Name</TableHead>
@@ -2877,7 +3270,7 @@ export default function UserManagementPage() {
                   </>
                 ) : (
                 <Table>
-                  <TableHeader className={`sticky top-0 z-10 border-b ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+                  <TableHeader className={`rp-sticky-head border-b ${isDark ? "border-slate-800" : "border-slate-200"}`}>
                     <TableRow className="border-none hover:bg-transparent">
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Card UID</TableHead>
                       <TableHead className={`text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>Full Name</TableHead>
@@ -3082,7 +3475,7 @@ export default function UserManagementPage() {
                           colSpan={9}
                           className={`text-center py-20 uppercase font-semibold tracking-widest text-xs ${isDark ? "text-slate-700" : "text-slate-300"}`}
                         >
-                          {roleTab === "Commuter" ? "No commuters found" : "No users found"}
+                          No commuters found
                         </TableCell>
                       </TableRow>
                     )}
@@ -3092,7 +3485,7 @@ export default function UserManagementPage() {
               </div>
 
               {/* Pagination Footer */}
-              <div className={`flex items-center justify-between pt-4 border-t mt-2 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+              <div className={`flex items-center justify-between pt-4 border-t mt-4 ${isDark ? "border-slate-800" : "border-slate-100"}`}>
                 <span className={`text-xs font-mono uppercase tracking-wide ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                   Showing{" "}
                   <span className={`font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
@@ -3137,8 +3530,8 @@ export default function UserManagementPage() {
               </div>
             </>
           )}
-        </CardContent>
-      </Card>
+        </ReportSection>
+      </ReportsPanel>
 
       {/* Card Preview Dialog — responsive, balanced layout.
           Order: header → card → quick facts → [Image | PDF] centered → Renew → Close (bottom) */}
