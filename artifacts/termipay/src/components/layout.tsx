@@ -5,7 +5,6 @@ import {
   CreditCard,
   ArrowLeftRight,
   Users,
-  Map,
   ScrollText,
   FileBarChart,
   LogOut,
@@ -253,6 +252,7 @@ function UserAvatar({
 
 // Nav items are grouped under a section label so the sidebar reads as
 // organized categories instead of one long flat list.
+// NOTE: Fare Matrix removed from admin — ang driver na ang nagse-set ng fare.
 const navGroups = [
   {
     label: "Main",
@@ -268,10 +268,9 @@ const navGroups = [
     ],
   },
   {
-    label: "Transactions & Fares",
+    label: "Transactions",
     items: [
       { path: "/transactions", label: "Transaction Logs", icon: ArrowLeftRight },
-      { path: "/fare-matrix", label: "Fare Matrix", icon: Map },
     ],
   },
   {
