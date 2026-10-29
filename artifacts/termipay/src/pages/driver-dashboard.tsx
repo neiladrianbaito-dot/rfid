@@ -2354,9 +2354,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   const { data: routes, isLoading, refetch: refetchRoutes } = useListRoutes(undefined, {
     query: {
       refetchOnWindowFocus: true,
-      // Safety net for devices that miss a Supabase Realtime event.
-      refetchInterval: 5000,
-      refetchIntervalInBackground: false,
+      refetchOnReconnect: true,
     },
   });
 
@@ -2387,24 +2385,24 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   }, []);
 
   useEffect(() => {
+    // Initial load only. Subsequent updates come from Supabase Realtime.
     void loadMyRoutes();
-    // Poll the authenticated backend too; Realtime subscriptions can be missed
-    // or may not cover the backend's my-routes ownership calculation.
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void loadMyRoutes();
-    }, 5000);
+
+    // Refresh when the user returns to this tab; this is event-based, not polling.
     const onVisible = () => {
       if (document.visibilityState === "visible") void loadMyRoutes();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [loadMyRoutes]);
 
+  // Realtime changes to either route activation or device ownership must refresh
+  // the authenticated driver's route list on every connected device.
   useRealtimeRefetch(["fare_routes", "devices"], () => {
-    loadMyRoutes();
+    void refetchRoutes();
+    void loadMyRoutes();
   });
 
   const visibleRoutes = useMemo(() => {
