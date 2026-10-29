@@ -569,15 +569,21 @@ type Device = {
    🙈 SOFT DELETE ("Reset") — row stays in the routes table, but it is hidden
    for THIS ACCOUNT on EVERY device / browser.
 
-   ✅ FIXED: before, the hidden list lived only in this browser's localStorage,
-   so a Reset on one device was never seen by the other devices of the same
-   account (that's why each device showed a different route).
-   Now the hidden list (and the reader device to re-use after Reset) is saved
-   in Supabase table `driver_route_resets` (owner = the driver account) and is
+   The hidden list (and the reader device to re-use after Reset) is saved in
+   Supabase table `driver_route_resets` (owner = the driver account) and is
    refetched in REALTIME, so every device of the same account always sees the
    same thing. localStorage is only a fast cache for instant first paint.
 
-   👉 Run the SQL for `driver_route_resets` once (see the instructions).
+   ✅ FIXED (v3):
+   • The table needs RLS policies (see the SQL) — without them NOTHING was saved,
+     so other devices never saw the reset and created_at never got a value.
+   • created_at is now also filled by the DATABASE (trigger in the SQL).
+   • A write is checked with .select(): if no row really came back, the user is told.
+   • load() no longer overwrites the list while a save is still in progress
+     (this caused the route to flicker / come back after Reset).
+   • When a save FAILS, the local copy is kept (never wiped by an empty server answer).
+   • Extra refresh when the tab/app comes back into view + a light 15 s refresh,
+     so a device still catches up even if Realtime isn't enabled for the table.
    ═══════════════════════════════════════════════════════════════════════ */
 
 const HIDDEN_CACHE_KEY = "fare_matrix_hidden_routes_v2"; // v2 = account-synced (old per-device list is ignored)
@@ -592,7 +598,11 @@ function getOwnerKey(): string {
     clean(claims?.id) ||
     clean(claims?.userId) ||
     clean(claims?.user_id) ||
+    clean(claims?.uid) ||
     clean(claims?.email) ||
+    clean(claims?.user?.id) ||
+    clean(claims?.user?.email) ||
+    clean(claims?.preferred_username) ||
     clean(claims?.username) ||
     clean(window.localStorage.getItem(DRIVER_NAME_KEY));
   return key.toLowerCase();
@@ -625,8 +635,12 @@ function writeHiddenCache(owner: string, rows: HiddenRow[]) {
 }
 
 function useHiddenRoutes() {
+  const { toast } = useToast();
   const owner = useMemo(() => getOwnerKey(), []);
   const [rows, setRows] = useState<HiddenRow[]>(() => readHiddenCache(owner));
+
+  // how many writes (hide / unhide / clear) are still running → load() waits while > 0
+  const pendingRef = useRef(0);
 
   const apply = useCallback(
     (updater: (prev: HiddenRow[]) => HiddenRow[]) => {
@@ -642,12 +656,17 @@ function useHiddenRoutes() {
   // Server = truth. If the request fails, the saved copy stays (never wipes the list).
   const load = useCallback(async () => {
     if (!owner) return;
+    if (pendingRef.current > 0) return; // a save is running → its own reload comes right after
     try {
       const { data, error } = await supabase
         .from("driver_route_resets")
         .select("route_id, device_id, created_at")
         .eq("owner", owner);
-      if (error || !Array.isArray(data)) return;
+      if (error || !Array.isArray(data)) {
+        if (error) console.error("driver_route_resets select failed:", error);
+        return;
+      }
+      if (pendingRef.current > 0) return; // a save started while we were loading → ignore this stale answer
       const next: HiddenRow[] = data.map((r: any) => ({
         route_id: String(r.route_id),
         device_id: r.device_id ? String(r.device_id) : null,
@@ -655,7 +674,8 @@ function useHiddenRoutes() {
       }));
       setRows(next);
       writeHiddenCache(owner, next);
-    } catch {
+    } catch (e) {
+      console.error("driver_route_resets select failed:", e);
       /* keep the saved copy */
     }
   }, [owner]);
@@ -668,6 +688,40 @@ function useHiddenRoutes() {
   useRealtimeRefetch(["driver_route_resets"], () => {
     load();
   });
+
+  // 🔁 Safety net (works even if Realtime isn't enabled for the table):
+  // refresh when the app/tab comes back into view, and every 15 s while it is visible.
+  useEffect(() => {
+    if (!owner) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    const onFocus = () => load();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 15000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      clearInterval(timer);
+    };
+  }, [owner, load]);
+
+  const notifySyncFailed = useCallback(
+    (what: string, err: unknown) => {
+      console.error(`driver_route_resets ${what} failed:`, err);
+      toast({
+        title: "Couldn't sync to your account",
+        description:
+          "The reset was saved only on this device. Check the driver_route_resets table policies (RLS) in Supabase.",
+        variant: "destructive",
+        duration: 4000,
+      });
+    },
+    [toast]
+  );
 
   // Hide routes (Reset). deviceId = reader to re-use for the next saved route.
   const hide = useCallback(
@@ -690,26 +744,36 @@ function useHiddenRoutes() {
       });
 
       if (!owner) return;
+      pendingRef.current += 1;
       (async () => {
+        let ok = true;
         try {
-          const { error } = await supabase.from("driver_route_resets").upsert(
-            strIds.map((id) => ({
-              owner,
-              route_id: id,
-              ...(deviceId ? { device_id: deviceId } : {}),
-              created_at: now,
-            })),
-            { onConflict: "owner,route_id" }
-          );
-          if (error) console.error("driver_route_resets upsert failed:", error);
+          const { data, error } = await supabase
+            .from("driver_route_resets")
+            .upsert(
+              strIds.map((id) => ({
+                owner,
+                route_id: id,
+                ...(deviceId ? { device_id: deviceId } : {}),
+                created_at: now,
+              })),
+              { onConflict: "owner,route_id" }
+            )
+            .select("route_id");
+          if (error || !Array.isArray(data) || data.length === 0) {
+            ok = false;
+            notifySyncFailed("upsert", error ?? "no row was saved");
+          }
         } catch (e) {
-          console.error("driver_route_resets upsert failed:", e);
+          ok = false;
+          notifySyncFailed("upsert", e);
         } finally {
-          load();
+          pendingRef.current -= 1;
+          if (ok) load(); // only reload when the save worked → a failed save never wipes the local copy
         }
       })();
     },
-    [apply, owner, load]
+    [apply, owner, load, notifySyncFailed]
   );
 
   // Show routes again (the same route was set again)
@@ -721,39 +785,54 @@ function useHiddenRoutes() {
       apply((prev) => prev.filter((r) => !remove.has(r.route_id)));
 
       if (!owner) return;
+      pendingRef.current += 1;
       (async () => {
+        let ok = true;
         try {
           const { error } = await supabase
             .from("driver_route_resets")
             .delete()
             .eq("owner", owner)
             .in("route_id", strIds);
-          if (error) console.error("driver_route_resets delete failed:", error);
+          if (error) {
+            ok = false;
+            notifySyncFailed("delete", error);
+          }
         } catch (e) {
-          console.error("driver_route_resets delete failed:", e);
+          ok = false;
+          notifySyncFailed("delete", e);
         } finally {
-          load();
+          pendingRef.current -= 1;
+          if (ok) load();
         }
       })();
     },
-    [apply, owner, load]
+    [apply, owner, load, notifySyncFailed]
   );
 
   // The remembered reader was used → forget it (on every device)
   const clearResetDevice = useCallback(() => {
     apply((prev) => prev.map((r) => (r.device_id ? { ...r, device_id: null } : r)));
     if (!owner) return;
+    pendingRef.current += 1;
     (async () => {
+      let ok = true;
       try {
-        await supabase
+        const { error } = await supabase
           .from("driver_route_resets")
           .update({ device_id: null })
           .eq("owner", owner)
           .not("device_id", "is", null);
+        if (error) {
+          ok = false;
+          console.error("clear reset device failed:", error);
+        }
       } catch (e) {
+        ok = false;
         console.error("clear reset device failed:", e);
       } finally {
-        load();
+        pendingRef.current -= 1;
+        if (ok) load();
       }
     })();
   }, [apply, owner, load]);
