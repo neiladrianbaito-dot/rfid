@@ -636,8 +636,54 @@ function writeHiddenCache(owner: string, rows: HiddenRow[]) {
 
 function useHiddenRoutes() {
   const { toast } = useToast();
-  const owner = useMemo(() => getOwnerKey(), []);
+
+  // Use the Supabase Auth UUID when available. RLS policies should authorize
+  // the same UUID on every device. Fall back to the driver's JWT identity only
+  // when this project intentionally uses a custom driver login.
+  const [owner, setOwner] = useState<string>("");
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const resolveOwner = async () => {
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (cancelled) return;
+        const authId = !error ? clean(data?.user?.id) : "";
+        const nextOwner = authId || getOwnerKey();
+        if (nextOwner) setOwner(nextOwner);
+      } catch {
+        if (!cancelled) {
+          const fallbackOwner = getOwnerKey();
+          if (fallbackOwner) setOwner(fallbackOwner);
+        }
+      }
+    };
+
+    void resolveOwner();
+    timer = window.setInterval(() => {
+      if (!cancelled && !owner) void resolveOwner();
+    }, 2000);
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+      void resolveOwner();
+    });
+
+    const onFocus = () => void resolveOwner();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      authListener.subscription.unsubscribe();
+    };
+  }, [owner]);
+
   const [rows, setRows] = useState<HiddenRow[]>(() => readHiddenCache(owner));
+  useEffect(() => {
+    if (!owner) return;
+    setRows(readHiddenCache(owner));
+  }, [owner]);
 
   // how many writes (hide / unhide / clear) are still running → load() waits while > 0
   const pendingRef = useRef(0);
@@ -715,7 +761,7 @@ function useHiddenRoutes() {
       toast({
         title: "Couldn't sync to your account",
         description:
-          "The reset was saved only on this device. Check the driver_route_resets table policies (RLS) in Supabase.",
+          "The database write failed. Open the browser console for the Supabase error, then check the SQL migration, RLS policies, and Realtime publication. The local view may not sync to other devices.",
         variant: "destructive",
         duration: 4000,
       });
@@ -743,7 +789,10 @@ function useHiddenRoutes() {
         return Array.from(map.values());
       });
 
-      if (!owner) return;
+      if (!owner) {
+        notifySyncFailed("upsert", "Driver account identity is not available yet. Sign in again and retry Reset.");
+        return;
+      }
       pendingRef.current += 1;
       (async () => {
         let ok = true;
@@ -2303,7 +2352,12 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   } = useHiddenRoutes();
 
   const { data: routes, isLoading, refetch: refetchRoutes } = useListRoutes(undefined, {
-    query: { refetchOnWindowFocus: true },
+    query: {
+      refetchOnWindowFocus: true,
+      // Safety net for devices that miss a Supabase Realtime event.
+      refetchInterval: 5000,
+      refetchIntervalInBackground: false,
+    },
   });
 
   useRealtimeRefetch(["fare_routes"], () => {
@@ -2333,7 +2387,20 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   }, []);
 
   useEffect(() => {
-    loadMyRoutes();
+    void loadMyRoutes();
+    // Poll the authenticated backend too; Realtime subscriptions can be missed
+    // or may not cover the backend's my-routes ownership calculation.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadMyRoutes();
+    }, 5000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadMyRoutes();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [loadMyRoutes]);
 
   useRealtimeRefetch(["fare_routes", "devices"], () => {
