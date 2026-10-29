@@ -1762,8 +1762,12 @@ type MapStyle = "standard" | "satellite";
 const MAP_STYLE_KEY = "termipay_map_style_v1";
 
 const OSM_TILES = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-// 🌙 Dark basemap (CARTO Dark Matter, built on OpenStreetMap data). Free, no API key.
-const DARK_TILES = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+// 🌙 Dark basemap (CARTO Dark Matter, built on OpenStreetMap data). CARTO now requires an API key.
+// 👉 Best practice: put it in your frontend env as VITE_CARTO_KEY=cb1_xxx (the fallback below is used if it's missing).
+// 🔒 In the CARTO dashboard, restrict the key to your website domain so nobody else can use it.
+const CARTO_KEY: string =
+  String((import.meta as any).env?.VITE_CARTO_KEY ?? "").trim() || "cb1_4xki_1_44bbe2ad15437abda6a169ea";
+const DARK_TILES = `https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`;
 const SAT_TILES =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const SAT_LABEL_TILES =
@@ -2589,10 +2593,9 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       baseLayerRef.current = base;
       labelLayerRef.current = labels;
     } else if (isDark) {
-      // 🌙 dark basemap (subdomains a-d, {r} = retina @2x on high-density screens)
+      // 🌙 dark basemap (CARTO, with API key; {r} = retina @2x on high-density screens)
       const base = L.tileLayer(DARK_TILES, {
         maxZoom: 19,
-        subdomains: "abcd",
       }).addTo(map);
       base.bringToBack();
       baseLayerRef.current = base;
