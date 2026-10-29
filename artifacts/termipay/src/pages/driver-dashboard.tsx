@@ -566,50 +566,209 @@ type Device = {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
-   🙈 UI-ONLY SOFT DELETE ("Reset") — row stays in the database
+   🙈 SOFT DELETE ("Reset") — row stays in the routes table, but it is hidden
+   for THIS ACCOUNT on EVERY device / browser.
+
+   ✅ FIXED: before, the hidden list lived only in this browser's localStorage,
+   so a Reset on one device was never seen by the other devices of the same
+   account (that's why each device showed a different route).
+   Now the hidden list (and the reader device to re-use after Reset) is saved
+   in Supabase table `driver_route_resets` (owner = the driver account) and is
+   refetched in REALTIME, so every device of the same account always sees the
+   same thing. localStorage is only a fast cache for instant first paint.
+
+   👉 Run the SQL for `driver_route_resets` once (see the instructions).
    ═══════════════════════════════════════════════════════════════════════ */
 
-const HIDDEN_KEY = "fare_matrix_hidden_routes";
+const HIDDEN_CACHE_KEY = "fare_matrix_hidden_routes_v2"; // v2 = account-synced (old per-device list is ignored)
 
-function readHidden(): string[] {
+type HiddenRow = { route_id: string; device_id: string | null; created_at: string };
+
+// Same key on every device of the same account (taken from the driver token)
+function getOwnerKey(): string {
+  const claims = decodeJwtPayload(window.localStorage.getItem(DRIVER_TOKEN_KEY));
+  const key =
+    clean(claims?.sub) ||
+    clean(claims?.id) ||
+    clean(claims?.userId) ||
+    clean(claims?.user_id) ||
+    clean(claims?.email) ||
+    clean(claims?.username) ||
+    clean(window.localStorage.getItem(DRIVER_NAME_KEY));
+  return key.toLowerCase();
+}
+
+function readHiddenCache(owner: string): HiddenRow[] {
   try {
-    const raw = localStorage.getItem(HIDDEN_KEY);
+    const raw = localStorage.getItem(`${HIDDEN_CACHE_KEY}:${owner}`);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.map(String) : [];
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((r: any) => r && r.route_id != null)
+          .map((r: any) => ({
+            route_id: String(r.route_id),
+            device_id: r.device_id ? String(r.device_id) : null,
+            created_at: String(r.created_at ?? ""),
+          }))
+      : [];
   } catch {
     return [];
   }
 }
 
-function writeHidden(ids: string[]) {
+function writeHiddenCache(owner: string, rows: HiddenRow[]) {
   try {
-    localStorage.setItem(HIDDEN_KEY, JSON.stringify(ids));
+    localStorage.setItem(`${HIDDEN_CACHE_KEY}:${owner}`, JSON.stringify(rows));
   } catch {
     /* storage unavailable */
   }
 }
 
 function useHiddenRoutes() {
-  const [hiddenIds, setHiddenIds] = useState<string[]>(() => readHidden());
+  const owner = useMemo(() => getOwnerKey(), []);
+  const [rows, setRows] = useState<HiddenRow[]>(() => readHiddenCache(owner));
 
-  const hide = useCallback((ids: (string | number)[]) => {
-    setHiddenIds((prev) => {
-      const next = Array.from(new Set([...prev, ...ids.map(String)]));
-      writeHidden(next);
-      return next;
-    });
-  }, []);
+  const apply = useCallback(
+    (updater: (prev: HiddenRow[]) => HiddenRow[]) => {
+      setRows((prev) => {
+        const next = updater(prev);
+        writeHiddenCache(owner, next);
+        return next;
+      });
+    },
+    [owner]
+  );
 
-  const unhide = useCallback((ids: (string | number)[]) => {
-    setHiddenIds((prev) => {
-      const remove = new Set(ids.map(String));
-      const next = prev.filter((id) => !remove.has(id));
-      writeHidden(next);
-      return next;
-    });
-  }, []);
+  // Server = truth. If the request fails, the saved copy stays (never wipes the list).
+  const load = useCallback(async () => {
+    if (!owner) return;
+    try {
+      const { data, error } = await supabase
+        .from("driver_route_resets")
+        .select("route_id, device_id, created_at")
+        .eq("owner", owner);
+      if (error || !Array.isArray(data)) return;
+      const next: HiddenRow[] = data.map((r: any) => ({
+        route_id: String(r.route_id),
+        device_id: r.device_id ? String(r.device_id) : null,
+        created_at: String(r.created_at ?? ""),
+      }));
+      setRows(next);
+      writeHiddenCache(owner, next);
+    } catch {
+      /* keep the saved copy */
+    }
+  }, [owner]);
 
-  return { hiddenIds, hide, unhide };
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // 🔴 Realtime: a Reset on ANY device of this account shows up on all the others right away
+  useRealtimeRefetch(["driver_route_resets"], () => {
+    load();
+  });
+
+  // Hide routes (Reset). deviceId = reader to re-use for the next saved route.
+  const hide = useCallback(
+    (ids: (string | number)[], deviceId?: string | null) => {
+      const strIds: string[] = Array.from(new Set(ids.map(String)));
+      if (strIds.length === 0) return;
+      const now = new Date().toISOString();
+
+      apply((prev) => {
+        const map = new Map<string, HiddenRow>(prev.map((r) => [r.route_id, r]));
+        for (const id of strIds) {
+          const old = map.get(id);
+          map.set(id, {
+            route_id: id,
+            device_id: deviceId ?? old?.device_id ?? null,
+            created_at: now,
+          });
+        }
+        return Array.from(map.values());
+      });
+
+      if (!owner) return;
+      (async () => {
+        try {
+          const { error } = await supabase.from("driver_route_resets").upsert(
+            strIds.map((id) => ({
+              owner,
+              route_id: id,
+              ...(deviceId ? { device_id: deviceId } : {}),
+              created_at: now,
+            })),
+            { onConflict: "owner,route_id" }
+          );
+          if (error) console.error("driver_route_resets upsert failed:", error);
+        } catch (e) {
+          console.error("driver_route_resets upsert failed:", e);
+        } finally {
+          load();
+        }
+      })();
+    },
+    [apply, owner, load]
+  );
+
+  // Show routes again (the same route was set again)
+  const unhide = useCallback(
+    (ids: (string | number)[]) => {
+      const strIds: string[] = Array.from(new Set(ids.map(String)));
+      if (strIds.length === 0) return;
+      const remove = new Set(strIds);
+      apply((prev) => prev.filter((r) => !remove.has(r.route_id)));
+
+      if (!owner) return;
+      (async () => {
+        try {
+          const { error } = await supabase
+            .from("driver_route_resets")
+            .delete()
+            .eq("owner", owner)
+            .in("route_id", strIds);
+          if (error) console.error("driver_route_resets delete failed:", error);
+        } catch (e) {
+          console.error("driver_route_resets delete failed:", e);
+        } finally {
+          load();
+        }
+      })();
+    },
+    [apply, owner, load]
+  );
+
+  // The remembered reader was used → forget it (on every device)
+  const clearResetDevice = useCallback(() => {
+    apply((prev) => prev.map((r) => (r.device_id ? { ...r, device_id: null } : r)));
+    if (!owner) return;
+    (async () => {
+      try {
+        await supabase
+          .from("driver_route_resets")
+          .update({ device_id: null })
+          .eq("owner", owner)
+          .not("device_id", "is", null);
+      } catch (e) {
+        console.error("clear reset device failed:", e);
+      } finally {
+        load();
+      }
+    })();
+  }, [apply, owner, load]);
+
+  const hiddenIds = useMemo(() => rows.map((r) => r.route_id), [rows]);
+
+  // 🔌 reader device of the last Reset (same on every device of this account)
+  const resetDeviceId = useMemo(() => {
+    const withDevice = rows
+      .filter((r) => r.device_id)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return withDevice[0]?.device_id ?? null;
+  }, [rows]);
+
+  return { hiddenIds, resetDeviceId, hide, unhide, clearResetDevice };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -2031,6 +2190,9 @@ function useDriverApiAuth() {
    • 🌙 The Default map follows the app theme (light ↔ dark) automatically.
    • 📏 The label at the top-left of the map shows the approximate distance of
      the saved route (example: ≈ 175 km).
+   • 🔄 Reset / hidden routes + the reader to re-use are now saved per ACCOUNT
+     (Supabase) and refreshed in realtime, so every device of the same account
+     shows the same route.
    ═══════════════════════════════════════════════════════════════════════ */
 
 type PanelProps = { isDark: boolean; visible: boolean };
@@ -2053,7 +2215,13 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
   /* ---------- places + routes data ---------- */
   const { places, loading: placesLoading, error: placesError } = useSamarPlaces();
-  const { hiddenIds, hide: hideRoutes, unhide: unhideRoutes } = useHiddenRoutes();
+  const {
+    hiddenIds,
+    resetDeviceId, // 🔌 reader of the last Reset — same on every device of this account
+    hide: hideRoutes,
+    unhide: unhideRoutes,
+    clearResetDevice,
+  } = useHiddenRoutes();
 
   const { data: routes, isLoading, refetch: refetchRoutes } = useListRoutes(undefined, {
     query: { refetchOnWindowFocus: true },
@@ -2118,9 +2286,6 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   const [resetUnlocked, setResetUnlocked] = useState(false);
   const noVisibleRoutes = !isLoading && myRoutesLoaded && !currentRoute;
   const distanceFareEnabled = noVisibleRoutes || resetUnlocked;
-
-  // 🔌 reader device of the route that was reset → re-used for the next saved route
-  const [resetDeviceId, setResetDeviceId] = useState<string | null>(null);
 
   const activeRoutes = shownRoutes.filter((r: any) => r.isActive);
   const activeRouteIdsKey = activeRoutes.map((r: any) => r.id).join(",");
@@ -2364,7 +2529,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     setPendingRouteId(null);
   };
 
-  /* ---------- Reset (UI-only soft delete) ---------- */
+  /* ---------- Reset (soft delete, synced to every device of this account) ---------- */
   const [isResetting, setIsResetting] = useState(false);
 
   const confirmReset = async (target: any) => {
@@ -2411,11 +2576,13 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       return;
     }
 
-    if (deviceToReuse) setResetDeviceId(deviceToReuse);
-
-    // hide the reset route + its return AND every other route.
+    // hide the reset route + its return AND every other route (saved for the whole ACCOUNT,
+    // together with the reader to re-use → all devices of this account follow in realtime).
     // → currentRoute becomes null → the map slides up and is removed (back to zero).
-    hideRoutes([...targets.map((r: any) => r.id), ...visibleRoutes.map((r: any) => r.id)]);
+    hideRoutes(
+      [...targets.map((r: any) => r.id), ...visibleRoutes.map((r: any) => r.id)],
+      deviceToReuse
+    );
     setResetUnlocked(true);
     resetForm(); // default origin comes back, destination is empty
     goToForm(); // scroll + highlight the form
@@ -2861,8 +3028,9 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     const p = { origin: originPlace.label, destination: destPlace.label, fareAmount };
 
     // ⚡ the reader claim does NOT depend on the route being saved → start it NOW, in parallel
-    const claimPromise: Promise<"ok" | "taken" | "error"> | null = resetDeviceId
-      ? claimDevice(resetDeviceId)
+    const deviceForActivation = resetDeviceId;
+    const claimPromise: Promise<"ok" | "taken" | "error"> | null = deviceForActivation
+      ? claimDevice(deviceForActivation)
       : null;
 
     try {
@@ -2884,8 +3052,13 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
       }
 
       let activateResult: "ok" | "failed" | "not-found" | "taken" | "no-device" = "no-device";
-      if (resetDeviceId && claimPromise) {
-        activateResult = await activateSavedRoute(p.origin, p.destination, resetDeviceId, claimPromise);
+      if (deviceForActivation && claimPromise) {
+        activateResult = await activateSavedRoute(
+          p.origin,
+          p.destination,
+          deviceForActivation,
+          claimPromise
+        );
       }
 
       queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
@@ -2893,7 +3066,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
 
       resetForm();
       setResetUnlocked(false); // 🔒 lock again — Reset is needed before adding another
-      setResetDeviceId(null);
+      clearResetDevice(); // 🔌 the remembered reader was used → forget it on every device
 
       if (activateResult === "ok") {
         toast({
