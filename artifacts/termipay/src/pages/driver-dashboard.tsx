@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthTheme } from "@/lib/auth-theme";
-import { useRealtimeRefetch } from "@/lib/use-realtime-refetch";
+
 import {
   Bus,
   LogOut,
@@ -126,6 +126,34 @@ async function fetchMyActiveRouteIds(): Promise<string[] | null> {
   }
 }
 
+function useDirectRealtimeRefetch(tables: string[], onChange: () => void) {
+  const callbackRef = useRef(onChange);
+  callbackRef.current = onChange;
+  const tablesKey = Array.from(new Set(tables)).sort().join(",");
+
+  useEffect(() => {
+    const channelName = `driver-dashboard:${tablesKey}:${Math.random().toString(36).slice(2)}`;
+    let channel = supabase.channel(channelName);
+
+    for (const table of tablesKey.split(",").filter(Boolean)) {
+      channel = channel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table },
+        () => callbackRef.current()
+      );
+    }
+
+    channel.subscribe((status) => {
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.error(`Realtime subscription failed for ${tablesKey}: ${status}`);
+      }
+    });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [tablesKey]);
+}
 type Tab = "home" | "map" | "trips" | "profile";
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -459,7 +487,7 @@ function useMyTrips(days: number, enabled: boolean) {
   });
 
   // Realtime: a new tap changes the current trip → refetch right away
-  useRealtimeRefetch(["transactions"], () => {
+  useDirectRealtimeRefetch(["transactions"], () => {
     if (enabled) query.refetch();
   });
 
@@ -603,67 +631,14 @@ function useHiddenRoutes() {
   }, []);
 
   useEffect(() => {
-    let stopped = false;
-    let controller: AbortController | null = null;
-    let retryTimer: number | null = null;
-
     void load();
-
-    const connect = async () => {
-      while (!stopped) {
-        controller = new AbortController();
-        try {
-          const response = await fetch(
-            `${API_BASE}/api/dashboard/route-resets/events`,
-            {
-              method: "GET",
-              headers: driverAuthHeaders(),
-              signal: controller.signal,
-            }
-          );
-          if (!response.ok || !response.body) {
-            throw new Error(`Route reset event stream failed: ${response.status}`);
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-
-          while (!stopped) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-
-            let boundary = buffer.indexOf("\n\n");
-            while (boundary >= 0) {
-              const eventBlock = buffer.slice(0, boundary);
-              buffer = buffer.slice(boundary + 2);
-              if (eventBlock.includes("event: route-resets")) void load();
-              boundary = buffer.indexOf("\n\n");
-            }
-          }
-        } catch (error) {
-          if (!stopped && !(error instanceof DOMException && error.name === "AbortError")) {
-            console.warn("Route reset stream disconnected; reconnecting.", error);
-          }
-        }
-
-        if (!stopped) {
-          await new Promise<void>((resolve) => {
-            retryTimer = window.setTimeout(resolve, 2000);
-          });
-        }
-      }
-    };
-
-    void connect();
-
-    return () => {
-      stopped = true;
-      controller?.abort();
-      if (retryTimer !== null) window.clearTimeout(retryTimer);
-    };
   }, [load]);
+
+  // Supabase Realtime is only a change notification. Data is reloaded through
+  // the authenticated backend endpoint, which scopes rows to req.driverUser.id.
+  useDirectRealtimeRefetch(["driver_route_resets"], () => {
+    void load();
+  });
   const hide = useCallback(
     async (ids: (string | number)[], deviceId?: string | null) => {
       const routeIds = Array.from(new Set(ids.map(String)));
@@ -2188,10 +2163,10 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
   } = useHiddenRoutes();
 
   const { data: routes, isLoading, refetch: refetchRoutes } = useListRoutes(undefined, {
-    query: { refetchOnWindowFocus: true },
+    query: { refetchOnWindowFocus: false, refetchInterval: false },
   });
 
-  useRealtimeRefetch(["fare_routes"], () => {
+  useDirectRealtimeRefetch(["fare_routes"], () => {
     refetchRoutes();
   });
 
@@ -2221,7 +2196,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     loadMyRoutes();
   }, [loadMyRoutes]);
 
-  useRealtimeRefetch(["fare_routes", "devices"], () => {
+  useDirectRealtimeRefetch(["fare_routes", "devices"], () => {
     loadMyRoutes();
   });
 
@@ -2361,7 +2336,7 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
     setLoadingDevices(false);
   };
 
-  useRealtimeRefetch(["devices"], () => {
+  useDirectRealtimeRefetch(["devices"], () => {
     if (activateRoute) fetchActiveDevices(activateRoute.id);
     fetchActiveRoutesDevices(activeRoutes.map((r: any) => r.id));
   });
@@ -3609,11 +3584,11 @@ function useTodayStats() {
     isError,
     refetch,
   } = useGetDashboardStats({
-    query: { refetchOnWindowFocus: true },
+    query: { refetchOnWindowFocus: false, refetchInterval: false },
   });
 
   // Realtime: every new tap/transaction → refetch right away
-  useRealtimeRefetch(["transactions"], () => {
+  useDirectRealtimeRefetch(["transactions"], () => {
     refetch();
   });
 
@@ -4416,6 +4391,8 @@ export default function DriverDashboardPage() {
     </div>
   );
 }
+
+
 
 
 
