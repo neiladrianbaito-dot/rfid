@@ -834,6 +834,45 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Fare formula and card discount reference */}
+      <Card className={`shadow-sm ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+        <CardHeader className={`pb-3 border-b ${isDark ? "border-slate-800" : "border-slate-100"}`}>
+          <div className="flex items-center gap-2">
+            <Settings className="text-blue-500" size={18} />
+            <h3 className={`text-sm font-bold uppercase tracking-wide ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+              Fare Formula &amp; Discounts
+            </h3>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3 pt-4 md:grid-cols-2">
+          <div className={`rounded-xl border p-4 ${isDark ? "border-slate-800 bg-slate-950/50" : "border-slate-200 bg-slate-50"}`}>
+            <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Distance-based regular fare
+            </p>
+            <p className={`mt-2 text-sm font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+              ₱15.00 for the first 4 km, then ₱2.20 per additional km.
+            </p>
+            <p className={`mt-2 rounded-lg px-3 py-2 text-xs font-mono ${isDark ? "bg-slate-900 text-slate-300" : "bg-white text-slate-700"}`}>
+              Fare = ₱15.00 + max(0, distance − 4 km) × ₱2.20
+            </p>
+          </div>
+          <div className={`rounded-xl border p-4 ${isDark ? "border-emerald-900/70 bg-emerald-950/20" : "border-emerald-200 bg-emerald-50/70"}`}>
+            <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>
+              20% fare discount
+            </p>
+            <p className={`mt-2 text-sm font-bold ${isDark ? "text-emerald-200" : "text-emerald-900"}`}>
+              Student, PWD, and Senior cards pay 80% of the regular fare.
+            </p>
+            <p className={`mt-2 rounded-lg px-3 py-2 text-xs font-mono ${isDark ? "bg-slate-900 text-slate-300" : "bg-white text-slate-700"}`}>
+              Discounted fare = regular fare × 0.80
+            </p>
+            <p className={`mt-2 text-xs ${isDark ? "text-emerald-300" : "text-emerald-800"}`}>
+              Example: ₱15.00 regular base fare → ₱12.00 after discount. Regular cards pay the full fare.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       {myRoleLoaded && !isSuperAdmin && (
         <div className={`p-4 rounded-lg border flex items-start gap-3 ${isDark ? "bg-slate-900 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
           <Shield className={`mt-0.5 shrink-0 ${isDark ? "text-slate-500" : "text-slate-400"}`} size={18} />
