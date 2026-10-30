@@ -3267,6 +3267,15 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
           </div>
         </div>
 
+        <div className={`rounded-xl border p-3 space-y-2 ${isDark ? "border-blue-900/70 bg-blue-950/20" : "border-blue-100 bg-blue-50/70"}`}>
+          <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-blue-300" : "text-blue-700"}`}>Fare formula</p>
+          <p className="text-xs font-semibold">{formatPeso(DEFAULT_BASE_FARE)} for the first {DEFAULT_BASE_KM} km, then {formatPeso(DEFAULT_RATE)} per additional km.</p>
+          <p className={`text-[11px] ${muted}`}>Regular fare = {formatPeso(DEFAULT_BASE_FARE)} + max(0, route distance − {DEFAULT_BASE_KM} km) × {formatPeso(DEFAULT_RATE)}.</p>
+          <div className={`rounded-lg px-2.5 py-2 text-[11px] ${isDark ? "bg-emerald-950/30 text-emerald-300" : "bg-emerald-50 text-emerald-800"}`}>
+            <span className="font-bold">20% discount</span> applies to Student, PWD, and Senior cards. Example: {formatPeso(DEFAULT_BASE_FARE)} regular base fare → <strong>{formatPeso(Math.round(DEFAULT_BASE_FARE * 0.8 * 100) / 100)}</strong> discounted fare. Regular cards pay the full fare.
+          </div>
+        </div>
+
         {error && (
           <p
             className={`rounded-lg px-3 py-2 text-[11px] font-medium ${
@@ -3361,6 +3370,8 @@ function FareMapPanel({ isDark, visible }: PanelProps) {
                   </div>
                   <div className="shrink-0 space-y-1.5 text-right">
                     <p className="text-2xl font-extrabold leading-none">₱{Number(route.fareAmount).toFixed(2)}</p>
+                    <p className={`text-[10px] font-medium ${muted}`}>Regular fare</p>
+                    <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">Student/PWD/Senior fare (20% off): ₱{(Math.round(Number(route.fareAmount) * 0.8 * 100) / 100).toFixed(2)}</p>
                     <Badge
                       className={
                         route.isActive
@@ -4391,6 +4402,7 @@ export default function DriverDashboardPage() {
     </div>
   );
 }
+
 
 
 

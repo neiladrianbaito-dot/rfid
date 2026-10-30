@@ -4,6 +4,18 @@ import { db, usersTable, transactionsTable, fareRoutesTable } from "@workspace/d
 
 const router: IRouter = Router();
 
+const DISCOUNTED_USER_TYPES = new Set(["STUDENT", "PWD", "SENIOR", "SENIOR CITIZEN"]);
+const STUDENT_PWD_SENIOR_DISCOUNT = 0.20;
+
+function getFareBreakdown(baseFareValue: unknown, userType: unknown) {
+  const regularFare = Math.round((Number(baseFareValue) + Number.EPSILON) * 100) / 100;
+  const normalizedType = String(userType ?? "").trim().toUpperCase();
+  const discountRate = DISCOUNTED_USER_TYPES.has(normalizedType) ? STUDENT_PWD_SENIOR_DISCOUNT : 0;
+  const discountAmount = Math.round((regularFare * discountRate + Number.EPSILON) * 100) / 100;
+  const chargedFare = Math.max(0, Math.round((regularFare - discountAmount + Number.EPSILON) * 100) / 100);
+  return { regularFare, discountRate, discountAmount, chargedFare };
+}
+
 router.post("/scan-rfid", async (req, res): Promise<void> => {
   const { cardUid } = req.body;
 
@@ -23,7 +35,7 @@ router.post("/scan-rfid", async (req, res): Promise<void> => {
     return;
   }
 
-  const fareAmount = Number(activeRoute.fareAmount);
+  const regularFare = Number(activeRoute.fareAmount);
 
   const [user] = await db
     .select()
@@ -40,6 +52,8 @@ router.post("/scan-rfid", async (req, res): Promise<void> => {
     return;
   }
 
+  const fareBreakdown = getFareBreakdown(regularFare, user.type);
+  const fareAmount = fareBreakdown.chargedFare;
   const cardBalance = Number(user.balance);
   const gcashBalance = Number(user.gcashLoadedTotal);
   const totalBalance = cardBalance + gcashBalance;
@@ -90,7 +104,7 @@ router.post("/scan-rfid", async (req, res): Promise<void> => {
 
   res.status(200).json({
     success: true,
-    message: `Fare of ₱${fareAmount.toFixed(2)} deducted successfully`,
+    message: `Fare of ₱${fareAmount.toFixed(2)} deducted successfully${fareBreakdown.discountRate ? ` (20% discount applied; regular fare ₱${fareBreakdown.regularFare.toFixed(2)})` : ""}`,
     user: {
       id: updatedUser.id,
       cardUid: updatedUser.cardUid,
@@ -105,6 +119,9 @@ router.post("/scan-rfid", async (req, res): Promise<void> => {
       origin: activeRoute.origin,
       destination: activeRoute.destination,
       fareAmount,
+      regularFare: fareBreakdown.regularFare,
+      discountPercent: fareBreakdown.discountRate * 100,
+      discountAmount: fareBreakdown.discountAmount,
     },
     transaction: {
       id: transaction.id,
@@ -149,7 +166,8 @@ router.post("/tap", async (req, res): Promise<void> => {
     return;
   }
 
-  const fareAmount = Number(route.fareAmount);
+  const fareBreakdown = getFareBreakdown(route.fareAmount, user.type);
+  const fareAmount = fareBreakdown.chargedFare;
   const cardBalance = Number(user.balance);
   const gcashBalance = Number(user.gcashLoadedTotal);
   const totalBalance = cardBalance + gcashBalance;
@@ -193,7 +211,15 @@ router.post("/tap", async (req, res): Promise<void> => {
       fullName: updatedUser.fullName,
       newTotalBalance: newCardBalance + newGcashBalance,
     },
-    route: { id: route.id, origin: route.origin, destination: route.destination, fareAmount },
+    route: {
+      id: route.id,
+      origin: route.origin,
+      destination: route.destination,
+      fareAmount,
+      regularFare: fareBreakdown.regularFare,
+      discountPercent: fareBreakdown.discountRate * 100,
+      discountAmount: fareBreakdown.discountAmount,
+    },
     transaction: { id: transaction.id, type: transaction.type, amount: Number(transaction.amount), status: transaction.status, timestamp: transaction.timestamp },
   });
 });
@@ -215,3 +241,4 @@ router.get("/active-routes", async (_req, res): Promise<void> => {
 });
 
 export default router;
+
