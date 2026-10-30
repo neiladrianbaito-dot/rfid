@@ -8,17 +8,6 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
-
-// Live reset notifications for connected driver dashboards (same API process).
-const routeResetStreams = new Map<string, Set<import("express").Response>>();
-
-function notifyRouteResetClients(owner: string): void {
-  const clients = routeResetStreams.get(owner);
-  if (!clients) return;
-  for (const client of clients) {
-    client.write("event: route-resets\ndata: {}\n\n");
-  }
-}
 const APP_TIME_ZONE = "Asia/Manila";
 
 function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
@@ -367,39 +356,6 @@ function getDriverId(req: any): string | null {
   return id === null || id === undefined ? null : String(id);
 }
 
-router.get("/dashboard/route-resets/events", (req, res): void => {
-  const owner = getDriverId(req);
-  if (!owner) {
-    res.status(403).end();
-    return;
-  }
-
-  res.status(200);
-  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.flushHeaders();
-  res.write(": connected\n\n");
-
-  let clients = routeResetStreams.get(owner);
-  if (!clients) {
-    clients = new Set();
-    routeResetStreams.set(owner, clients);
-  }
-  clients.add(res);
-
-  const heartbeat = setInterval(() => {
-    res.write(": keep-alive\n\n");
-  }, 25000);
-
-  res.on("close", () => {
-    clearInterval(heartbeat);
-    const current = routeResetStreams.get(owner);
-    current?.delete(res);
-    if (current?.size === 0) routeResetStreams.delete(owner);
-  });
-});
 router.get("/dashboard/route-resets", async (req, res): Promise<void> => {
   try {
     const owner = getDriverId(req);
@@ -479,7 +435,6 @@ router.post("/dashboard/route-resets", async (req, res): Promise<void> => {
       `);
     }
 
-    notifyRouteResetClients(owner);
     res.json({ success: true });
   } catch (error) {
     console.error("POST /dashboard/route-resets error:", error);
@@ -520,7 +475,6 @@ router.delete("/dashboard/route-resets", async (req, res): Promise<void> => {
       `);
     }
 
-    notifyRouteResetClients(owner);
     res.json({ success: true });
   } catch (error) {
     console.error("DELETE /dashboard/route-resets error:", error);
@@ -543,7 +497,6 @@ router.patch(
         set device_id = null
         where owner = ${owner} and device_id is not null
       `);
-      notifyRouteResetClients(owner);
       res.json({ success: true });
     } catch (error) {
       console.error("PATCH /dashboard/route-resets/clear-device error:", error);
@@ -639,6 +592,3 @@ router.get("/reports/summary", async (_req, res): Promise<void> => {
 });
 
 export default router;
-
-
-

@@ -28,7 +28,7 @@ const DRIVER_RULES: RouteRule[] = [
   },
   {
     methods: new Set(["GET"]),
-    path: /\/dashboard\/(stats|my-routes|my-trips|route-resets(?:/events)?)\/?$/,
+    path: /\/dashboard\/(stats|my-routes|my-trips|route-resets)\/?$/,
   },
   {
     methods: new Set(["POST"]),
@@ -52,7 +52,7 @@ const DRIVER_ONLY_RULES: RouteRule[] = [
   },
   {
     methods: new Set(["GET"]),
-    path: /\/dashboard\/(my-routes|my-trips|route-resets(?:/events)?)\/?$/,
+    path: /\/dashboard\/(my-routes|my-trips|route-resets)\/?$/,
   },
   {
     methods: new Set(["POST"]),
@@ -169,5 +169,3 @@ export async function requireAuth(
     res.status(500).json({ error: "Internal server error" });
   }
 }
-
-
