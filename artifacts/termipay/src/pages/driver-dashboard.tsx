@@ -603,16 +603,67 @@ function useHiddenRoutes() {
   }, []);
 
   useEffect(() => {
+    let stopped = false;
+    let controller: AbortController | null = null;
+    let retryTimer: number | null = null;
+
     void load();
-    const timer = window.setInterval(() => void load(), 10000);
-    const onFocus = () => void load();
-    window.addEventListener("focus", onFocus);
+
+    const connect = async () => {
+      while (!stopped) {
+        controller = new AbortController();
+        try {
+          const response = await fetch(
+            `${API_BASE}/api/dashboard/route-resets/events`,
+            {
+              method: "GET",
+              headers: driverAuthHeaders(),
+              signal: controller.signal,
+            }
+          );
+          if (!response.ok || !response.body) {
+            throw new Error(`Route reset event stream failed: ${response.status}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (!stopped) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let boundary = buffer.indexOf("\n\n");
+            while (boundary >= 0) {
+              const eventBlock = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              if (eventBlock.includes("event: route-resets")) void load();
+              boundary = buffer.indexOf("\n\n");
+            }
+          }
+        } catch (error) {
+          if (!stopped && !(error instanceof DOMException && error.name === "AbortError")) {
+            console.warn("Route reset stream disconnected; reconnecting.", error);
+          }
+        }
+
+        if (!stopped) {
+          await new Promise<void>((resolve) => {
+            retryTimer = window.setTimeout(resolve, 2000);
+          });
+        }
+      }
+    };
+
+    void connect();
+
     return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
+      stopped = true;
+      controller?.abort();
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
   }, [load]);
-
   const hide = useCallback(
     async (ids: (string | number)[], deviceId?: string | null) => {
       const routeIds = Array.from(new Set(ids.map(String)));
@@ -4365,5 +4416,7 @@ export default function DriverDashboardPage() {
     </div>
   );
 }
+
+
 
 

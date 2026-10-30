@@ -8,6 +8,7 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
 const APP_TIME_ZONE = "Asia/Manila";
 
 function extractRows<T = Record<string, unknown>>(result: unknown): T[] {
@@ -497,7 +498,7 @@ router.patch(
         set device_id = null
         where owner = ${owner} and device_id is not null
       `);
-      res.json({ success: true });
+        res.json({ success: true });
     } catch (error) {
       console.error("PATCH /dashboard/route-resets/clear-device error:", error);
       res.status(500).json({ error: "Failed to clear saved device" });
@@ -592,3 +593,7 @@ router.get("/reports/summary", async (_req, res): Promise<void> => {
 });
 
 export default router;
+
+
+
+
