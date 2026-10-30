@@ -278,6 +278,7 @@ router.get("/dashboard/my-trips", async (req, res): Promise<void> => {
           abs(t.amount) as amount,
           t.origin,
           t.destination,
+          t.card_uid,
           coalesce(t.route_id::text, '') || '|' || coalesce(t.origin, '') || '|' || coalesce(t.destination, '') as route_key
         from transactions t
         where t.type = 'Fare'
@@ -317,8 +318,19 @@ router.get("/dashboard/my-trips", async (req, res): Promise<void> => {
         count(*)::int as taps,
         coalesce(sum(case when status = 'Success' then amount else 0 end), 0) as fare,
         max(origin) as origin,
-        max(destination) as destination
+        max(destination) as destination,
+        coalesce(
+          json_agg(
+            json_build_object(
+              'cardUid', grouped.card_uid,
+              'name', coalesce(nullif(u.full_name, ''), 'Unknown passenger'),
+              'tappedAt', grouped.ts,
+              'fare', case when grouped.status = 'Success' then grouped.amount else 0 end
+            ) order by grouped.ts
+          ), '[]'::json
+        ) as passengers
       from grouped
+      left join users u on u.card_uid = grouped.card_uid
       group by trip_no
       order by min(ts) desc
     `);
@@ -331,6 +343,7 @@ router.get("/dashboard/my-trips", async (req, res): Promise<void> => {
       fare: string | number;
       origin: string | null;
       destination: string | null;
+      passengers: { cardUid: string; name: string; tappedAt: string | Date; fare: string | number }[] | string;
     }>(raw);
 
     res.json({
@@ -342,6 +355,12 @@ router.get("/dashboard/my-trips", async (req, res): Promise<void> => {
         endedAt: new Date(r.ended_at).toISOString(),
         taps: Number(r.taps) || 0,
         fare: Math.abs(Number(r.fare)) || 0,
+        passengers: (typeof r.passengers === "string" ? JSON.parse(r.passengers) : (r.passengers ?? [])).map((p: any) => ({
+          cardUid: String(p.cardUid ?? ""),
+          name: String(p.name ?? "Unknown passenger"),
+          tappedAt: new Date(p.tappedAt).toISOString(),
+          fare: Math.abs(Number(p.fare)) || 0,
+        })),
       })),
     });
   } catch (error) {
