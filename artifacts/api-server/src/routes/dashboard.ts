@@ -349,6 +349,161 @@ router.get("/dashboard/my-trips", async (req, res): Promise<void> => {
   }
 });
 
+// Account-wide route reset markers. The owner always comes from the verified
+// custom driver token attached by requireAuth, never from browser input.
+function getDriverId(req: any): string | null {
+  const id = req.driverUser?.id;
+  return id === null || id === undefined ? null : String(id);
+}
+
+router.get("/dashboard/route-resets", async (req, res): Promise<void> => {
+  try {
+    const owner = getDriverId(req);
+    if (!owner) {
+      res.status(403).json({ error: "Drivers only" });
+      return;
+    }
+
+    const raw = await db.execute(sql`
+      select route_id, device_id, created_at
+      from public.driver_route_resets
+      where owner = ${owner}
+      order by created_at desc
+    `);
+    const rows = extractRows<{
+      route_id: string;
+      device_id: string | null;
+      created_at: string | Date;
+    }>(raw);
+
+    res.json({
+      rows: rows.map((row) => ({
+        route_id: String(row.route_id),
+        device_id: row.device_id ? String(row.device_id) : null,
+        created_at: new Date(row.created_at).toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error("GET /dashboard/route-resets error:", error);
+    res.status(500).json({ error: "Failed to load route resets" });
+  }
+});
+
+router.post("/dashboard/route-resets", async (req, res): Promise<void> => {
+  try {
+    const owner = getDriverId(req);
+    if (!owner) {
+      res.status(403).json({ error: "Drivers only" });
+      return;
+    }
+
+    if (!Array.isArray(req.body?.routeIds)) {
+      res.status(400).json({ error: "routeIds must be an array" });
+      return;
+    }
+
+    const routeIds = Array.from(
+      new Set(
+        req.body.routeIds
+          .filter((id: unknown) => id !== null && id !== undefined)
+          .map((id: unknown) => String(id).trim())
+          .filter((id: string) => id.length > 0)
+      )
+    );
+    if (routeIds.length === 0) {
+      res.status(400).json({ error: "At least one route ID is required" });
+      return;
+    }
+
+    const deviceId =
+      typeof req.body.deviceId === "string" && req.body.deviceId.trim()
+        ? req.body.deviceId.trim()
+        : null;
+
+    for (const routeId of routeIds) {
+      await db.execute(sql`
+        insert into public.driver_route_resets
+          (owner, route_id, device_id, created_at)
+        values (${owner}, ${routeId}, ${deviceId}, now())
+        on conflict (owner, route_id)
+        do update set
+          device_id = coalesce(
+            excluded.device_id,
+            driver_route_resets.device_id
+          ),
+          created_at = now()
+      `);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("POST /dashboard/route-resets error:", error);
+    res.status(500).json({ error: "Failed to save route resets" });
+  }
+});
+
+router.delete("/dashboard/route-resets", async (req, res): Promise<void> => {
+  try {
+    const owner = getDriverId(req);
+    if (!owner) {
+      res.status(403).json({ error: "Drivers only" });
+      return;
+    }
+
+    if (!Array.isArray(req.body?.routeIds)) {
+      res.status(400).json({ error: "routeIds must be an array" });
+      return;
+    }
+
+    const routeIds = Array.from(
+      new Set(
+        req.body.routeIds
+          .filter((id: unknown) => id !== null && id !== undefined)
+          .map((id: unknown) => String(id).trim())
+          .filter((id: string) => id.length > 0)
+      )
+    );
+    if (routeIds.length === 0) {
+      res.status(400).json({ error: "At least one route ID is required" });
+      return;
+    }
+
+    for (const routeId of routeIds) {
+      await db.execute(sql`
+        delete from public.driver_route_resets
+        where owner = ${owner} and route_id = ${routeId}
+      `);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("DELETE /dashboard/route-resets error:", error);
+    res.status(500).json({ error: "Failed to restore routes" });
+  }
+});
+
+router.patch(
+  "/dashboard/route-resets/clear-device",
+  async (req, res): Promise<void> => {
+    try {
+      const owner = getDriverId(req);
+      if (!owner) {
+        res.status(403).json({ error: "Drivers only" });
+        return;
+      }
+
+      await db.execute(sql`
+        update public.driver_route_resets
+        set device_id = null
+        where owner = ${owner} and device_id is not null
+      `);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("PATCH /dashboard/route-resets/clear-device error:", error);
+      res.status(500).json({ error: "Failed to clear saved device" });
+    }
+  }
+);
 router.get("/dashboard/revenue-trend", async (_req, res): Promise<void> => {
   const dateSeries = getLast7DatesInAppTz();
   const sevenDaysAgo = new Date(`${dateSeries[0]}T00:00:00`);
