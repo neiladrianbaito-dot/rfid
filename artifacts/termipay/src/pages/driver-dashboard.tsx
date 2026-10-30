@@ -52,6 +52,7 @@ import {
   PowerOff,
   ArrowLeftRight,
   ArrowRight,
+  ArrowLeft,
   Clock,
   Cpu,
   Wifi,
@@ -419,6 +420,7 @@ type Trip = {
   endedAt: string; // ISO
   taps: number;
   fare: number;
+  passengers?: { cardUid: string; name: string; tappedAt: string; fare: number }[];
 };
 
 const MANILA_TZ = "Asia/Manila";
@@ -462,6 +464,7 @@ function mergeTripsByRoute(list: Trip[]): Trip[] {
       endedAt: new Date(t.endedAt) > new Date(prev.endedAt) ? t.endedAt : prev.endedAt,
       taps: prev.taps + t.taps,
       fare: prev.fare + t.fare,
+      passengers: [...(prev.passengers ?? []), ...(t.passengers ?? [])],
     });
   }
 
@@ -499,11 +502,13 @@ function TripCard({
   isDark,
   showDate,
   compact,
+  onTapsClick,
 }: {
   trip: Trip;
   isDark: boolean;
   showDate?: boolean;
   compact?: boolean;
+  onTapsClick?: () => void;
 }) {
   const card = isDark ? "bg-slate-900/70 border-slate-800" : "bg-white border-slate-200 shadow-sm";
   const sameMinute = fmtTripTime(trip.startedAt) === fmtTripTime(trip.endedAt);
@@ -539,14 +544,25 @@ function TripCard({
                 {showDate ? `${fmtTripDay(trip.startedAt)} · ` : ""}
                 {timeText}
               </span>
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                  isDark ? "bg-purple-950/60 text-purple-300" : "bg-purple-50 text-purple-600"
-                }`}
-              >
-                <Fingerprint className="h-3 w-3" />
-                {trip.taps} {trip.taps === 1 ? "tap" : "taps"}
-              </span>
+              {onTapsClick ? (
+                <button
+                  type="button"
+                  onClick={onTapsClick}
+                  aria-label={`Show passengers for ${trip.taps} taps`}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-opacity hover:opacity-80 ${
+                    isDark ? "bg-purple-950/60 text-purple-300" : "bg-purple-50 text-purple-600"
+                  }`}
+                >
+                  <Fingerprint className="h-3 w-3" />
+                  {trip.taps} {trip.taps === 1 ? "tap" : "taps"}
+                  <ChevronRight className="h-3 w-3" />
+                </button>
+              ) : (
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${isDark ? "bg-purple-950/60 text-purple-300" : "bg-purple-50 text-purple-600"}`}>
+                  <Fingerprint className="h-3 w-3" />
+                  {trip.taps} {trip.taps === 1 ? "tap" : "taps"}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -3817,6 +3833,7 @@ export default function DriverDashboardPage() {
 
   // 🧾 Real trips from the database (today on Home, today / last 7 days on the Trips tab)
   const [tripRange, setTripRange] = useState<"today" | "week">("today");
+  const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const tripDays = tab === "trips" && tripRange === "week" ? 7 : 1;
   const tripsQuery = useMyTrips(tripDays, authorized);
   const trips: Trip[] = tripsQuery.data ?? [];
@@ -4175,6 +4192,38 @@ export default function DriverDashboardPage() {
 
         {tab === "trips" && (
           <section key="trips" className="tab-in space-y-4">
+            {selectedTrip ? (
+              <>
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={() => setSelectedTrip(null)} aria-label="Back to trips" className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
+                    <ArrowLeft className="h-5 w-5" />
+                  </button>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-extrabold">Passengers</h2>
+                    <p className={`text-xs ${muted}`}>{selectedTrip.origin || "—"} → {selectedTrip.destination || "—"} · {fmtTripTime(selectedTrip.startedAt)}</p>
+                  </div>
+                </div>
+                <div className={`rounded-2xl border p-4 ${card}`}>
+                  <p className="text-sm font-bold">{selectedTrip.passengers?.length ?? 0} passenger taps</p>
+                  <p className={`mt-1 text-xs ${muted}`}>Passenger names are shown for the taps in this trip.</p>
+                </div>
+                {!selectedTrip.passengers?.length ? (
+                  <div className={`rounded-2xl border border-dashed p-6 text-center text-sm ${muted} ${isDark ? "border-slate-800" : "border-slate-300"}`}>No passenger names were found for this trip.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {selectedTrip.passengers.map((passenger, index) => (
+                      <div key={`${passenger.cardUid}-${passenger.tappedAt}-${index}`} className={`flex items-center justify-between gap-3 rounded-2xl border p-4 ${card}`}>
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${isDark ? "bg-blue-950 text-blue-300" : "bg-blue-50 text-blue-600"}`}><UserRound className="h-5 w-5" /></div>
+                          <div className="min-w-0"><p className="truncate text-sm font-bold">{passenger.name || "Unknown passenger"}</p><p className={`text-xs ${muted}`}>{fmtTripTime(passenger.tappedAt)}</p></div>
+                        </div>
+                        <span className="shrink-0 text-sm font-bold text-emerald-500">{formatPeso(passenger.fare)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : <>
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-lg font-extrabold">Trips</h2>
               <div
@@ -4272,7 +4321,7 @@ export default function DriverDashboardPage() {
                     </div>
                   )}
                   {list.map((t) => (
-                    <TripCard key={t.key} trip={t} isDark={isDark} />
+                    <TripCard key={t.key} trip={t} isDark={isDark} onTapsClick={() => setSelectedTrip(t)} />
                   ))}
                 </div>
               ))
@@ -4281,6 +4330,7 @@ export default function DriverDashboardPage() {
             <p className={`text-[11px] ${muted}`}>
               Each route is one trip per day. New taps on the same route are added to that trip.
             </p>
+            </>}
           </section>
         )}
 
