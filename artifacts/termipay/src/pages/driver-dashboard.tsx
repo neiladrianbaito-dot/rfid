@@ -984,8 +984,6 @@ function PlaceCombobox({
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const idleBlurRef = useRef(false);
 
   // typing stays smooth: the big list is filtered a moment later, never blocking the keyboard
   const deferredValue = useDeferredValue(value);
@@ -994,24 +992,6 @@ function PlaceCombobox({
     containerRef.current?.querySelector("input")?.blur();
   };
 
-  // ⌨️ User stopped typing for 800 ms → close the keyboard (the result list stays open so they can tap one)
-  const scheduleIdleBlur = () => {
-    if (idleTimer.current) clearTimeout(idleTimer.current);
-    idleTimer.current = setTimeout(() => {
-      const input = containerRef.current?.querySelector("input");
-      if (input && document.activeElement === input) {
-        idleBlurRef.current = true; // blur without closing the list
-        input.blur();
-        idleBlurRef.current = false;
-      }
-    }, 800);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (idleTimer.current) clearTimeout(idleTimer.current);
-    };
-  }, []);
 
   // Tap outside → close the list
   useEffect(() => {
@@ -1051,7 +1031,6 @@ function PlaceCombobox({
   }, [active]);
 
   const pick = (p: Place) => {
-    if (idleTimer.current) clearTimeout(idleTimer.current);
     onChange(p.label, p);
     setOpen(false);
     hideKeyboard();
@@ -1092,11 +1071,10 @@ function PlaceCombobox({
         onChange={(e) => {
           onChange(e.target.value, null);
           setOpen(true);
-          scheduleIdleBlur();
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => {
-          if (!idleBlurRef.current) setOpen(false);
+          setOpen(false);
         }}
         onKeyDown={onKeyDown}
         // text-base on mobile prevents iOS auto-zoom on focus
