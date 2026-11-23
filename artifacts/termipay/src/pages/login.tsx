@@ -184,9 +184,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [lockSeconds, setLockSeconds] = useState(0);
   const [theme, setTheme] = useState<Theme>("light");
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
+  const wasLockedRef = useRef(false);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(THEME_KEY) as Theme | null;
@@ -196,6 +198,28 @@ export default function LoginPage() {
       setTheme("dark");
     }
   }, []);
+
+  const isLocked = lockSeconds > 0;
+  const lockLabel = `${Math.floor(lockSeconds / 60)}:${String(lockSeconds % 60).padStart(2, "0")}`;
+
+  // Countdown: ticks down once per second while locked.
+  useEffect(() => {
+    if (!isLocked) return;
+    const id = setInterval(() => {
+      setLockSeconds((s) => (s > 1 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isLocked]);
+
+  // When the lock ends, clear the lockout error message.
+  useEffect(() => {
+    if (lockSeconds > 0) {
+      wasLockedRef.current = true;
+    } else if (wasLockedRef.current) {
+      wasLockedRef.current = false;
+      setError("");
+    }
+  }, [lockSeconds]);
 
   const toggleTheme = () => {
     setTheme((prev) => {
@@ -219,13 +243,26 @@ export default function LoginPage() {
         setLocation("/");
       },
       onError: (err: any) => {
-        setError(err.response?.data?.message || "Invalid username or password");
+        // Support both shapes: generated client (err.data / err.status)
+        // and axios (err.response.data / err.response.status)
+        const body = err?.data ?? err?.response?.data ?? null;
+        const status = err?.status ?? err?.response?.status;
+        const retry = Number(body?.retryAfterSeconds) || 0;
+
+        if (status === 429 || retry > 0) {
+          setLockSeconds(retry);
+          setError(body?.message || "Too many failed attempts. Please try again later.");
+          return;
+        }
+
+        setError(body?.message || body?.error || "Invalid username or password");
       },
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked) return;
     if (!username || !password) { setError("Please enter both username and password"); return; }
     setError("");
     loginMutation.mutate({ data: { username, password } });
@@ -311,7 +348,10 @@ export default function LoginPage() {
                   isDark ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-red-50 border-red-200 text-red-600"
                 }`}>
                   <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                  {error}
+                  <span>
+                    {error}
+                    {isLocked && <strong className="block mt-1">Try again in {lockLabel}</strong>}
+                  </span>
                 </div>
               )}
 
@@ -383,13 +423,15 @@ export default function LoginPage() {
               <Button
                 type="submit"
                 className="w-full h-11 text-sm font-bold uppercase tracking-widest bg-blue-600 hover:bg-blue-500 text-white transition-all rounded-xl shadow-[0_4px_16px_rgba(37,99,235,0.4)] hover:shadow-[0_6px_22px_rgba(37,99,235,0.5)] mt-1"
-                disabled={loginMutation.isPending}
+                disabled={loginMutation.isPending || isLocked}
               >
                 {loginMutation.isPending ? (
                   <span className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Connecting…
                   </span>
+                ) : isLocked ? (
+                  `Locked · ${lockLabel}`
                 ) : (
                   "Log In"
                 )}
