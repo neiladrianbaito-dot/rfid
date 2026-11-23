@@ -17,7 +17,7 @@ const app: Express = express();
 // Render = 1, local dev = 0. Override with TRUST_PROXY.
 app.set("trust proxy", Number(process.env["TRUST_PROXY"] ?? 1));
 
-// Attach the client's public IP to every request
+// Attach the client's public (ISP router) IP to every request
 app.use((req: Request, _res: Response, next: NextFunction) => {
   req.publicIp = getPublicIp(req);
   next();
@@ -46,6 +46,17 @@ const allowedOrigins = process.env["CORS_ORIGIN"]
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Temporary: remove after testing
+app.get("/debug-ip", (req: Request, res: Response) => {
+  res.json({
+    publicIp: req.publicIp,
+    reqIp: req.ip,
+    remote: req.socket.remoteAddress,
+    xff: req.headers["x-forwarded-for"],
+    cf: req.headers["cf-connecting-ip"],
+  });
+});
 
 app.use("/api", router);
 

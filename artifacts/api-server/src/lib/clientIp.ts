@@ -22,7 +22,13 @@ function isPrivateV4(ip: string): boolean {
 
 function isPrivateV6(ip: string): boolean {
   const v = ip.toLowerCase();
-  return v === "::1" || v === "::" || v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe80");
+  return (
+    v === "::1" ||
+    v === "::" ||
+    v.startsWith("fc") ||
+    v.startsWith("fd") ||
+    v.startsWith("fe80")
+  );
 }
 
 export function isPublicIp(raw: string): boolean {
@@ -53,4 +59,14 @@ export function getPublicIp(req: Request): string | null {
     if (ip && isPublicIp(ip)) return ip;
   }
   return null;
+}
+
+/**
+ * Validates the local (LAN) IP sent by the device, e.g. 192.168.101.75.
+ * Returns null if it is missing or not a valid IPv4 address.
+ */
+export function parseLocalIp(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const ip = value.trim();
+  return isIP(ip) === 4 ? ip : null;
 }
