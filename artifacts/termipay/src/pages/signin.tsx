@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import {
   Card,
@@ -36,6 +36,38 @@ import {
 type Role = "commuter" | "driver";
 
 const AUTH_ROLE_KEY = "termipay_auth_role";
+const SIGNIN_LOCK_KEY = "termipay_signin_lock";
+
+type StoredLock = { until: number; email: string };
+
+// Returns the saved lock if it is still in the future, else null.
+function readStoredLock(): StoredLock | null {
+  try {
+    const raw = window.localStorage.getItem(SIGNIN_LOCK_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredLock;
+    if (
+      parsed &&
+      typeof parsed.until === "number" &&
+      typeof parsed.email === "string" &&
+      parsed.until > Date.now()
+    ) {
+      return parsed;
+    }
+    window.localStorage.removeItem(SIGNIN_LOCK_KEY);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function clearStoredLock() {
+  try {
+    window.localStorage.removeItem(SIGNIN_LOCK_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 /* Palitan dito kung iba ang endpoints/routes mo */
 const ROLE_CONFIG: Record<
@@ -84,11 +116,17 @@ export default function SigninPage() {
   const [role, setRole] = useState<Role>(initialRole);
   const config = ROLE_CONFIG[role];
 
-  const [email, setEmail] = useState("");
+  // Restore a lock that survived a page refresh.
+  const [lock, setLock] = useState<StoredLock | null>(() => readStoredLock());
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  const [email, setEmail] = useState(() => readStoredLock()?.email ?? "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() =>
+    readStoredLock() ? "Too many failed attempts. Please try again later." : ""
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
 
@@ -99,6 +137,36 @@ export default function SigninPage() {
   const [forgotError, setForgotError] = useState("");
 
   const busy = isSubmitting || isGoogleSubmitting;
+
+  // The lock only applies to the email that was locked.
+  const emailKey = email.trim().toLowerCase();
+  const lockSeconds =
+    lock && lock.email === emailKey && lock.until > now
+      ? Math.ceil((lock.until - now) / 1000)
+      : 0;
+  const isLocked = lockSeconds > 0;
+  const lockLabel = `${Math.floor(lockSeconds / 60)}:${String(
+    lockSeconds % 60
+  ).padStart(2, "0")}`;
+
+  // Tick every second while a lock exists; clear everything when it ends.
+  useEffect(() => {
+    if (!lock) return;
+
+    const tick = () => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= lock.until) {
+        setLock(null);
+        setError("");
+        clearStoredLock();
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lock]);
 
   /* Shared style tokens */
   const fieldClass = isDark
@@ -147,6 +215,8 @@ export default function SigninPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
+    if (isLocked) return;
+
     if (!email.trim() || !password) {
       setError("Please enter both email and password.");
       return;
@@ -166,7 +236,28 @@ export default function SigninPage() {
         message?: string;
         token?: string;
         role?: Role;
+        retryAfterSeconds?: number;
+        attemptsLeft?: number;
       };
+
+      // Locked by the server (too many wrong passwords)
+      if (response.status === 429) {
+        const retry = Number(data?.retryAfterSeconds) || 60;
+        const until = Date.now() + retry * 1000;
+        const nextLock: StoredLock = { until, email: emailKey };
+        try {
+          window.localStorage.setItem(SIGNIN_LOCK_KEY, JSON.stringify(nextLock));
+        } catch {
+          /* ignore */
+        }
+        setNow(Date.now());
+        setLock(nextLock);
+        setPassword("");
+        setError(
+          data?.message || "Too many failed attempts. Please try again later."
+        );
+        return;
+      }
 
       if (!response.ok) {
         setError(data?.message || "Invalid email or password");
@@ -189,6 +280,7 @@ export default function SigninPage() {
 
       const finalRole: Role = data.role ?? role;
 
+      clearStoredLock();
       window.localStorage.setItem(ROLE_CONFIG[finalRole].tokenKey, data.token);
       window.localStorage.setItem(AUTH_ROLE_KEY, finalRole);
       redirectToDashboard(finalRole);
@@ -443,7 +535,16 @@ export default function SigninPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
-              {error && <div className={errorClass}>{error}</div>}
+              {error && (
+                <div className={errorClass}>
+                  {error}
+                  {isLocked && (
+                    <strong className="block mt-1">
+                      Try again in {lockLabel}
+                    </strong>
+                  )}
+                </div>
+              )}
 
               {/* Email */}
               <div className="space-y-1 sm:space-y-1.5">
@@ -530,13 +631,15 @@ export default function SigninPage() {
               <Button
                 type="submit"
                 className="w-full h-10 sm:h-11 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold shadow-lg shadow-blue-900/20 text-[13px] sm:text-sm"
-                disabled={busy}
+                disabled={busy || isLocked}
               >
                 {isSubmitting ? (
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Authenticating...
                   </span>
+                ) : isLocked ? (
+                  `Locked · ${lockLabel}`
                 ) : (
                   `Sign In as ${config.label}`
                 )}
