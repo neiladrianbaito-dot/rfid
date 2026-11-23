@@ -8,6 +8,7 @@ import type { Request } from "express";
 import { isIP } from "node:net";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { getCurrentRequest } from "./request-context";
 
 export type AuditAction =
   | "LOGIN"
@@ -40,9 +41,9 @@ const clip = (value: string, max: number) =>
 /**
  * Best-effort client IP from an Express request.
  *
- * IMPORTANT: for req.ip to be the real client and not your proxy, set this
- * once in app.ts:
- *     app.set("trust proxy", 1);
+ * IMPORTANT: for req.ip / X-Forwarded-For to be the real client and not your
+ * proxy, set this once in your app setup:
+ *     app.set("trust proxy", true);   // or a hop count / subnet, e.g. 1
  *
  * Returns null if nothing valid is found, so the inet column never receives
  * a malformed value (which would make the insert fail).
@@ -91,7 +92,10 @@ export async function logAudit({
 }: LogAuditParams): Promise<void> {
   try {
     const actor = user && user.trim() ? clip(user.trim(), MAX_USER) : "unknown";
-    const clientIp = ip ?? getClientIp(req);
+    // Priority: explicit ip -> explicit req -> the request that is currently
+    // being handled (request-context). The last one means callers that never
+    // pass `req` (users.ts, scholars, etc.) still get the IP recorded.
+    const clientIp = ip ?? getClientIp(req) ?? getClientIp(getCurrentRequest());
 
     await db.execute(sql`
       insert into audit_logs ("user", action, entity, details, ip_address, status)

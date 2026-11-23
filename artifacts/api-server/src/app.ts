@@ -3,6 +3,7 @@ import cors from "cors";
 import { pinoHttp } from "pino-http";
 import router from "./routes";
 import { logger as baseLogger } from "./lib/logger";
+import { requestContext } from "./lib/request-context";
 
 const app: Express = express();
 
@@ -86,6 +87,9 @@ const allowedOrigins = process.env["CORS_ORIGIN"]
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Lets logAudit() find the current request's IP anywhere in the route code.
+app.use(requestContext);
 
 // TEMPORARY helper to verify the IP on Render. Only exists when you set the
 // env variable DEBUG_IP=true. Open  https://<your-api>/api/debug-ip  in your
