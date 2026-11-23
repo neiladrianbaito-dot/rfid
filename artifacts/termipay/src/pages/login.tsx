@@ -12,8 +12,19 @@ import { motion } from "framer-motion";
 const FORCE_LOGGED_OUT_KEY = "termipay_force_logged_out";
 const AUTH_TOKEN_KEY = "termipay_auth_token";
 const THEME_KEY = "termipay_theme";
+const LOCK_UNTIL_KEY = "termipay_admin_lock_until";
 
 type Theme = "light" | "dark";
+
+// Returns the saved lock end time (ms) if it is still in the future, else 0.
+function readStoredLock(): number {
+  try {
+    const raw = Number(window.localStorage.getItem(LOCK_UNTIL_KEY));
+    return raw > Date.now() ? raw : 0;
+  } catch {
+    return 0;
+  }
+}
 
 const ParticleNetworkBackground = ({ theme }: { theme: Theme }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -183,12 +194,14 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
-  const [lockSeconds, setLockSeconds] = useState(0);
+  const [lockUntil, setLockUntil] = useState<number>(() => readStoredLock());
+  const [now, setNow] = useState<number>(() => Date.now());
+  const [error, setError] = useState(() =>
+    readStoredLock() > 0 ? "Too many failed attempts. Please try again later." : ""
+  );
   const [theme, setTheme] = useState<Theme>("light");
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-  const wasLockedRef = useRef(false);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(THEME_KEY) as Theme | null;
@@ -199,27 +212,29 @@ export default function LoginPage() {
     }
   }, []);
 
+  // Remaining seconds is computed from the saved end time, so it survives refresh.
+  const lockSeconds = lockUntil > now ? Math.ceil((lockUntil - now) / 1000) : 0;
   const isLocked = lockSeconds > 0;
   const lockLabel = `${Math.floor(lockSeconds / 60)}:${String(lockSeconds % 60).padStart(2, "0")}`;
 
-  // Countdown: ticks down once per second while locked.
+  // Tick every second while a lock exists; clear everything when it ends.
   useEffect(() => {
-    if (!isLocked) return;
-    const id = setInterval(() => {
-      setLockSeconds((s) => (s > 1 ? s - 1 : 0));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [isLocked]);
+    if (lockUntil <= 0) return;
 
-  // When the lock ends, clear the lockout error message.
-  useEffect(() => {
-    if (lockSeconds > 0) {
-      wasLockedRef.current = true;
-    } else if (wasLockedRef.current) {
-      wasLockedRef.current = false;
-      setError("");
-    }
-  }, [lockSeconds]);
+    const tick = () => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= lockUntil) {
+        setLockUntil(0);
+        setError("");
+        try { window.localStorage.removeItem(LOCK_UNTIL_KEY); } catch {}
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lockUntil]);
 
   const toggleTheme = () => {
     setTheme((prev) => {
@@ -234,6 +249,7 @@ export default function LoginPage() {
   const loginMutation = useLogin({
     mutation: {
       onSuccess: async (data) => {
+        try { window.localStorage.removeItem(LOCK_UNTIL_KEY); } catch {}
         window.localStorage.removeItem(FORCE_LOGGED_OUT_KEY);
         const token = (data as any)?.token;
         if (token) window.localStorage.setItem(AUTH_TOKEN_KEY, token);
@@ -250,7 +266,10 @@ export default function LoginPage() {
         const retry = Number(body?.retryAfterSeconds) || 0;
 
         if (status === 429 || retry > 0) {
-          setLockSeconds(retry);
+          const until = Date.now() + (retry || 60) * 1000;
+          try { window.localStorage.setItem(LOCK_UNTIL_KEY, String(until)); } catch {}
+          setNow(Date.now());
+          setLockUntil(until);
           setError(body?.message || "Too many failed attempts. Please try again later.");
           return;
         }
