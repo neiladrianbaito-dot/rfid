@@ -852,6 +852,14 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
     const linkedRows = extractRows<{ uid: string }>(linkedRaw);
 
     if (linkedRows.length > 0) {
+      await logAudit({
+        user: currentUser.email ?? userId,
+        action: "UPDATE",
+        entity: "User",
+        details: `${currentUser.email ?? userId} failed to link card ${cardUid} — card UID already linked to another account`,
+        status: "failed",
+        req,
+      });
       res.status(409).json({
         success: false,
         message:
@@ -958,6 +966,14 @@ router.post("/auth/user/link-card", async (req, res): Promise<void> => {
     const existingRows = extractRows<{ uid: string }>(existingRaw);
 
     if (existingRows.length > 0) {
+      await logAudit({
+        user: currentUser.email ?? String(currentUser.id),
+        action: "UPDATE",
+        entity: "User",
+        details: `${currentUser.email ?? currentUser.id} failed to link card ${cardUid} — card UID already linked to another account`,
+        status: "failed",
+        req,
+      });
       res.status(409).json({
         success: false,
         message: "This Card UID is already linked to another account and cannot be linked again. Please use a different card.",
@@ -974,6 +990,14 @@ router.post("/auth/user/link-card", async (req, res): Promise<void> => {
     const alreadyLinked = currentUserRows[0]?.linked_card_uid;
 
     if (alreadyLinked) {
+      await logAudit({
+        user: currentUser.email ?? String(currentUser.id),
+        action: "UPDATE",
+        entity: "User",
+        details: `${currentUser.email ?? currentUser.id} failed to link card ${cardUid} — account already has a linked card`,
+        status: "failed",
+        req,
+      });
       res.status(409).json({
         success: false,
         message: "Your account already has a linked card. This action cannot be changed.",
