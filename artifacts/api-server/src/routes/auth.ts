@@ -1191,21 +1191,65 @@ router.post("/auth/user/change-password", async (req, res): Promise<void> => {
   }
 });
 
-// ── USER LOGOUT ───────────────────────────────────────────────────────────────
+// ── LOGOUT (commuter / driver AND admin / staff) ─────────────────────────────
+// Before, only /auth/user/logout existed and it only understood USER tokens,
+// so an admin/staff logout could never be recorded. This one handler accepts
+// either kind of token and is mounted on all three URLs below, so it works no
+// matter which one the frontend calls.
+//
+// The frontend must call it BEFORE it clears the token:
+//   POST  Authorization: Bearer <token>
+// It always answers 200 so a logging problem can never block a logout.
 
-router.post("/auth/user/logout", async (req, res): Promise<void> => {
-  const currentUser = getUserFromAuthHeader(req.headers.authorization);
-  if (currentUser) {
-    await logAudit({
-      user: currentUser.email ?? String(currentUser.id),
-      action: "LOGOUT",
-      entity: "User",
-      details: `${currentUser.email ?? currentUser.id} logged out`,
-      req,
-    });
+async function handleLogout(req: Request, res: Response): Promise<void> {
+  try {
+    const token = getBearerToken(req.headers.authorization);
+
+    // 1) admin / staff token
+    let adminUser: ReturnType<typeof verifyAdminToken> | null = null;
+    try {
+      adminUser = token ? verifyAdminToken(token) : null;
+    } catch {
+      adminUser = null;
+    }
+
+    if (adminUser) {
+      await logAudit({
+        user: adminUser.username,
+        action: "LOGOUT",
+        entity: roleLabel(normalizeRole((adminUser as { role?: unknown }).role)),
+        details: `${adminUser.username} logged out`,
+        req,
+      });
+    } else {
+      // 2) commuter / driver token
+      let currentUser: ReturnType<typeof verifyUserToken> | null = null;
+      try {
+        currentUser = token ? verifyUserToken(token) : null;
+      } catch {
+        currentUser = null;
+      }
+
+      if (currentUser) {
+        await logAudit({
+          user: currentUser.email ?? String(currentUser.id),
+          action: "LOGOUT",
+          entity: "User",
+          details: `${currentUser.email ?? currentUser.id} logged out`,
+          req,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Logout audit error:", error);
   }
+
   res.status(200).json({ success: true });
-});
+}
+
+router.post("/auth/user/logout", handleLogout);   // commuter / driver (existing URL)
+router.post("/auth/logout", handleLogout);        // admin / staff
+router.post("/auth/admin/logout", handleLogout);  // alias, in case the frontend uses this one
 
 // ── ADMIN LOGIN ───────────────────────────────────────────────────────────────
 
