@@ -1,12 +1,18 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
-import { pinoHttp } from "pino-http"; // Isang import lang dapat
+import rateLimit from "express-rate-limit";
+import { pinoHttp } from "pino-http";
 import router from "./routes";
-import { logger as baseLogger } from "./lib/logger"; // I-rename para hindi mag-conflict sa middleware
+import { logger as baseLogger } from "./lib/logger";
 
 const app: Express = express();
 
-// Gamitin ang pinoHttp middleware nang tama
+// Needed so req.ip is the real client IP and not your host's proxy.
+// = number of proxies between the internet and this app
+//   (Render / Railway / Heroku / Nginx = 1, local dev = 0).
+// Override with the TRUST_PROXY env variable.
+app.set("trust proxy", Number(process.env["TRUST_PROXY"] ?? 1));
+
 app.use(
   pinoHttp({
     logger: baseLogger,
@@ -22,9 +28,18 @@ app.use(
   })
 );
 
-app.use(cors({ origin: true, credentials: true }));
+// Optional: set CORS_ORIGIN="https://your-frontend.com" (comma-separated for
+// several). If not set, behaves exactly like before (allows any origin).
+const allowedOrigins = process.env["CORS_ORIGIN"]
+  ? process.env["CORS_ORIGIN"].split(",").map((o) => o.trim())
+  : true;
+
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// /audit/log-export is public, so limit it to stop log spamming.
+app.use("/api/audit", rateLimit({ windowMs: 60_000, limit: 20 }));
 
 app.use("/api", router);
 

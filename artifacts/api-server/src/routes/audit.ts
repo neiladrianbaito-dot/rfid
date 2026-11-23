@@ -21,16 +21,36 @@ router.post("/audit/log-export", async (req, res): Promise<void> => {
     const token = getBearerToken(req.headers.authorization);
     const adminUser = token ? verifyAdminToken(token) : null;
 
-    const body = req.body as { entity?: string; format?: string; details?: string };
-    const entity = body?.entity?.trim() || "Report";
-    const format = body?.format?.trim() || "File";
-    const actor = adminUser?.username ?? "unknown";
+    const body = (req.body ?? {}) as { entity?: string; format?: string; details?: string };
+    const entity = body.entity?.trim() || "Report";
+    const format = body.format?.trim() || "File";
 
+    if (!adminUser) {
+      // No / invalid / expired token → unauthenticated attempt.
+      // Record it as FAILED with user "unknown" + the caller's IP.
+      // Don't trust client-supplied `details` here; write our own line.
+      await logAudit({
+        user: "unknown",
+        action: "EXPORT",
+        entity,
+        details: token
+          ? `Export attempt with invalid or expired token (${entity} as ${format})`
+          : `Unauthenticated export attempt (${entity} as ${format})`,
+        status: "failed",
+        req,
+      });
+      res.status(200).json({ success: false });
+      return;
+    }
+
+    const actor = adminUser.username;
     await logAudit({
       user: actor,
       action: "EXPORT",
       entity,
-      details: body?.details?.trim() || `${actor} exported ${entity} as ${format}`,
+      details: body.details?.trim() || `${actor} exported ${entity} as ${format}`,
+      status: "success",
+      req,
     });
 
     res.status(200).json({ success: true });

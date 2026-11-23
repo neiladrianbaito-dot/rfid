@@ -79,7 +79,13 @@ function verifyPassword(password: string, storedPasswordHash: string): boolean {
   if (parts.length !== 2) return false;
   const [salt, storedHash] = parts;
   const computedHash = scryptSync(password, salt, 64).toString("hex");
-  return timingSafeEqual(Buffer.from(storedHash, "hex"), Buffer.from(computedHash, "hex"));
+
+  const a = Buffer.from(storedHash, "hex");
+  const b = Buffer.from(computedHash, "hex");
+  // timingSafeEqual THROWS if the lengths differ (e.g. a malformed hash in the DB),
+  // which would turn a bad login into a 500. Guard it.
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 // ── Token / auth helpers ──────────────────────────────────────────────────────
@@ -192,12 +198,16 @@ async function isNameAlreadyLinkedToAccount(fullName: string, role: AccountRole)
 // linked. Used by the manual admin "Unlink Card" endpoint below, AND
 // called automatically from users.ts whenever a card gets blocked,
 // deactivated, or reassigned/transferred to a different person. Exported
-// so other route files can import and call it directly. ─────────────────────
+// so other route files can import and call it directly.
+//
+// `req` is OPTIONAL (4th arg) so existing callers in users.ts keep working
+// without changes. Pass it when you have it so the IP gets recorded. ────────
 
 export async function unlinkCardFromAnyAccount(
   cardUidRaw: string,
   actor: { username: string },
-  reason: string
+  reason: string,
+  req?: Request
 ): Promise<{ unlinked: boolean; previousAccount?: { id: string; fullName: string; email: string } }> {
   const cardUid = cardUidRaw.trim().toUpperCase();
   if (!cardUid) return { unlinked: false };
@@ -224,6 +234,7 @@ export async function unlinkCardFromAnyAccount(
     action: "UPDATE",
     entity: "User",
     details: `${actor.username} auto-unlinked card ${cardUid} from account ${existing.email} (${existing.full_name}) — ${reason}`,
+    req,
   });
 
   return {
@@ -260,6 +271,14 @@ async function handleSignup(role: AccountRole, req: Request, res: Response): Pro
     if (role === "commuter") {
       const registered = await findRegisteredName(fullName);
       if (!registered) {
+        await logAudit({
+          user: "unknown",
+          action: "CREATE",
+          entity: "User",
+          details: `Failed commuter signup for "${email}" — name "${fullName}" is not registered`,
+          status: "failed",
+          req,
+        });
         res.status(403).json({
           success: false,
           message: "This name is not registered in our system. Please contact your admin.",
@@ -269,6 +288,14 @@ async function handleSignup(role: AccountRole, req: Request, res: Response): Pro
 
       const nameAlreadyUsed = await isNameAlreadyLinkedToAccount(fullName, "commuter");
       if (nameAlreadyUsed) {
+        await logAudit({
+          user: "unknown",
+          action: "CREATE",
+          entity: "User",
+          details: `Failed commuter signup for "${email}" — name "${fullName}" is already linked to an account`,
+          status: "failed",
+          req,
+        });
         res.status(409).json({
           success: false,
           message: "This name is already linked to an existing account.",
@@ -287,6 +314,14 @@ async function handleSignup(role: AccountRole, req: Request, res: Response): Pro
 
     const inserted = extractRows<{ uid: string }>(insertResult);
     if (inserted.length === 0) {
+      await logAudit({
+        user: "unknown",
+        action: "CREATE",
+        entity: "User",
+        details: `Failed ${accountRoleLabel(role).toLowerCase()} signup — email "${email}" is already registered`,
+        status: "failed",
+        req,
+      });
       res.status(409).json({ success: false, message: "Email is already registered" });
       return;
     }
@@ -296,6 +331,7 @@ async function handleSignup(role: AccountRole, req: Request, res: Response): Pro
       action: "CREATE",
       entity: "User",
       details: `${fullName} (${email}) signed up as ${accountRoleLabel(role).toLowerCase()}`,
+      req,
     });
 
     res.status(201).json({ success: true, message: "Signup successful. You can now sign in." });
@@ -320,6 +356,18 @@ async function handleSignin(role: AccountRole, req: Request, res: Response): Pro
       res.status(400).json({ success: false, message: "Email and password are required" });
       return;
     }
+
+    // Records a failed attempt. The account is not identified, so the user is
+    // "unknown" and the email that was tried goes in the details.
+    const logFailedSignin = (reason: string) =>
+      logAudit({
+        user: "unknown",
+        action: "LOGIN",
+        entity: "User",
+        details: `Failed ${accountRoleLabel(role).toLowerCase()} login for "${email}" — ${reason}`,
+        status: "failed",
+        req,
+      });
 
     await ensureRoleColumn();
 
@@ -353,6 +401,7 @@ async function handleSignin(role: AccountRole, req: Request, res: Response): Pro
       }
 
       if (!supabaseUser) {
+        await logFailedSignin(user ? "wrong password" : "no account with this email");
         res.status(401).json({ success: false, message: "Invalid email or password" });
         return;
       }
@@ -389,6 +438,7 @@ async function handleSignin(role: AccountRole, req: Request, res: Response): Pro
     }
 
     if (!user) {
+      await logFailedSignin("account could not be loaded");
       res.status(401).json({ success: false, message: "Invalid email or password" });
       return;
     }
@@ -396,6 +446,14 @@ async function handleSignin(role: AccountRole, req: Request, res: Response): Pro
     // Role guard: password was correct, but this account belongs to the other role.
     const actualRole = normalizeAccountRole(user.role);
     if (actualRole !== role) {
+      await logAudit({
+        user: user.email,
+        action: "LOGIN",
+        entity: "User",
+        details: `${user.email} tried to sign in on the ${accountRoleLabel(role)} tab but is a ${accountRoleLabel(actualRole)} account`,
+        status: "failed",
+        req,
+      });
       res.status(403).json({
         success: false,
         role: actualRole,
@@ -412,6 +470,7 @@ async function handleSignin(role: AccountRole, req: Request, res: Response): Pro
       action: "LOGIN",
       entity: "User",
       details: `${user.email} logged in as ${accountRoleLabel(actualRole).toLowerCase()}`,
+      req,
     });
 
     res.json({
@@ -470,6 +529,14 @@ router.post("/auth/oauth-sync", async (req, res): Promise<void> => {
         "SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY are set on this server and point to the " +
         "SAME Supabase project as the frontend's VITE_SUPABASE_URL."
       );
+      await logAudit({
+        user: "unknown",
+        action: "LOGIN",
+        entity: "User",
+        details: "Failed Google sign-in — invalid or expired Supabase session",
+        status: "failed",
+        req,
+      });
       res.status(401).json({ success: false, message: "Invalid or expired session. Please sign in again." });
       return;
     }
@@ -494,6 +561,14 @@ router.post("/auth/oauth-sync", async (req, res): Promise<void> => {
     if (existing) {
       finalRole = normalizeAccountRole(existing.role);
       if (requestedRole && requestedRole !== finalRole) {
+        await logAudit({
+          user: email,
+          action: "LOGIN",
+          entity: "User",
+          details: `${email} tried Google sign-in on the ${accountRoleLabel(requestedRole)} tab but is a ${accountRoleLabel(finalRole)} account`,
+          status: "failed",
+          req,
+        });
         res.status(403).json({
           success: false,
           role: finalRole,
@@ -549,6 +624,7 @@ router.post("/auth/oauth-sync", async (req, res): Promise<void> => {
       action: "LOGIN",
       entity: "User",
       details: `${user.email} signed in with Google as ${accountRoleLabel(userRole).toLowerCase()}`,
+      req,
     });
 
     res.json({
@@ -699,6 +775,15 @@ router.get("/auth/check-card-uid", async (req, res): Promise<void> => {
       if (tracker.count >= CARD_UID_MAX_ATTEMPTS) {
         tracker.lockedUntil = now + CARD_UID_LOCKOUT_MS;
         cardUidAttemptMap.set(userId, tracker);
+
+        await logAudit({
+          user: currentUser.email ?? userId,
+          action: "UPDATE",
+          entity: "User",
+          details: `${currentUser.email ?? userId} was locked out for 60 seconds after ${CARD_UID_MAX_ATTEMPTS} failed card UID attempts (last tried: ${cardUid})`,
+          status: "failed",
+          req,
+        });
 
         res.status(429).json({
           success: false,
@@ -866,6 +951,7 @@ router.post("/auth/user/link-card", async (req, res): Promise<void> => {
       action: "UPDATE",
       entity: "User",
       details: `${currentUser.email ?? currentUser.id} linked card ${cardUid}`,
+      req,
     });
 
     res.json({ success: true, linkedCardUid: cardUid });
@@ -897,7 +983,7 @@ router.post("/admin/users/unlink-card", requireFullAccess, async (req, res): Pro
       return;
     }
 
-    const result = await unlinkCardFromAnyAccount(cardUid, adminUser, "manual admin unlink");
+    const result = await unlinkCardFromAnyAccount(cardUid, adminUser, "manual admin unlink", req);
 
     if (!result.unlinked) {
       res.status(404).json({ error: "No account is currently linked to this card" });
@@ -1022,6 +1108,14 @@ router.post("/auth/user/change-password", async (req, res): Promise<void> => {
     }
 
     if (!verifyPassword(currentPassword, user.password_hash)) {
+      await logAudit({
+        user: currentUser.email ?? String(currentUser.id),
+        action: "UPDATE",
+        entity: "User",
+        details: `${currentUser.email ?? currentUser.id} failed to change password — wrong current password`,
+        status: "failed",
+        req,
+      });
       res.status(401).json({ success: false, message: "Current password is incorrect." });
       return;
     }
@@ -1046,6 +1140,7 @@ router.post("/auth/user/change-password", async (req, res): Promise<void> => {
       action: "UPDATE",
       entity: "User",
       details: `${currentUser.email ?? currentUser.id} changed their password`,
+      req,
     });
 
     res.json({ success: true, message: "Password changed successfully." });
@@ -1065,6 +1160,7 @@ router.post("/auth/user/logout", async (req, res): Promise<void> => {
       action: "LOGOUT",
       entity: "User",
       details: `${currentUser.email ?? currentUser.id} logged out`,
+      req,
     });
   }
   res.status(200).json({ success: true });
@@ -1097,11 +1193,27 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     const isLegacyAdminValid = !!admin && verifyPassword(password, admin.password_hash);
 
     if (!supabaseUser && !isLegacyAdminValid) {
+      await logAudit({
+        user: "unknown",
+        action: "LOGIN",
+        entity: "Admin",
+        details: `Failed admin login for "${username}" — ${admin ? "wrong password" : "no such account"}`,
+        status: "failed",
+        req,
+      });
       res.status(401).json({ success: false, message: "Invalid credentials" });
       return;
     }
 
     if (admin && (admin as any).status === "Disabled") {
+      await logAudit({
+        user: admin.username,
+        action: "LOGIN",
+        entity: roleLabel(normalizeRole(admin.role)),
+        details: `${admin.username} tried to log in but the account is disabled`,
+        status: "failed",
+        req,
+      });
       res.status(403).json({
         success: false,
         message: "This account has been disabled. Please contact a Super Admin.",
@@ -1133,6 +1245,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       action: "LOGIN",
       entity: roleLabel(role),
       details: `${admin?.username ?? normalizedUsername} logged in`,
+      req,
     });
 
     res.json({
@@ -1202,6 +1315,14 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
     }
 
     if (newPassword && !verifyPassword(currentPassword, admin.password_hash)) {
+      await logAudit({
+        user: admin.username,
+        action: "UPDATE",
+        entity: roleLabel(normalizeRole(admin.role)),
+        details: `${admin.username} failed to change password — wrong current password`,
+        status: "failed",
+        req,
+      });
       res.status(401).json({ error: "Invalid current password" });
       return;
     }
@@ -1252,6 +1373,7 @@ router.post("/auth/update-profile", async (req, res): Promise<void> => {
       ]
         .filter(Boolean)
         .join(", "),
+      req,
     });
 
     res.json({
@@ -1378,6 +1500,7 @@ router.post("/admin/staff", requireSuperAdmin, requireFullAccess, async (req, re
       action: "CREATE",
       entity: roleLabel(role),
       details: `${adminUser.username} created ${roleLabel(role).toLowerCase()} account "${username}" (${permission})`,
+      req,
     });
 
     res.status(201).json({ success: true, staff: inserted });
@@ -1422,6 +1545,7 @@ router.post("/auth/user/unlink-card", async (req, res): Promise<void> => {
       action: "UPDATE",
       entity: "User",
       details: `${currentUser.email ?? currentUser.id} unlinked their own card (${linkedCardUid})`,
+      req,
     });
 
     res.json({ success: true, message: "Card unlinked successfully." });
@@ -1479,6 +1603,7 @@ router.patch("/admin/staff/:id/access", requireSuperAdmin, async (req, res): Pro
       action: "UPDATE",
       entity: "Staff",
       details: `${adminUser.username} set "${target.username}" access to ${permission}`,
+      req,
     });
 
     res.json({ success: true, permission });
@@ -1528,6 +1653,7 @@ router.delete("/admin/staff/:id", requireSuperAdmin, async (req, res): Promise<v
       action: "DELETE",
       entity: roleLabel(normalizeRole(target.role)),
       details: `${adminUser.username} removed ${roleLabel(normalizeRole(target.role)).toLowerCase()} account "${target.username}"`,
+      req,
     });
 
     res.json({ success: true, message: "Staff account removed" });
