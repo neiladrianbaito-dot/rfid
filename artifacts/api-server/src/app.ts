@@ -1,6 +1,5 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
-import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
 import router from "./routes";
 import { logger as baseLogger } from "./lib/logger";
@@ -38,9 +37,6 @@ app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// /audit/log-export is public, so limit it to stop log spamming.
-app.use("/api/audit", rateLimit({ windowMs: 60_000, limit: 20 }));
-
 app.use("/api", router);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
@@ -54,10 +50,3 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   }
 
   const status = typeof error?.status === "number" ? error.status : 500;
-  res.status(status).json({
-    success: false,
-    message: error?.message || "Internal server error",
-  });
-});
-
-export default app;
