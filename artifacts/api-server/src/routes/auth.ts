@@ -7,6 +7,12 @@ import { createAdminToken, verifyAdminToken } from "../lib/admin-token";
 import { createUserToken, verifyUserToken } from "../lib/user-token";
 import { signInSupabaseWithPassword, getSupabaseUserFromToken } from "../lib/supabase";
 import { logAudit } from "../lib/audit-logger";
+import {
+  checkLoginLock,
+  recordLoginFailure,
+  clearLoginFailures,
+  lockMessage,
+} from "../lib/login-limiter";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import {
   requireAdmin,
@@ -357,10 +363,22 @@ async function handleSignin(role: AccountRole, req: Request, res: Response): Pro
       return;
     }
 
-    // Records a failed attempt. The account is not identified, so the user is
-    // "unknown" and the email that was tried goes in the details.
-    const logFailedSignin = (reason: string) =>
-      logAudit({
+    // ── Brute-force protection: after 3 wrong passwords the login is locked ──
+    const lock = checkLoginLock(req, email);
+    if (lock.locked) {
+      res.status(429).json({
+        success: false,
+        message: lockMessage(lock.retryAfterSeconds),
+        retryAfterSeconds: lock.retryAfterSeconds,
+      });
+      return;
+    }
+
+    // Records a failed attempt, counts it toward the lockout and sends the
+    // response. The account is not identified, so the user is "unknown" and
+    // the email that was tried goes in the details.
+    const failSignin = async (reason: string) => {
+      await logAudit({
         user: "unknown",
         action: "LOGIN",
         entity: "User",
@@ -368,6 +386,28 @@ async function handleSignin(role: AccountRole, req: Request, res: Response): Pro
         status: "failed",
         req,
       });
+
+      const state = recordLoginFailure(req, email);
+      if (state.justLocked) {
+        await logAudit({
+          user: "unknown",
+          action: "LOGIN",
+          entity: "User",
+          details: `Login locked for "${email}" after repeated failed attempts`,
+          status: "failed",
+          req,
+        });
+      }
+
+      res.status(state.locked ? 429 : 401).json({
+        success: false,
+        message: state.locked
+          ? lockMessage(state.retryAfterSeconds)
+          : `Invalid email or password. ${state.attemptsLeft} attempt${state.attemptsLeft !== 1 ? "s" : ""} remaining.`,
+        attemptsLeft: state.attemptsLeft,
+        retryAfterSeconds: state.locked ? state.retryAfterSeconds : undefined,
+      });
+    };
 
     await ensureRoleColumn();
 
@@ -401,8 +441,7 @@ async function handleSignin(role: AccountRole, req: Request, res: Response): Pro
       }
 
       if (!supabaseUser) {
-        await logFailedSignin(user ? "wrong password" : "no account with this email");
-        res.status(401).json({ success: false, message: "Invalid email or password" });
+        await failSignin(user ? "wrong password" : "no account with this email");
         return;
       }
 
@@ -438,8 +477,7 @@ async function handleSignin(role: AccountRole, req: Request, res: Response): Pro
     }
 
     if (!user) {
-      await logFailedSignin("account could not be loaded");
-      res.status(401).json({ success: false, message: "Invalid email or password" });
+      await failSignin("account could not be loaded");
       return;
     }
 
@@ -461,6 +499,9 @@ async function handleSignin(role: AccountRole, req: Request, res: Response): Pro
       });
       return;
     }
+
+    // Correct password (and right tab) → reset the failed-attempt counter.
+    clearLoginFailures(req, email);
 
     // Card status no longer blocks login — it's only informational now.
     const { blocked: cardBlocked, status: cardStatus } = await checkLinkedCardStatus(user.linked_card_uid);
@@ -1185,6 +1226,18 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       .limit(1);
 
     const { username, password } = parsed.data;
+
+    // ── Brute-force protection: after 3 wrong passwords the login is locked ──
+    const lock = checkLoginLock(req, username);
+    if (lock.locked) {
+      res.status(429).json({
+        success: false,
+        message: lockMessage(lock.retryAfterSeconds),
+        retryAfterSeconds: lock.retryAfterSeconds,
+      });
+      return;
+    }
+
     const looksLikeEmail = username.includes("@");
     const supabaseUser = looksLikeEmail
       ? await signInSupabaseWithPassword(username, password)
@@ -1201,9 +1254,32 @@ router.post("/auth/login", async (req, res): Promise<void> => {
         status: "failed",
         req,
       });
-      res.status(401).json({ success: false, message: "Invalid credentials" });
+
+      const state = recordLoginFailure(req, username);
+      if (state.justLocked) {
+        await logAudit({
+          user: "unknown",
+          action: "LOGIN",
+          entity: "Admin",
+          details: `Admin login locked for "${username}" after repeated failed attempts`,
+          status: "failed",
+          req,
+        });
+      }
+
+      res.status(state.locked ? 429 : 401).json({
+        success: false,
+        message: state.locked
+          ? lockMessage(state.retryAfterSeconds)
+          : `Invalid credentials. ${state.attemptsLeft} attempt${state.attemptsLeft !== 1 ? "s" : ""} remaining.`,
+        attemptsLeft: state.attemptsLeft,
+        retryAfterSeconds: state.locked ? state.retryAfterSeconds : undefined,
+      });
       return;
     }
+
+    // Credentials are correct → reset the failed-attempt counter.
+    clearLoginFailures(req, username);
 
     if (admin && (admin as any).status === "Disabled") {
       await logAudit({
