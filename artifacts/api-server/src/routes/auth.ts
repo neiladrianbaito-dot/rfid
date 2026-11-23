@@ -1217,18 +1217,14 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       return;
     }
 
-    await ensurePermissionColumn();
-
-    const [admin] = await db
-      .select()
-      .from(adminsTable)
-      .where(eq(adminsTable.username, parsed.data.username))
-      .limit(1);
-
     const { username, password } = parsed.data;
 
-    // ── Brute-force protection: after 3 wrong passwords the login is locked ──
-    const lock = checkLoginLock(req, username);
+    // Namespaced so admin attempts never share a counter with commuter/driver
+    // emails (the limiter itself already trims + lowercases the identifier).
+    const limiterKey = `admin:${username}`;
+
+    // ── Brute-force protection: check BEFORE touching the DB or Supabase ──
+    const lock = checkLoginLock(req, limiterKey);
     if (lock.locked) {
       res.status(429).json({
         success: false,
@@ -1238,10 +1234,24 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       return;
     }
 
-    const looksLikeEmail = username.includes("@");
-    const supabaseUser = looksLikeEmail
-      ? await signInSupabaseWithPassword(username, password)
-      : null;
+    await ensurePermissionColumn();
+
+    const [admin] = await db
+      .select()
+      .from(adminsTable)
+      .where(eq(adminsTable.username, username))
+      .limit(1);
+
+    // Supabase fallback must never crash the login or skip the failure count.
+    let supabaseUser: Awaited<ReturnType<typeof signInSupabaseWithPassword>> = null;
+    if (username.includes("@")) {
+      try {
+        supabaseUser = await signInSupabaseWithPassword(username, password);
+      } catch (supabaseErr) {
+        console.warn("Admin Supabase signin failed (non-fatal):", supabaseErr);
+        supabaseUser = null;
+      }
+    }
 
     const isLegacyAdminValid = !!admin && verifyPassword(password, admin.password_hash);
 
@@ -1255,7 +1265,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
         req,
       });
 
-      const state = recordLoginFailure(req, username);
+      const state = recordLoginFailure(req, limiterKey);
       if (state.justLocked) {
         await logAudit({
           user: "unknown",
@@ -1279,7 +1289,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     }
 
     // Credentials are correct → reset the failed-attempt counter.
-    clearLoginFailures(req, username);
+    clearLoginFailures(req, limiterKey);
 
     if (admin && (admin as any).status === "Disabled") {
       await logAudit({
@@ -1297,7 +1307,9 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       return;
     }
 
-    if (admin && !admin.password_hash.includes(":")) {
+    // Upgrade old plain-text hashes, but only when the legacy password
+    // was actually the one that was verified.
+    if (admin && isLegacyAdminValid && !admin.password_hash.includes(":")) {
       const upgradedHash = hashPassword(password);
       await db
         .update(adminsTable)
